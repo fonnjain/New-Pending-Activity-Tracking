@@ -1,0 +1,1 @@
+- [Balance & Activity Tracker](tracker-app.md) — xlsx-driven snapshot/records app; live ageing, jsonb summary, OR-based replace, parse rules.

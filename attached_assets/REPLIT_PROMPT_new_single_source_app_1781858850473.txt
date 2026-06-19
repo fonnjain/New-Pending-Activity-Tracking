@@ -1,0 +1,181 @@
+REPLIT PROMPT — NEW MOBILE-FRIENDLY "BALANCE & ACTIVITY TRACKER" WEB APP
+========================================================================
+Build a brand-new, mobile-first web app from scratch. This is NOT related to any prior
+app. It is driven by ONE Excel file (a balance/activity report) and needs no joins, no
+multi-file pipeline, and no activity-selection rule — the activity is already in the file.
+
+=========================================================================
+1. STACK & SHAPE
+=========================================================================
+- Python Flask backend + a clean mobile-first frontend (vanilla HTML/CSS/JS or a light
+  framework; keep it simple and fast on phones). Serve on host 0.0.0.0, port from env
+  PORT (default 8080).
+- Dependencies: flask, pandas, openpyxl. (Add anthropic-related calls only if section 8
+  is implemented.)
+- Mobile-first: single-column layouts, large tap targets, sticky filter bar, tables that
+  scroll horizontally inside a card, bottom tab navigation on small screens. Must look
+  good on a phone first, desktop second.
+
+=========================================================================
+2. THE INPUT FILE (single source of truth)
+=========================================================================
+One .xlsx upload. The data is on sheet "Sheet1"; the real header is on the THIRD row
+(read with header=2 / skip the two blank rows). Columns (exact names):
+  Project Code, Order Nature, Contractor, Job Card No., Tower Type, Tower Sub Type,
+  Alias, Mark No., Section, Length, Width, Wt/Pcs, Balance Qty., Balance Wt.,
+  Assign Date, Activity, Operation, Ref. Job Card No.
+
+CRITICAL PARSING RULES (the engine MUST do all of these):
+  a) "Project Code" is SPARSE (blank on most rows — it's a grouped report). FORWARD-FILL
+     it down so every row gets its project. Normalize like "794." -> "794", "920.0" ->
+     "920" (strip trailing dot/.0 and whitespace).
+  b) Keep only rows where "Mark No." is non-empty.
+  c) Mark No. looks like "920 4GA-11LH" = "<Project> <Alias>-<MarkTail>". Derive:
+        job       = Project Code (after forward-fill/normalize)
+        structure = Alias
+        mark_tail = the part AFTER the "<Project> <Alias>-" prefix
+        mark_id   = job + "\" + structure + "\" + mark_tail   (canonical key)
+     NOTE: mark_tail itself may contain hyphens (e.g. "2LA2-1-3AX"); strip only the
+     leading "<Project> <Alias>-" prefix, do not split on the first hyphen.
+  d) "Activity" is the CURRENT pending activity, already decided — use it as-is. Do NOT
+     compute or re-derive it. Values seen include:
+        C, RFI, NH, B, HAB, W, TS, Q, G, GB, Y, NTF, NTFSW, BL, NTF...
+  e) "Operation" is the full process route for that part, comma-separated, e.g.
+        "C,P,S,RFI,NH,Q,TS,G,GB,Y". Keep it; use it to show progress (current Activity's
+        position within the route).
+  f) "Balance Qty." and "Balance Wt." are already computed — use directly. (All rows in
+     the file are pending; balance qty is > 0.)
+  g) "Assign Date" -> normalize to YYYY-MM-DD; some rows (~tiny number) are null.
+  h) A mark can appear on MORE THAN ONE row (multiple job cards / activities). De-dupe
+     for the tracker: group by mark_id and keep ONE row — the one with the LATEST
+     Assign Date; if tie, the one with the largest Balance Qty. Keep the others available
+     under a "history/other rows" detail if easy, but the main views use the single
+     de-duped row per mark. NO DUPLICATE marks in any view.
+
+DERIVED FIELDS (computed live, deterministic):
+  - ageing_days = today - Assign Date (whole days). Recompute on every load; never cache.
+  - route_steps = Operation split on commas; current_step_index = position of Activity in
+    route_steps (for a progress indicator). If Activity not in the route, mark unknown.
+
+=========================================================================
+3. DETERMINISTIC ENGINE (authoritative) — keep AI out of the result path
+=========================================================================
+- All displayed numbers/values come from the deterministic parse above. Same file always
+  yields the same result. No randomness, no model calls in the result path.
+- The app must fully work with NO API key and NO network for its core tracking features.
+
+=========================================================================
+4. DATABASE / PERSISTENCE (store results, dated snapshots, no duplicates)
+=========================================================================
+Use a simple persistent store (SQLite is fine on Replit).
+  - A "snapshot" = one uploaded report, identified by (report_date OR upload date) +
+    optional label. Re-uploading the SAME report (same identifying date/label) REPLACES
+    that snapshot — never appends a duplicate.
+  - Within a snapshot, each mark_id appears exactly once (enforced — see de-dupe above).
+  - Schema:
+       snapshots(id, label, source_filename, report_date, created_at)
+       records(snapshot_id, mark_id, job, structure, mark_tail, section, grade?,
+               wt_pcs, balance_qty, balance_wt, activity, operation, assign_date,
+               contractor, order_nature, tower_type, ageing_basis_date)
+       UNIQUE(snapshot_id, mark_id)   -- no duplicate marks in a snapshot
+  - Dashboards show the LATEST snapshot by default, with a snapshot picker to view older
+    ones (history). Keep history for trend/ageing-over-time.
+  - ageing_days is always recomputed at read time from assign_date vs today (not stored).
+
+=========================================================================
+5. NAVIGATION (mobile bottom tabs / desktop top tabs)
+=========================================================================
+  [ Overview ] [ Activity ] [ Ageing ] [ Contractor ] [ Data ]
+
+Global filter bar (sticky, collapsible on mobile) available on Overview/Activity/Ageing/
+Contractor:
+  - Cascading dropdowns: Job (Project) -> Structure (Alias) -> Mark. Each narrows the
+    next; changing a higher level resets lower ones to "All".
+  - Contractor dropdown.
+  - Activity dropdown.
+  - Free-text search (mark / section / contractor).
+  All filters combine with AND and update every visible figure live.
+
+=========================================================================
+6. THE FIVE VIEWS
+=========================================================================
+OVERVIEW (home)
+  - KPI tiles: Total pending marks, Total balance qty, Total balance weight (kg),
+    Avg ageing (days), # contractors, # structures.
+  - A compact ageing donut/bar (0-30 / 31-60 / 60+ days).
+  - "Top aged marks" mini list (5-8) and "Busiest contractors" mini list.
+
+ACTIVITY (activity-wise)
+  - One card/row per Activity present in the data, shown in process order:
+       C, RFI, NH, B, HAB, W, TS, Q, G, GB, Y  (plus any extras like NTF/NTFSW/BL after).
+  - For each Activity: count of marks, balance qty, balance weight, AVG AGEING (days),
+    and a 0-30 / 31-60 / 60+ bucket split (small stacked bar).
+  - Tapping an Activity expands a table of its marks: Mark | Section | Bal Qty | Bal Wt |
+    Contractor | Assign Date | Ageing (colour-coded green<=30 / amber 31-60 / red>60) |
+    a tiny route progress (current step within Operation).
+
+AGEING (ageing-focused)
+  - KPI tiles (pending marks, qty, weight, avg ageing).
+  - Ageing buckets 0-30 / 31-60 / 60+ with counts and weights (bars).
+  - ACTIVITY-WISE AGEING table: one row per activity (process order), with marks, qty,
+    weight, avg ageing, and the three bucket counts; sortable; default sort by avg ageing
+    desc so the most-aged activities surface first.
+  - Full pending table with the same colour-coded ageing column; sortable + searchable.
+  - The cascading Job->Structure->Mark dropdowns and contractor filter drive this whole
+    page.
+
+CONTRACTOR (contractor-wise)
+  - KPI tiles: # contractors, busiest (by weight), most-aged load (highest avg ageing),
+    unassigned count (null contractor).
+  - Workload bars: one bar per contractor = total balance weight, labelled with weight +
+    "(n marks · q pcs)", sorted desc.
+  - Contractor x ageing matrix: rows = contractors, cols = 0-30 / 31-60 / 60+, cells =
+    mark counts, shaded by intensity, plus Total and Avg-age columns.
+  - Summary table: Contractor | Marks | Qty | Weight | Avg ageing.
+
+DATA (import / export / snapshots)
+  - Upload an .xlsx (drag-drop + browse). Show parse summary: rows read, marks after
+    de-dupe, projects found, any rows with missing contractor/date (flagged).
+  - Snapshot list with dates/labels; pick one to view; re-upload same date replaces.
+  - Export current view to CSV and full snapshot to JSON.
+  - Show a clear note: "Activity, balances and routes come straight from the source file.
+    Ageing is computed live (today - Assign Date)."
+
+=========================================================================
+7. STYLING (make it feel like a real industrial tracker, mobile-first)
+=========================================================================
+- Clean, high-contrast, industrial steel palette (dark slate header, white cards, one
+  warm accent for emphasis). Tabular numerals for all figures.
+- Ageing colour scale used consistently everywhere: green <=30, amber 31-60, red >60.
+- Big touch targets, sticky filter/search, bottom nav on phones. Tables scroll inside
+  cards rather than breaking layout. Test at ~380px width.
+
+=========================================================================
+8. OPTIONAL AI LAYER (advisory only — keep engine authoritative)
+=========================================================================
+Add ONLY if quick; the app must work fully without it. The user will provide an Anthropic
+API key as a Secret named ANTHROPIC_API_KEY (read server-side only, never in client code,
+responses, or logs). Two read-only assists:
+  - "Sanitize input": Claude suggests cleanups for the uploaded data (typos, bad/odd
+    dates, inconsistent contractor/section spellings). User reviews and clicks ONE
+    "Accept all"; the engine then re-runs deterministically on the accepted data.
+    Claude never sets result values.
+  - "AI review of results": send the parsed input + the computed output; Claude audits
+    consistency (ageing math, de-dupe correctness, unknown activity codes, null
+    contractor/date, marks whose Activity isn't in their Operation route) and returns a
+    read-only findings panel. It never modifies data.
+If ANTHROPIC_API_KEY is unset, hide/disable these with a small note. Default model for
+these calls: claude-sonnet-4-5.
+
+=========================================================================
+9. ACCEPTANCE CHECKS
+=========================================================================
+- Upload the balance/activity .xlsx (header on row 3): app forward-fills Project Code,
+  parses marks, de-dupes to one row per mark, and shows all five views.
+- Cascading Job->Structure->Mark filters narrow correctly and update every figure.
+- Activity dashboard shows avg ageing + bucket split per activity; Ageing dashboard shows
+  an activity-wise ageing table sorted by avg ageing.
+- No duplicate marks anywhere; re-uploading the same report replaces, not appends.
+- Works with no API key / no network for all core tracking.
+- Ageing is (today - Assign Date) recomputed live; colour scale consistent.
+- Looks and works well on a ~380px phone screen.

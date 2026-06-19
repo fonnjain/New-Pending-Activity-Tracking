@@ -1,0 +1,204 @@
+import { useTracker, useFilteredRecords } from "@/lib/store";
+import { useGetSnapshotRecords, getGetSnapshotRecordsQueryKey } from "@workspace/api-client-react";
+import { EmptyState, getAgeingColor } from "./overview";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
+import { useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Search } from "lucide-react";
+
+const PROCESS_ORDER = ["C", "RFI", "NH", "B", "HAB", "W", "TS", "Q", "G", "GB", "Y"];
+
+export default function AgeingView() {
+  const { selectedSnapshotId } = useTracker();
+  if (!selectedSnapshotId) return <EmptyState />;
+  return <AgeingContent />;
+}
+
+function AgeingContent() {
+  const { selectedSnapshotId } = useTracker();
+  const { data: allRecords } = useGetSnapshotRecords(selectedSnapshotId as number, {
+    query: { enabled: !!selectedSnapshotId, queryKey: getGetSnapshotRecordsQueryKey(selectedSnapshotId as number) }
+  });
+  const records = useFilteredRecords(allRecords);
+  const [search, setSearch] = useState("");
+
+  const withAge = records.filter(r => r.ageingDays !== null);
+  const totalMarks = records.length;
+  const totalQty = records.reduce((sum, r) => sum + r.balanceQty, 0);
+  const totalWt = records.reduce((sum, r) => sum + r.balanceWt, 0);
+  const avgAgeing = withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays!, 0) / withAge.length) : 0;
+
+  const age0to30 = withAge.filter(r => r.ageingDays !== null && r.ageingDays <= 30);
+  const age31to60 = withAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60);
+  const age60Plus = withAge.filter(r => r.ageingDays !== null && r.ageingDays > 60);
+
+  // Group by activity for matrix
+  const activities = new Map<string, any[]>();
+  records.forEach(r => {
+    const act = r.activity || "Unassigned";
+    if (!activities.has(act)) activities.set(act, []);
+    activities.get(act)!.push(r);
+  });
+
+  const actStats = Array.from(activities.entries()).map(([act, actRecs]) => {
+    const actWithAge = actRecs.filter(r => r.ageingDays !== null);
+    return {
+      activity: act,
+      marks: actRecs.length,
+      qty: actRecs.reduce((sum, r) => sum + r.balanceQty, 0),
+      weight: actRecs.reduce((sum, r) => sum + r.balanceWt, 0),
+      avgAge: actWithAge.length ? Math.round(actWithAge.reduce((sum, r) => sum + r.ageingDays!, 0) / actWithAge.length) : null,
+      c0to30: actWithAge.filter(r => r.ageingDays !== null && r.ageingDays <= 30).length,
+      c31to60: actWithAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length,
+      c60Plus: actWithAge.filter(r => r.ageingDays !== null && r.ageingDays > 60).length,
+    };
+  }).sort((a, b) => {
+    // Default sorted by avg age desc
+    return (b.avgAge || 0) - (a.avgAge || 0);
+  });
+
+  const filteredFull = records.filter(r => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return r.markId.toLowerCase().includes(q) || r.contractor?.toLowerCase().includes(q) || r.section?.toLowerCase().includes(q);
+  }).sort((a, b) => (b.ageingDays || 0) - (a.ageingDays || 0));
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiTile title="Pending Marks" value={totalMarks} />
+        <KpiTile title="Balance Qty" value={totalQty.toLocaleString()} />
+        <KpiTile title="Balance Wt (kg)" value={Math.round(totalWt).toLocaleString()} />
+        <KpiTile title="Avg Ageing (d)" value={avgAgeing} />
+      </div>
+
+      <div className="grid md:grid-cols-3 gap-3">
+        <BucketCard title="0-30 Days" records={age0to30} colorClass="bg-ageing-green" textColorClass="ageing-green" />
+        <BucketCard title="31-60 Days" records={age31to60} colorClass="bg-ageing-amber" textColorClass="ageing-amber" />
+        <BucketCard title="60+ Days" records={age60Plus} colorClass="bg-ageing-red" textColorClass="ageing-red" />
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Activity-wise Ageing</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Activity</TableHead>
+                  <TableHead className="text-right">Marks</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Wt (kg)</TableHead>
+                  <TableHead className="text-right">Avg Ageing</TableHead>
+                  <TableHead className="text-right">0-30</TableHead>
+                  <TableHead className="text-right">31-60</TableHead>
+                  <TableHead className="text-right">60+</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {actStats.map(stat => (
+                  <TableRow key={stat.activity}>
+                    <TableCell className="font-bold">{stat.activity}</TableCell>
+                    <TableCell className="text-right">{stat.marks}</TableCell>
+                    <TableCell className="text-right">{stat.qty}</TableCell>
+                    <TableCell className="text-right">{Math.round(stat.weight)}</TableCell>
+                    <TableCell className={`text-right font-bold ${getAgeingColor(stat.avgAge)}`}>{stat.avgAge !== null ? `${stat.avgAge}d` : '-'}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">{stat.c0to30}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">{stat.c31to60}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">{stat.c60Plus}</TableCell>
+                  </TableRow>
+                ))}
+                {actStats.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-4 text-muted-foreground">No activities to display.</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Full Pending Work</CardTitle>
+          <div className="relative w-64">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder="Search marks..."
+              className="pl-9 h-9"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto max-h-[600px]">
+            <Table>
+              <TableHeader className="sticky top-0 bg-card z-10 shadow-sm">
+                <TableRow>
+                  <TableHead>Mark</TableHead>
+                  <TableHead>Section</TableHead>
+                  <TableHead>Activity</TableHead>
+                  <TableHead>Contractor</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Wt</TableHead>
+                  <TableHead className="text-right">Date</TableHead>
+                  <TableHead className="text-right">Ageing</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredFull.map(r => (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-mono font-medium">{r.markId}</TableCell>
+                    <TableCell className="text-xs truncate max-w-[150px]">{r.section}</TableCell>
+                    <TableCell className="text-xs font-semibold">{r.activity}</TableCell>
+                    <TableCell className="text-xs">{r.contractor}</TableCell>
+                    <TableCell className="text-right">{r.balanceQty}</TableCell>
+                    <TableCell className="text-right">{Math.round(r.balanceWt)}</TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">{r.assignDate}</TableCell>
+                    <TableCell className={`text-right font-bold ${getAgeingColor(r.ageingDays)}`}>
+                      {r.ageingDays !== null ? `${r.ageingDays}d` : '-'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function KpiTile({ title, value }: { title: string, value: string | number }) {
+  return (
+    <Card className="shadow-sm border-border">
+      <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full">
+        <p className="text-[10px] sm:text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 line-clamp-1">{title}</p>
+        <p className="text-xl sm:text-2xl font-bold tracking-tight">{value}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BucketCard({ title, records, colorClass, textColorClass }: { title: string, records: any[], colorClass: string, textColorClass: string }) {
+  const marks = records.length;
+  const wt = records.reduce((sum, r) => sum + r.balanceWt, 0);
+  
+  return (
+    <Card className={`border-l-4 ${colorClass.replace('bg-', 'border-')}`}>
+      <CardContent className="p-4">
+        <h4 className={`text-sm font-bold uppercase tracking-wider mb-2 ${textColorClass}`}>{title}</h4>
+        <div className="flex justify-between items-end">
+          <div className="text-2xl font-bold">{marks} <span className="text-sm font-normal text-muted-foreground">marks</span></div>
+          <div className="text-sm font-medium text-muted-foreground">{Math.round(wt).toLocaleString()} kg</div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: snapshots
+    description: Snapshot and report operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,123 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /snapshots:
+    get:
+      operationId: listSnapshots
+      tags: [snapshots]
+      summary: List snapshots
+      description: Returns all stored snapshots, newest first, each with a parse summary.
+      responses:
+        "200":
+          description: List of snapshots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Snapshot"
+    post:
+      operationId: uploadSnapshot
+      tags: [snapshots]
+      summary: Upload a report
+      description: >
+        Upload an .xlsx balance/activity report. The server parses Sheet1 (header on row 3),
+        forward-fills Project Code, derives mark identifiers, de-dupes to one row per mark,
+        and stores a snapshot. Re-uploading with the same report date or label replaces the
+        existing snapshot.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/SnapshotUpload"
+      responses:
+        "201":
+          description: Snapshot created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+        "400":
+          description: Invalid upload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /snapshots/{id}:
+    get:
+      operationId: getSnapshot
+      tags: [snapshots]
+      summary: Get a snapshot
+      description: Returns a single snapshot with its parse summary.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Snapshot"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteSnapshot
+      tags: [snapshots]
+      summary: Delete a snapshot
+      description: Deletes a snapshot and all its records.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /snapshots/{id}/records:
+    get:
+      operationId: getSnapshotRecords
+      tags: [snapshots]
+      summary: Get records for a snapshot
+      description: >
+        Returns the de-duped records for a snapshot. Ageing (days) and route progress are
+        recomputed live on every read from the assign date versus today.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Records for the snapshot
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Record"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +152,142 @@ components:
           type: string
       required:
         - status
-
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+    SnapshotUpload:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+        label:
+          type: string
+        reportDate:
+          type: string
+      required:
+        - file
+    ParseSummary:
+      type: object
+      properties:
+        rowsRead:
+          type: integer
+        marksAfterDedupe:
+          type: integer
+        projectsFound:
+          type: integer
+        missingContractor:
+          type: integer
+        missingDate:
+          type: integer
+        duplicateMarksCollapsed:
+          type: integer
+      required:
+        - rowsRead
+        - marksAfterDedupe
+        - projectsFound
+        - missingContractor
+        - missingDate
+        - duplicateMarksCollapsed
+    Snapshot:
+      type: object
+      properties:
+        id:
+          type: integer
+        label:
+          type: ["string", "null"]
+        sourceFilename:
+          type: string
+        reportDate:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        summary:
+          $ref: "#/components/schemas/ParseSummary"
+      required:
+        - id
+        - label
+        - sourceFilename
+        - reportDate
+        - createdAt
+        - summary
+    UploadResult:
+      type: object
+      properties:
+        snapshot:
+          $ref: "#/components/schemas/Snapshot"
+        replaced:
+          type: boolean
+      required:
+        - snapshot
+        - replaced
+    Record:
+      type: object
+      properties:
+        id:
+          type: integer
+        snapshotId:
+          type: integer
+        markId:
+          type: string
+        job:
+          type: string
+        structure:
+          type: string
+        markTail:
+          type: string
+        section:
+          type: ["string", "null"]
+        grade:
+          type: ["string", "null"]
+        wtPcs:
+          type: ["number", "null"]
+        balanceQty:
+          type: number
+        balanceWt:
+          type: number
+        activity:
+          type: ["string", "null"]
+        operation:
+          type: ["string", "null"]
+        assignDate:
+          type: ["string", "null"]
+        contractor:
+          type: ["string", "null"]
+        orderNature:
+          type: ["string", "null"]
+        towerType:
+          type: ["string", "null"]
+        ageingDays:
+          type: ["integer", "null"]
+        routeSteps:
+          type: array
+          items:
+            type: string
+        currentStepIndex:
+          type: ["integer", "null"]
+      required:
+        - id
+        - snapshotId
+        - markId
+        - job
+        - structure
+        - markTail
+        - section
+        - grade
+        - wtPcs
+        - balanceQty
+        - balanceWt
+        - activity
+        - operation
+        - assignDate
+        - contractor
+        - orderNature
+        - towerType
+        - ageingDays
+        - routeSteps
+        - currentStepIndex
