@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
 import { useListSnapshots, type Record } from "@workspace/api-client-react";
 
 export interface Filters {
@@ -78,26 +78,28 @@ export function useTracker() {
 
 export function useFilteredRecords(records: Record[] | undefined) {
   const { filters } = useTracker();
-  
-  if (!records) return [];
 
-  return records.filter((r) => {
-    if (filters.job && r.job !== filters.job) return false;
-    if (filters.structure && r.structure !== filters.structure) return false;
-    if (filters.mark && r.markId !== filters.mark && r.markTail !== filters.mark) return false;
-    if (filters.contractor && r.contractor !== filters.contractor) return false;
-    if (filters.activity && r.activity !== filters.activity) return false;
-    
-    if (filters.search) {
-      const q = filters.search.toLowerCase();
-      const matchSearch = 
-        r.markId?.toLowerCase().includes(q) ||
-        r.markTail?.toLowerCase().includes(q) ||
-        r.section?.toLowerCase().includes(q) ||
-        r.contractor?.toLowerCase().includes(q);
-      if (!matchSearch) return false;
-    }
-    
-    return true;
-  });
+  return useMemo(() => {
+    if (!records) return [];
+
+    return records.filter((r) => {
+      if (filters.job && r.job !== filters.job) return false;
+      if (filters.structure && r.structure !== filters.structure) return false;
+      if (filters.mark && r.markId !== filters.mark && r.markTail !== filters.mark) return false;
+      if (filters.contractor && r.contractor !== filters.contractor) return false;
+      if (filters.activity && r.activity !== filters.activity) return false;
+
+      if (filters.search) {
+        const q = filters.search.toLowerCase();
+        const matchSearch =
+          r.markId?.toLowerCase().includes(q) ||
+          r.markTail?.toLowerCase().includes(q) ||
+          r.section?.toLowerCase().includes(q) ||
+          r.contractor?.toLowerCase().includes(q);
+        if (!matchSearch) return false;
+      }
+
+      return true;
+    });
+  }, [records, filters]);
 }

@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 
 const PROCESS_ORDER = ["C", "RFI", "NH", "B", "HAB", "W", "TS", "Q", "G", "GB", "Y"];
 
@@ -22,22 +22,26 @@ function ActivityContent() {
   });
   const records = useFilteredRecords(allRecords);
 
-  // Group by activity
-  const activities = new Map<string, any[]>();
-  records.forEach(r => {
-    const act = r.activity || "Unassigned";
-    if (!activities.has(act)) activities.set(act, []);
-    activities.get(act)!.push(r);
-  });
+  const { activities, sortedActivities } = useMemo(() => {
+    // Group by activity
+    const activities = new Map<string, any[]>();
+    records.forEach(r => {
+      const act = r.activity || "Unassigned";
+      if (!activities.has(act)) activities.set(act, []);
+      activities.get(act)!.push(r);
+    });
 
-  const sortedActivities = Array.from(activities.keys()).sort((a, b) => {
-    const idxA = PROCESS_ORDER.indexOf(a);
-    const idxB = PROCESS_ORDER.indexOf(b);
-    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-    if (idxA !== -1) return -1;
-    if (idxB !== -1) return 1;
-    return a.localeCompare(b);
-  });
+    const sortedActivities = Array.from(activities.keys()).sort((a, b) => {
+      const idxA = PROCESS_ORDER.indexOf(a);
+      const idxB = PROCESS_ORDER.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+
+    return { activities, sortedActivities };
+  }, [records]);
 
   return (
     <div className="space-y-4">

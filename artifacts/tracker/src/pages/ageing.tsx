@@ -3,11 +3,11 @@ import { useGetSnapshotRecords, getGetSnapshotRecordsQueryKey } from "@workspace
 import { EmptyState, getAgeingColor } from "./overview";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Search } from "lucide-react";
 
-const PROCESS_ORDER = ["C", "RFI", "NH", "B", "HAB", "W", "TS", "Q", "G", "GB", "Y"];
+const ROW_CAP = 200;
 
 export default function AgeingView() {
   const { selectedSnapshotId } = useTracker();
@@ -23,46 +23,58 @@ function AgeingContent() {
   const records = useFilteredRecords(allRecords);
   const [search, setSearch] = useState("");
 
-  const withAge = records.filter(r => r.ageingDays !== null);
-  const totalMarks = records.length;
-  const totalQty = records.reduce((sum, r) => sum + r.balanceQty, 0);
-  const totalWt = records.reduce((sum, r) => sum + r.balanceWt, 0);
-  const avgAgeing = withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays!, 0) / withAge.length) : 0;
+  const {
+    totalMarks, totalQty, totalWt, avgAgeing, age0to30, age31to60, age60Plus, actStats,
+  } = useMemo(() => {
+    const withAge = records.filter(r => r.ageingDays !== null);
+    const totalMarks = records.length;
+    const totalQty = records.reduce((sum, r) => sum + r.balanceQty, 0);
+    const totalWt = records.reduce((sum, r) => sum + r.balanceWt, 0);
+    const avgAgeing = withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays!, 0) / withAge.length) : 0;
 
-  const age0to30 = withAge.filter(r => r.ageingDays !== null && r.ageingDays <= 30);
-  const age31to60 = withAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60);
-  const age60Plus = withAge.filter(r => r.ageingDays !== null && r.ageingDays > 60);
+    const age0to30 = withAge.filter(r => r.ageingDays !== null && r.ageingDays <= 30);
+    const age31to60 = withAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60);
+    const age60Plus = withAge.filter(r => r.ageingDays !== null && r.ageingDays > 60);
 
-  // Group by activity for matrix
-  const activities = new Map<string, any[]>();
-  records.forEach(r => {
-    const act = r.activity || "Unassigned";
-    if (!activities.has(act)) activities.set(act, []);
-    activities.get(act)!.push(r);
-  });
+    // Group by activity for matrix
+    const activities = new Map<string, any[]>();
+    records.forEach(r => {
+      const act = r.activity || "Unassigned";
+      if (!activities.has(act)) activities.set(act, []);
+      activities.get(act)!.push(r);
+    });
 
-  const actStats = Array.from(activities.entries()).map(([act, actRecs]) => {
-    const actWithAge = actRecs.filter(r => r.ageingDays !== null);
-    return {
-      activity: act,
-      marks: actRecs.length,
-      qty: actRecs.reduce((sum, r) => sum + r.balanceQty, 0),
-      weight: actRecs.reduce((sum, r) => sum + r.balanceWt, 0),
-      avgAge: actWithAge.length ? Math.round(actWithAge.reduce((sum, r) => sum + r.ageingDays!, 0) / actWithAge.length) : null,
-      c0to30: actWithAge.filter(r => r.ageingDays !== null && r.ageingDays <= 30).length,
-      c31to60: actWithAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length,
-      c60Plus: actWithAge.filter(r => r.ageingDays !== null && r.ageingDays > 60).length,
-    };
-  }).sort((a, b) => {
-    // Default sorted by avg age desc
-    return (b.avgAge || 0) - (a.avgAge || 0);
-  });
+    const actStats = Array.from(activities.entries()).map(([act, actRecs]) => {
+      const actWithAge = actRecs.filter(r => r.ageingDays !== null);
+      return {
+        activity: act,
+        marks: actRecs.length,
+        qty: actRecs.reduce((sum, r) => sum + r.balanceQty, 0),
+        weight: actRecs.reduce((sum, r) => sum + r.balanceWt, 0),
+        avgAge: actWithAge.length ? Math.round(actWithAge.reduce((sum, r) => sum + r.ageingDays!, 0) / actWithAge.length) : null,
+        c0to30: actWithAge.filter(r => r.ageingDays !== null && r.ageingDays <= 30).length,
+        c31to60: actWithAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length,
+        c60Plus: actWithAge.filter(r => r.ageingDays !== null && r.ageingDays > 60).length,
+      };
+    }).sort((a, b) => (b.avgAge || 0) - (a.avgAge || 0));
 
-  const filteredFull = records.filter(r => {
-    if (!search) return true;
+    return { totalMarks, totalQty, totalWt, avgAgeing, age0to30, age31to60, age60Plus, actStats };
+  }, [records]);
+
+  const sortedFull = useMemo(
+    () => [...records].sort((a, b) => (b.ageingDays || 0) - (a.ageingDays || 0)),
+    [records]
+  );
+
+  const filteredFull = useMemo(() => {
+    if (!search) return sortedFull;
     const q = search.toLowerCase();
-    return r.markId.toLowerCase().includes(q) || r.contractor?.toLowerCase().includes(q) || r.section?.toLowerCase().includes(q);
-  }).sort((a, b) => (b.ageingDays || 0) - (a.ageingDays || 0));
+    return sortedFull.filter(r =>
+      r.markId.toLowerCase().includes(q) || r.contractor?.toLowerCase().includes(q) || r.section?.toLowerCase().includes(q)
+    );
+  }, [sortedFull, search]);
+
+  const visibleFull = filteredFull.slice(0, ROW_CAP);
 
   return (
     <div className="space-y-6">
@@ -124,7 +136,14 @@ function AgeingContent() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Full Pending Work</CardTitle>
+          <div className="flex flex-col gap-0.5">
+            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Full Pending Work</CardTitle>
+            <span className="text-xs text-muted-foreground">
+              {filteredFull.length > ROW_CAP
+                ? `Showing top ${ROW_CAP} of ${filteredFull.length} — refine with search or filters`
+                : `${filteredFull.length} marks`}
+            </span>
+          </div>
           <div className="relative w-64">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
@@ -152,7 +171,7 @@ function AgeingContent() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredFull.map(r => (
+                {visibleFull.map(r => (
                   <TableRow key={r.id}>
                     <TableCell className="font-mono font-medium">{r.markId}</TableCell>
                     <TableCell className="text-xs truncate max-w-[150px]">{r.section}</TableCell>

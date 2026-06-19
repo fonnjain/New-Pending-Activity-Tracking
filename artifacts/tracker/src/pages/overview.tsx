@@ -3,6 +3,7 @@ import { useGetSnapshotRecords, getGetSnapshotRecordsQueryKey } from "@workspace
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { useMemo } from "react";
 
 export default function Overview() {
   const { selectedSnapshotId } = useTracker();
@@ -21,42 +22,52 @@ function OverviewContent() {
   });
   const records = useFilteredRecords(allRecords);
 
-  const totalMarks = records.length;
-  const totalQty = records.reduce((sum, r) => sum + r.balanceQty, 0);
-  const totalWt = records.reduce((sum, r) => sum + r.balanceWt, 0);
-  
-  const recordsWithAgeing = records.filter(r => r.ageingDays !== null);
-  const avgAgeing = recordsWithAgeing.length ? 
-    Math.round(recordsWithAgeing.reduce((sum, r) => sum + (r.ageingDays || 0), 0) / recordsWithAgeing.length) : 0;
-    
-  const contractorsCount = new Set(records.map(r => r.contractor).filter(Boolean)).size;
-  const structuresCount = new Set(records.map(r => r.structure).filter(Boolean)).size;
+  const {
+    totalMarks, totalQty, totalWt, avgAgeing, contractorsCount, structuresCount,
+    topAgedMarks, busiestContractors, age0to30, age31to60, age60Plus,
+    p0to30, p31to60, p60Plus,
+  } = useMemo(() => {
+    const totalMarks = records.length;
+    const totalQty = records.reduce((sum, r) => sum + r.balanceQty, 0);
+    const totalWt = records.reduce((sum, r) => sum + r.balanceWt, 0);
 
-  const topAgedMarks = [...recordsWithAgeing]
-    .sort((a, b) => (b.ageingDays || 0) - (a.ageingDays || 0))
-    .slice(0, 8);
+    const recordsWithAgeing = records.filter(r => r.ageingDays !== null);
+    const avgAgeing = recordsWithAgeing.length ?
+      Math.round(recordsWithAgeing.reduce((sum, r) => sum + (r.ageingDays || 0), 0) / recordsWithAgeing.length) : 0;
 
-  const contractorMap = new Map<string, { weight: number, count: number }>();
-  records.forEach(r => {
-    const c = r.contractor || "Unassigned";
-    if (!contractorMap.has(c)) contractorMap.set(c, { weight: 0, count: 0 });
-    const stat = contractorMap.get(c)!;
-    stat.weight += r.balanceWt;
-    stat.count += 1;
-  });
+    const contractorsCount = new Set(records.map(r => r.contractor).filter(Boolean)).size;
+    const structuresCount = new Set(records.map(r => r.structure).filter(Boolean)).size;
 
-  const busiestContractors = Array.from(contractorMap.entries())
-    .sort((a, b) => b[1].weight - a[1].weight)
-    .slice(0, 5);
+    const topAgedMarks = [...recordsWithAgeing]
+      .sort((a, b) => (b.ageingDays || 0) - (a.ageingDays || 0))
+      .slice(0, 8);
 
-  const age0to30 = recordsWithAgeing.filter(r => r.ageingDays !== null && r.ageingDays <= 30).length;
-  const age31to60 = recordsWithAgeing.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length;
-  const age60Plus = recordsWithAgeing.filter(r => r.ageingDays !== null && r.ageingDays > 60).length;
-  const totalAged = age0to30 + age31to60 + age60Plus || 1;
+    const contractorMap = new Map<string, { weight: number, count: number }>();
+    records.forEach(r => {
+      const c = r.contractor || "Unassigned";
+      if (!contractorMap.has(c)) contractorMap.set(c, { weight: 0, count: 0 });
+      const stat = contractorMap.get(c)!;
+      stat.weight += r.balanceWt;
+      stat.count += 1;
+    });
 
-  const p0to30 = (age0to30 / totalAged) * 100;
-  const p31to60 = (age31to60 / totalAged) * 100;
-  const p60Plus = (age60Plus / totalAged) * 100;
+    const busiestContractors = Array.from(contractorMap.entries())
+      .sort((a, b) => b[1].weight - a[1].weight)
+      .slice(0, 5);
+
+    const age0to30 = recordsWithAgeing.filter(r => r.ageingDays !== null && r.ageingDays <= 30).length;
+    const age31to60 = recordsWithAgeing.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length;
+    const age60Plus = recordsWithAgeing.filter(r => r.ageingDays !== null && r.ageingDays > 60).length;
+    const totalAged = age0to30 + age31to60 + age60Plus || 1;
+
+    return {
+      totalMarks, totalQty, totalWt, avgAgeing, contractorsCount, structuresCount,
+      topAgedMarks, busiestContractors, age0to30, age31to60, age60Plus,
+      p0to30: (age0to30 / totalAged) * 100,
+      p31to60: (age31to60 / totalAged) * 100,
+      p60Plus: (age60Plus / totalAged) * 100,
+    };
+  }, [records]);
 
   return (
     <div className="space-y-6">

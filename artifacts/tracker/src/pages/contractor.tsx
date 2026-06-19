@@ -3,6 +3,7 @@ import { useGetSnapshotRecords, getGetSnapshotRecordsQueryKey } from "@workspace
 import { EmptyState, getAgeingColor } from "./overview";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
+import { useMemo } from "react";
 
 export default function ContractorView() {
   const { selectedSnapshotId } = useTracker();
@@ -17,35 +18,40 @@ function ContractorContent() {
   });
   const records = useFilteredRecords(allRecords);
 
-  const conMap = new Map<string, any[]>();
-  records.forEach(r => {
-    const c = r.contractor || "Unassigned";
-    if (!conMap.has(c)) conMap.set(c, []);
-    conMap.get(c)!.push(r);
-  });
+  const { conMap, sortedStats, unassignedCount, busiest, mostAged, maxWeight } = useMemo(() => {
+    const conMap = new Map<string, any[]>();
+    records.forEach(r => {
+      const c = r.contractor || "Unassigned";
+      if (!conMap.has(c)) conMap.set(c, []);
+      conMap.get(c)!.push(r);
+    });
 
-  const stats = Array.from(conMap.entries()).map(([name, recs]) => {
-    const withAge = recs.filter(r => r.ageingDays !== null);
+    const stats = Array.from(conMap.entries()).map(([name, recs]) => {
+      const withAge = recs.filter(r => r.ageingDays !== null);
+      return {
+        name,
+        marks: recs.length,
+        qty: recs.reduce((sum, r) => sum + r.balanceQty, 0),
+        weight: recs.reduce((sum, r) => sum + r.balanceWt, 0),
+        avgAge: withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays!, 0) / withAge.length) : null,
+        c0to30: withAge.filter(r => r.ageingDays !== null && r.ageingDays <= 30).length,
+        c31to60: withAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length,
+        c60Plus: withAge.filter(r => r.ageingDays !== null && r.ageingDays > 60).length,
+      };
+    });
+
+    // Sort by weight desc
+    const sortedStats = [...stats].sort((a, b) => b.weight - a.weight);
+
     return {
-      name,
-      marks: recs.length,
-      qty: recs.reduce((sum, r) => sum + r.balanceQty, 0),
-      weight: recs.reduce((sum, r) => sum + r.balanceWt, 0),
-      avgAge: withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays!, 0) / withAge.length) : null,
-      c0to30: withAge.filter(r => r.ageingDays !== null && r.ageingDays <= 30).length,
-      c31to60: withAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length,
-      c60Plus: withAge.filter(r => r.ageingDays !== null && r.ageingDays > 60).length,
+      conMap,
+      sortedStats,
+      unassignedCount: stats.find(s => s.name === "Unassigned")?.marks || 0,
+      busiest: sortedStats[0]?.name || "-",
+      mostAged: [...stats].sort((a, b) => (b.avgAge || 0) - (a.avgAge || 0))[0]?.name || "-",
+      maxWeight: Math.max(...sortedStats.map(s => s.weight), 1),
     };
-  });
-
-  // Sort by weight desc
-  const sortedStats = [...stats].sort((a, b) => b.weight - a.weight);
-  
-  const unassignedCount = stats.find(s => s.name === "Unassigned")?.marks || 0;
-  const busiest = sortedStats[0]?.name || "-";
-  const mostAged = [...stats].sort((a, b) => (b.avgAge || 0) - (a.avgAge || 0))[0]?.name || "-";
-
-  const maxWeight = Math.max(...sortedStats.map(s => s.weight), 1);
+  }, [records]);
 
   return (
     <div className="space-y-6">

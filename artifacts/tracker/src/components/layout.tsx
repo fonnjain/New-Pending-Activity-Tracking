@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Activity, Clock, Users, Database, Filter, X } from "lucide-react";
 import { useTracker } from "@/lib/store";
@@ -75,22 +75,38 @@ function FilterBar() {
     query: { enabled: !!selectedSnapshotId, queryKey: getGetSnapshotRecordsQueryKey(selectedSnapshotId as number) }
   });
 
-  const jobs = Array.from(new Set(records.map(r => r.job).filter(Boolean))).sort();
-  
-  const structures = Array.from(new Set(records
-    .filter(r => !filters.job || r.job === filters.job)
-    .map(r => r.structure)
-    .filter(Boolean)
-  )).sort();
+  const jobs = useMemo(
+    () => Array.from(new Set(records.map(r => r.job).filter(Boolean))).sort(),
+    [records]
+  );
 
-  const marks = Array.from(new Set(records
-    .filter(r => (!filters.job || r.job === filters.job) && (!filters.structure || r.structure === filters.structure))
-    .map(r => r.markId) // Simplified for UI
-    .filter(Boolean)
-  )).sort();
+  const structures = useMemo(
+    () => Array.from(new Set(records
+      .filter(r => !filters.job || r.job === filters.job)
+      .map(r => r.structure)
+      .filter(Boolean)
+    )).sort(),
+    [records, filters.job]
+  );
 
-  const contractors = Array.from(new Set(records.map(r => r.contractor).filter((c): c is string => Boolean(c)))).sort();
-  const activities = Array.from(new Set(records.map(r => r.activity).filter((a): a is string => Boolean(a)))).sort();
+  const marks = useMemo(
+    () => Array.from(new Set(records
+      .filter(r => (!filters.job || r.job === filters.job) && (!filters.structure || r.structure === filters.structure))
+      .map(r => r.markId) // Simplified for UI
+      .filter(Boolean)
+    )).sort(),
+    [records, filters.job, filters.structure]
+  );
+
+  const contractors = useMemo(
+    () => Array.from(new Set(records.map(r => r.contractor).filter((c): c is string => Boolean(c)))).sort(),
+    [records]
+  );
+
+  const activities = useMemo(
+    () => Array.from(new Set(records.map(r => r.activity).filter((a): a is string => Boolean(a)))).sort(),
+    [records]
+  );
 
   const activeFilterCount = Object.values(filters).filter(v => v !== null && v !== "").length;
 

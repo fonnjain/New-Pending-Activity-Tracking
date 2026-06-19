@@ -25,3 +25,8 @@ Mobile-first web app: upload one Excel report -> one "snapshot" with de-duped "r
 - Tailwind v4: never `@apply` a custom utility class (e.g. tabular-nums) — use the raw CSS property.
 - React Query hooks require an explicit `queryKey` in `query` options (e.g. getGetSnapshotRecordsQueryKey(id)).
 - Default snapshot selection lives in TrackerProvider (store.tsx): auto-selects newest, recovers if selected is deleted.
+
+## Performance (all client-side aggregation)
+- Every view recomputes KPIs/buckets/groupings/sorts from the selected snapshot's records on each render; `useFilteredRecords` filters too. ALL of this MUST stay wrapped in `useMemo` keyed on `[records]` (and `filters`/`search` where relevant), or typing in any search box re-runs full aggregation + re-renders and the browser hangs on large real datasets.
+  **Why:** a real uploaded report has thousands of marks; without memoization the app froze ("slow and hanging").
+- Large record tables must be bounded. Ageing "Full Pending Work" caps rendered rows at `ROW_CAP` (200) with a "Showing top N of M" notice; search/filters narrow it. If full browsing is needed later, add pagination/virtualization rather than removing the cap.
