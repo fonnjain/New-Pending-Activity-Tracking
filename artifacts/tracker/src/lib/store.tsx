@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
-import { useListSnapshots, type Record } from "@workspace/api-client-react";
+import { useListImports, type Record } from "@workspace/api-client-react";
 
 export interface Filters {
   job: string | null;
@@ -11,8 +11,8 @@ export interface Filters {
 }
 
 interface TrackerContextType {
-  selectedSnapshotId: number | null;
-  setSelectedSnapshotId: (id: number | null) => void;
+  selectedImportId: number | null;
+  setSelectedImportId: (id: number | null) => void;
   filters: Filters;
   setFilter: (key: keyof Filters, value: string | null) => void;
   clearFilters: () => void;
@@ -30,22 +30,22 @@ const defaultFilters: Filters = {
 const TrackerContext = createContext<TrackerContextType | undefined>(undefined);
 
 export function TrackerProvider({ children }: { children: ReactNode }) {
-  const [selectedSnapshotId, setSelectedSnapshotId] = useState<number | null>(null);
+  const [selectedImportId, setSelectedImportId] = useState<number | null>(null);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
-  const { data: snapshots } = useListSnapshots();
+  const { data: imports } = useListImports();
 
-  // Default to the newest snapshot, and recover if the selected one is removed.
+  // Default to the newest import, and recover if the selected one is removed.
   useEffect(() => {
-    if (!snapshots) return;
-    if (snapshots.length === 0) {
-      if (selectedSnapshotId !== null) setSelectedSnapshotId(null);
+    if (!imports) return;
+    if (imports.length === 0) {
+      if (selectedImportId !== null) setSelectedImportId(null);
       return;
     }
-    const exists = snapshots.some((s) => s.id === selectedSnapshotId);
+    const exists = imports.some((s) => s.id === selectedImportId);
     if (!exists) {
-      setSelectedSnapshotId(snapshots[0].id);
+      setSelectedImportId(imports[0].id);
     }
-  }, [snapshots, selectedSnapshotId]);
+  }, [imports, selectedImportId]);
 
   const setFilter = (key: keyof Filters, value: string | null) => {
     setFilters((prev) => {
@@ -64,7 +64,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
   const clearFilters = () => setFilters(defaultFilters);
 
   return (
-    <TrackerContext.Provider value={{ selectedSnapshotId, setSelectedSnapshotId, filters, setFilter, clearFilters }}>
+    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, clearFilters }}>
       {children}
     </TrackerContext.Provider>
   );

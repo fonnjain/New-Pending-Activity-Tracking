@@ -8,15 +8,26 @@
 
 export interface Record {
   id: number;
-  snapshotId: number;
+  importId: number;
   markId: string;
   job: string;
   structure: string;
   markTail: string;
+  markNo: string;
+  /** @nullable */
+  alias: string | null;
   /** @nullable */
   section: string | null;
   /** @nullable */
-  grade: string | null;
+  jobCardNo: string | null;
+  /** @nullable */
+  towerType: string | null;
+  /** @nullable */
+  towerSubType: string | null;
+  /** @nullable */
+  length: number | null;
+  /** @nullable */
+  width: number | null;
   /** @nullable */
   wtPcs: number | null;
   balanceQty: number;
@@ -32,7 +43,7 @@ export interface Record {
   /** @nullable */
   orderNature: string | null;
   /** @nullable */
-  towerType: string | null;
+  refJobCardNo: string | null;
   /** @nullable */
   ageingDays: number | null;
   routeSteps: string[];

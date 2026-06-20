@@ -20,11 +20,13 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  ChangeSet,
+  CompareImportsParams,
   ErrorResponse,
   HealthStatus,
+  Import,
+  ImportUpload,
   Record,
-  Snapshot,
-  SnapshotUpload,
   UploadResult
 } from './api.schemas';
 
@@ -118,21 +120,22 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
 
 
-export const getListSnapshotsUrl = () => {
+export const getListImportsUrl = () => {
 
 
 
 
-  return `/api/snapshots`
+  return `/api/imports`
 }
 
 /**
- * Returns all stored snapshots, newest first, each with a parse summary.
- * @summary List snapshots
- */
-export const listSnapshots = async ( options?: RequestInit): Promise<Snapshot[]> => {
+ * Returns every import in the append-only ledger, newest first, each with its parse summary and (when available) a compact change summary versus the prior import.
 
-  return customFetch<Snapshot[]>(getListSnapshotsUrl(),
+ * @summary List imports
+ */
+export const listImports = async ( options?: RequestInit): Promise<Import[]> => {
+
+  return customFetch<Import[]>(getListImportsUrl(),
   {
     ...options,
     method: 'GET'
@@ -145,45 +148,45 @@ export const listSnapshots = async ( options?: RequestInit): Promise<Snapshot[]>
 
 
 
-export const getListSnapshotsQueryKey = () => {
+export const getListImportsQueryKey = () => {
     return [
-    `/api/snapshots`
+    `/api/imports`
     ] as const;
     }
 
 
-export const getListSnapshotsQueryOptions = <TData = Awaited<ReturnType<typeof listSnapshots>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSnapshots>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getListImportsQueryOptions = <TData = Awaited<ReturnType<typeof listImports>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listImports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListSnapshotsQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListImportsQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSnapshots>>> = ({ signal }) => listSnapshots({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImports>>> = ({ signal }) => listImports({ signal, ...requestOptions });
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSnapshots>>, TError, TData> & { queryKey: QueryKey }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listImports>>, TError, TData> & { queryKey: QueryKey }
 }
 
-export type ListSnapshotsQueryResult = NonNullable<Awaited<ReturnType<typeof listSnapshots>>>
-export type ListSnapshotsQueryError = ErrorType<unknown>
+export type ListImportsQueryResult = NonNullable<Awaited<ReturnType<typeof listImports>>>
+export type ListImportsQueryError = ErrorType<unknown>
 
 
 /**
- * @summary List snapshots
+ * @summary List imports
  */
 
-export function useListSnapshots<TData = Awaited<ReturnType<typeof listSnapshots>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSnapshots>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export function useListImports<TData = Awaited<ReturnType<typeof listImports>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listImports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getListSnapshotsQueryOptions(options)
+  const queryOptions = getListImportsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -196,30 +199,30 @@ export function useListSnapshots<TData = Awaited<ReturnType<typeof listSnapshots
 
 
 
-export const getUploadSnapshotUrl = () => {
+export const getUploadImportUrl = () => {
 
 
 
 
-  return `/api/snapshots`
+  return `/api/imports`
 }
 
 /**
- * Upload an .xlsx balance/activity report. The server parses Sheet1 (header on row 3), forward-fills Project Code, derives mark identifiers, de-dupes to one row per mark, and stores a snapshot. Re-uploading with the same report date or label replaces the existing snapshot.
+ * Upload an .xlsx balance/activity report. The server parses Sheet1 (header on row 3), forward-fills Project Code, derives mark identifiers, and preserves in-sheet duplicate rows. Every upload is appended as a new import. Distinct full rows are deduplicated only ACROSS uploads via a permanent record pool; an import records how many copies of each pool row it contains. A field-level change set versus the previous import is computed.
 
  * @summary Upload a report
  */
-export const uploadSnapshot = async (snapshotUpload: SnapshotUpload, options?: RequestInit): Promise<UploadResult> => {
+export const uploadImport = async (importUpload: ImportUpload, options?: RequestInit): Promise<UploadResult> => {
     const formData = new FormData();
-formData.append(`file`, snapshotUpload.file);
-if(snapshotUpload.label !== undefined) {
- formData.append(`label`, snapshotUpload.label);
+formData.append(`file`, importUpload.file);
+if(importUpload.label !== undefined) {
+ formData.append(`label`, importUpload.label);
  }
-if(snapshotUpload.reportDate !== undefined) {
- formData.append(`reportDate`, snapshotUpload.reportDate);
+if(importUpload.reportDate !== undefined) {
+ formData.append(`reportDate`, importUpload.reportDate);
  }
 
-  return customFetch<UploadResult>(getUploadSnapshotUrl(),
+  return customFetch<UploadResult>(getUploadImportUrl(),
   {
     ...options,
     method: 'POST'
@@ -232,11 +235,11 @@ if(snapshotUpload.reportDate !== undefined) {
 
 
 
-export const getUploadSnapshotMutationOptions = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadSnapshot>>, TError,{data: BodyType<SnapshotUpload>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof uploadSnapshot>>, TError,{data: BodyType<SnapshotUpload>}, TContext> => {
+export const getUploadImportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadImport>>, TError,{data: BodyType<ImportUpload>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadImport>>, TError,{data: BodyType<ImportUpload>}, TContext> => {
 
-const mutationKey = ['uploadSnapshot'];
+const mutationKey = ['uploadImport'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -246,10 +249,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadSnapshot>>, {data: BodyType<SnapshotUpload>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadImport>>, {data: BodyType<ImportUpload>}> = (props) => {
           const {data} = props ?? {};
 
-          return  uploadSnapshot(data,requestOptions)
+          return  uploadImport(data,requestOptions)
         }
 
 
@@ -259,39 +262,46 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type UploadSnapshotMutationResult = NonNullable<Awaited<ReturnType<typeof uploadSnapshot>>>
-    export type UploadSnapshotMutationBody = BodyType<SnapshotUpload>
-    export type UploadSnapshotMutationError = ErrorType<ErrorResponse>
+    export type UploadImportMutationResult = NonNullable<Awaited<ReturnType<typeof uploadImport>>>
+    export type UploadImportMutationBody = BodyType<ImportUpload>
+    export type UploadImportMutationError = ErrorType<ErrorResponse>
 
     /**
  * @summary Upload a report
  */
-export const useUploadSnapshot = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadSnapshot>>, TError,{data: BodyType<SnapshotUpload>}, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useUploadImport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadImport>>, TError,{data: BodyType<ImportUpload>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof uploadSnapshot>>,
+        Awaited<ReturnType<typeof uploadImport>>,
         TError,
-        {data: BodyType<SnapshotUpload>},
+        {data: BodyType<ImportUpload>},
         TContext
       > => {
-      return useMutation(getUploadSnapshotMutationOptions(options));
+      return useMutation(getUploadImportMutationOptions(options));
     }
 
-export const getGetSnapshotUrl = (id: number,) => {
+export const getCompareImportsUrl = (params: CompareImportsParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/snapshots/${id}`
+  return stringifiedParams.length > 0 ? `/api/imports/compare?${stringifiedParams}` : `/api/imports/compare`
 }
 
 /**
- * Returns a single snapshot with its parse summary.
- * @summary Get a snapshot
+ * Returns the full field-level change set between two arbitrary imports.
+ * @summary Compare any two imports
  */
-export const getSnapshot = async (id: number, options?: RequestInit): Promise<Snapshot> => {
+export const compareImports = async (params: CompareImportsParams, options?: RequestInit): Promise<ChangeSet> => {
 
-  return customFetch<Snapshot>(getGetSnapshotUrl(id),
+  return customFetch<ChangeSet>(getCompareImportsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -304,45 +314,45 @@ export const getSnapshot = async (id: number, options?: RequestInit): Promise<Sn
 
 
 
-export const getGetSnapshotQueryKey = (id: number,) => {
+export const getCompareImportsQueryKey = (params?: CompareImportsParams,) => {
     return [
-    `/api/snapshots/${id}`
+    `/api/imports/compare`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetSnapshotQueryOptions = <TData = Awaited<ReturnType<typeof getSnapshot>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSnapshot>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getCompareImportsQueryOptions = <TData = Awaited<ReturnType<typeof compareImports>>, TError = ErrorType<ErrorResponse>>(params: CompareImportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof compareImports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetSnapshotQueryKey(id);
+  const queryKey =  queryOptions?.queryKey ?? getCompareImportsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSnapshot>>> = ({ signal }) => getSnapshot(id, { signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof compareImports>>> = ({ signal }) => compareImports(params, { signal, ...requestOptions });
 
 
 
 
 
-   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSnapshot>>, TError, TData> & { queryKey: QueryKey }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof compareImports>>, TError, TData> & { queryKey: QueryKey }
 }
 
-export type GetSnapshotQueryResult = NonNullable<Awaited<ReturnType<typeof getSnapshot>>>
-export type GetSnapshotQueryError = ErrorType<ErrorResponse>
+export type CompareImportsQueryResult = NonNullable<Awaited<ReturnType<typeof compareImports>>>
+export type CompareImportsQueryError = ErrorType<ErrorResponse>
 
 
 /**
- * @summary Get a snapshot
+ * @summary Compare any two imports
  */
 
-export function useGetSnapshot<TData = Awaited<ReturnType<typeof getSnapshot>>, TError = ErrorType<ErrorResponse>>(
- id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSnapshot>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export function useCompareImports<TData = Awaited<ReturnType<typeof compareImports>>, TError = ErrorType<ErrorResponse>>(
+ params: CompareImportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof compareImports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetSnapshotQueryOptions(id,options)
+  const queryOptions = getCompareImportsQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -355,93 +365,21 @@ export function useGetSnapshot<TData = Awaited<ReturnType<typeof getSnapshot>>, 
 
 
 
-export const getDeleteSnapshotUrl = (id: number,) => {
+export const getGetImportUrl = (id: number,) => {
 
 
 
 
-  return `/api/snapshots/${id}`
+  return `/api/imports/${id}`
 }
 
 /**
- * Deletes a snapshot and all its records.
- * @summary Delete a snapshot
+ * Returns a single import with its parse and change summaries.
+ * @summary Get an import
  */
-export const deleteSnapshot = async (id: number, options?: RequestInit): Promise<void> => {
+export const getImport = async (id: number, options?: RequestInit): Promise<Import> => {
 
-  return customFetch<void>(getDeleteSnapshotUrl(id),
-  {
-    ...options,
-    method: 'DELETE'
-
-
-  }
-);}
-
-
-
-
-export const getDeleteSnapshotMutationOptions = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSnapshot>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteSnapshot>>, TError,{id: number}, TContext> => {
-
-const mutationKey = ['deleteSnapshot'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteSnapshot>>, {id: number}> = (props) => {
-          const {id} = props ?? {};
-
-          return  deleteSnapshot(id,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type DeleteSnapshotMutationResult = NonNullable<Awaited<ReturnType<typeof deleteSnapshot>>>
-
-    export type DeleteSnapshotMutationError = ErrorType<ErrorResponse>
-
-    /**
- * @summary Delete a snapshot
- */
-export const useDeleteSnapshot = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSnapshot>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof deleteSnapshot>>,
-        TError,
-        {id: number},
-        TContext
-      > => {
-      return useMutation(getDeleteSnapshotMutationOptions(options));
-    }
-
-export const getGetSnapshotRecordsUrl = (id: number,) => {
-
-
-
-
-  return `/api/snapshots/${id}/records`
-}
-
-/**
- * Returns the de-duped records for a snapshot. Ageing (days) and route progress are recomputed live on every read from the assign date versus today.
-
- * @summary Get records for a snapshot
- */
-export const getSnapshotRecords = async (id: number, options?: RequestInit): Promise<Record[]> => {
-
-  return customFetch<Record[]>(getGetSnapshotRecordsUrl(id),
+  return customFetch<Import>(getGetImportUrl(id),
   {
     ...options,
     method: 'GET'
@@ -454,45 +392,275 @@ export const getSnapshotRecords = async (id: number, options?: RequestInit): Pro
 
 
 
-export const getGetSnapshotRecordsQueryKey = (id: number,) => {
+export const getGetImportQueryKey = (id: number,) => {
     return [
-    `/api/snapshots/${id}/records`
+    `/api/imports/${id}`
     ] as const;
     }
 
 
-export const getGetSnapshotRecordsQueryOptions = <TData = Awaited<ReturnType<typeof getSnapshotRecords>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSnapshotRecords>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetImportQueryOptions = <TData = Awaited<ReturnType<typeof getImport>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetSnapshotRecordsQueryKey(id);
+  const queryKey =  queryOptions?.queryKey ?? getGetImportQueryKey(id);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSnapshotRecords>>> = ({ signal }) => getSnapshotRecords(id, { signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImport>>> = ({ signal }) => getImport(id, { signal, ...requestOptions });
 
 
 
 
 
-   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSnapshotRecords>>, TError, TData> & { queryKey: QueryKey }
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImport>>, TError, TData> & { queryKey: QueryKey }
 }
 
-export type GetSnapshotRecordsQueryResult = NonNullable<Awaited<ReturnType<typeof getSnapshotRecords>>>
-export type GetSnapshotRecordsQueryError = ErrorType<ErrorResponse>
+export type GetImportQueryResult = NonNullable<Awaited<ReturnType<typeof getImport>>>
+export type GetImportQueryError = ErrorType<ErrorResponse>
 
 
 /**
- * @summary Get records for a snapshot
+ * @summary Get an import
  */
 
-export function useGetSnapshotRecords<TData = Awaited<ReturnType<typeof getSnapshotRecords>>, TError = ErrorType<ErrorResponse>>(
- id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSnapshotRecords>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export function useGetImport<TData = Awaited<ReturnType<typeof getImport>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetSnapshotRecordsQueryOptions(id,options)
+  const queryOptions = getGetImportQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getDeleteImportUrl = (id: number,) => {
+
+
+
+
+  return `/api/imports/${id}`
+}
+
+/**
+ * Deletes an import and its membership rows. The shared record pool is permanent and is never deleted.
+
+ * @summary Delete an import
+ */
+export const deleteImport = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteImportUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteImportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteImport>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteImport>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteImport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteImport>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteImport(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteImportMutationResult = NonNullable<Awaited<ReturnType<typeof deleteImport>>>
+
+    export type DeleteImportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Delete an import
+ */
+export const useDeleteImport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteImport>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteImport>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteImportMutationOptions(options));
+    }
+
+export const getGetImportRecordsUrl = (id: number,) => {
+
+
+
+
+  return `/api/imports/${id}/records`
+}
+
+/**
+ * Returns the records belonging to an import, expanded by copy count so in-sheet duplicates appear as separate pending units. Ageing (days) and route progress are recomputed live on every read from the assign date versus today.
+
+ * @summary Get records for an import
+ */
+export const getImportRecords = async (id: number, options?: RequestInit): Promise<Record[]> => {
+
+  return customFetch<Record[]>(getGetImportRecordsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetImportRecordsQueryKey = (id: number,) => {
+    return [
+    `/api/imports/${id}/records`
+    ] as const;
+    }
+
+
+export const getGetImportRecordsQueryOptions = <TData = Awaited<ReturnType<typeof getImportRecords>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportRecords>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImportRecordsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImportRecords>>> = ({ signal }) => getImportRecords(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImportRecords>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetImportRecordsQueryResult = NonNullable<Awaited<ReturnType<typeof getImportRecords>>>
+export type GetImportRecordsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get records for an import
+ */
+
+export function useGetImportRecords<TData = Awaited<ReturnType<typeof getImportRecords>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportRecords>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetImportRecordsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetImportChangesUrl = (id: number,) => {
+
+
+
+
+  return `/api/imports/${id}/changes`
+}
+
+/**
+ * Returns the full field-level change set for an import versus the immediately preceding import. For the first import, all marks are reported as new.
+
+ * @summary Get the change set for an import
+ */
+export const getImportChanges = async (id: number, options?: RequestInit): Promise<ChangeSet> => {
+
+  return customFetch<ChangeSet>(getGetImportChangesUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetImportChangesQueryKey = (id: number,) => {
+    return [
+    `/api/imports/${id}/changes`
+    ] as const;
+    }
+
+
+export const getGetImportChangesQueryOptions = <TData = Awaited<ReturnType<typeof getImportChanges>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportChanges>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImportChangesQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImportChanges>>> = ({ signal }) => getImportChanges(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImportChanges>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetImportChangesQueryResult = NonNullable<Awaited<ReturnType<typeof getImportChanges>>>
+export type GetImportChangesQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get the change set for an import
+ */
+
+export function useGetImportChanges<TData = Awaited<ReturnType<typeof getImportChanges>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportChanges>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetImportChangesQueryOptions(id,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

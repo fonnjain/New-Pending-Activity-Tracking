@@ -25,33 +25,38 @@ A mobile-first web app for steel-fabrication workshops. Upload an Excel (.xlsx) 
 ## Where things live
 
 - API contract (source of truth): `lib/api-spec/openapi.yaml` — run codegen after edits
-- DB schema (source of truth): `lib/db/src/schema/snapshots.ts`, `lib/db/src/schema/records.ts`
+- DB schema (source of truth): `lib/db/src/schema/imports.ts`, `lib/db/src/schema/recordPool.ts`, `lib/db/src/schema/importRows.ts`
 - Excel parsing + ageing/route computation: `artifacts/api-server/src/lib/parse.ts`
-- Snapshot/record routes: `artifacts/api-server/src/routes/snapshots.ts`
+- Merge/diff engine (change detection between imports): `artifacts/api-server/src/lib/diff.ts`
+- Import/record routes (upload, records, changes, compare): `artifacts/api-server/src/routes/imports.ts`
 - Frontend pages: `artifacts/tracker/src/pages/` (overview, activity, ageing, contractor, data)
-- Frontend state (selected snapshot + cascading filters): `artifacts/tracker/src/lib/store.tsx`
+- Overview "Changes since last upload" panel: `artifacts/tracker/src/components/changes-panel.tsx`
+- Frontend state (selected import + cascading filters): `artifacts/tracker/src/lib/store.tsx`
 - Theme + ageing colors: `artifacts/tracker/src/index.css`
 
 ## Architecture decisions
 
-- One uploaded report = one **snapshot**; its de-duped marks = **records**. The app shows one snapshot at a time (defaults to newest).
-- Re-uploading with the same `reportDate` OR `label` replaces the matching snapshot(s); match + delete + insert run in a single transaction.
+- **Append-only merge.** Each uploaded report = one immutable **import**; imports never replace each other (defaults to showing the newest = current state). Re-uploading is idempotent.
+- **Two dedup layers, opposite intent.** WITHIN a file: NO dedup — in-sheet duplicate rows are preserved as separate pending units (tracked via `copies`, expanded in `/imports/{id}/records`). ACROSS uploads: dedup via a permanent `record_pool` keyed by full-row SHA-256 `hash`.
+- **Per-import change log.** Each import stores a field-level diff vs the previous import: moved activity, qty/wt changed, new marks, completed. Change identity = `job|structure|markTail|jobCardNo`; a removed identity is flagged **completed**, never deleted. Pool rows are permanent; deleting an import cascades only `import_rows`.
+- **Concurrency-safe uploads.** `POST /imports` takes `pg_advisory_xact_lock(728041)` so concurrent uploads serialize against a stable baseline; pool insert uses `onConflictDoNothing(hash)` + re-select.
 - `ageingDays` is NOT stored — it is recomputed live (today − Assign Date) at read time, so ageing stays current without re-uploading.
-- The parse summary (rowsRead, duplicateMarksCollapsed, etc.) is stored as a `jsonb` column on the snapshot because rowsRead/collapsed cannot be reconstructed from the de-duped records.
-- All KPIs, buckets, and breakdowns are computed client-side from the selected snapshot's records with filters applied (AND logic). No separate aggregation endpoints.
+- The parse summary (rowsRead, etc.) and change summary are stored as `jsonb` columns on the import because they cannot be reconstructed from the deduped pool.
+- All KPIs, buckets, and breakdowns are computed client-side from the selected import's records with filters applied (AND logic). No separate aggregation endpoints.
+- Deterministic self-checks only (conservation: added+unchanged===rowsKept; idempotency; non-negative). AI advisory is out of scope.
 
 ## Parsing rules (parse.ts)
 
-- Reads `Sheet1` (falls back to first sheet); header is on the 3rd row (`range: 2`).
+- Reads `Sheet1` (falls back to first sheet); header is on the 3rd row (`range: 2`); reads all 18 columns.
 - Forward-fills `Project Code`; normalizes `"794."`→`794`, `"920.0"`→`920`.
 - Keeps only rows with a non-empty `Mark No.`.
 - `mark_id` = `job\structure\markTail`; `markTail` strips the `"<job> <alias>-"` prefix (not a naive split on first hyphen).
-- De-dupes to one row per `mark_id`: latest `Assign Date` wins; tie → largest `Balance Qty`.
+- NO within-file dedup: every kept row becomes a pending unit; a full-row SHA-256 `hash` dedups across uploads only.
 - Ageing color scale (used everywhere): green ≤30, amber 31–60, red >60, neutral when no date.
 
 ## Product
 
-Five views: Overview (KPIs + ageing breakdown + top aged / busiest contractors), Activity (process-ordered activity cards with expandable mark tables), Ageing (buckets + activity-wise ageing table + full pending table), Contractor (workload bars + contractor×ageing matrix), Data (upload, parse summary, snapshot list, CSV/JSON export). Cascading Job→Structure→Mark filters plus contractor/activity/search apply across all views.
+Five views: Overview (KPIs + "Changes since last upload" panel + ageing breakdown + top aged / busiest contractors), Activity (process-ordered activity cards with expandable mark tables), Ageing (buckets + activity-wise ageing table + full pending table), Contractor (workload bars + contractor×ageing matrix), Data (upload, parse summary, import list with change counts, CSV/JSON export). The Changes panel shows chips + a tabbed table (Moved activity / Qty-Wt changed / New marks / Completed) and a compare-any-two-imports selector. Cascading Job→Structure→Mark filters plus contractor/activity/search apply across all views.
 
 ## User preferences
 

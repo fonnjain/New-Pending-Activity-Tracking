@@ -18,10 +18,11 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
- * Returns all stored snapshots, newest first, each with a parse summary.
- * @summary List snapshots
+ * Returns every import in the append-only ledger, newest first, each with its parse summary and (when available) a compact change summary versus the prior import.
+
+ * @summary List imports
  */
-export const ListSnapshotsResponseItem = zod.object({
+export const ListImportsResponseItem = zod.object({
   "id": zod.number(),
   "label": zod.string().nullable(),
   "sourceFilename": zod.string(),
@@ -29,22 +30,35 @@ export const ListSnapshotsResponseItem = zod.object({
   "createdAt": zod.string(),
   "summary": zod.object({
   "rowsRead": zod.number(),
-  "marksAfterDedupe": zod.number(),
+  "rowsKept": zod.number(),
+  "distinctRows": zod.number(),
+  "duplicateRowCopies": zod.number(),
   "projectsFound": zod.number(),
   "missingContractor": zod.number(),
-  "missingDate": zod.number(),
-  "duplicateMarksCollapsed": zod.number()
+  "missingDate": zod.number()
+}),
+  "changeSummary": zod.union([zod.object({
+  "prevImportId": zod.number().nullable(),
+  "addedRows": zod.number(),
+  "unchangedRows": zod.number(),
+  "movedActivity": zod.number(),
+  "qtyChanged": zod.number(),
+  "newMarks": zod.number(),
+  "completed": zod.number(),
+  "netPendingQtyChange": zod.number(),
+  "netPendingWtChange": zod.number(),
+  "flags": zod.array(zod.string())
+}),zod.null()])
 })
-})
-export const ListSnapshotsResponse = zod.array(ListSnapshotsResponseItem)
+export const ListImportsResponse = zod.array(ListImportsResponseItem)
 
 
 /**
- * Upload an .xlsx balance/activity report. The server parses Sheet1 (header on row 3), forward-fills Project Code, derives mark identifiers, de-dupes to one row per mark, and stores a snapshot. Re-uploading with the same report date or label replaces the existing snapshot.
+ * Upload an .xlsx balance/activity report. The server parses Sheet1 (header on row 3), forward-fills Project Code, derives mark identifiers, and preserves in-sheet duplicate rows. Every upload is appended as a new import. Distinct full rows are deduplicated only ACROSS uploads via a permanent record pool; an import records how many copies of each pool row it contains. A field-level change set versus the previous import is computed.
 
  * @summary Upload a report
  */
-export const UploadSnapshotBody = zod.object({
+export const UploadImportBody = zod.object({
   "file": zod.instanceof(File),
   "label": zod.string().optional(),
   "reportDate": zod.string().optional()
@@ -52,14 +66,94 @@ export const UploadSnapshotBody = zod.object({
 
 
 /**
- * Returns a single snapshot with its parse summary.
- * @summary Get a snapshot
+ * Returns the full field-level change set between two arbitrary imports.
+ * @summary Compare any two imports
  */
-export const GetSnapshotParams = zod.object({
+export const CompareImportsQueryParams = zod.object({
+  "from": zod.coerce.number(),
+  "to": zod.coerce.number()
+})
+
+export const CompareImportsResponse = zod.object({
+  "fromImportId": zod.number().nullable(),
+  "toImportId": zod.number(),
+  "fromLabel": zod.string().nullable(),
+  "toLabel": zod.string().nullable(),
+  "counts": zod.object({
+  "addedRows": zod.number(),
+  "unchangedRows": zod.number(),
+  "movedActivity": zod.number(),
+  "qtyChanged": zod.number(),
+  "newMarks": zod.number(),
+  "completed": zod.number()
+}),
+  "netPendingQtyChange": zod.number(),
+  "netPendingWtChange": zod.number(),
+  "movedActivity": zod.array(zod.object({
+  "markId": zod.string(),
+  "job": zod.string(),
+  "structure": zod.string(),
+  "markTail": zod.string(),
+  "contractor": zod.string().nullable(),
+  "activityFrom": zod.string().nullable(),
+  "activityTo": zod.string().nullable(),
+  "qtyFrom": zod.number().nullable(),
+  "qtyTo": zod.number().nullable(),
+  "wtFrom": zod.number().nullable(),
+  "wtTo": zod.number().nullable()
+})),
+  "qtyChanged": zod.array(zod.object({
+  "markId": zod.string(),
+  "job": zod.string(),
+  "structure": zod.string(),
+  "markTail": zod.string(),
+  "contractor": zod.string().nullable(),
+  "activityFrom": zod.string().nullable(),
+  "activityTo": zod.string().nullable(),
+  "qtyFrom": zod.number().nullable(),
+  "qtyTo": zod.number().nullable(),
+  "wtFrom": zod.number().nullable(),
+  "wtTo": zod.number().nullable()
+})),
+  "newMarks": zod.array(zod.object({
+  "markId": zod.string(),
+  "job": zod.string(),
+  "structure": zod.string(),
+  "markTail": zod.string(),
+  "contractor": zod.string().nullable(),
+  "activityFrom": zod.string().nullable(),
+  "activityTo": zod.string().nullable(),
+  "qtyFrom": zod.number().nullable(),
+  "qtyTo": zod.number().nullable(),
+  "wtFrom": zod.number().nullable(),
+  "wtTo": zod.number().nullable()
+})),
+  "completed": zod.array(zod.object({
+  "markId": zod.string(),
+  "job": zod.string(),
+  "structure": zod.string(),
+  "markTail": zod.string(),
+  "contractor": zod.string().nullable(),
+  "activityFrom": zod.string().nullable(),
+  "activityTo": zod.string().nullable(),
+  "qtyFrom": zod.number().nullable(),
+  "qtyTo": zod.number().nullable(),
+  "wtFrom": zod.number().nullable(),
+  "wtTo": zod.number().nullable()
+})),
+  "flags": zod.array(zod.string())
+})
+
+
+/**
+ * Returns a single import with its parse and change summaries.
+ * @summary Get an import
+ */
+export const GetImportParams = zod.object({
   "id": zod.coerce.number()
 })
 
-export const GetSnapshotResponse = zod.object({
+export const GetImportResponse = zod.object({
   "id": zod.number(),
   "label": zod.string().nullable(),
   "sourceFilename": zod.string(),
@@ -67,42 +161,62 @@ export const GetSnapshotResponse = zod.object({
   "createdAt": zod.string(),
   "summary": zod.object({
   "rowsRead": zod.number(),
-  "marksAfterDedupe": zod.number(),
+  "rowsKept": zod.number(),
+  "distinctRows": zod.number(),
+  "duplicateRowCopies": zod.number(),
   "projectsFound": zod.number(),
   "missingContractor": zod.number(),
-  "missingDate": zod.number(),
-  "duplicateMarksCollapsed": zod.number()
-})
+  "missingDate": zod.number()
+}),
+  "changeSummary": zod.union([zod.object({
+  "prevImportId": zod.number().nullable(),
+  "addedRows": zod.number(),
+  "unchangedRows": zod.number(),
+  "movedActivity": zod.number(),
+  "qtyChanged": zod.number(),
+  "newMarks": zod.number(),
+  "completed": zod.number(),
+  "netPendingQtyChange": zod.number(),
+  "netPendingWtChange": zod.number(),
+  "flags": zod.array(zod.string())
+}),zod.null()])
 })
 
 
 /**
- * Deletes a snapshot and all its records.
- * @summary Delete a snapshot
+ * Deletes an import and its membership rows. The shared record pool is permanent and is never deleted.
+
+ * @summary Delete an import
  */
-export const DeleteSnapshotParams = zod.object({
+export const DeleteImportParams = zod.object({
   "id": zod.coerce.number()
 })
 
 
 /**
- * Returns the de-duped records for a snapshot. Ageing (days) and route progress are recomputed live on every read from the assign date versus today.
+ * Returns the records belonging to an import, expanded by copy count so in-sheet duplicates appear as separate pending units. Ageing (days) and route progress are recomputed live on every read from the assign date versus today.
 
- * @summary Get records for a snapshot
+ * @summary Get records for an import
  */
-export const GetSnapshotRecordsParams = zod.object({
+export const GetImportRecordsParams = zod.object({
   "id": zod.coerce.number()
 })
 
-export const GetSnapshotRecordsResponseItem = zod.object({
+export const GetImportRecordsResponseItem = zod.object({
   "id": zod.number(),
-  "snapshotId": zod.number(),
+  "importId": zod.number(),
   "markId": zod.string(),
   "job": zod.string(),
   "structure": zod.string(),
   "markTail": zod.string(),
+  "markNo": zod.string(),
+  "alias": zod.string().nullable(),
   "section": zod.string().nullable(),
-  "grade": zod.string().nullable(),
+  "jobCardNo": zod.string().nullable(),
+  "towerType": zod.string().nullable(),
+  "towerSubType": zod.string().nullable(),
+  "length": zod.number().nullable(),
+  "width": zod.number().nullable(),
   "wtPcs": zod.number().nullable(),
   "balanceQty": zod.number(),
   "balanceWt": zod.number(),
@@ -111,11 +225,91 @@ export const GetSnapshotRecordsResponseItem = zod.object({
   "assignDate": zod.string().nullable(),
   "contractor": zod.string().nullable(),
   "orderNature": zod.string().nullable(),
-  "towerType": zod.string().nullable(),
+  "refJobCardNo": zod.string().nullable(),
   "ageingDays": zod.number().nullable(),
   "routeSteps": zod.array(zod.string()),
   "currentStepIndex": zod.number().nullable()
 })
-export const GetSnapshotRecordsResponse = zod.array(GetSnapshotRecordsResponseItem)
+export const GetImportRecordsResponse = zod.array(GetImportRecordsResponseItem)
+
+
+/**
+ * Returns the full field-level change set for an import versus the immediately preceding import. For the first import, all marks are reported as new.
+
+ * @summary Get the change set for an import
+ */
+export const GetImportChangesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetImportChangesResponse = zod.object({
+  "fromImportId": zod.number().nullable(),
+  "toImportId": zod.number(),
+  "fromLabel": zod.string().nullable(),
+  "toLabel": zod.string().nullable(),
+  "counts": zod.object({
+  "addedRows": zod.number(),
+  "unchangedRows": zod.number(),
+  "movedActivity": zod.number(),
+  "qtyChanged": zod.number(),
+  "newMarks": zod.number(),
+  "completed": zod.number()
+}),
+  "netPendingQtyChange": zod.number(),
+  "netPendingWtChange": zod.number(),
+  "movedActivity": zod.array(zod.object({
+  "markId": zod.string(),
+  "job": zod.string(),
+  "structure": zod.string(),
+  "markTail": zod.string(),
+  "contractor": zod.string().nullable(),
+  "activityFrom": zod.string().nullable(),
+  "activityTo": zod.string().nullable(),
+  "qtyFrom": zod.number().nullable(),
+  "qtyTo": zod.number().nullable(),
+  "wtFrom": zod.number().nullable(),
+  "wtTo": zod.number().nullable()
+})),
+  "qtyChanged": zod.array(zod.object({
+  "markId": zod.string(),
+  "job": zod.string(),
+  "structure": zod.string(),
+  "markTail": zod.string(),
+  "contractor": zod.string().nullable(),
+  "activityFrom": zod.string().nullable(),
+  "activityTo": zod.string().nullable(),
+  "qtyFrom": zod.number().nullable(),
+  "qtyTo": zod.number().nullable(),
+  "wtFrom": zod.number().nullable(),
+  "wtTo": zod.number().nullable()
+})),
+  "newMarks": zod.array(zod.object({
+  "markId": zod.string(),
+  "job": zod.string(),
+  "structure": zod.string(),
+  "markTail": zod.string(),
+  "contractor": zod.string().nullable(),
+  "activityFrom": zod.string().nullable(),
+  "activityTo": zod.string().nullable(),
+  "qtyFrom": zod.number().nullable(),
+  "qtyTo": zod.number().nullable(),
+  "wtFrom": zod.number().nullable(),
+  "wtTo": zod.number().nullable()
+})),
+  "completed": zod.array(zod.object({
+  "markId": zod.string(),
+  "job": zod.string(),
+  "structure": zod.string(),
+  "markTail": zod.string(),
+  "contractor": zod.string().nullable(),
+  "activityFrom": zod.string().nullable(),
+  "activityTo": zod.string().nullable(),
+  "qtyFrom": zod.number().nullable(),
+  "qtyTo": zod.number().nullable(),
+  "wtFrom": zod.number().nullable(),
+  "wtTo": zod.number().nullable()
+})),
+  "flags": zod.array(zod.string())
+})
 
 

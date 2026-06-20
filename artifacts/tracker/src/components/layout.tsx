@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Clock, Users, Database, Filter, X } from "lucide-react";
 import { useTracker } from "@/lib/store";
-import { useListSnapshots, useGetSnapshotRecords, getGetSnapshotRecordsQueryKey } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -19,8 +19,8 @@ const navItems = [
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
-  const { selectedSnapshotId } = useTracker();
-  const showFilters = location !== "/data" && location !== "/jobs" && selectedSnapshotId != null;
+  const { selectedImportId } = useTracker();
+  const showFilters = location !== "/data" && location !== "/jobs" && selectedImportId != null;
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground pb-16 md:pb-0 md:pt-14">
@@ -70,10 +70,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 function FilterBar() {
-  const { filters, setFilter, clearFilters, selectedSnapshotId } = useTracker();
+  const { filters, setFilter, clearFilters, selectedImportId } = useTracker();
   const [isOpen, setIsOpen] = useState(false);
-  const { data: records = [] } = useGetSnapshotRecords(selectedSnapshotId as number, {
-    query: { enabled: !!selectedSnapshotId, queryKey: getGetSnapshotRecordsQueryKey(selectedSnapshotId as number) }
+  const { data: records = [] } = useGetImportRecords(selectedImportId as number, {
+    query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
 
   const jobs = useMemo(

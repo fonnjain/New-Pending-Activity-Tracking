@@ -1,8 +1,8 @@
 import { useState, useMemo } from "react";
 import { useTracker } from "@/lib/store";
 import {
-  useGetSnapshotRecords,
-  getGetSnapshotRecordsQueryKey,
+  useGetImportRecords,
+  getGetImportRecordsQueryKey,
 } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -22,17 +22,17 @@ import { ChevronLeft, Search } from "lucide-react";
 const ROW_CAP = 300;
 
 export default function JobDashboard() {
-  const { selectedSnapshotId } = useTracker();
-  if (!selectedSnapshotId) return <EmptyState />;
-  return <JobDashboardContent key={selectedSnapshotId} />;
+  const { selectedImportId } = useTracker();
+  if (!selectedImportId) return <EmptyState />;
+  return <JobDashboardContent key={selectedImportId} />;
 }
 
 function JobDashboardContent() {
-  const { selectedSnapshotId } = useTracker();
-  const { data: records = [] } = useGetSnapshotRecords(selectedSnapshotId as number, {
+  const { selectedImportId } = useTracker();
+  const { data: records = [] } = useGetImportRecords(selectedImportId as number, {
     query: {
-      enabled: !!selectedSnapshotId,
-      queryKey: getGetSnapshotRecordsQueryKey(selectedSnapshotId as number),
+      enabled: !!selectedImportId,
+      queryKey: getGetImportRecordsQueryKey(selectedImportId as number),
     },
   });
 

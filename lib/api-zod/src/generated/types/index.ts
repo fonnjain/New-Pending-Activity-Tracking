@@ -6,10 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './changeCounts';
+export * from './changeItem';
+export * from './changeSet';
+export * from './changeSummary';
+export * from './compareImportsParams';
 export * from './errorResponse';
 export * from './healthStatus';
+export * from './import';
+export * from './importUpload';
 export * from './parseSummary';
 export * from './record';
-export * from './snapshot';
-export * from './snapshotUpload';
 export * from './uploadResult';

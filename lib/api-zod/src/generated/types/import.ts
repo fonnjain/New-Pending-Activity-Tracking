@@ -5,9 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ChangeSummary } from './changeSummary';
 import type { ParseSummary } from './parseSummary';
 
-export interface Snapshot {
+export interface Import {
   id: number;
   /** @nullable */
   label: string | null;
@@ -16,4 +17,5 @@ export interface Snapshot {
   reportDate: string | null;
   createdAt: string;
   summary: ParseSummary;
+  changeSummary: ChangeSummary | null;
 }

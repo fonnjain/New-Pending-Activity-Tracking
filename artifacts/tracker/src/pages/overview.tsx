@@ -1,15 +1,16 @@
 import { useTracker, useFilteredRecords } from "@/lib/store";
-import { useGetSnapshotRecords, getGetSnapshotRecordsQueryKey } from "@workspace/api-client-react";
+import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { formatTons } from "@/lib/utils";
 import { useMemo } from "react";
+import { ChangesPanel } from "@/components/changes-panel";
 
 export default function Overview() {
-  const { selectedSnapshotId } = useTracker();
+  const { selectedImportId } = useTracker();
   
-  if (!selectedSnapshotId) {
+  if (!selectedImportId) {
     return <EmptyState />;
   }
 
@@ -17,9 +18,9 @@ export default function Overview() {
 }
 
 function OverviewContent() {
-  const { selectedSnapshotId } = useTracker();
-  const { data: allRecords } = useGetSnapshotRecords(selectedSnapshotId as number, {
-    query: { enabled: !!selectedSnapshotId, queryKey: getGetSnapshotRecordsQueryKey(selectedSnapshotId as number) }
+  const { selectedImportId } = useTracker();
+  const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
+    query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
   const records = useFilteredRecords(allRecords);
 
@@ -72,6 +73,8 @@ function OverviewContent() {
 
   return (
     <div className="space-y-6">
+      {selectedImportId && <ChangesPanel importId={selectedImportId} />}
+
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiTile title="Pending Marks" value={totalMarks} />
         <KpiTile title="Balance Qty" value={totalQty.toLocaleString()} />
@@ -163,7 +166,7 @@ export function EmptyState() {
       <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mb-6">
         <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
       </div>
-      <h2 className="text-2xl font-bold mb-2">No Active Snapshot</h2>
+      <h2 className="text-2xl font-bold mb-2">No Active Import</h2>
       <p className="text-muted-foreground max-w-md mb-8">
         Upload a balance and activity report to start tracking shop-floor progress and ageing.
       </p>

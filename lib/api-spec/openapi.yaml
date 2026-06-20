@@ -10,8 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
-  - name: snapshots
-    description: Snapshot and report operations
+  - name: imports
+    description: Import, merge, and change-log operations
 paths:
   /healthz:
     get:
@@ -26,39 +26,42 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
-  /snapshots:
+  /imports:
     get:
-      operationId: listSnapshots
-      tags: [snapshots]
-      summary: List snapshots
-      description: Returns all stored snapshots, newest first, each with a parse summary.
+      operationId: listImports
+      tags: [imports]
+      summary: List imports
+      description: >
+        Returns every import in the append-only ledger, newest first, each with its
+        parse summary and (when available) a compact change summary versus the prior import.
       responses:
         "200":
-          description: List of snapshots
+          description: List of imports
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Snapshot"
+                  $ref: "#/components/schemas/Import"
     post:
-      operationId: uploadSnapshot
-      tags: [snapshots]
+      operationId: uploadImport
+      tags: [imports]
       summary: Upload a report
       description: >
         Upload an .xlsx balance/activity report. The server parses Sheet1 (header on row 3),
-        forward-fills Project Code, derives mark identifiers, de-dupes to one row per mark,
-        and stores a snapshot. Re-uploading with the same report date or label replaces the
-        existing snapshot.
+        forward-fills Project Code, derives mark identifiers, and preserves in-sheet duplicate
+        rows. Every upload is appended as a new import. Distinct full rows are deduplicated only
+        ACROSS uploads via a permanent record pool; an import records how many copies of each
+        pool row it contains. A field-level change set versus the previous import is computed.
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
-              $ref: "#/components/schemas/SnapshotUpload"
+              $ref: "#/components/schemas/ImportUpload"
       responses:
         "201":
-          description: Snapshot created
+          description: Import created
           content:
             application/json:
               schema:
@@ -69,12 +72,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /snapshots/{id}:
+  /imports/compare:
     get:
-      operationId: getSnapshot
-      tags: [snapshots]
-      summary: Get a snapshot
-      description: Returns a single snapshot with its parse summary.
+      operationId: compareImports
+      tags: [imports]
+      summary: Compare any two imports
+      description: Returns the full field-level change set between two arbitrary imports.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The change set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangeSet"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /imports/{id}:
+    get:
+      operationId: getImport
+      tags: [imports]
+      summary: Get an import
+      description: Returns a single import with its parse and change summaries.
       parameters:
         - name: id
           in: path
@@ -83,11 +122,11 @@ paths:
             type: integer
       responses:
         "200":
-          description: The snapshot
+          description: The import
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Snapshot"
+                $ref: "#/components/schemas/Import"
         "404":
           description: Not found
           content:
@@ -95,10 +134,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
     delete:
-      operationId: deleteSnapshot
-      tags: [snapshots]
-      summary: Delete a snapshot
-      description: Deletes a snapshot and all its records.
+      operationId: deleteImport
+      tags: [imports]
+      summary: Delete an import
+      description: >
+        Deletes an import and its membership rows. The shared record pool is permanent and
+        is never deleted.
       parameters:
         - name: id
           in: path
@@ -114,13 +155,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /snapshots/{id}/records:
+  /imports/{id}/records:
     get:
-      operationId: getSnapshotRecords
-      tags: [snapshots]
-      summary: Get records for a snapshot
+      operationId: getImportRecords
+      tags: [imports]
+      summary: Get records for an import
       description: >
-        Returns the de-duped records for a snapshot. Ageing (days) and route progress are
+        Returns the records belonging to an import, expanded by copy count so in-sheet
+        duplicates appear as separate pending units. Ageing (days) and route progress are
         recomputed live on every read from the assign date versus today.
       parameters:
         - name: id
@@ -130,13 +172,40 @@ paths:
             type: integer
       responses:
         "200":
-          description: Records for the snapshot
+          description: Records for the import
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/Record"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /imports/{id}/changes:
+    get:
+      operationId: getImportChanges
+      tags: [imports]
+      summary: Get the change set for an import
+      description: >
+        Returns the full field-level change set for an import versus the immediately
+        preceding import. For the first import, all marks are reported as new.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The change set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangeSet"
         "404":
           description: Not found
           content:
@@ -159,7 +228,7 @@ components:
           type: string
       required:
         - error
-    SnapshotUpload:
+    ImportUpload:
       type: object
       properties:
         file:
@@ -176,7 +245,11 @@ components:
       properties:
         rowsRead:
           type: integer
-        marksAfterDedupe:
+        rowsKept:
+          type: integer
+        distinctRows:
+          type: integer
+        duplicateRowCopies:
           type: integer
         projectsFound:
           type: integer
@@ -184,16 +257,51 @@ components:
           type: integer
         missingDate:
           type: integer
-        duplicateMarksCollapsed:
-          type: integer
       required:
         - rowsRead
-        - marksAfterDedupe
+        - rowsKept
+        - distinctRows
+        - duplicateRowCopies
         - projectsFound
         - missingContractor
         - missingDate
-        - duplicateMarksCollapsed
-    Snapshot:
+    ChangeSummary:
+      type: object
+      properties:
+        prevImportId:
+          type: ["integer", "null"]
+        addedRows:
+          type: integer
+        unchangedRows:
+          type: integer
+        movedActivity:
+          type: integer
+        qtyChanged:
+          type: integer
+        newMarks:
+          type: integer
+        completed:
+          type: integer
+        netPendingQtyChange:
+          type: number
+        netPendingWtChange:
+          type: number
+        flags:
+          type: array
+          items:
+            type: string
+      required:
+        - prevImportId
+        - addedRows
+        - unchangedRows
+        - movedActivity
+        - qtyChanged
+        - newMarks
+        - completed
+        - netPendingQtyChange
+        - netPendingWtChange
+        - flags
+    Import:
       type: object
       properties:
         id:
@@ -208,6 +316,10 @@ components:
           type: string
         summary:
           $ref: "#/components/schemas/ParseSummary"
+        changeSummary:
+          oneOf:
+            - $ref: "#/components/schemas/ChangeSummary"
+            - type: "null"
       required:
         - id
         - label
@@ -215,22 +327,132 @@ components:
         - reportDate
         - createdAt
         - summary
+        - changeSummary
+    ChangeItem:
+      type: object
+      properties:
+        markId:
+          type: string
+        job:
+          type: string
+        structure:
+          type: string
+        markTail:
+          type: string
+        contractor:
+          type: ["string", "null"]
+        activityFrom:
+          type: ["string", "null"]
+        activityTo:
+          type: ["string", "null"]
+        qtyFrom:
+          type: ["number", "null"]
+        qtyTo:
+          type: ["number", "null"]
+        wtFrom:
+          type: ["number", "null"]
+        wtTo:
+          type: ["number", "null"]
+      required:
+        - markId
+        - job
+        - structure
+        - markTail
+        - contractor
+        - activityFrom
+        - activityTo
+        - qtyFrom
+        - qtyTo
+        - wtFrom
+        - wtTo
+    ChangeCounts:
+      type: object
+      properties:
+        addedRows:
+          type: integer
+        unchangedRows:
+          type: integer
+        movedActivity:
+          type: integer
+        qtyChanged:
+          type: integer
+        newMarks:
+          type: integer
+        completed:
+          type: integer
+      required:
+        - addedRows
+        - unchangedRows
+        - movedActivity
+        - qtyChanged
+        - newMarks
+        - completed
+    ChangeSet:
+      type: object
+      properties:
+        fromImportId:
+          type: ["integer", "null"]
+        toImportId:
+          type: integer
+        fromLabel:
+          type: ["string", "null"]
+        toLabel:
+          type: ["string", "null"]
+        counts:
+          $ref: "#/components/schemas/ChangeCounts"
+        netPendingQtyChange:
+          type: number
+        netPendingWtChange:
+          type: number
+        movedActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangeItem"
+        qtyChanged:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangeItem"
+        newMarks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangeItem"
+        completed:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangeItem"
+        flags:
+          type: array
+          items:
+            type: string
+      required:
+        - fromImportId
+        - toImportId
+        - fromLabel
+        - toLabel
+        - counts
+        - netPendingQtyChange
+        - netPendingWtChange
+        - movedActivity
+        - qtyChanged
+        - newMarks
+        - completed
+        - flags
     UploadResult:
       type: object
       properties:
-        snapshot:
-          $ref: "#/components/schemas/Snapshot"
-        replaced:
-          type: boolean
+        import:
+          $ref: "#/components/schemas/Import"
+        changeSet:
+          $ref: "#/components/schemas/ChangeSet"
       required:
-        - snapshot
-        - replaced
+        - import
+        - changeSet
     Record:
       type: object
       properties:
         id:
           type: integer
-        snapshotId:
+        importId:
           type: integer
         markId:
           type: string
@@ -240,10 +462,22 @@ components:
           type: string
         markTail:
           type: string
+        markNo:
+          type: string
+        alias:
+          type: ["string", "null"]
         section:
           type: ["string", "null"]
-        grade:
+        jobCardNo:
           type: ["string", "null"]
+        towerType:
+          type: ["string", "null"]
+        towerSubType:
+          type: ["string", "null"]
+        length:
+          type: ["number", "null"]
+        width:
+          type: ["number", "null"]
         wtPcs:
           type: ["number", "null"]
         balanceQty:
@@ -260,7 +494,7 @@ components:
           type: ["string", "null"]
         orderNature:
           type: ["string", "null"]
-        towerType:
+        refJobCardNo:
           type: ["string", "null"]
         ageingDays:
           type: ["integer", "null"]
@@ -272,13 +506,19 @@ components:
           type: ["integer", "null"]
       required:
         - id
-        - snapshotId
+        - importId
         - markId
         - job
         - structure
         - markTail
+        - markNo
+        - alias
         - section
-        - grade
+        - jobCardNo
+        - towerType
+        - towerSubType
+        - length
+        - width
         - wtPcs
         - balanceQty
         - balanceWt
@@ -287,7 +527,7 @@ components:
         - assignDate
         - contractor
         - orderNature
-        - towerType
+        - refJobCardNo
         - ageingDays
         - routeSteps
         - currentStepIndex

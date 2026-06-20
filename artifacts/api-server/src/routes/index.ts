@@ -1,10 +1,10 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
-import snapshotsRouter from "./snapshots";
+import importsRouter from "./imports";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
-router.use(snapshotsRouter);
+router.use(importsRouter);
 
 export default router;

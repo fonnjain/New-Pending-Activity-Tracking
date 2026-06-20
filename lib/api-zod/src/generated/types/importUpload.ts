@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface SnapshotUpload {
+export interface ImportUpload {
   file: Blob;
   label?: string;
   reportDate?: string;

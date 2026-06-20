@@ -13,7 +13,7 @@ export interface ErrorResponse {
   error: string;
 }
 
-export interface SnapshotUpload {
+export interface ImportUpload {
   file: Blob;
   label?: string;
   reportDate?: string;
@@ -21,14 +21,29 @@ export interface SnapshotUpload {
 
 export interface ParseSummary {
   rowsRead: number;
-  marksAfterDedupe: number;
+  rowsKept: number;
+  distinctRows: number;
+  duplicateRowCopies: number;
   projectsFound: number;
   missingContractor: number;
   missingDate: number;
-  duplicateMarksCollapsed: number;
 }
 
-export interface Snapshot {
+export interface ChangeSummary {
+  /** @nullable */
+  prevImportId: number | null;
+  addedRows: number;
+  unchangedRows: number;
+  movedActivity: number;
+  qtyChanged: number;
+  newMarks: number;
+  completed: number;
+  netPendingQtyChange: number;
+  netPendingWtChange: number;
+  flags: string[];
+}
+
+export interface Import {
   id: number;
   /** @nullable */
   label: string | null;
@@ -37,24 +52,84 @@ export interface Snapshot {
   reportDate: string | null;
   createdAt: string;
   summary: ParseSummary;
+  changeSummary: ChangeSummary | null;
 }
 
-export interface UploadResult {
-  snapshot: Snapshot;
-  replaced: boolean;
-}
-
-export interface Record {
-  id: number;
-  snapshotId: number;
+export interface ChangeItem {
   markId: string;
   job: string;
   structure: string;
   markTail: string;
   /** @nullable */
+  contractor: string | null;
+  /** @nullable */
+  activityFrom: string | null;
+  /** @nullable */
+  activityTo: string | null;
+  /** @nullable */
+  qtyFrom: number | null;
+  /** @nullable */
+  qtyTo: number | null;
+  /** @nullable */
+  wtFrom: number | null;
+  /** @nullable */
+  wtTo: number | null;
+}
+
+export interface ChangeCounts {
+  addedRows: number;
+  unchangedRows: number;
+  movedActivity: number;
+  qtyChanged: number;
+  newMarks: number;
+  completed: number;
+}
+
+export interface ChangeSet {
+  /** @nullable */
+  fromImportId: number | null;
+  toImportId: number;
+  /** @nullable */
+  fromLabel: string | null;
+  /** @nullable */
+  toLabel: string | null;
+  counts: ChangeCounts;
+  netPendingQtyChange: number;
+  netPendingWtChange: number;
+  movedActivity: ChangeItem[];
+  qtyChanged: ChangeItem[];
+  newMarks: ChangeItem[];
+  completed: ChangeItem[];
+  flags: string[];
+}
+
+export interface UploadResult {
+  import: Import;
+  changeSet: ChangeSet;
+}
+
+export interface Record {
+  id: number;
+  importId: number;
+  markId: string;
+  job: string;
+  structure: string;
+  markTail: string;
+  markNo: string;
+  /** @nullable */
+  alias: string | null;
+  /** @nullable */
   section: string | null;
   /** @nullable */
-  grade: string | null;
+  jobCardNo: string | null;
+  /** @nullable */
+  towerType: string | null;
+  /** @nullable */
+  towerSubType: string | null;
+  /** @nullable */
+  length: number | null;
+  /** @nullable */
+  width: number | null;
   /** @nullable */
   wtPcs: number | null;
   balanceQty: number;
@@ -70,11 +145,16 @@ export interface Record {
   /** @nullable */
   orderNature: string | null;
   /** @nullable */
-  towerType: string | null;
+  refJobCardNo: string | null;
   /** @nullable */
   ageingDays: number | null;
   routeSteps: string[];
   /** @nullable */
   currentStepIndex: number | null;
 }
+
+export type CompareImportsParams = {
+from: number;
+to: number;
+};
 

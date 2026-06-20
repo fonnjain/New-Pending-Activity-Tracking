@@ -1,5 +1,5 @@
 import { useTracker, useFilteredRecords } from "@/lib/store";
-import { useGetSnapshotRecords, getGetSnapshotRecordsQueryKey } from "@workspace/api-client-react";
+import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
@@ -11,15 +11,15 @@ import { Search } from "lucide-react";
 const ROW_CAP = 200;
 
 export default function AgeingView() {
-  const { selectedSnapshotId } = useTracker();
-  if (!selectedSnapshotId) return <EmptyState />;
+  const { selectedImportId } = useTracker();
+  if (!selectedImportId) return <EmptyState />;
   return <AgeingContent />;
 }
 
 function AgeingContent() {
-  const { selectedSnapshotId } = useTracker();
-  const { data: allRecords } = useGetSnapshotRecords(selectedSnapshotId as number, {
-    query: { enabled: !!selectedSnapshotId, queryKey: getGetSnapshotRecordsQueryKey(selectedSnapshotId as number) }
+  const { selectedImportId } = useTracker();
+  const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
+    query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
   const records = useFilteredRecords(allRecords);
   const [search, setSearch] = useState("");

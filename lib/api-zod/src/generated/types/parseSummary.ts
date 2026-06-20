@@ -8,9 +8,10 @@
 
 export interface ParseSummary {
   rowsRead: number;
-  marksAfterDedupe: number;
+  rowsKept: number;
+  distinctRows: number;
+  duplicateRowCopies: number;
   projectsFound: number;
   missingContractor: number;
   missingDate: number;
-  duplicateMarksCollapsed: number;
 }

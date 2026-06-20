@@ -5,9 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { Snapshot } from './snapshot';
+import type { ChangeSet } from './changeSet';
+import type { Import } from './import';
 
 export interface UploadResult {
-  snapshot: Snapshot;
-  replaced: boolean;
+  import: Import;
+  changeSet: ChangeSet;
 }

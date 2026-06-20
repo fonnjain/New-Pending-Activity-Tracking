@@ -1,17 +1,15 @@
+import { createHash } from "node:crypto";
 import * as XLSX from "xlsx";
-import type { InsertRecord } from "@workspace/db";
+import type { InsertRecordPool, ParseSummary } from "@workspace/db";
 
-export interface ParseSummary {
-  rowsRead: number;
-  marksAfterDedupe: number;
-  projectsFound: number;
-  missingContractor: number;
-  missingDate: number;
-  duplicateMarksCollapsed: number;
-}
+export type { ParseSummary };
+
+// A parsed source row, identical in shape to a record_pool insert plus its
+// content hash. In-sheet duplicates are PRESERVED (no within-file de-dup).
+export type ParsedRow = Omit<InsertRecordPool, "hash"> & { hash: string };
 
 export interface ParseResult {
-  records: Omit<InsertRecord, "snapshotId">[];
+  rows: ParsedRow[];
   summary: ParseSummary;
 }
 
@@ -121,6 +119,32 @@ function deriveMark(
   return { structure, markTail: markTail.trim() };
 }
 
+// Canonical, order-stable serialization of all normalized source fields, hashed
+// to a hex digest. Two rows with identical normalized content share a hash.
+function hashRow(row: Omit<InsertRecordPool, "hash">): string {
+  const parts = [
+    row.job,
+    row.orderNature,
+    row.contractor,
+    row.jobCardNo,
+    row.towerType,
+    row.towerSubType,
+    row.alias,
+    row.markNo,
+    row.section,
+    row.length,
+    row.width,
+    row.wtPcs,
+    row.balanceQty,
+    row.balanceWt,
+    row.assignDate,
+    row.activity,
+    row.operation,
+    row.refJobCardNo,
+  ].map((v) => (v == null ? "\u0000" : String(v)));
+  return createHash("sha256").update(parts.join("\u0001")).digest("hex");
+}
+
 export function parseWorkbook(buffer: Buffer): ParseResult {
   const wb = XLSX.read(buffer, { cellDates: true });
   const sheetName = wb.SheetNames.includes("Sheet1")
@@ -135,7 +159,7 @@ export function parseWorkbook(buffer: Buffer): ParseResult {
   }
 
   // header on the third row => header index 2 (0-based)
-  const rows = XLSX.utils.sheet_to_json<RawRow>(ws, {
+  const rawRows = XLSX.utils.sheet_to_json<RawRow>(ws, {
     range: 2,
     defval: null,
     raw: true,
@@ -144,14 +168,9 @@ export function parseWorkbook(buffer: Buffer): ParseResult {
   let rowsRead = 0;
   let lastProject = "";
   const projects = new Set<string>();
+  const rows: ParsedRow[] = [];
 
-  interface Parsed extends Omit<InsertRecord, "snapshotId"> {
-    _sortDate: string | null;
-  }
-
-  const parsedRows: Parsed[] = [];
-
-  for (const row of rows) {
+  for (const row of rawRows) {
     rowsRead++;
 
     // forward-fill project code
@@ -163,70 +182,54 @@ export function parseWorkbook(buffer: Buffer): ParseResult {
     const markNo = cellToString(row[COL.markNo]);
     if (!markNo) continue;
 
-    const alias = cellToString(row[COL.alias]);
-    const { structure, markTail } = deriveMark(markNo, job, alias);
+    const alias = emptyToNull(row[COL.alias]);
+    const aliasStr = alias ?? "";
+    const { structure, markTail } = deriveMark(markNo, job, aliasStr);
     const markId = `${job}\\${structure}\\${markTail}`;
 
     if (job) projects.add(job);
 
-    const assignDate = formatDate(row[COL.assignDate]);
-
-    parsedRows.push({
-      markId,
+    const base: Omit<InsertRecordPool, "hash"> = {
       job,
       structure,
       markTail,
+      markId,
+      orderNature: emptyToNull(row[COL.orderNature]),
+      contractor: emptyToNull(row[COL.contractor]),
+      jobCardNo: emptyToNull(row[COL.jobCard]),
+      towerType: emptyToNull(row[COL.towerType]),
+      towerSubType: emptyToNull(row[COL.towerSubType]),
+      alias,
+      markNo,
       section: emptyToNull(row[COL.section]),
-      grade: null,
+      length: toNumber(row[COL.length]),
+      width: toNumber(row[COL.width]),
       wtPcs: toNumber(row[COL.wtPcs]),
       balanceQty: toNumber(row[COL.balanceQty]) ?? 0,
       balanceWt: toNumber(row[COL.balanceWt]) ?? 0,
+      assignDate: formatDate(row[COL.assignDate]),
       activity: emptyToNull(row[COL.activity]),
       operation: emptyToNull(row[COL.operation]),
-      assignDate,
-      contractor: emptyToNull(row[COL.contractor]),
-      orderNature: emptyToNull(row[COL.orderNature]),
-      towerType: emptyToNull(row[COL.towerType]),
-      _sortDate: assignDate,
-    });
+      refJobCardNo: emptyToNull(row[COL.refJobCard]),
+    };
+
+    rows.push({ ...base, hash: hashRow(base) });
   }
 
-  // de-dupe by markId: keep latest Assign Date; tie -> largest Balance Qty
-  const byMark = new Map<string, Parsed>();
-  let collapsed = 0;
-  for (const r of parsedRows) {
-    const existing = byMark.get(r.markId);
-    if (!existing) {
-      byMark.set(r.markId, r);
-      continue;
-    }
-    collapsed++;
-    const a = r._sortDate ?? "";
-    const b = existing._sortDate ?? "";
-    let replace = false;
-    if (a > b) replace = true;
-    else if (a === b && r.balanceQty > existing.balanceQty) replace = true;
-    if (replace) byMark.set(r.markId, r);
-  }
-
-  const deduped = Array.from(byMark.values());
-  const records = deduped.map(({ _sortDate, ...rest }) => {
-    void _sortDate;
-    return rest;
-  });
-
-  const missingContractor = records.filter((r) => r.contractor == null).length;
-  const missingDate = records.filter((r) => r.assignDate == null).length;
+  const distinct = new Set(rows.map((r) => r.hash));
+  const missingContractor = rows.filter((r) => r.contractor == null).length;
+  const missingDate = rows.filter((r) => r.assignDate == null).length;
 
   return {
-    records,
+    rows,
     summary: {
       rowsRead,
-      marksAfterDedupe: records.length,
+      rowsKept: rows.length,
+      distinctRows: distinct.size,
+      duplicateRowCopies: rows.length - distinct.size,
       projectsFound: projects.size,
       missingContractor,
       missingDate,
-      duplicateMarksCollapsed: collapsed,
     },
   };
 }
