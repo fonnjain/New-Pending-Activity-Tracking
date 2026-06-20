@@ -8,6 +8,7 @@ import { ChevronDown } from "lucide-react";
 import { useState, useMemo } from "react";
 
 const PROCESS_ORDER = ["C", "RFI", "NH", "B", "HAB", "W", "TS", "Q", "G", "GB", "Y"];
+const ROW_CAP = 300;
 
 export default function ActivityView() {
   const { selectedSnapshotId } = useTracker();
@@ -71,6 +72,18 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
   const p31to60 = (age31to60 / totalAged) * 100;
   const p60Plus = (age60Plus / totalAged) * 100;
 
+  const sortedRows = useMemo(() => {
+    return [...records].sort((a, b) => {
+      const j = String(a.job ?? "").localeCompare(String(b.job ?? ""));
+      if (j !== 0) return j;
+      const s = String(a.structure ?? "").localeCompare(String(b.structure ?? ""));
+      if (s !== 0) return s;
+      return (b.ageingDays ?? -1) - (a.ageingDays ?? -1);
+    });
+  }, [records]);
+
+  const visibleRows = sortedRows.slice(0, ROW_CAP);
+
   return (
     <Card className="overflow-hidden">
       <Collapsible open={open} onOpenChange={setOpen}>
@@ -107,6 +120,8 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Job</TableHead>
+                    <TableHead>Structure</TableHead>
                     <TableHead>Mark</TableHead>
                     <TableHead>Section</TableHead>
                     <TableHead className="text-right">Qty</TableHead>
@@ -118,8 +133,10 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {records.map(r => (
+                  {visibleRows.map(r => (
                     <TableRow key={r.id}>
+                      <TableCell className="font-medium whitespace-nowrap">{r.job || '-'}</TableCell>
+                      <TableCell className="whitespace-nowrap">{r.structure || '-'}</TableCell>
                       <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
                       <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || '-'}</TableCell>
                       <TableCell className="text-right">{r.balanceQty}</TableCell>
@@ -151,6 +168,11 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
                 </TableBody>
               </Table>
             </div>
+            {sortedRows.length > ROW_CAP && (
+              <div className="p-3 text-center text-xs text-muted-foreground border-t">
+                Showing first {ROW_CAP.toLocaleString()} of {sortedRows.length.toLocaleString()} marks. Use the filters or search to narrow down.
+              </div>
+            )}
           </div>
         </CollapsibleContent>
       </Collapsible>
