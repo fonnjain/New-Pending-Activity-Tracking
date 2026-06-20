@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "6jwkkWKCJuBu2J8VJLGqr"
+uri = "file://docs/ARCHITECTURE.md"
+type = "text"
+title = "Balance & Activity Tracker — Architecture"
