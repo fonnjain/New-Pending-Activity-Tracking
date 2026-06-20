@@ -45,6 +45,8 @@ Mobile-first web app: each Excel upload = one append-only "import". Imports neve
 - Default import selection lives in TrackerProvider (store.tsx): auto-selects newest, recovers if selected is deleted.
 
 ## Performance (all client-side aggregation)
+- **The records endpoint returns the FULL expanded dataset (~48k rows / multiple MB) in one array, and all 6 pages call `useGetImportRecords` with the same key.** The React Query client MUST set a non-zero `staleTime` (and `refetchOnWindowFocus:false`, low `retry`), or defaults (`staleTime:0`, refetch-on-focus, `retry:3`) refetch the whole payload on every tab switch / window focus / 500. In the lower-memory production instance this flood of heavy refetches crashes the API (healthcheck + /records intermittently 500); the frontend then gets `[]` and every page misleadingly shows "No data for the selected filters" even though prod has data.
+  **Why:** real reports are huge; the failure looked like "missing data" but was the server collapsing under redundant large fetches. Config lives in `App.tsx` QueryClient defaults.
 - Every view recomputes KPIs/buckets/groupings/sorts from the selected import's records on each render; this MUST stay wrapped in `useMemo` keyed on `[records]` (and `filters`/`search` where relevant), or typing in a search box re-runs full aggregation and the browser hangs on large real datasets.
 - Large record tables must be bounded (Ageing "Full Pending Work" caps at `ROW_CAP` 200 with a "Showing top N of M" notice). Add pagination/virtualization rather than removing the cap.
 

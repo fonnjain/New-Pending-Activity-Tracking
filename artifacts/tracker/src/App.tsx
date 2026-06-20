@@ -13,7 +13,17 @@ import AgeingView from "@/pages/ageing";
 import ContractorView from "@/pages/contractor";
 import DataView from "@/pages/data";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,
+      gcTime: 30 * 60 * 1000,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      retry: 1,
+    },
+  },
+});
 
 function Router() {
   return (
