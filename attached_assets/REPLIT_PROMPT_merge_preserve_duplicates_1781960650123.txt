@@ -1,0 +1,124 @@
+REPLIT AGENT PROMPT — IMPORT MERGE (PRESERVE IN-SHEET DUPLICATES) + CHANGE LOG
+==============================================================================
+Paste into the Agent chat of the Balance/Activity Tracker app. Data-integrity change.
+Do not change field meanings, activity values, the ageing formula, or dashboard layouts
+beyond adding the change panel.
+
+CORE PRINCIPLE (read carefully — this is specific)
+- Duplicate rows that exist WITHIN a single uploaded sheet are LEGITIMATE and must be
+  KEPT EXACTLY AS UPLOADED. Never collapse, merge, or remove duplicates that came from
+  the same file. If a sheet has 3 identical rows, the database keeps 3 identical rows.
+- De-duplication happens ONLY BETWEEN UPLOADS: when a NEW file is imported, do not
+  re-add rows that are already present from a PREVIOUS upload. Add only genuinely new
+  rows, and capture changes. Show what changed.
+
+ROW IDENTITY FOR THE BETWEEN-UPLOAD CHECK
+- A row counts as "already in the database" ONLY if an IDENTICAL row — matching on ALL
+  columns — already exists from a previous upload. (Not a natural/business key — the
+  WHOLE row must match: Project Code, Order Nature, Contractor, Job Card No., Tower
+  Type, Tower Sub Type, Alias, Mark No., Section, Length, Width, Wt/Pcs, Balance Qty.,
+  Balance Wt., Assign Date, Activity, Operation, Ref. Job Card No.)
+- Implementation: compute a full-row hash (after the standard parse/normalize:
+  forward-fill Project Code, normalize project + dates, trim whitespace) and use the
+  hash as the comparison identity. Two rows are "the same" iff their full-row hash is
+  equal.
+
+MERGE MUST BE MULTISET-AWARE (count duplicates, do not dedupe within a file)
+This is the subtle part. Because in-sheet duplicates are kept, compare by COUNT per
+identical-row-hash, not by mere presence:
+  For each distinct full-row hash H:
+     live_count = how many copies of H are already in the live store
+     new_count  = how many copies of H are in the incoming file
+     to_add(H)  = max(0, new_count - live_count)
+  Insert to_add(H) copies. (If the new file has 3 copies and live has 1, add 2 -> live
+  now has 3, matching the file. If new has 3 and live already has 3, add 0.)
+  Never remove existing copies on import; never collapse the file's own duplicates.
+
+WHAT IS "NEW" vs "CHANGED"
+- ADDED  = full-row hashes (or extra copies of a hash) present in the new file beyond
+  what the live store already has -> inserted.
+- CHANGED = same logical item with a DIFFERENT value. Detect changes at the item level
+  using a business key = (Project, Alias, mark_tail, Activity, Job Card No.). For each
+  business key, compare the new file's payload to the previous upload's payload
+  (balance_qty, balance_wt, assign_date, contractor, section, wt_pcs, operation, etc.).
+  If the same business key exists in both uploads but a payload value differs, record it
+  as an UPDATED item with field-level from->to. (The new differing row is ADDED per the
+  hash rule; the change is also LOGGED as an update for the dashboard.)
+- REMOVED/COMPLETED = a business key that existed in the previous upload but is absent
+  from the new upload. Flag status="completed/closed" (do NOT delete; keep for history).
+- UNCHANGED = full-row hash already present in equal-or-greater count -> nothing added.
+
+So: identical previous rows are never touched or re-added; only the delta (new copies,
+new items, changed items) is written, and disappearances are flagged.
+
+DO NOT TOUCH EXISTING DATA
+- Importing must NEVER modify, deduplicate, or delete rows that were already stored from
+  earlier uploads (including their in-sheet duplicates). It only APPENDS the delta and
+  writes change-log entries. Existing stored rows are immutable on import.
+
+CHANGE SET (per import) — for the dashboard
+  change_set = {
+    import_id, prev_import_id, imported_at, source_filename,
+    counts: { added_rows, updated_items, removed_items, unchanged_rows },
+    added:   [ added rows (the delta copies / new rows) ],
+    updated: [ {business_key, field, from, to} ],   // field-level diffs
+    removed: [ {business_key, last_activity, last_balance_qty} ]
+  }
+Highlight production-meaningful changes: ACTIVITY MOVED (activity changed for a business
+key), QTY/WT CHANGED, NEW MARKS (a mark_id not seen before), COMPLETED (removed).
+
+DASHBOARD — "CHANGES SINCE LAST UPLOAD" PANEL (Overview)
+- Summary chips: Added N rows · Updated N · Completed N · Unchanged N, plus
+  "Activities moved: N" and "Net pending qty change: ±X".
+- Tabbed table: [ Moved activity ] [ Qty/Wt changed ] [ New marks ] [ Completed ].
+  Columns: Mark | Structure | Activity (from->to) | Qty (from->to) | Contractor | when.
+  Colour: activity-forward green, qty-down green, qty-up amber, completed blue.
+- "Compare uploads" selector to diff any two imports, not only the latest pair.
+- Mobile-first: chips stack, table scrolls inside its card.
+
+DATABASE
+- Store rows from every upload; in-sheet duplicates preserved (do NOT put a UNIQUE
+  constraint on the full row — duplicates are allowed). Track each row's source import.
+- Store per-import change_sets; link prev->current.
+- Re-importing the EXACT same file => to_add = 0 for every hash, change_set all-zero,
+  nothing written except an import record. (Idempotent.)
+- Keep removed/completed items flagged, not deleted.
+
+DOES THE SANITY / AI LAYER CHANGE? — YES, ADJUST IT
+Keep existing checks; adapt for this merge model:
+  Engine-side (deterministic), per import:
+    - Idempotency: re-importing identical file adds 0 rows and logs 0 changes. If not -> bug.
+    - Multiset correctness: after import, for every hash, live_count == max(prev_live_count,
+      new_file_count); never less (we never deleted), never more than the file requires.
+    - In-sheet duplicates preserved: the number of identical-row copies in the store for
+      a just-imported file's hashes is >= that file's copy count.
+    - Conservation: unchanged_rows + added_rows accounts for all incoming rows; removed
+      items are flagged not dropped.
+    - Plausibility (surface, don't block): activity moved BACKWARD in the Operation route;
+      balance_qty INCREASED for a business key; a contractor mass-reassignment.
+  IMPORTANT: do NOT add a "collapse duplicates" or "dedupe the dataset" check anywhere —
+  in-sheet duplicates are valid and must remain. The only dedup is the between-upload
+  "don't re-add identical previous rows" rule above.
+
+  Sanitize-input step: still runs BEFORE the merge so cleaned values don't create false
+  "changed" diffs (a contractor spelling fix must not show as an update). But sanitize
+  must NOT remove in-sheet duplicate rows.
+  AI review (advisory, read-only): also reviews the change_set — are the moves/qty
+  changes consistent with normal flow; flag odd patterns (mass backward moves, a flood of
+  removals suggesting a partial file). Never modifies data.
+
+GUARDRAILS
+- Deterministic engine authoritative; AI checks-only. Merge + change_set are code, not model.
+- Existing stored data is immutable on import (append-only delta + change log).
+- Works fully for import/merge/changes with no AI/network. Server-side API key only.
+
+ACCEPTANCE CHECK
+- A sheet containing 3 identical rows imports as 3 rows; they are NOT collapsed.
+- Re-import the SAME sheet -> 0 rows added, change_set all-zero, the 3 duplicates remain 3
+  (not 6, not 1).
+- Import a sheet that adds one extra copy of an existing identical row -> exactly 1 row
+  added (multiset top-up), not a full re-add.
+- Import a modified sheet (one item's qty 12->8, one activity G->GB, one new mark, one
+  item gone) -> change panel shows 1 qty change, 1 activity move, 1 new mark, 1 completed;
+  previously stored rows untouched.
+- No process anywhere deletes or collapses in-sheet duplicates.
