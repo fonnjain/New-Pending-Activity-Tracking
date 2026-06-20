@@ -56,6 +56,7 @@ function ActivityContent() {
 
 function ActivityCard({ activity, records }: { activity: string, records: any[] }) {
   const [open, setOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   
   const qty = records.reduce((sum, r) => sum + r.balanceQty, 0);
   const wt = records.reduce((sum, r) => sum + r.balanceWt, 0);
@@ -82,7 +83,7 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
     });
   }, [records]);
 
-  const visibleRows = sortedRows.slice(0, ROW_CAP);
+  const visibleRows = showAll ? sortedRows : sortedRows.slice(0, ROW_CAP);
 
   return (
     <Card className="overflow-hidden">
@@ -170,7 +171,30 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
             </div>
             {sortedRows.length > ROW_CAP && (
               <div className="p-3 text-center text-xs text-muted-foreground border-t">
-                Showing first {ROW_CAP.toLocaleString()} of {sortedRows.length.toLocaleString()} marks. Use the filters or search to narrow down.
+                {showAll ? (
+                  <span>
+                    Showing all {sortedRows.length.toLocaleString()} marks.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setShowAll(false)}
+                      className="text-primary font-medium hover:underline"
+                    >
+                      Show less
+                    </button>
+                  </span>
+                ) : (
+                  <span>
+                    Showing first {ROW_CAP.toLocaleString()} of {sortedRows.length.toLocaleString()} marks.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setShowAll(true)}
+                      className="text-primary font-medium hover:underline"
+                    >
+                      Show all
+                    </button>{" "}
+                    or use the filters/search to narrow down.
+                  </span>
+                )}
               </div>
             )}
           </div>
