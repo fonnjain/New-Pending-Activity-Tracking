@@ -65,6 +65,7 @@ Five views: Overview (KPIs + "Changes since last upload" panel + ageing breakdow
 
 ## Gotchas
 
+- **Large responses must be compressed.** The `/imports/{id}/records` endpoint returns the full expanded dataset (~28 MB+ JSON for a real report). The deployment proxy silently returns `500` (empty body) to the browser for oversized upstream responses even though the app logs `statusCode 200` — this surfaces as a misleading "No data for the selected filters" in the published app while dev works fine. `app.use(compression())` (in `artifacts/api-server/src/app.ts`) gzips it ~10x to stay under the limit. Keep compression enabled.
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen` before relying on hooks/schemas.
 - After changing DB schema, run `pnpm --filter @workspace/db run push`.
 - Tailwind v4: do not `@apply` a custom utility class; use raw CSS properties for things like `font-variant-numeric: tabular-nums`.
