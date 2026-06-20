@@ -3,7 +3,13 @@ import { useGetSnapshotRecords, getGetSnapshotRecordsQueryKey } from "@workspace
 import { EmptyState, getAgeingColor } from "./overview";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { useMemo } from "react";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
+import { ChevronDown, ChevronLeft, Search } from "lucide-react";
+import { useMemo, useState } from "react";
+
+const PROCESS_ORDER = ["C", "RFI", "NH", "B", "HAB", "W", "TS", "Q", "G", "GB", "Y"];
+const ROW_CAP = 300;
 
 export default function ContractorView() {
   const { selectedSnapshotId } = useTracker();
@@ -17,6 +23,8 @@ function ContractorContent() {
     query: { enabled: !!selectedSnapshotId, queryKey: getGetSnapshotRecordsQueryKey(selectedSnapshotId as number) }
   });
   const records = useFilteredRecords(allRecords);
+
+  const [selectedContractor, setSelectedContractor] = useState<string | null>(null);
 
   const { conMap, sortedStats, unassignedCount, busiest, mostAged, maxWeight } = useMemo(() => {
     const conMap = new Map<string, any[]>();
@@ -53,6 +61,16 @@ function ContractorContent() {
     };
   }, [records]);
 
+  if (selectedContractor) {
+    return (
+      <ContractorDetail
+        name={selectedContractor}
+        records={conMap.get(selectedContractor) ?? []}
+        onBack={() => setSelectedContractor(null)}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -70,9 +88,14 @@ function ContractorContent() {
           <CardContent>
             <div className="space-y-4">
               {sortedStats.map(s => (
-                <div key={s.name} className="space-y-1.5">
+                <button
+                  key={s.name}
+                  type="button"
+                  onClick={() => setSelectedContractor(s.name)}
+                  className="w-full space-y-1.5 text-left rounded-md p-1.5 -m-1.5 hover:bg-muted/40 transition-colors"
+                >
                   <div className="flex justify-between text-sm">
-                    <span className="font-semibold text-foreground">{s.name}</span>
+                    <span className="font-semibold text-foreground hover:text-primary transition-colors">{s.name}</span>
                     <span className="text-muted-foreground font-mono">{Math.round(s.weight).toLocaleString()}</span>
                   </div>
                   <div className="h-2.5 bg-muted rounded-full overflow-hidden flex">
@@ -84,7 +107,7 @@ function ContractorContent() {
                   <div className="text-[10px] text-muted-foreground text-right">
                     {s.marks} marks • {s.qty} pcs
                   </div>
-                </div>
+                </button>
               ))}
               {sortedStats.length === 0 && <div className="text-muted-foreground text-sm">No data available.</div>}
             </div>
@@ -109,8 +132,8 @@ function ContractorContent() {
                 </TableHeader>
                 <TableBody>
                   {sortedStats.map(s => (
-                    <TableRow key={s.name}>
-                      <TableCell className="font-medium text-xs">{s.name}</TableCell>
+                    <TableRow key={s.name} className="cursor-pointer hover:bg-muted/40" onClick={() => setSelectedContractor(s.name)}>
+                      <TableCell className="font-medium text-xs text-primary">{s.name}</TableCell>
                       <TableCell className={`text-right tabular-nums ${s.c0to30 > 0 ? 'bg-ageing-green/10 font-bold ageing-green' : 'text-muted-foreground'}`}>{s.c0to30}</TableCell>
                       <TableCell className={`text-right tabular-nums ${s.c31to60 > 0 ? 'bg-ageing-amber/10 font-bold ageing-amber' : 'text-muted-foreground'}`}>{s.c31to60}</TableCell>
                       <TableCell className={`text-right tabular-nums ${s.c60Plus > 0 ? 'bg-ageing-red/10 font-bold ageing-red' : 'text-muted-foreground'}`}>{s.c60Plus}</TableCell>
@@ -142,8 +165,8 @@ function ContractorContent() {
               </TableHeader>
               <TableBody>
                 {sortedStats.map(s => (
-                  <TableRow key={s.name}>
-                    <TableCell className="font-bold">{s.name}</TableCell>
+                  <TableRow key={s.name} className="cursor-pointer hover:bg-muted/40" onClick={() => setSelectedContractor(s.name)}>
+                    <TableCell className="font-bold text-primary">{s.name}</TableCell>
                     <TableCell className="text-right">{s.marks}</TableCell>
                     <TableCell className="text-right">{s.qty}</TableCell>
                     <TableCell className="text-right">{Math.round(s.weight)}</TableCell>
@@ -158,6 +181,191 @@ function ContractorContent() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function ContractorDetail({ name, records, onBack }: { name: string, records: any[], onBack: () => void }) {
+  const [search, setSearch] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return records;
+    return records.filter(r =>
+      [r.markId, r.job, r.structure, r.section, r.activity].some(v => String(v ?? "").toLowerCase().includes(q))
+    );
+  }, [records, search]);
+
+  const { activities, sortedActivities } = useMemo(() => {
+    const activities = new Map<string, any[]>();
+    filtered.forEach(r => {
+      const act = r.activity || "Unassigned";
+      if (!activities.has(act)) activities.set(act, []);
+      activities.get(act)!.push(r);
+    });
+    const sortedActivities = Array.from(activities.keys()).sort((a, b) => {
+      const idxA = PROCESS_ORDER.indexOf(a);
+      const idxB = PROCESS_ORDER.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+    return { activities, sortedActivities };
+  }, [filtered]);
+
+  const totalQty = useMemo(() => filtered.reduce((sum, r) => sum + r.balanceQty, 0), [filtered]);
+  const totalWt = useMemo(() => filtered.reduce((sum, r) => sum + r.balanceWt, 0), [filtered]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors shrink-0 mt-1"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          Back
+        </button>
+        <div className="min-w-0">
+          <h2 className="text-xl font-bold tracking-tight truncate">{name}</h2>
+          <p className="text-xs text-muted-foreground">
+            {filtered.length.toLocaleString()} marks • {totalQty.toLocaleString()} pcs • {Math.round(totalWt).toLocaleString()} kg • {sortedActivities.length} activities
+          </p>
+        </div>
+      </div>
+
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search job, structure, mark, section..."
+          className="pl-9"
+        />
+      </div>
+
+      {sortedActivities.map(act => (
+        <ContractorActivityCard key={act} activity={act} records={activities.get(act)!} />
+      ))}
+      {sortedActivities.length === 0 && (
+        <div className="text-center p-8 text-muted-foreground">No marks found for this contractor.</div>
+      )}
+    </div>
+  );
+}
+
+function ContractorActivityCard({ activity, records }: { activity: string, records: any[] }) {
+  const [open, setOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+
+  const qty = records.reduce((sum, r) => sum + r.balanceQty, 0);
+  const wt = records.reduce((sum, r) => sum + r.balanceWt, 0);
+
+  const withAge = records.filter(r => r.ageingDays !== null);
+  const avgAge = withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays, 0) / withAge.length) : null;
+
+  const sortedRows = useMemo(() => {
+    return [...records].sort((a, b) => {
+      const j = String(a.job ?? "").localeCompare(String(b.job ?? ""));
+      if (j !== 0) return j;
+      const s = String(a.structure ?? "").localeCompare(String(b.structure ?? ""));
+      if (s !== 0) return s;
+      return (b.ageingDays ?? -1) - (a.ageingDays ?? -1);
+    });
+  }, [records]);
+
+  const visibleRows = showAll ? sortedRows : sortedRows.slice(0, ROW_CAP);
+
+  return (
+    <Card className="overflow-hidden">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger className="w-full">
+          <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
+            <div className="flex items-center gap-4 text-left">
+              <div className="bg-secondary text-secondary-foreground font-bold w-12 h-12 flex items-center justify-center rounded-md text-lg shrink-0">
+                {activity}
+              </div>
+              <div className="min-w-[120px]">
+                <div className="font-semibold text-lg">{records.length} marks</div>
+                <div className="text-xs text-muted-foreground">{qty.toLocaleString()} pcs • {Math.round(wt).toLocaleString()} kg</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 text-right">
+              <div className="hidden sm:block">
+                <div className="text-xs uppercase text-muted-foreground font-semibold">Avg Age</div>
+                <div className={`font-bold text-lg ${getAgeingColor(avgAge)}`}>{avgAge !== null ? `${avgAge}d` : '-'}</div>
+              </div>
+              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+            </div>
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="border-t bg-card">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Job</TableHead>
+                    <TableHead>Structure</TableHead>
+                    <TableHead>Mark</TableHead>
+                    <TableHead>Section</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="text-right">Wt (kg)</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead className="text-right">Ageing</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {visibleRows.map(r => (
+                    <TableRow key={r.id}>
+                      <TableCell className="font-medium whitespace-nowrap">{r.job || '-'}</TableCell>
+                      <TableCell className="whitespace-nowrap">{r.structure || '-'}</TableCell>
+                      <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
+                      <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || '-'}</TableCell>
+                      <TableCell className="text-right">{r.balanceQty}</TableCell>
+                      <TableCell className="text-right">{Math.round(r.balanceWt)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || '-'}</TableCell>
+                      <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
+                        {r.ageingDays !== null ? `${r.ageingDays}d` : '-'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            {sortedRows.length > ROW_CAP && (
+              <div className="p-3 text-center text-xs text-muted-foreground border-t">
+                {showAll ? (
+                  <span>
+                    Showing all {sortedRows.length.toLocaleString()} marks.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setShowAll(false)}
+                      className="text-primary font-medium hover:underline"
+                    >
+                      Show less
+                    </button>
+                  </span>
+                ) : (
+                  <span>
+                    Showing first {ROW_CAP.toLocaleString()} of {sortedRows.length.toLocaleString()} marks.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setShowAll(true)}
+                      className="text-primary font-medium hover:underline"
+                    >
+                      Show all
+                    </button>{" "}
+                    or use the search to narrow down.
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </Card>
   );
 }
 
