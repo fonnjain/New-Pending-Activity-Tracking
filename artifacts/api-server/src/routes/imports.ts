@@ -90,6 +90,7 @@ function serializeRecord(r: RecordPoolRow, importId: number, id: number) {
   return {
     id,
     importId,
+    hash: r.hash,
     markId: r.markId,
     job: r.job,
     structure: r.structure,

@@ -205,6 +205,7 @@ export const GetImportRecordsParams = zod.object({
 export const GetImportRecordsResponseItem = zod.object({
   "id": zod.number(),
   "importId": zod.number(),
+  "hash": zod.string().describe('Full-row SHA-256 content hash; identical full rows share a hash.'),
   "markId": zod.string(),
   "job": zod.string(),
   "structure": zod.string(),
@@ -310,6 +311,71 @@ export const GetImportChangesResponse = zod.object({
   "wtTo": zod.number().nullable()
 })),
   "flags": zod.array(zod.string())
+})
+
+
+/**
+ * Optional, advisory-only. Reports whether an Anthropic API key is configured server-side so the UI can enable or disable AI assists up front. Returns available:false when ANTHROPIC_API_KEY is unset; the deterministic engine is unaffected either way. The key itself is never returned.
+
+ * @summary Whether the AI layer is configured (advisory)
+ */
+export const AiStatusResponse = zod.object({
+  "available": zod.boolean().describe('True when an Anthropic API key is configured server-side. The key is never returned.')
+})
+
+
+/**
+ * Optional, advisory-only. Asks the model to SUGGEST cleanups for descriptive fields only (malformed dates -> YYYY-MM-DD, inconsistent contractor/section spellings canonicalized to the most common form, trimmed whitespace, obvious typos). It never touches balanceQty, balanceWt, activity, operation, markId, or any hashed identity input, and it never applies changes - only returns a diff list. If ANTHROPIC_API_KEY is unset the endpoint responds with available:false and an empty suggestion list; the deterministic engine is unaffected.
+
+ * @summary Suggest descriptive-field cleanups for an import (advisory)
+ */
+export const AiSanitizeBody = zod.object({
+  "importId": zod.number().describe('The import whose descriptive fields should be reviewed for cleanups.')
+})
+
+export const AiSanitizeResponse = zod.object({
+  "available": zod.boolean().describe('False when ANTHROPIC_API_KEY is unset; suggestions will be empty.'),
+  "suggestions": zod.array(zod.object({
+  "poolHash": zod.string().describe('Full-row hash of the record the suggestion applies to.'),
+  "field": zod.string().describe('Descriptive field to clean (e.g. contractor, section, assignDate).'),
+  "from": zod.string().nullable().describe('Current value.'),
+  "to": zod.string().nullable().describe('Suggested canonical value.'),
+  "reason": zod.string().describe('Short human-readable rationale.')
+})),
+  "counts": zod.object({
+  "dates": zod.number(),
+  "names": zod.number(),
+  "other": zod.number()
+})
+})
+
+
+/**
+ * Optional, advisory-only and read-only. Sends the parsed-records summary and the deterministic change set (versus the previous import, or versus compareTo when given) and asks the model to AUDIT consistency (ageing math, unknown activity codes, activity not in its operation route, null contractor/date, backward route moves, qty increases, mass contractor reassignment, a flood of completed marks). Returns a verdict, summary, stats, and findings. When the standard verdict is not "pass" or deep is requested, a deeper model pass adds a prioritized plan. The AI never writes to record_pool, import_rows, or any computed field. If ANTHROPIC_API_KEY is unset the endpoint responds with available:false; the deterministic engine is unaffected.
+
+ * @summary AI consistency review of an import's results (advisory, read-only)
+ */
+export const AiReviewBody = zod.object({
+  "importId": zod.number().describe('The import to review.'),
+  "compareTo": zod.number().nullish().describe('Optional base import id to compare against instead of the previous import.'),
+  "deep": zod.boolean().nullish().describe('Request a deeper model pass that adds a prioritized remediation plan.')
+})
+
+export const AiReviewResponse = zod.object({
+  "available": zod.boolean().describe('False when ANTHROPIC_API_KEY is unset.'),
+  "verdict": zod.union([zod.literal('pass'),zod.literal('warn'),zod.literal('fail'),zod.literal(null)]).nullable(),
+  "summary": zod.string().nullable(),
+  "stats": zod.record(zod.string(), zod.unknown()).nullable().describe('Free-form key\/value stats produced by the review.'),
+  "findings": zod.array(zod.object({
+  "severity": zod.enum(['info', 'warn', 'error']),
+  "check": zod.string().describe('Name of the consistency check.'),
+  "markId": zod.string().nullable(),
+  "message": zod.string(),
+  "expected": zod.string().nullable(),
+  "actual": zod.string().nullable()
+})),
+  "plan": zod.array(zod.string()).nullable().describe('Prioritized remediation steps, present only after a deep review.'),
+  "deep": zod.boolean().describe('True when the result came from the deeper model pass.')
 })
 
 

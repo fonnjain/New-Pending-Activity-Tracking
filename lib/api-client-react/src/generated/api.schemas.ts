@@ -111,6 +111,8 @@ export interface UploadResult {
 export interface Record {
   id: number;
   importId: number;
+  /** Full-row SHA-256 content hash; identical full rows share a hash. */
+  hash: string;
   markId: string;
   job: string;
   structure: string;
@@ -151,6 +153,125 @@ export interface Record {
   routeSteps: string[];
   /** @nullable */
   currentStepIndex: number | null;
+}
+
+export interface SanitizeRequest {
+  /** The import whose descriptive fields should be reviewed for cleanups. */
+  importId: number;
+}
+
+export interface SanitizeSuggestion {
+  /** Full-row hash of the record the suggestion applies to. */
+  poolHash: string;
+  /** Descriptive field to clean (e.g. contractor, section, assignDate). */
+  field: string;
+  /**
+     * Current value.
+     * @nullable
+     */
+  from: string | null;
+  /**
+     * Suggested canonical value.
+     * @nullable
+     */
+  to: string | null;
+  /** Short human-readable rationale. */
+  reason: string;
+}
+
+export interface SanitizeCounts {
+  dates: number;
+  names: number;
+  other: number;
+}
+
+export interface SanitizeResult {
+  /** False when ANTHROPIC_API_KEY is unset; suggestions will be empty. */
+  available: boolean;
+  suggestions: SanitizeSuggestion[];
+  counts: SanitizeCounts;
+}
+
+export interface AiStatus {
+  /** True when an Anthropic API key is configured server-side. The key is never returned. */
+  available: boolean;
+}
+
+export interface ReviewRequest {
+  /** The import to review. */
+  importId: number;
+  /**
+     * Optional base import id to compare against instead of the previous import.
+     * @nullable
+     */
+  compareTo?: number | null;
+  /**
+     * Request a deeper model pass that adds a prioritized remediation plan.
+     * @nullable
+     */
+  deep?: boolean | null;
+}
+
+export type ReviewFindingSeverity = typeof ReviewFindingSeverity[keyof typeof ReviewFindingSeverity];
+
+
+export const ReviewFindingSeverity = {
+  info: 'info',
+  warn: 'warn',
+  error: 'error',
+} as const;
+
+export interface ReviewFinding {
+  severity: ReviewFindingSeverity;
+  /** Name of the consistency check. */
+  check: string;
+  /** @nullable */
+  markId: string | null;
+  message: string;
+  /** @nullable */
+  expected: string | null;
+  /** @nullable */
+  actual: string | null;
+}
+
+/**
+ * @nullable
+ */
+export type ReviewResultVerdict = typeof ReviewResultVerdict[keyof typeof ReviewResultVerdict] | null;
+
+
+export const ReviewResultVerdict = {
+  pass: 'pass',
+  warn: 'warn',
+  fail: 'fail',
+} as const;
+
+/**
+ * Free-form key/value stats produced by the review.
+ * @nullable
+ */
+export type ReviewResultStats = { [key: string]: unknown } | null;
+
+export interface ReviewResult {
+  /** False when ANTHROPIC_API_KEY is unset. */
+  available: boolean;
+  /** @nullable */
+  verdict: ReviewResultVerdict;
+  /** @nullable */
+  summary: string | null;
+  /**
+     * Free-form key/value stats produced by the review.
+     * @nullable
+     */
+  stats: ReviewResultStats;
+  findings: ReviewFinding[];
+  /**
+     * Prioritized remediation steps, present only after a deep review.
+     * @nullable
+     */
+  plan: string[] | null;
+  /** True when the result came from the deeper model pass. */
+  deep: boolean;
 }
 
 export type CompareImportsParams = {

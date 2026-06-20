@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Upload, FileDown, CheckCircle2, Trash2, DownloadCloud } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToCsv, exportToJson } from "@/lib/export";
+import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { useQueryClient } from "@tanstack/react-query";
 
 export default function DataView() {
@@ -105,6 +106,8 @@ export default function DataView() {
           </div>
         </CardContent>
       </Card>
+
+      {selectedImportId && <AiSanitizePanel importId={selectedImportId} />}
 
       {selectedImport && (
         <Card className="border-border">

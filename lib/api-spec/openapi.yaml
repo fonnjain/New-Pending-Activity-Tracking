@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: imports
     description: Import, merge, and change-log operations
+  - name: ai
+    description: Optional, advisory-only AI assists (sanitize suggestions and consistency review)
 paths:
   /healthz:
     get:
@@ -208,6 +210,86 @@ paths:
                 $ref: "#/components/schemas/ChangeSet"
         "404":
           description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /ai/status:
+    get:
+      operationId: aiStatus
+      tags: [ai]
+      summary: Whether the AI layer is configured (advisory)
+      description: >
+        Optional, advisory-only. Reports whether an Anthropic API key is configured server-side so the
+        UI can enable or disable AI assists up front. Returns available:false when ANTHROPIC_API_KEY is
+        unset; the deterministic engine is unaffected either way. The key itself is never returned.
+      responses:
+        "200":
+          description: AI availability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiStatus"
+  /ai/sanitize:
+    post:
+      operationId: aiSanitize
+      tags: [ai]
+      summary: Suggest descriptive-field cleanups for an import (advisory)
+      description: >
+        Optional, advisory-only. Asks the model to SUGGEST cleanups for descriptive fields only
+        (malformed dates -> YYYY-MM-DD, inconsistent contractor/section spellings canonicalized to
+        the most common form, trimmed whitespace, obvious typos). It never touches balanceQty,
+        balanceWt, activity, operation, markId, or any hashed identity input, and it never applies
+        changes - only returns a diff list. If ANTHROPIC_API_KEY is unset the endpoint responds with
+        available:false and an empty suggestion list; the deterministic engine is unaffected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SanitizeRequest"
+      responses:
+        "200":
+          description: Sanitize suggestions (or available:false when AI is disabled)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SanitizeResult"
+        "404":
+          description: Import not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /ai/review:
+    post:
+      operationId: aiReview
+      tags: [ai]
+      summary: AI consistency review of an import's results (advisory, read-only)
+      description: >
+        Optional, advisory-only and read-only. Sends the parsed-records summary and the deterministic
+        change set (versus the previous import, or versus compareTo when given) and asks the model to
+        AUDIT consistency (ageing math, unknown activity codes, activity not in its operation route,
+        null contractor/date, backward route moves, qty increases, mass contractor reassignment, a
+        flood of completed marks). Returns a verdict, summary, stats, and findings. When the standard
+        verdict is not "pass" or deep is requested, a deeper model pass adds a prioritized plan. The
+        AI never writes to record_pool, import_rows, or any computed field. If ANTHROPIC_API_KEY is
+        unset the endpoint responds with available:false; the deterministic engine is unaffected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewRequest"
+      responses:
+        "200":
+          description: Review result (or available:false when AI is disabled)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewResult"
+        "404":
+          description: Import not found
           content:
             application/json:
               schema:
@@ -454,6 +536,9 @@ components:
           type: integer
         importId:
           type: integer
+        hash:
+          type: string
+          description: Full-row SHA-256 content hash; identical full rows share a hash.
         markId:
           type: string
         job:
@@ -507,6 +592,7 @@ components:
       required:
         - id
         - importId
+        - hash
         - markId
         - job
         - structure
@@ -531,3 +617,145 @@ components:
         - ageingDays
         - routeSteps
         - currentStepIndex
+    SanitizeRequest:
+      type: object
+      properties:
+        importId:
+          type: integer
+          description: The import whose descriptive fields should be reviewed for cleanups.
+      required:
+        - importId
+    SanitizeSuggestion:
+      type: object
+      properties:
+        poolHash:
+          type: string
+          description: Full-row hash of the record the suggestion applies to.
+        field:
+          type: string
+          description: Descriptive field to clean (e.g. contractor, section, assignDate).
+        from:
+          type: ["string", "null"]
+          description: Current value.
+        to:
+          type: ["string", "null"]
+          description: Suggested canonical value.
+        reason:
+          type: string
+          description: Short human-readable rationale.
+      required:
+        - poolHash
+        - field
+        - from
+        - to
+        - reason
+    SanitizeCounts:
+      type: object
+      properties:
+        dates:
+          type: integer
+        names:
+          type: integer
+        other:
+          type: integer
+      required:
+        - dates
+        - names
+        - other
+    SanitizeResult:
+      type: object
+      properties:
+        available:
+          type: boolean
+          description: False when ANTHROPIC_API_KEY is unset; suggestions will be empty.
+        suggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SanitizeSuggestion"
+        counts:
+          $ref: "#/components/schemas/SanitizeCounts"
+      required:
+        - available
+        - suggestions
+        - counts
+    AiStatus:
+      type: object
+      properties:
+        available:
+          type: boolean
+          description: True when an Anthropic API key is configured server-side. The key is never returned.
+      required:
+        - available
+    ReviewRequest:
+      type: object
+      properties:
+        importId:
+          type: integer
+          description: The import to review.
+        compareTo:
+          type: ["integer", "null"]
+          description: Optional base import id to compare against instead of the previous import.
+        deep:
+          type: ["boolean", "null"]
+          description: Request a deeper model pass that adds a prioritized remediation plan.
+      required:
+        - importId
+    ReviewFinding:
+      type: object
+      properties:
+        severity:
+          type: string
+          enum: [info, warn, error]
+        check:
+          type: string
+          description: Name of the consistency check.
+        markId:
+          type: ["string", "null"]
+        message:
+          type: string
+        expected:
+          type: ["string", "null"]
+        actual:
+          type: ["string", "null"]
+      required:
+        - severity
+        - check
+        - markId
+        - message
+        - expected
+        - actual
+    ReviewResult:
+      type: object
+      properties:
+        available:
+          type: boolean
+          description: False when ANTHROPIC_API_KEY is unset.
+        verdict:
+          type: ["string", "null"]
+          enum: [pass, warn, fail, null]
+        summary:
+          type: ["string", "null"]
+        stats:
+          type: ["object", "null"]
+          additionalProperties: true
+          description: Free-form key/value stats produced by the review.
+        findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewFinding"
+        plan:
+          type: ["array", "null"]
+          items:
+            type: string
+          description: Prioritized remediation steps, present only after a deep review.
+        deep:
+          type: boolean
+          description: True when the result came from the deeper model pass.
+      required:
+        - available
+        - verdict
+        - summary
+        - stats
+        - findings
+        - plan
+        - deep

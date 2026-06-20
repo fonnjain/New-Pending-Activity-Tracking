@@ -20,7 +20,7 @@ Mobile-first web app: each Excel upload = one append-only "import". Imports neve
   **Why:** ageing must stay current without re-uploading.
 - **Per-import `summary` (ParseSummary) and `changeSummary` (ChangeSummary) stored as jsonb.**
   **Why:** rowsRead/duplicate counts and change tallies cannot be reconstructed from the deduped pool; needed for the imports list + self-checks.
-- **Deterministic self-checks only (conservation: added+unchanged===rowsKept; idempotency; non-negative). AI advisory out of scope.**
+- **Deterministic self-checks (conservation: added+unchanged===rowsKept; idempotency; non-negative).** An OPTIONAL advisory AI layer sits beside this — see "Advisory AI layer" below — but the deterministic engine is always authoritative.
 
 ## Concurrency (POST /imports)
 - The upload transaction takes `pg_advisory_xact_lock(728041)` first, so concurrent uploads serialize — each import's "previous import" baseline and pool inserts see a stable committed state.
@@ -47,6 +47,17 @@ Mobile-first web app: each Excel upload = one append-only "import". Imports neve
 ## Performance (all client-side aggregation)
 - Every view recomputes KPIs/buckets/groupings/sorts from the selected import's records on each render; this MUST stay wrapped in `useMemo` keyed on `[records]` (and `filters`/`search` where relevant), or typing in a search box re-runs full aggregation and the browser hangs on large real datasets.
 - Large record tables must be bounded (Ageing "Full Pending Work" caps at `ROW_CAP` 200 with a "Showing top N of M" notice). Add pagination/virtualization rather than removing the cap.
+
+## Advisory AI layer (optional, never authoritative)
+- The AI layer is advisory text ONLY. It must never write `record_pool`/`import_rows`/computed fields and the whole app must work fully with NO key.
+  **Why:** the deterministic engine is the single source of truth; AI is a sanity-checker/cleanup-suggester, not a data source.
+  **How to apply:** every AI route returns `available:false` (not an error) when `ANTHROPIC_API_KEY` is unset, and checks availability BEFORE any DB work so the no-key path is verifiable without data. The key is read server-side only, only placed in the outbound Anthropic header, never logged or returned.
+- **UI gates on a dedicated `GET /ai/status` probe**, not on a post-click response. Buttons disable + show "Set ANTHROPIC_API_KEY to enable AI assists" up front.
+  **Why:** a code review caught that gating only after a click fails the "disabled with note" requirement.
+- **Sanitize = descriptive-field cleanups only** via a hard server-side allow-list (contractor/section/assignDate/towerType/towerSubType/orderNature/refJobCardNo). Suggestions targeting any other field or an unknown hash are dropped server-side. NEVER include identity inputs (job/structure/markTail/markNo/alias/jobCardNo) or engine fields (qty/wt/activity/operation).
+- **Accept-all sanitize round-trips through a cleaned .xlsx**, it never mutates the pool. The export must reproduce parse.ts's exact layout (Sheet1, two blank rows, header on row 3, the 18 columns in COL order) so re-upload recomputes everything; suggestions are matched to rows by full-row `hash` (exposed on the Record schema for this).
+  **Why:** keeps the engine authoritative — the user re-uploads and the normal merge/diff runs; no special write path.
+- Model ids live in ONE place (`lib/ai.ts`): standard = sonnet, deep = opus. Review runs a deep pass when verdict!=pass or deep requested, adding a `plan[]`.
 
 ## Codegen / schema gotchas
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. Do not change `info.title` (controls generated filenames).

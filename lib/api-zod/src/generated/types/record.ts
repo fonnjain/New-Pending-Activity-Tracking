@@ -9,6 +9,8 @@
 export interface Record {
   id: number;
   importId: number;
+  /** Full-row SHA-256 content hash; identical full rows share a hash. */
+  hash: string;
   markId: string;
   job: string;
   structure: string;

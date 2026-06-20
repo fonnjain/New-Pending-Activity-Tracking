@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AiStatus,
   ChangeSet,
   CompareImportsParams,
   ErrorResponse,
@@ -27,6 +28,10 @@ import type {
   Import,
   ImportUpload,
   Record,
+  ReviewRequest,
+  ReviewResult,
+  SanitizeRequest,
+  SanitizeResult,
   UploadResult
 } from './api.schemas';
 
@@ -672,4 +677,229 @@ export function useGetImportChanges<TData = Awaited<ReturnType<typeof getImportC
 
 
 
+
+export const getAiStatusUrl = () => {
+
+
+
+
+  return `/api/ai/status`
+}
+
+/**
+ * Optional, advisory-only. Reports whether an Anthropic API key is configured server-side so the UI can enable or disable AI assists up front. Returns available:false when ANTHROPIC_API_KEY is unset; the deterministic engine is unaffected either way. The key itself is never returned.
+
+ * @summary Whether the AI layer is configured (advisory)
+ */
+export const aiStatus = async ( options?: RequestInit): Promise<AiStatus> => {
+
+  return customFetch<AiStatus>(getAiStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAiStatusQueryKey = () => {
+    return [
+    `/api/ai/status`
+    ] as const;
+    }
+
+
+export const getAiStatusQueryOptions = <TData = Awaited<ReturnType<typeof aiStatus>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof aiStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAiStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof aiStatus>>> = ({ signal }) => aiStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof aiStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type AiStatusQueryResult = NonNullable<Awaited<ReturnType<typeof aiStatus>>>
+export type AiStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Whether the AI layer is configured (advisory)
+ */
+
+export function useAiStatus<TData = Awaited<ReturnType<typeof aiStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof aiStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getAiStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getAiSanitizeUrl = () => {
+
+
+
+
+  return `/api/ai/sanitize`
+}
+
+/**
+ * Optional, advisory-only. Asks the model to SUGGEST cleanups for descriptive fields only (malformed dates -> YYYY-MM-DD, inconsistent contractor/section spellings canonicalized to the most common form, trimmed whitespace, obvious typos). It never touches balanceQty, balanceWt, activity, operation, markId, or any hashed identity input, and it never applies changes - only returns a diff list. If ANTHROPIC_API_KEY is unset the endpoint responds with available:false and an empty suggestion list; the deterministic engine is unaffected.
+
+ * @summary Suggest descriptive-field cleanups for an import (advisory)
+ */
+export const aiSanitize = async (sanitizeRequest: SanitizeRequest, options?: RequestInit): Promise<SanitizeResult> => {
+
+  return customFetch<SanitizeResult>(getAiSanitizeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      sanitizeRequest,)
+  }
+);}
+
+
+
+
+export const getAiSanitizeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSanitize>>, TError,{data: BodyType<SanitizeRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiSanitize>>, TError,{data: BodyType<SanitizeRequest>}, TContext> => {
+
+const mutationKey = ['aiSanitize'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiSanitize>>, {data: BodyType<SanitizeRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiSanitize(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiSanitizeMutationResult = NonNullable<Awaited<ReturnType<typeof aiSanitize>>>
+    export type AiSanitizeMutationBody = BodyType<SanitizeRequest>
+    export type AiSanitizeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Suggest descriptive-field cleanups for an import (advisory)
+ */
+export const useAiSanitize = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSanitize>>, TError,{data: BodyType<SanitizeRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiSanitize>>,
+        TError,
+        {data: BodyType<SanitizeRequest>},
+        TContext
+      > => {
+      return useMutation(getAiSanitizeMutationOptions(options));
+    }
+
+export const getAiReviewUrl = () => {
+
+
+
+
+  return `/api/ai/review`
+}
+
+/**
+ * Optional, advisory-only and read-only. Sends the parsed-records summary and the deterministic change set (versus the previous import, or versus compareTo when given) and asks the model to AUDIT consistency (ageing math, unknown activity codes, activity not in its operation route, null contractor/date, backward route moves, qty increases, mass contractor reassignment, a flood of completed marks). Returns a verdict, summary, stats, and findings. When the standard verdict is not "pass" or deep is requested, a deeper model pass adds a prioritized plan. The AI never writes to record_pool, import_rows, or any computed field. If ANTHROPIC_API_KEY is unset the endpoint responds with available:false; the deterministic engine is unaffected.
+
+ * @summary AI consistency review of an import's results (advisory, read-only)
+ */
+export const aiReview = async (reviewRequest: ReviewRequest, options?: RequestInit): Promise<ReviewResult> => {
+
+  return customFetch<ReviewResult>(getAiReviewUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      reviewRequest,)
+  }
+);}
+
+
+
+
+export const getAiReviewMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiReview>>, TError,{data: BodyType<ReviewRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiReview>>, TError,{data: BodyType<ReviewRequest>}, TContext> => {
+
+const mutationKey = ['aiReview'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiReview>>, {data: BodyType<ReviewRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiReview(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiReviewMutationResult = NonNullable<Awaited<ReturnType<typeof aiReview>>>
+    export type AiReviewMutationBody = BodyType<ReviewRequest>
+    export type AiReviewMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary AI consistency review of an import's results (advisory, read-only)
+ */
+export const useAiReview = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiReview>>, TError,{data: BodyType<ReviewRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiReview>>,
+        TError,
+        {data: BodyType<ReviewRequest>},
+        TContext
+      > => {
+      return useMutation(getAiReviewMutationOptions(options));
+    }
 
