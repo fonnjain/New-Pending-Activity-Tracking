@@ -1,0 +1,83 @@
+REPLIT AGENT PROMPT — FIX / LOCK THE COLUMN MAPPING (Balance & Activity Tracker)
+================================================================================
+Paste into the Agent chat of the Balance/Activity Tracker app. This corrects how columns
+are read so every figure uses the right source. Do not change the UI layout, the
+deterministic-engine principle, the database/snapshot rules, or the ageing formula —
+only the column mapping and the derived Job/Structure/Mark definitions.
+
+THE FILE
+Data is on sheet "Sheet1"; the real header is on the THIRD row (read with header=2 /
+skip the two rows above it). Use these EXACT columns by NAME (letters shown for
+reference only — always match by header name, not position):
+
+  A  Project Code      -> JOB (project). SPARSE: forward-fill down. Normalize:
+                          strip whitespace and a trailing "." or ".0"  (e.g. "794." ->
+                          "794", "920.0" -> "920").
+  B  Order Nature      -> keep (optional display)
+  C  Contractor        -> contractor
+  D  Job Card No.      -> job_card (for de-dup history only)
+  E  Tower Type        -> keep (optional display)
+  F  Tower Sub Type    -> keep (optional display)
+  G  Alias             -> STRUCTURE.  *** STRUCTURE = Alias (column G). ***
+                          Do NOT derive structure from Mark No., Tower Type, or anything
+                          else. "Structures" count = number of DISTINCT Alias values
+                          within the current filter/project.
+  H  Mark No.          -> raw mark string, e.g. "916F F24-1W" = "<Project> <Alias>-<tail>"
+  I  Section           -> section
+  J  Length            -> length
+  K  Width             -> width
+  L  Wt/Pcs            -> wt_pcs
+  M  Balance Qty.      -> balance_qty (already computed; use as-is, integer)
+  N  Balance Wt.       -> balance_wt  (already computed; use as-is)
+  O  Assign Date       -> assign_date (normalize to YYYY-MM-DD)
+  P  Activity          -> activity (current pending step; use as-is, do NOT recompute)
+  Q  Operation         -> operation route, comma-separated (e.g. "C,P,S,RFI,NH,Q,TS,G,GB,Y")
+  R  Ref. Job Card No. -> keep (optional)
+
+DERIVED KEYS (compute from the above)
+  job        = normalized Project Code (col A, forward-filled)
+  structure  = Alias (col G)                          <-- THE FIX
+  mark_tail  = Mark No. with the leading "<job> <structure>-" prefix removed.
+               IMPORTANT: mark_tail may itself contain hyphens (e.g. "Pln. Wshr",
+               "1-3AX"); remove ONLY the "<job> <structure>-" prefix, never split on the
+               first hyphen.
+  mark_id    = job + "\" + structure + "\" + mark_tail   (canonical unique key per mark)
+
+DE-DUP (unchanged in spirit, restated for clarity)
+  A mark can appear on several rows (multiple job cards / activities). For the main
+  views keep ONE row per mark_id: the row with the latest Assign Date; if tied, the
+  largest Balance Qty. No duplicate marks in any view or snapshot.
+
+AGGREGATIONS — make sure each uses the RIGHT field:
+  - "Structures" (per project or per filter) = COUNT DISTINCT structure (Alias, col G).
+  - "Marks" = COUNT DISTINCT mark_id (after de-dup).
+  - "Qty"   = SUM of balance_qty (col M) over the de-duped marks in scope.
+  - "Wt (t)"= SUM of balance_wt (col N) over the de-duped marks, shown in tonnes
+              (divide kg by 1000; if Balance Wt. is already in kg, /1000 for the "t"
+              column; label the unit clearly).
+  - "Avg Ageing" = mean of ageing_days over the de-duped marks in scope.
+  - "0-30 / 31-60 / 60+" = counts of de-duped marks in each ageing bucket.
+  ageing_days = today - assign_date (whole days), recomputed live.
+
+DATA NOTE (not a bug)
+  Some marks are hardware (washers, round bar, plates) with very large Balance Qty
+  (hundreds of thousands). These are REAL counts — do not cap, scale, or treat as
+  errors. Qty totals can be large for projects containing such items. (Weight stays
+  sensible because Wt/Pcs is tiny for these.) If helpful, the Data view may flag rows
+  with unusually large balance_qty for the user's awareness, but must NOT alter them.
+
+CASCADING FILTERS (confirm they use the corrected fields)
+  Job (col A) -> Structure (col G / Alias) -> Mark (mark_id). Each narrows the next.
+  The "Job-wise / By Project" table groups by job and shows: Structures (distinct Alias),
+  Marks, Qty, Wt (t), Avg Ageing, and the three ageing buckets — all per the definitions
+  above.
+
+ACCEPTANCE CHECK
+  - Structure count = distinct Alias (col G). For project 916F this is 1 (Alias "F24");
+    for project 933 it is 7. Marks for 933 = 1089.
+  - Qty and Wt sum the de-duped marks' Balance Qty (M) and Balance Wt (N); large
+    hardware quantities are preserved, not flagged as errors.
+  - mark_tail keeps internal hyphens (e.g. "916F F24-Pln. Wshr" -> structure "F24",
+    mark_tail "Pln. Wshr").
+  - Avg Ageing and buckets computed from (today - Assign Date) over de-duped marks.
+  - No duplicate marks anywhere; cascading Job -> Structure(Alias) -> Mark works.
