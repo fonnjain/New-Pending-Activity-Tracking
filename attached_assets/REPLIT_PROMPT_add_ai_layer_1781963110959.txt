@@ -1,0 +1,83 @@
+REPLIT AGENT PROMPT — ADD AI ADVISORY LAYER (sanitize + review), CONTRACT-FIRST
+===============================================================================
+Add an OPTIONAL, advisory-only AI layer to the existing Balance & Activity Tracker
+monorepo. Follow the project's own conventions (contract-first OpenAPI, Drizzle, pino,
+generated React Query hooks). The deterministic engine stays authoritative — AI never
+sets a result value.
+
+NON-NEGOTIABLES
+- Engine remains the single source of truth. AI output is advisory text only; it never
+  writes to record_pool, import_rows, or any computed field.
+- App must work fully with NO key / no network: AI endpoints return 503 "AI disabled"
+  and the UI hides/disables the buttons. Core import/merge/changes/dashboards unaffected.
+- API key read SERVER-SIDE only from env ANTHROPIC_API_KEY (Replit Secret). Never sent to
+  the browser, never logged (pino redaction). All Anthropic calls happen in api-server.
+
+CONTRACT-FIRST (do this first)
+- Add to lib/api-spec/openapi.yaml two operations, then run
+  `pnpm --filter @workspace/api-spec run codegen` so hooks + Zod regenerate:
+    POST /ai/sanitize   body { importId }            -> SanitizeResult
+    POST /ai/review     body { importId, compareTo? } -> ReviewResult
+  Schemas:
+    SanitizeResult { available: bool, suggestions: [ {poolHash, field, from, to, reason} ],
+                     counts: {dates, names, other} }
+    ReviewResult   { available: bool, verdict: "pass"|"warn"|"fail", summary, stats,
+                     findings: [ {severity, check, markId?, message, expected?, actual?} ],
+                     plan?: [string] }
+- Do NOT change info.title.
+
+SERVER (api-server)
+- New lib/ai.ts: thin Anthropic Messages client (https://api.anthropic.com/v1/messages,
+  headers x-api-key, anthropic-version: 2023-06-01). Model constant in ONE place:
+  AI_MODEL_STANDARD = "claude-sonnet-4-5", AI_MODEL_DEEP = "claude-opus-4-8".
+  If ANTHROPIC_API_KEY unset -> return { available:false } (handlers respond 503-style
+  with available:false; never throw).
+- routes/ai.ts:
+  * POST /ai/sanitize: load the import's records, ask Claude to SUGGEST cleanups ONLY for
+    descriptive fields — fix malformed/odd dates (normalize to YYYY-MM-DD), standardize
+    inconsistent contractor/section spellings to one canonical form (most-common wins),
+    trim whitespace, obvious typos. It MUST NOT touch balanceQty, balanceWt, activity,
+    operation, markId, or the hash inputs that change identity. Return suggestions as a
+    diff list; DO NOT apply them.
+  * POST /ai/review: send { parsed records summary, changeSet (from diff.ts, or
+    compareImports if compareTo given) } and ask Claude to AUDIT consistency:
+    - ageing math (today - assignDate), de-dup/multiset sanity already passed by the
+      engine (confirm, don't recompute results), unknown activity codes, activity not in
+      its Operation route, null contractor/date, backward route moves, qty increases,
+      mass contractor reassignment, a flood of "completed" suggesting a partial file.
+    Output the ReviewResult JSON (verdict/summary/stats/findings). JSON only; strip any
+    ``` fences; validate shape with Zod before returning.
+  * Opus deep review: only when standard verdict != "pass" OR caller requests deep, call
+    again with AI_MODEL_DEEP and add a prioritized "plan" array (root-cause + fix order).
+    Opus is analysis only; no data writes.
+- Both endpoints are READ-ONLY: no DB writes except, optionally, caching the last
+  ReviewResult on the imports row as jsonb `ai_review` (advisory cache only) — never on
+  record_pool.
+
+FRONTEND (tracker, Data view + Overview)
+- "Sanitize input": button on the Data view for the selected import. Calls useAiSanitize;
+  shows suggestions in a review table (field | from -> to | reason) with ONE "Accept all"
+  button and "Discard". Accept does NOT mutate the pool; instead it applies the accepted
+  text cleanups as a NEW import (re-run the deterministic parse+merge on cleaned values)
+  so history/dedup stay intact — i.e. sanitize feeds a fresh upload, engine recomputes.
+  (If a new import is heavy, at minimum keep accepted suggestions as a downloadable
+  cleaned file the user re-uploads. Either way the engine, not the model, produces stored
+  data.)
+- "AI review of results": button on Overview near the Changes panel. Calls useAiReview;
+  renders a read-only panel: colored verdict badge (pass/warn/fail), summary, stats, and
+  a filterable findings table (severity | check | mark | message | expected->actual).
+  If verdict != "pass", reveal "Run deep review with Claude Opus 4.8" -> calls review
+  with deep flag and shows the returned "plan" under a Remediation heading.
+- If SanitizeResult/ReviewResult.available === false, show a small note
+  "Set ANTHROPIC_API_KEY to enable AI assists" and disable the buttons.
+- No emojis (per project convention). Use existing components/styling.
+
+GUARDRAILS / ACCEPTANCE
+- With no ANTHROPIC_API_KEY: import, merge, change log, all six dashboards work; AI
+  buttons disabled with the note; /ai/* return available:false.
+- AI never writes to record_pool/import_rows; sanitize only ever affects stored data via
+  a fresh deterministic import the user accepts; review is read-only.
+- Sanitize runs BEFORE any merge it influences, so a contractor spelling fix never shows
+  as a real "Updated" change in the diff.
+- Key never appears in client bundles, network responses to the browser, or logs.
+- openapi.yaml is the source of truth; hooks/Zod are regenerated, not hand-written.
