@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
-import { BarChart3, Activity, Clock, Users, Database, Filter, X } from "lucide-react";
+import { BarChart3, Briefcase, Activity, Clock, Users, Database, Filter, X } from "lucide-react";
 import { useTracker } from "@/lib/store";
 import { useListSnapshots, useGetSnapshotRecords, getGetSnapshotRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 
 const navItems = [
   { href: "/", icon: BarChart3, label: "Overview" },
+  { href: "/jobs", icon: Briefcase, label: "Job-wise" },
   { href: "/activity", icon: Activity, label: "Activity" },
   { href: "/ageing", icon: Clock, label: "Ageing" },
   { href: "/contractor", icon: Users, label: "Contractor" },
@@ -19,7 +20,7 @@ const navItems = [
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { selectedSnapshotId } = useTracker();
-  const showFilters = location !== "/data" && selectedSnapshotId != null;
+  const showFilters = location !== "/data" && location !== "/jobs" && selectedSnapshotId != null;
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground pb-16 md:pb-0 md:pt-14">

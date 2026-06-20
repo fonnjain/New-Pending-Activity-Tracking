@@ -7,6 +7,7 @@ import { Layout } from "@/components/layout";
 import NotFound from "@/pages/not-found";
 
 import Overview from "@/pages/overview";
+import JobDashboard from "@/pages/job-dashboard";
 import ActivityView from "@/pages/activity";
 import AgeingView from "@/pages/ageing";
 import ContractorView from "@/pages/contractor";
@@ -19,6 +20,7 @@ function Router() {
     <Layout>
       <Switch>
         <Route path="/" component={Overview} />
+        <Route path="/jobs" component={JobDashboard} />
         <Route path="/activity" component={ActivityView} />
         <Route path="/ageing" component={AgeingView} />
         <Route path="/contractor" component={ContractorView} />
