@@ -5,15 +5,15 @@ import { useTracker } from "@/lib/store";
 import { useListSnapshots, useGetSnapshotRecords, getGetSnapshotRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 const navItems = [
   { href: "/", icon: BarChart3, label: "Overview" },
   { href: "/jobs", icon: Briefcase, label: "Job-wise" },
+  { href: "/contractor", icon: Users, label: "Contractor" },
   { href: "/activity", icon: Activity, label: "Activity" },
   { href: "/ageing", icon: Clock, label: "Ageing" },
-  { href: "/contractor", icon: Users, label: "Contractor" },
   { href: "/data", icon: Database, label: "Data" },
 ];
 
@@ -147,53 +147,55 @@ function FilterBar() {
           <div className="p-3 md:px-6 pt-0 border-t bg-muted/30 grid grid-cols-2 md:grid-cols-5 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">Job</label>
-              <Select value={filters.job || "all"} onValueChange={(v) => setFilter("job", v === "all" ? null : v)}>
-                <SelectTrigger className="h-8 text-sm bg-background"><SelectValue placeholder="All Jobs" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Jobs</SelectItem>
-                  {jobs.map(j => <SelectItem key={j} value={j}>{j}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={filters.job}
+                onChange={(v) => setFilter("job", v)}
+                options={jobs}
+                allLabel="All Jobs"
+                searchPlaceholder="Search jobs..."
+              />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">Structure</label>
-              <Select value={filters.structure || "all"} onValueChange={(v) => setFilter("structure", v === "all" ? null : v)} disabled={structures.length === 0}>
-                <SelectTrigger className="h-8 text-sm bg-background"><SelectValue placeholder="All Structures" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Structures</SelectItem>
-                  {structures.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={filters.structure}
+                onChange={(v) => setFilter("structure", v)}
+                options={structures}
+                allLabel="All Structures"
+                searchPlaceholder="Search structures..."
+                disabled={structures.length === 0}
+              />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">Mark</label>
-              <Select value={filters.mark || "all"} onValueChange={(v) => setFilter("mark", v === "all" ? null : v)} disabled={marks.length === 0}>
-                <SelectTrigger className="h-8 text-sm bg-background"><SelectValue placeholder="All Marks" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Marks</SelectItem>
-                  {marks.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={filters.mark}
+                onChange={(v) => setFilter("mark", v)}
+                options={marks}
+                allLabel="All Marks"
+                searchPlaceholder="Search marks..."
+                disabled={marks.length === 0}
+              />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">Contractor</label>
-              <Select value={filters.contractor || "all"} onValueChange={(v) => setFilter("contractor", v === "all" ? null : v)}>
-                <SelectTrigger className="h-8 text-sm bg-background"><SelectValue placeholder="All Contractors" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Contractors</SelectItem>
-                  {contractors.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={filters.contractor}
+                onChange={(v) => setFilter("contractor", v)}
+                options={contractors}
+                allLabel="All Contractors"
+                searchPlaceholder="Search contractors..."
+              />
             </div>
             <div className="space-y-1 col-span-2 md:col-span-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">Activity</label>
-              <Select value={filters.activity || "all"} onValueChange={(v) => setFilter("activity", v === "all" ? null : v)}>
-                <SelectTrigger className="h-8 text-sm bg-background"><SelectValue placeholder="All Activities" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Activities</SelectItem>
-                  {activities.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={filters.activity}
+                onChange={(v) => setFilter("activity", v)}
+                options={activities}
+                allLabel="All Activities"
+                searchPlaceholder="Search activities..."
+              />
             </div>
           </div>
         </CollapsibleContent>
