@@ -15,6 +15,10 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { Input } from "@/components/ui/input";
+import { ChevronLeft, Search } from "lucide-react";
+
+const ROW_CAP = 300;
 
 export default function JobDashboard() {
   const { selectedSnapshotId } = useTracker();
@@ -34,6 +38,7 @@ function JobDashboardContent() {
   const [project, setProject] = useState<string | null>(null);
   const [structure, setStructure] = useState<string | null>(null);
   const [mark, setMark] = useState<string | null>(null);
+  const [selectedJob, setSelectedJob] = useState<string | null>(null);
 
   // Cascading dropdown options
   const projectOptions = useMemo(
@@ -157,6 +162,16 @@ function JobDashboardContent() {
       };
     }, [filtered]);
 
+  if (selectedJob) {
+    return (
+      <JobDetail
+        job={selectedJob}
+        records={records.filter((r) => (r.job || "Unknown") === selectedJob)}
+        onBack={() => setSelectedJob(null)}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -241,8 +256,12 @@ function JobDashboardContent() {
               </TableHeader>
               <TableBody>
                 {byProject.map((p) => (
-                  <TableRow key={p.job}>
-                    <TableCell className="font-bold">{p.job}</TableCell>
+                  <TableRow
+                    key={p.job}
+                    className="cursor-pointer hover:bg-muted/40"
+                    onClick={() => setSelectedJob(p.job)}
+                  >
+                    <TableCell className="font-bold text-primary">{p.job}</TableCell>
                     <TableCell className="text-right">{p.structures}</TableCell>
                     <TableCell className="text-right">{p.marks}</TableCell>
                     <TableCell className="text-right">{p.qty}</TableCell>
@@ -314,6 +333,154 @@ function JobDashboardContent() {
               </TableBody>
             </Table>
           </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function JobDetail({
+  job,
+  records,
+  onBack,
+}: {
+  job: string;
+  records: any[];
+  onBack: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [showAll, setShowAll] = useState(false);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return records;
+    return records.filter((r) =>
+      [r.structure, r.markId, r.activity, r.section].some((v) =>
+        String(v ?? "").toLowerCase().includes(q),
+      ),
+    );
+  }, [records, search]);
+
+  const sortedRows = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      const s = String(a.structure ?? "").localeCompare(String(b.structure ?? ""));
+      if (s !== 0) return s;
+      const m = String(a.markId ?? "").localeCompare(String(b.markId ?? ""));
+      if (m !== 0) return m;
+      return (b.ageingDays ?? -1) - (a.ageingDays ?? -1);
+    });
+  }, [filtered]);
+
+  const structureCount = useMemo(
+    () => new Set(filtered.map((r) => r.structure).filter(Boolean)).size,
+    [filtered],
+  );
+  const totalQty = useMemo(() => filtered.reduce((s, r) => s + r.balanceQty, 0), [filtered]);
+  const totalWt = useMemo(() => filtered.reduce((s, r) => s + r.balanceWt, 0), [filtered]);
+
+  const visibleRows = showAll ? sortedRows : sortedRows.slice(0, ROW_CAP);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors shrink-0 mt-1"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          Back
+        </button>
+        <div className="min-w-0">
+          <h2 className="text-xl font-bold tracking-tight truncate">Project {job}</h2>
+          <p className="text-xs text-muted-foreground">
+            {structureCount} structures • {filtered.length.toLocaleString()} marks •{" "}
+            {totalQty.toLocaleString()} pcs • {Math.round(totalWt).toLocaleString()} kg
+          </p>
+        </div>
+      </div>
+
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search structure, mark, activity, section..."
+          className="pl-9"
+        />
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Structure</TableHead>
+                  <TableHead>Mark</TableHead>
+                  <TableHead>Activity</TableHead>
+                  <TableHead>Section</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Wt (kg)</TableHead>
+                  <TableHead>Contractor</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead className="text-right">Ageing</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {visibleRows.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-medium whitespace-nowrap">{r.structure || "-"}</TableCell>
+                    <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
+                    <TableCell className="whitespace-nowrap">{r.activity || "-"}</TableCell>
+                    <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || "-"}</TableCell>
+                    <TableCell className="text-right">{r.balanceQty}</TableCell>
+                    <TableCell className="text-right">{Math.round(r.balanceWt)}</TableCell>
+                    <TableCell className="text-xs whitespace-nowrap">{r.contractor || "-"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || "-"}</TableCell>
+                    <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
+                      {r.ageingDays !== null ? `${r.ageingDays}d` : "-"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {sortedRows.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">
+                      No marks found for this project.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          {sortedRows.length > ROW_CAP && (
+            <div className="p-3 text-center text-xs text-muted-foreground border-t">
+              {showAll ? (
+                <span>
+                  Showing all {sortedRows.length.toLocaleString()} marks.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setShowAll(false)}
+                    className="text-primary font-medium hover:underline"
+                  >
+                    Show less
+                  </button>
+                </span>
+              ) : (
+                <span>
+                  Showing first {ROW_CAP.toLocaleString()} of {sortedRows.length.toLocaleString()} marks.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setShowAll(true)}
+                    className="text-primary font-medium hover:underline"
+                  >
+                    Show all
+                  </button>{" "}
+                  or use the search to narrow down.
+                </span>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
