@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/table";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Input } from "@/components/ui/input";
+import { formatTons } from "@/lib/utils";
 import { ChevronLeft, Search } from "lucide-react";
 
 const ROW_CAP = 300;
@@ -228,7 +229,7 @@ function JobDashboardContent() {
         <KpiTile title="Projects" value={totalProjects} />
         <KpiTile title="Pending Marks" value={totalMarks} />
         <KpiTile title="Balance Qty" value={totalQty.toLocaleString()} />
-        <KpiTile title="Balance Wt (kg)" value={Math.round(totalWt).toLocaleString()} />
+        <KpiTile title="Balance Wt (t)" value={formatTons(totalWt)} />
         <KpiTile title="Avg Ageing (d)" value={avgAgeing} />
       </div>
 
@@ -247,7 +248,7 @@ function JobDashboardContent() {
                   <TableHead className="text-right">Structures</TableHead>
                   <TableHead className="text-right">Marks</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Wt (kg)</TableHead>
+                  <TableHead className="text-right">Wt (t)</TableHead>
                   <TableHead className="text-right">Avg Ageing</TableHead>
                   <TableHead className="text-right">0-30</TableHead>
                   <TableHead className="text-right">31-60</TableHead>
@@ -265,7 +266,7 @@ function JobDashboardContent() {
                     <TableCell className="text-right">{p.structures}</TableCell>
                     <TableCell className="text-right">{p.marks}</TableCell>
                     <TableCell className="text-right">{p.qty}</TableCell>
-                    <TableCell className="text-right">{Math.round(p.weight)}</TableCell>
+                    <TableCell className="text-right">{formatTons(p.weight)}</TableCell>
                     <TableCell
                       className={`text-right font-bold tabular-nums ${getAgeingColor(p.avgAge)}`}
                     >
@@ -304,7 +305,7 @@ function JobDashboardContent() {
                   <TableHead>Structure</TableHead>
                   <TableHead className="text-right">Marks</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Wt (kg)</TableHead>
+                  <TableHead className="text-right">Wt (t)</TableHead>
                   <TableHead className="text-right">Avg Ageing</TableHead>
                 </TableRow>
               </TableHeader>
@@ -315,7 +316,7 @@ function JobDashboardContent() {
                     <TableCell className="max-w-[200px] truncate">{s.structure}</TableCell>
                     <TableCell className="text-right">{s.marks}</TableCell>
                     <TableCell className="text-right">{s.qty}</TableCell>
-                    <TableCell className="text-right">{Math.round(s.weight)}</TableCell>
+                    <TableCell className="text-right">{formatTons(s.weight)}</TableCell>
                     <TableCell
                       className={`text-right font-bold tabular-nums ${getAgeingColor(s.avgAge)}`}
                     >
@@ -395,7 +396,7 @@ function JobDetail({
           <h2 className="text-xl font-bold tracking-tight truncate">Project {job}</h2>
           <p className="text-xs text-muted-foreground">
             {structureCount} structures • {filtered.length.toLocaleString()} marks •{" "}
-            {totalQty.toLocaleString()} pcs • {Math.round(totalWt).toLocaleString()} kg
+            {totalQty.toLocaleString()} pcs • {formatTons(totalWt)} t
           </p>
         </div>
       </div>
@@ -421,7 +422,7 @@ function JobDetail({
                   <TableHead>Activity</TableHead>
                   <TableHead>Section</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Wt (kg)</TableHead>
+                  <TableHead className="text-right">Wt (t)</TableHead>
                   <TableHead>Contractor</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead className="text-right">Ageing</TableHead>
@@ -435,7 +436,7 @@ function JobDetail({
                     <TableCell className="whitespace-nowrap">{r.activity || "-"}</TableCell>
                     <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || "-"}</TableCell>
                     <TableCell className="text-right">{r.balanceQty}</TableCell>
-                    <TableCell className="text-right">{Math.round(r.balanceWt)}</TableCell>
+                    <TableCell className="text-right">{formatTons(r.balanceWt)}</TableCell>
                     <TableCell className="text-xs whitespace-nowrap">{r.contractor || "-"}</TableCell>
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || "-"}</TableCell>
                     <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>

@@ -3,6 +3,7 @@ import { useGetSnapshotRecords, getGetSnapshotRecordsQueryKey } from "@workspace
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { formatTons } from "@/lib/utils";
 import { useMemo } from "react";
 
 export default function Overview() {
@@ -74,7 +75,7 @@ function OverviewContent() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiTile title="Pending Marks" value={totalMarks} />
         <KpiTile title="Balance Qty" value={totalQty.toLocaleString()} />
-        <KpiTile title="Balance Wt (kg)" value={Math.round(totalWt).toLocaleString()} />
+        <KpiTile title="Balance Wt (t)" value={formatTons(totalWt)} />
         <KpiTile title="Avg Ageing (d)" value={avgAgeing} />
         <KpiTile title="Contractors" value={contractorsCount} />
         <KpiTile title="Structures" value={structuresCount} />
@@ -131,7 +132,7 @@ function OverviewContent() {
                 <div key={c} className="flex justify-between items-center text-sm p-2 bg-muted/30 hover:bg-muted/50 transition-colors rounded-md border border-transparent hover:border-border">
                   <div className="font-medium text-foreground">{c}</div>
                   <div className="text-right">
-                    <div className="font-bold tabular-nums">{Math.round(stats.weight).toLocaleString()} kg</div>
+                    <div className="font-bold tabular-nums">{formatTons(stats.weight)} t</div>
                     <div className="text-xs text-muted-foreground">{stats.count} marks</div>
                   </div>
                 </div>

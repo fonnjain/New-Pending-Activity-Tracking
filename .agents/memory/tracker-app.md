@@ -21,6 +21,11 @@ Mobile-first web app: upload one Excel report -> one "snapshot" with de-duped "r
 - Dedupe one row per mark_id: latest Assign Date wins, tie -> largest Balance Qty.
 - Ageing colors everywhere: green <=30, amber 31-60, red >60, neutral when no date.
 
+## Units
+- **All UI weight is shown in metric TONS, not kg.** Storage/records stay in kg (`balanceWt`); convert at render time only, via `formatTons(kg)` in `lib/utils.ts` (kg/1000, 1 decimal, locale separators). Labels read "(t)" / "Wt (t)".
+  **Why:** real reports are large; tons read cleaner. Conversion is display-only so sorting/bar-width math still use raw kg (unit-invariant for rank/percent).
+  **How to apply:** any new weight display must route through `formatTons`; never store or aggregate in tons. CSV/JSON export intentionally keeps raw kg (it is source data, not a display).
+
 ## Frontend gotchas
 - Tailwind v4: never `@apply` a custom utility class (e.g. tabular-nums) — use the raw CSS property.
 - React Query hooks require an explicit `queryKey` in `query` options (e.g. getGetSnapshotRecordsQueryKey(id)).

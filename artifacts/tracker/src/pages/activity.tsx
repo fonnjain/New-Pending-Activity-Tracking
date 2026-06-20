@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { ChevronDown } from "lucide-react";
+import { formatTons } from "@/lib/utils";
 import { useState, useMemo } from "react";
 
 const PROCESS_ORDER = ["C", "RFI", "NH", "B", "HAB", "W", "TS", "Q", "G", "GB", "Y"];
@@ -96,7 +97,7 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
               </div>
               <div className="min-w-[120px]">
                 <div className="font-semibold text-lg">{records.length} marks</div>
-                <div className="text-xs text-muted-foreground">{qty.toLocaleString()} pcs • {Math.round(wt).toLocaleString()} kg</div>
+                <div className="text-xs text-muted-foreground">{qty.toLocaleString()} pcs • {formatTons(wt)} t</div>
               </div>
               <div className="hidden md:flex flex-col ml-6 w-32 justify-center">
                 <div className="flex h-1.5 rounded-full overflow-hidden w-full bg-muted">
@@ -126,7 +127,7 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
                     <TableHead>Mark</TableHead>
                     <TableHead>Section</TableHead>
                     <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Wt (kg)</TableHead>
+                    <TableHead className="text-right">Wt (t)</TableHead>
                     <TableHead>Contractor</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead className="text-right">Ageing</TableHead>
@@ -141,7 +142,7 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
                       <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
                       <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || '-'}</TableCell>
                       <TableCell className="text-right">{r.balanceQty}</TableCell>
-                      <TableCell className="text-right">{Math.round(r.balanceWt)}</TableCell>
+                      <TableCell className="text-right">{formatTons(r.balanceWt)}</TableCell>
                       <TableCell className="text-xs whitespace-nowrap">{r.contractor || '-'}</TableCell>
                       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || '-'}</TableCell>
                       <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>

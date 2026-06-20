@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
+import { formatTons } from "@/lib/utils";
 import { ChevronDown, ChevronLeft, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -83,7 +84,7 @@ function ContractorContent() {
       <div className="grid md:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Workload (kg)</CardTitle>
+            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Workload (t)</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
@@ -96,7 +97,7 @@ function ContractorContent() {
                 >
                   <div className="flex justify-between text-sm">
                     <span className="font-semibold text-foreground hover:text-primary transition-colors">{s.name}</span>
-                    <span className="text-muted-foreground font-mono">{Math.round(s.weight).toLocaleString()}</span>
+                    <span className="text-muted-foreground font-mono">{formatTons(s.weight)}</span>
                   </div>
                   <div className="h-2.5 bg-muted rounded-full overflow-hidden flex">
                     <div 
@@ -159,7 +160,7 @@ function ContractorContent() {
                   <TableHead>Contractor</TableHead>
                   <TableHead className="text-right">Marks</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Wt (kg)</TableHead>
+                  <TableHead className="text-right">Wt (t)</TableHead>
                   <TableHead className="text-right">Avg Ageing</TableHead>
                 </TableRow>
               </TableHeader>
@@ -169,7 +170,7 @@ function ContractorContent() {
                     <TableCell className="font-bold text-primary">{s.name}</TableCell>
                     <TableCell className="text-right">{s.marks}</TableCell>
                     <TableCell className="text-right">{s.qty}</TableCell>
-                    <TableCell className="text-right">{Math.round(s.weight)}</TableCell>
+                    <TableCell className="text-right">{formatTons(s.weight)}</TableCell>
                     <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(s.avgAge)}`}>
                       {s.avgAge !== null ? `${s.avgAge}d` : '-'}
                     </TableCell>
@@ -230,7 +231,7 @@ function ContractorDetail({ name, records, onBack }: { name: string, records: an
         <div className="min-w-0">
           <h2 className="text-xl font-bold tracking-tight truncate">{name}</h2>
           <p className="text-xs text-muted-foreground">
-            {filtered.length.toLocaleString()} marks • {totalQty.toLocaleString()} pcs • {Math.round(totalWt).toLocaleString()} kg • {sortedActivities.length} activities
+            {filtered.length.toLocaleString()} marks • {totalQty.toLocaleString()} pcs • {formatTons(totalWt)} t • {sortedActivities.length} activities
           </p>
         </div>
       </div>
@@ -288,7 +289,7 @@ function ContractorActivityCard({ activity, records }: { activity: string, recor
               </div>
               <div className="min-w-[120px]">
                 <div className="font-semibold text-lg">{records.length} marks</div>
-                <div className="text-xs text-muted-foreground">{qty.toLocaleString()} pcs • {Math.round(wt).toLocaleString()} kg</div>
+                <div className="text-xs text-muted-foreground">{qty.toLocaleString()} pcs • {formatTons(wt)} t</div>
               </div>
             </div>
             <div className="flex items-center gap-4 text-right">
@@ -311,7 +312,7 @@ function ContractorActivityCard({ activity, records }: { activity: string, recor
                     <TableHead>Mark</TableHead>
                     <TableHead>Section</TableHead>
                     <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Wt (kg)</TableHead>
+                    <TableHead className="text-right">Wt (t)</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead className="text-right">Ageing</TableHead>
                   </TableRow>
@@ -324,7 +325,7 @@ function ContractorActivityCard({ activity, records }: { activity: string, recor
                       <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
                       <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || '-'}</TableCell>
                       <TableCell className="text-right">{r.balanceQty}</TableCell>
-                      <TableCell className="text-right">{Math.round(r.balanceWt)}</TableCell>
+                      <TableCell className="text-right">{formatTons(r.balanceWt)}</TableCell>
                       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || '-'}</TableCell>
                       <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
                         {r.ageingDays !== null ? `${r.ageingDays}d` : '-'}
