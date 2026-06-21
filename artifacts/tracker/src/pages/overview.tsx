@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { formatTons } from "@/lib/utils";
 import { useMemo } from "react";
 import { ChangesPanel } from "@/components/changes-panel";
-import { AiReviewPanel } from "@/components/ai-review-panel";
 
 export default function Overview() {
   const { selectedImportId } = useTracker();
@@ -75,7 +74,6 @@ function OverviewContent() {
   return (
     <div className="space-y-6">
       {selectedImportId && <ChangesPanel importId={selectedImportId} />}
-      {selectedImportId && <AiReviewPanel importId={selectedImportId} />}
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiTile title="Pending Marks" value={totalMarks} />

@@ -11,6 +11,7 @@ import JobDashboard from "@/pages/job-dashboard";
 import ActivityView from "@/pages/activity";
 import AgeingView from "@/pages/ageing";
 import ContractorView from "@/pages/contractor";
+import AiReviewView from "@/pages/ai-review";
 import DataView from "@/pages/data";
 
 const queryClient = new QueryClient({
@@ -34,6 +35,7 @@ function Router() {
         <Route path="/activity" component={ActivityView} />
         <Route path="/ageing" component={AgeingView} />
         <Route path="/contractor" component={ContractorView} />
+        <Route path="/ai-review" component={AiReviewView} />
         <Route path="/data" component={DataView} />
         <Route component={NotFound} />
       </Switch>
