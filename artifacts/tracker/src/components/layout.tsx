@@ -122,11 +122,20 @@ function FilterBar() {
       <Collapsible open={isOpen} onOpenChange={setIsOpen} className="w-full">
         <div className="flex items-center justify-between p-3 md:px-6">
           <div className="flex items-center gap-2 flex-1 mr-4 flex-wrap">
+            <div className="w-[150px]">
+              <SearchableSelect
+                value={filters.job}
+                onChange={(v) => setFilter("job", v)}
+                options={jobs}
+                allLabel="All Jobs"
+                searchPlaceholder="Search jobs..."
+              />
+            </div>
             <Input 
-              placeholder="Search marks, sections..." 
+              placeholder="Search mark name, section..." 
               value={filters.search}
               onChange={(e) => setFilter("search", e.target.value)}
-              className="flex-1 min-w-[140px] max-w-[300px] h-9"
+              className="flex-1 min-w-[140px] max-w-[280px] h-9"
             />
             <DateRangeSelect className="h-9 w-[170px]" />
           </div>
@@ -151,17 +160,7 @@ function FilterBar() {
         </div>
         
         <CollapsibleContent>
-          <div className="p-3 md:px-6 pt-0 border-t bg-muted/30 grid grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">Job</label>
-              <SearchableSelect
-                value={filters.job}
-                onChange={(v) => setFilter("job", v)}
-                options={jobs}
-                allLabel="All Jobs"
-                searchPlaceholder="Search jobs..."
-              />
-            </div>
+          <div className="p-3 md:px-6 pt-0 border-t bg-muted/30 grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">Structure</label>
               <SearchableSelect
