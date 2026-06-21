@@ -6,7 +6,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@
 import { useState, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { formatTons } from "@/lib/utils";
-import { Search } from "lucide-react";
+import { Search, ChevronLeft } from "lucide-react";
 
 const ROW_CAP = 200;
 
@@ -24,8 +24,10 @@ function AgeingContent() {
   const records = useFilteredRecords(allRecords);
   const [search, setSearch] = useState("");
 
+  const [drill, setDrill] = useState<{ type: "contractor" | "activity"; value: string } | null>(null);
+
   const {
-    totalMarks, totalQty, totalWt, avgAgeing, age0to30, age31to60, age60Plus, actStats,
+    totalMarks, totalQty, totalWt, avgAgeing, age0to30, age31to60, age60Plus, actStats, ctrStats,
   } = useMemo(() => {
     const withAge = records.filter(r => r.ageingDays !== null);
     const totalMarks = records.length;
@@ -59,7 +61,28 @@ function AgeingContent() {
       };
     }).sort((a, b) => (b.avgAge || 0) - (a.avgAge || 0));
 
-    return { totalMarks, totalQty, totalWt, avgAgeing, age0to30, age31to60, age60Plus, actStats };
+    // Group by contractor
+    const contractors = new Map<string, any[]>();
+    records.forEach(r => {
+      const c = r.contractor || "No Contractor";
+      if (!contractors.has(c)) contractors.set(c, []);
+      contractors.get(c)!.push(r);
+    });
+    const ctrStats = Array.from(contractors.entries()).map(([contractor, recs]) => {
+      const wAge = recs.filter(r => r.ageingDays !== null);
+      return {
+        contractor,
+        marks: recs.length,
+        qty: recs.reduce((s, r) => s + r.balanceQty, 0),
+        weight: recs.reduce((s, r) => s + r.balanceWt, 0),
+        avgAge: wAge.length ? Math.round(wAge.reduce((s, r) => s + r.ageingDays!, 0) / wAge.length) : null,
+        c0to30: wAge.filter(r => r.ageingDays !== null && r.ageingDays <= 30).length,
+        c31to60: wAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length,
+        c60Plus: wAge.filter(r => r.ageingDays !== null && r.ageingDays > 60).length,
+      };
+    }).sort((a, b) => (b.avgAge || 0) - (a.avgAge || 0));
+
+    return { totalMarks, totalQty, totalWt, avgAgeing, age0to30, age31to60, age60Plus, actStats, ctrStats };
   }, [records]);
 
   const sortedFull = useMemo(
@@ -77,6 +100,22 @@ function AgeingContent() {
 
   const visibleFull = filteredFull.slice(0, ROW_CAP);
 
+  if (drill) {
+    const detailRecords = records.filter(r =>
+      drill.type === "contractor"
+        ? (r.contractor || "No Contractor") === drill.value
+        : (r.activity || "Unassigned") === drill.value
+    );
+    return (
+      <AgeingDetail
+        title={drill.value}
+        subtitle={drill.type === "contractor" ? "Contractor" : "Activity"}
+        records={detailRecords}
+        onBack={() => setDrill(null)}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -91,6 +130,53 @@ function AgeingContent() {
         <BucketCard title="31-60 Days" records={age31to60} colorClass="bg-ageing-amber" textColorClass="ageing-amber" />
         <BucketCard title="60+ Days" records={age60Plus} colorClass="bg-ageing-red" textColorClass="ageing-red" />
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Contractor-wise Ageing</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto max-h-[500px]">
+            <Table>
+              <TableHeader className="sticky top-0 bg-card z-10 shadow-sm">
+                <TableRow>
+                  <TableHead>Contractor</TableHead>
+                  <TableHead className="text-right">Marks</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Wt (t)</TableHead>
+                  <TableHead className="text-right">Avg Ageing</TableHead>
+                  <TableHead className="text-right">0-30</TableHead>
+                  <TableHead className="text-right">31-60</TableHead>
+                  <TableHead className="text-right">60+</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {ctrStats.map(stat => (
+                  <TableRow
+                    key={stat.contractor}
+                    className="cursor-pointer hover:bg-muted/40"
+                    onClick={() => setDrill({ type: "contractor", value: stat.contractor })}
+                  >
+                    <TableCell className="font-bold">{stat.contractor}</TableCell>
+                    <TableCell className="text-right">{stat.marks}</TableCell>
+                    <TableCell className="text-right">{stat.qty}</TableCell>
+                    <TableCell className="text-right">{formatTons(stat.weight)}</TableCell>
+                    <TableCell className={`text-right font-bold ${getAgeingColor(stat.avgAge)}`}>{stat.avgAge !== null ? `${stat.avgAge}d` : '-'}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">{stat.c0to30}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">{stat.c31to60}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">{stat.c60Plus}</TableCell>
+                  </TableRow>
+                ))}
+                {ctrStats.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-4 text-muted-foreground">No contractors to display.</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -113,7 +199,11 @@ function AgeingContent() {
               </TableHeader>
               <TableBody>
                 {actStats.map(stat => (
-                  <TableRow key={stat.activity}>
+                  <TableRow
+                    key={stat.activity}
+                    className="cursor-pointer hover:bg-muted/40"
+                    onClick={() => setDrill({ type: "activity", value: stat.activity })}
+                  >
                     <TableCell className="font-bold">{stat.activity}</TableCell>
                     <TableCell className="text-right">{stat.marks}</TableCell>
                     <TableCell className="text-right">{stat.qty}</TableCell>
@@ -189,6 +279,121 @@ function AgeingContent() {
               </TableBody>
             </Table>
           </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function AgeingDetail({ title, subtitle, records, onBack }: { title: string, subtitle: string, records: any[], onBack: () => void }) {
+  const [search, setSearch] = useState("");
+  const [showAll, setShowAll] = useState(false);
+
+  const sorted = useMemo(
+    () => [...records].sort((a, b) => (b.ageingDays || 0) - (a.ageingDays || 0)),
+    [records]
+  );
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter(r =>
+      [r.markId, r.structure, r.section, r.activity, r.contractor].some(v =>
+        String(v ?? "").toLowerCase().includes(q)
+      )
+    );
+  }, [sorted, search]);
+
+  const totalQty = useMemo(() => filtered.reduce((s, r) => s + r.balanceQty, 0), [filtered]);
+  const totalWt = useMemo(() => filtered.reduce((s, r) => s + r.balanceWt, 0), [filtered]);
+  const visible = showAll ? filtered : filtered.slice(0, ROW_CAP);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors shrink-0 mt-1"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          Back
+        </button>
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground uppercase tracking-wider">{subtitle}</p>
+          <h2 className="text-xl font-bold tracking-tight truncate">{title}</h2>
+          <p className="text-xs text-muted-foreground">
+            {filtered.length.toLocaleString()} marks • {totalQty.toLocaleString()} pcs • {formatTons(totalWt)} t
+          </p>
+        </div>
+      </div>
+
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search mark, structure, section, activity..."
+          className="pl-9"
+        />
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto max-h-[600px]">
+            <Table>
+              <TableHeader className="sticky top-0 bg-card z-10 shadow-sm">
+                <TableRow>
+                  <TableHead>Mark</TableHead>
+                  <TableHead>Structure</TableHead>
+                  <TableHead>Section</TableHead>
+                  <TableHead>Activity</TableHead>
+                  <TableHead>Contractor</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Wt</TableHead>
+                  <TableHead className="text-right">Date</TableHead>
+                  <TableHead className="text-right">Ageing</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {visible.map(r => (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
+                    <TableCell className="whitespace-nowrap">{r.structure || '-'}</TableCell>
+                    <TableCell className="text-xs truncate max-w-[150px]">{r.section}</TableCell>
+                    <TableCell className="text-xs font-semibold">{r.activity}</TableCell>
+                    <TableCell className="text-xs">{r.contractor}</TableCell>
+                    <TableCell className="text-right">{r.balanceQty}</TableCell>
+                    <TableCell className="text-right">{formatTons(r.balanceWt)}</TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">{r.assignDate}</TableCell>
+                    <TableCell className={`text-right font-bold ${getAgeingColor(r.ageingDays)}`}>
+                      {r.ageingDays !== null ? `${r.ageingDays}d` : '-'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {filtered.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">No marks found.</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          {filtered.length > ROW_CAP && (
+            <div className="p-3 text-center text-xs text-muted-foreground border-t">
+              {showAll ? (
+                <span>
+                  Showing all {filtered.length.toLocaleString()} marks.{" "}
+                  <button type="button" onClick={() => setShowAll(false)} className="text-primary font-medium hover:underline">Show less</button>
+                </span>
+              ) : (
+                <span>
+                  Showing first {ROW_CAP.toLocaleString()} of {filtered.length.toLocaleString()} marks.{" "}
+                  <button type="button" onClick={() => setShowAll(true)} className="text-primary font-medium hover:underline">Show all</button>{" "}
+                  or search to narrow.
+                </span>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
