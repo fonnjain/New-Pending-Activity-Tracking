@@ -51,17 +51,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </main>
 
       {/* Bottom Nav (Mobile) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-sidebar border-t border-sidebar-border z-50 flex items-center justify-around pb-safe">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-sidebar border-t border-sidebar-border z-50 flex items-stretch pb-safe">
         {navItems.map((item) => {
           const isActive = location === item.href;
           const Icon = item.icon;
           return (
-            <Link key={item.href} href={item.href}>
-              <div className={`flex flex-col items-center justify-center w-16 h-full cursor-pointer transition-colors ${
+            <Link key={item.href} href={item.href} className="flex-1 min-w-0">
+              <div className={`flex flex-col items-center justify-center w-full h-full px-0.5 cursor-pointer transition-colors ${
                 isActive ? "text-primary" : "text-sidebar-foreground/70 hover:text-sidebar-foreground"
               }`}>
-                <Icon className="h-5 w-5 mb-1" strokeWidth={isActive ? 2.5 : 2} />
-                <span className="text-[10px] font-medium">{item.label}</span>
+                <Icon className="h-5 w-5 mb-1 shrink-0" strokeWidth={isActive ? 2.5 : 2} />
+                <span className="text-[10px] font-medium leading-tight truncate max-w-full">{item.label}</span>
               </div>
             </Link>
           );
