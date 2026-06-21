@@ -350,17 +350,38 @@ function JobDetail({
   onBack: () => void;
 }) {
   const [search, setSearch] = useState("");
+  const [activity, setActivity] = useState<string | null>(null);
+  const [contractor, setContractor] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+
+  const activityOptions = useMemo(
+    () =>
+      Array.from(new Set(records.map((r) => r.activity).filter(Boolean))).sort(),
+    [records],
+  );
+  const contractorOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(records.map((r) => r.contractor).filter(Boolean)),
+      ).sort(),
+    [records],
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return records;
-    return records.filter((r) =>
-      [r.structure, r.markId, r.activity, r.section].some((v) =>
-        String(v ?? "").toLowerCase().includes(q),
-      ),
-    );
-  }, [records, search]);
+    return records.filter((r) => {
+      if (activity && r.activity !== activity) return false;
+      if (contractor && r.contractor !== contractor) return false;
+      if (
+        q &&
+        ![r.structure, r.markId, r.activity, r.section].some((v) =>
+          String(v ?? "").toLowerCase().includes(q),
+        )
+      )
+        return false;
+      return true;
+    });
+  }, [records, search, activity, contractor]);
 
   const sortedRows = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -401,14 +422,44 @@ function JobDetail({
         </div>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search structure, mark, activity, section..."
-          className="pl-9"
-        />
+      <div className="space-y-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search structure, mark, activity, section..."
+            className="pl-9"
+          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-muted-foreground uppercase">
+              Activity
+            </label>
+            <SearchableSelect
+              value={activity}
+              onChange={setActivity}
+              options={activityOptions}
+              allLabel="All Activities"
+              searchPlaceholder="Search activities..."
+              disabled={activityOptions.length === 0}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-muted-foreground uppercase">
+              Contractor
+            </label>
+            <SearchableSelect
+              value={contractor}
+              onChange={setContractor}
+              options={contractorOptions}
+              allLabel="All Contractors"
+              searchPlaceholder="Search contractors..."
+              disabled={contractorOptions.length === 0}
+            />
+          </div>
+        </div>
       </div>
 
       <Card>
