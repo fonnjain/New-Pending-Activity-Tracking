@@ -59,7 +59,6 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   
-  const qty = records.reduce((sum, r) => sum + r.balanceQty, 0);
   const wt = records.reduce((sum, r) => sum + r.balanceWt, 0);
   
   const withAge = records.filter(r => r.ageingDays !== null);
@@ -96,8 +95,8 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
                 {activity}
               </div>
               <div className="min-w-[120px]">
-                <div className="font-semibold text-lg">{records.length} marks</div>
-                <div className="text-xs text-muted-foreground">{qty.toLocaleString()} pcs • {formatWeight(wt)}</div>
+                <div className="font-bold text-lg">{formatWeight(wt)}</div>
+                <div className="text-xs text-muted-foreground">{records.length} marks</div>
               </div>
               <div className="hidden md:flex flex-col ml-6 w-32 justify-center">
                 <div className="flex h-1.5 rounded-full overflow-hidden w-full bg-muted">
