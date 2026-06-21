@@ -245,7 +245,7 @@ function JobDashboardContent() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Project</TableHead>
-                  <TableHead className="text-right">Structures</TableHead>
+                  <TableHead className="text-right">No. of Structures</TableHead>
                   <TableHead className="text-right">Marks</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
                   <TableHead className="text-right">Wt (t)</TableHead>
