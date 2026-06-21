@@ -6,6 +6,7 @@ import { useListImports, useGetImportRecords, getGetImportRecordsQueryKey } from
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { DateRangeSelect } from "@/components/date-range-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 const navItems = [
@@ -115,13 +116,14 @@ function FilterBar() {
     <div className="sticky top-0 md:top-14 z-30 bg-card border-b shadow-sm">
       <Collapsible open={isOpen} onOpenChange={setIsOpen} className="w-full">
         <div className="flex items-center justify-between p-3 md:px-6">
-          <div className="flex items-center gap-2 flex-1 mr-4">
+          <div className="flex items-center gap-2 flex-1 mr-4 flex-wrap">
             <Input 
               placeholder="Search marks, sections..." 
               value={filters.search}
               onChange={(e) => setFilter("search", e.target.value)}
-              className="max-w-[300px] h-9"
+              className="flex-1 min-w-[140px] max-w-[300px] h-9"
             />
+            <DateRangeSelect className="h-9 w-[170px]" />
           </div>
           <div className="flex items-center gap-2">
             {activeFilterCount > 0 && (

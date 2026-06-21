@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useTracker } from "@/lib/store";
+import { useTracker, isWithinDateRange } from "@/lib/store";
 import {
   useGetImportRecords,
   getGetImportRecordsQueryKey,
@@ -15,6 +15,7 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { DateRangeSelect } from "@/components/date-range-select";
 import { Input } from "@/components/ui/input";
 import { formatTons } from "@/lib/utils";
 import { ChevronLeft, Search } from "lucide-react";
@@ -28,13 +29,18 @@ export default function JobDashboard() {
 }
 
 function JobDashboardContent() {
-  const { selectedImportId } = useTracker();
-  const { data: records = [] } = useGetImportRecords(selectedImportId as number, {
+  const { selectedImportId, filters } = useTracker();
+  const { data: rawRecords = [] } = useGetImportRecords(selectedImportId as number, {
     query: {
       enabled: !!selectedImportId,
       queryKey: getGetImportRecordsQueryKey(selectedImportId as number),
     },
   });
+
+  const records = useMemo(
+    () => rawRecords.filter((r) => isWithinDateRange(r.assignDate, filters.dateRange)),
+    [rawRecords, filters.dateRange],
+  );
 
   const [project, setProject] = useState<string | null>(null);
   const [structure, setStructure] = useState<string | null>(null);
@@ -182,7 +188,13 @@ function JobDashboardContent() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-muted-foreground uppercase">
+                Date Range
+              </label>
+              <DateRangeSelect />
+            </div>
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">
                 Project
