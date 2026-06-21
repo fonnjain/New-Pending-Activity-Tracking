@@ -108,6 +108,11 @@ export interface UploadResult {
   changeSet: ChangeSet;
 }
 
+export interface DeleteAllResult {
+  importsDeleted: number;
+  poolRowsDeleted: number;
+}
+
 export interface Record {
   id: number;
   importId: number;

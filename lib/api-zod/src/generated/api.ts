@@ -66,6 +66,17 @@ export const UploadImportBody = zod.object({
 
 
 /**
+ * Permanently deletes ALL imports, their membership rows, and the shared record pool. This is a full reset of the dataset and cannot be undone. After this, the app is empty and new reports can be uploaded fresh.
+
+ * @summary Delete all data
+ */
+export const DeleteAllImportsResponse = zod.object({
+  "importsDeleted": zod.number(),
+  "poolRowsDeleted": zod.number()
+})
+
+
+/**
  * Returns the full field-level change set between two arbitrary imports.
  * @summary Compare any two imports
  */

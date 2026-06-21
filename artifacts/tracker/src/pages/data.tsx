@@ -1,8 +1,8 @@
-import { useListImports, useUploadImport, useGetImportRecords, useDeleteImport, getListImportsQueryKey, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
+import { useListImports, useUploadImport, useGetImportRecords, useDeleteImport, useDeleteAllImports, getListImportsQueryKey, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Upload, FileDown, CheckCircle2, Trash2, DownloadCloud } from "lucide-react";
+import { Upload, FileDown, CheckCircle2, Trash2, DownloadCloud, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToCsv, exportToJson } from "@/lib/export";
 import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
@@ -14,6 +14,7 @@ export default function DataView() {
   const { selectedImportId, setSelectedImportId } = useTracker();
   const upload = useUploadImport();
   const deleteImport = useDeleteImport();
+  const deleteAll = useDeleteAllImports();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -56,6 +57,29 @@ export default function DataView() {
         if (selectedImportId === id) setSelectedImportId(null);
         queryClient.invalidateQueries({ queryKey: getListImportsQueryKey() });
       }
+    });
+  };
+
+  const handleDeleteAll = () => {
+    if (
+      !confirm(
+        "Delete ALL data? This permanently removes every import and the entire shared record pool. This cannot be undone. New data can be uploaded afterwards.",
+      )
+    )
+      return;
+    deleteAll.mutate(undefined, {
+      onSuccess: (res) => {
+        toast({
+          title: "All data deleted",
+          description: `${res.importsDeleted.toLocaleString()} imports and ${res.poolRowsDeleted.toLocaleString()} pool rows removed.`,
+        });
+        setSelectedImportId(null);
+        refetch();
+        queryClient.invalidateQueries({ queryKey: getListImportsQueryKey() });
+      },
+      onError: (err) => {
+        toast({ variant: "destructive", title: "Delete failed", description: err?.message || "Unknown error" });
+      },
     });
   };
 
@@ -174,7 +198,21 @@ export default function DataView() {
       )}
 
       <div className="space-y-4">
-        <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Import History</h3>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Import History</h3>
+          {imports.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDeleteAll}
+              disabled={deleteAll.isPending}
+              className="h-8 gap-2 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+            >
+              <AlertTriangle className="w-4 h-4" />
+              {deleteAll.isPending ? "Deleting..." : "Delete all data"}
+            </Button>
+          )}
+        </div>
         <div className="grid gap-3">
           {imports.map(s => (
             <Card

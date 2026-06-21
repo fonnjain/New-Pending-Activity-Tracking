@@ -12,6 +12,7 @@ export * from './changeItem';
 export * from './changeSet';
 export * from './changeSummary';
 export * from './compareImportsParams';
+export * from './deleteAllResult';
 export * from './errorResponse';
 export * from './healthStatus';
 export * from './import';

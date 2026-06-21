@@ -74,6 +74,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteAllImports
+      tags: [imports]
+      summary: Delete all data
+      description: >
+        Permanently deletes ALL imports, their membership rows, and the shared record pool.
+        This is a full reset of the dataset and cannot be undone. After this, the app is empty
+        and new reports can be uploaded fresh.
+      responses:
+        "200":
+          description: Deletion summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteAllResult"
   /imports/compare:
     get:
       operationId: compareImports
@@ -563,6 +578,16 @@ components:
       required:
         - import
         - changeSet
+    DeleteAllResult:
+      type: object
+      properties:
+        importsDeleted:
+          type: integer
+        poolRowsDeleted:
+          type: integer
+      required:
+        - importsDeleted
+        - poolRowsDeleted
     Record:
       type: object
       properties:

@@ -23,6 +23,7 @@ import type {
   AiStatus,
   ChangeSet,
   CompareImportsParams,
+  DeleteAllResult,
   ErrorResponse,
   HealthStatus,
   Import,
@@ -285,6 +286,78 @@ export const useUploadImport = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getUploadImportMutationOptions(options));
+    }
+
+export const getDeleteAllImportsUrl = () => {
+
+
+
+
+  return `/api/imports`
+}
+
+/**
+ * Permanently deletes ALL imports, their membership rows, and the shared record pool. This is a full reset of the dataset and cannot be undone. After this, the app is empty and new reports can be uploaded fresh.
+
+ * @summary Delete all data
+ */
+export const deleteAllImports = async ( options?: RequestInit): Promise<DeleteAllResult> => {
+
+  return customFetch<DeleteAllResult>(getDeleteAllImportsUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteAllImportsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAllImports>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteAllImports>>, TError,void, TContext> => {
+
+const mutationKey = ['deleteAllImports'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAllImports>>, void> = () => {
+
+
+          return  deleteAllImports(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteAllImportsMutationResult = NonNullable<Awaited<ReturnType<typeof deleteAllImports>>>
+
+    export type DeleteAllImportsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete all data
+ */
+export const useDeleteAllImports = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAllImports>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteAllImports>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getDeleteAllImportsMutationOptions(options));
     }
 
 export const getCompareImportsUrl = (params: CompareImportsParams,) => {

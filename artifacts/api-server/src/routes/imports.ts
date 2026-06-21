@@ -366,6 +366,23 @@ router.get("/imports/:id", async (req, res): Promise<void> => {
   res.json(imp);
 });
 
+router.delete("/imports", async (req, res): Promise<void> => {
+  const result = await db.transaction(async (tx) => {
+    // Serialize against concurrent uploads (which take the same lock) so a reset
+    // can never interleave with an upload and leave a partial/inconsistent state.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(728041)`);
+    const deletedImports = await tx.delete(importsTable).returning({ id: importsTable.id });
+    const deletedPool = await tx.delete(recordPoolTable).returning({ id: recordPoolTable.id });
+    return {
+      importsDeleted: deletedImports.length,
+      poolRowsDeleted: deletedPool.length,
+    };
+  });
+
+  req.log.info(result, "deleted all imports and record pool");
+  res.json(result);
+});
+
 router.delete("/imports/:id", async (req, res): Promise<void> => {
   const params = DeleteImportParams.safeParse(req.params);
   if (!params.success) {
