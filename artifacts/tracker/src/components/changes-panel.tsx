@@ -9,7 +9,7 @@ import {
   type ChangeItem,
 } from "@workspace/api-client-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { formatTons } from "@/lib/utils";
+import { formatWeight } from "@/lib/utils";
 
 type Tab = "movedActivity" | "qtyChanged" | "newMarks" | "completed";
 
@@ -117,7 +117,7 @@ export function ChangesPanel({ importId }: { importId: number }) {
                 tone={changeSet.netPendingQtyChange <= 0 ? "emerald" : "red"}
               />
               <Chip
-                label="Net pending wt (t)"
+                label="Net pending wt"
                 value={signedTons(changeSet.netPendingWtChange)}
                 tone={changeSet.netPendingWtChange <= 0 ? "emerald" : "red"}
               />
@@ -183,12 +183,12 @@ function ChangeTable({ items, tab }: { items: ChangeItem[]; tab: Tab }) {
             {showActivity && <th className="py-2 pr-4 font-semibold">From</th>}
             {showActivity && <th className="py-2 pr-4 font-semibold">To</th>}
             {showQty && <th className="py-2 pr-4 font-semibold text-right">Qty</th>}
-            {showQty && <th className="py-2 pr-4 font-semibold text-right">Wt (t)</th>}
+            {showQty && <th className="py-2 pr-4 font-semibold text-right">Wt</th>}
             {!showActivity && !showQty && (
               <th className="py-2 pr-4 font-semibold text-right">Qty</th>
             )}
             {!showActivity && !showQty && (
-              <th className="py-2 pr-4 font-semibold text-right">Wt (t)</th>
+              <th className="py-2 pr-4 font-semibold text-right">Wt</th>
             )}
           </tr>
         </thead>
@@ -272,7 +272,7 @@ function fmt(n: number | null): string {
 
 function fmtTons(n: number | null): string {
   if (n === null) return "—";
-  return formatTons(n);
+  return formatWeight(n);
 }
 
 function signed(n: number): string {
@@ -281,6 +281,6 @@ function signed(n: number): string {
 }
 
 function signedTons(n: number): string {
-  const s = formatTons(Math.abs(n));
+  const s = formatWeight(Math.abs(n));
   return n > 0 ? `+${s}` : n < 0 ? `-${s}` : s;
 }

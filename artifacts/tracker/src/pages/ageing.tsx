@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { useState, useMemo } from "react";
 import { Input } from "@/components/ui/input";
-import { formatTons } from "@/lib/utils";
+import { formatWeight } from "@/lib/utils";
 import { Search, ChevronLeft } from "lucide-react";
 
 const ROW_CAP = 200;
@@ -121,7 +121,7 @@ function AgeingContent() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiTile title="Pending Marks" value={totalMarks} />
         <KpiTile title="Balance Qty" value={totalQty.toLocaleString()} />
-        <KpiTile title="Balance Wt (t)" value={formatTons(totalWt)} />
+        <KpiTile title="Balance Wt" value={formatWeight(totalWt)} />
         <KpiTile title="Avg Ageing (d)" value={avgAgeing} />
       </div>
 
@@ -143,7 +143,7 @@ function AgeingContent() {
                   <TableHead>Contractor</TableHead>
                   <TableHead className="text-right">Marks</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Wt (t)</TableHead>
+                  <TableHead className="text-right">Wt</TableHead>
                   <TableHead className="text-right">Avg Ageing</TableHead>
                   <TableHead className="text-right">0-30</TableHead>
                   <TableHead className="text-right">31-60</TableHead>
@@ -160,7 +160,7 @@ function AgeingContent() {
                     <TableCell className="font-bold">{stat.contractor}</TableCell>
                     <TableCell className="text-right">{stat.marks}</TableCell>
                     <TableCell className="text-right">{stat.qty}</TableCell>
-                    <TableCell className="text-right">{formatTons(stat.weight)}</TableCell>
+                    <TableCell className="text-right">{formatWeight(stat.weight)}</TableCell>
                     <TableCell className={`text-right font-bold ${getAgeingColor(stat.avgAge)}`}>{stat.avgAge !== null ? `${stat.avgAge}d` : '-'}</TableCell>
                     <TableCell className="text-right text-muted-foreground">{stat.c0to30}</TableCell>
                     <TableCell className="text-right text-muted-foreground">{stat.c31to60}</TableCell>
@@ -190,7 +190,7 @@ function AgeingContent() {
                   <TableHead>Activity</TableHead>
                   <TableHead className="text-right">Marks</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Wt (t)</TableHead>
+                  <TableHead className="text-right">Wt</TableHead>
                   <TableHead className="text-right">Avg Ageing</TableHead>
                   <TableHead className="text-right">0-30</TableHead>
                   <TableHead className="text-right">31-60</TableHead>
@@ -207,7 +207,7 @@ function AgeingContent() {
                     <TableCell className="font-bold">{stat.activity}</TableCell>
                     <TableCell className="text-right">{stat.marks}</TableCell>
                     <TableCell className="text-right">{stat.qty}</TableCell>
-                    <TableCell className="text-right">{formatTons(stat.weight)}</TableCell>
+                    <TableCell className="text-right">{formatWeight(stat.weight)}</TableCell>
                     <TableCell className={`text-right font-bold ${getAgeingColor(stat.avgAge)}`}>{stat.avgAge !== null ? `${stat.avgAge}d` : '-'}</TableCell>
                     <TableCell className="text-right text-muted-foreground">{stat.c0to30}</TableCell>
                     <TableCell className="text-right text-muted-foreground">{stat.c31to60}</TableCell>
@@ -269,7 +269,7 @@ function AgeingContent() {
                     <TableCell className="text-xs font-semibold">{r.activity}</TableCell>
                     <TableCell className="text-xs">{r.contractor}</TableCell>
                     <TableCell className="text-right">{r.balanceQty}</TableCell>
-                    <TableCell className="text-right">{formatTons(r.balanceWt)}</TableCell>
+                    <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">{r.assignDate}</TableCell>
                     <TableCell className={`text-right font-bold ${getAgeingColor(r.ageingDays)}`}>
                       {r.ageingDays !== null ? `${r.ageingDays}d` : '-'}
@@ -322,7 +322,7 @@ function AgeingDetail({ title, subtitle, records, onBack }: { title: string, sub
           <p className="text-xs text-muted-foreground uppercase tracking-wider">{subtitle}</p>
           <h2 className="text-xl font-bold tracking-tight truncate">{title}</h2>
           <p className="text-xs text-muted-foreground">
-            {filtered.length.toLocaleString()} marks • {totalQty.toLocaleString()} pcs • {formatTons(totalWt)} t
+            {filtered.length.toLocaleString()} marks • {totalQty.toLocaleString()} pcs • {formatWeight(totalWt)}
           </p>
         </div>
       </div>
@@ -363,7 +363,7 @@ function AgeingDetail({ title, subtitle, records, onBack }: { title: string, sub
                     <TableCell className="text-xs font-semibold">{r.activity}</TableCell>
                     <TableCell className="text-xs">{r.contractor}</TableCell>
                     <TableCell className="text-right">{r.balanceQty}</TableCell>
-                    <TableCell className="text-right">{formatTons(r.balanceWt)}</TableCell>
+                    <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">{r.assignDate}</TableCell>
                     <TableCell className={`text-right font-bold ${getAgeingColor(r.ageingDays)}`}>
                       {r.ageingDays !== null ? `${r.ageingDays}d` : '-'}
@@ -421,7 +421,7 @@ function BucketCard({ title, records, colorClass, textColorClass }: { title: str
         <h4 className={`text-sm font-bold uppercase tracking-wider mb-2 ${textColorClass}`}>{title}</h4>
         <div className="flex justify-between items-end">
           <div className="text-2xl font-bold">{marks} <span className="text-sm font-normal text-muted-foreground">marks</span></div>
-          <div className="text-sm font-medium text-muted-foreground">{formatTons(wt)} t</div>
+          <div className="text-sm font-medium text-muted-foreground">{formatWeight(wt)}</div>
         </div>
       </CardContent>
     </Card>

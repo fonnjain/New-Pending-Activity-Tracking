@@ -11,9 +11,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 
 const navItems = [
   { href: "/", icon: BarChart3, label: "Overview" },
+  { href: "/activity", icon: Activity, label: "Activity" },
   { href: "/jobs", icon: Briefcase, label: "Job-wise" },
   { href: "/contractor", icon: Users, label: "Contractor" },
-  { href: "/activity", icon: Activity, label: "Activity" },
   { href: "/ageing", icon: Clock, label: "Ageing" },
   { href: "/reports", icon: FileText, label: "Reports" },
   { href: "/data", icon: Database, label: "Data" },

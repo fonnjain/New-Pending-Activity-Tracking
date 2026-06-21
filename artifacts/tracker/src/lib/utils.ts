@@ -5,11 +5,15 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-// Convert a weight in kilograms to metric tons (kg / 1000), formatted with
-// thousands separators and one decimal place. Used everywhere weight is shown.
-export function formatTons(kg: number): string {
-  return (kg / 1000).toLocaleString(undefined, {
+// Format a weight (in kilograms) with its unit. Weights under 1 ton (1000 kg)
+// are shown in kilograms (e.g. "850 kg"); 1 ton and above are shown in metric
+// tons with one decimal place (e.g. "2.0 t"). Used everywhere weight is shown.
+export function formatWeight(kg: number): string {
+  if (Math.abs(kg) < 1000) {
+    return `${Math.round(kg).toLocaleString()} kg`;
+  }
+  return `${(kg / 1000).toLocaleString(undefined, {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
-  });
+  })} t`;
 }
