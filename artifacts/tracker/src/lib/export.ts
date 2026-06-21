@@ -83,6 +83,121 @@ export async function exportCleanedXlsx(
   XLSX.writeFile(wb, filename);
 }
 
+// Export a set of rows to a real .xlsx file. `columns` is a list of
+// [header label, record field] tuples controlling order and what is written.
+export async function exportToXlsx(
+  filename: string,
+  columns: [string, string][],
+  rows: any[],
+  sheetName = "Report",
+) {
+  const XLSX = await import("xlsx");
+  const header = columns.map(([label]) => label);
+  const aoa: any[][] = [header];
+  for (const r of rows) {
+    aoa.push(
+      columns.map(([, field]) => {
+        const v = r[field];
+        return v == null ? "" : v;
+      }),
+    );
+  }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  XLSX.writeFile(wb, filename);
+}
+
+// Render the AI report result into a downloadable PDF. Plain text layout with
+// wrapping and automatic page breaks (no styling dependencies).
+export async function exportAiReportPdf(filename: string, result: any) {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const margin = 48;
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const maxW = pageW - margin * 2;
+  let y = margin;
+
+  const ensure = (h: number) => {
+    if (y + h > pageH - margin) {
+      doc.addPage();
+      y = margin;
+    }
+  };
+
+  const writeText = (text: string, size: number, bold: boolean, gap = 4) => {
+    if (!text) return;
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(size);
+    const lines = doc.splitTextToSize(text, maxW) as string[];
+    const lineH = size * 1.35;
+    for (const line of lines) {
+      ensure(lineH);
+      doc.text(line, margin, y);
+      y += lineH;
+    }
+    y += gap;
+  };
+
+  writeText("AI Report", 20, true, 8);
+  const meta: string[] = [];
+  if (result.model) meta.push(`Model: ${result.model}`);
+  if (result.generatedAt) meta.push(`Generated: ${new Date(result.generatedAt).toLocaleString()}`);
+  if (result.filtered) meta.push("Filtered slice (current filters applied)");
+  if (meta.length) writeText(meta.join("   |   "), 9, false, 10);
+
+  if (result.summary) {
+    writeText(`Summary  (Health: ${String(result.summary.health).toUpperCase()})`, 14, true);
+    if (result.summary.headline) writeText(result.summary.headline, 11, false, 8);
+    for (const r of result.summary.topRisks ?? []) {
+      writeText(`- ${r.title}  [${r.severity}]`, 11, true, 2);
+      if (r.metric) writeText(r.metric, 10, false, 1);
+      if (r.why) writeText(r.why, 10, false, 6);
+    }
+  }
+
+  if (result.actionPlan?.length) {
+    writeText("Action Plan", 14, true);
+    for (const a of result.actionPlan) {
+      writeText(`${a.priority}. ${a.action}  (${a.horizon} / effort ${a.effort})`, 11, true, 2);
+      if (a.target) writeText(`Target: ${a.target}`, 10, false, 1);
+      if (a.rationale) writeText(a.rationale, 10, false, 1);
+      if (a.expectedImpact) writeText(`Expected impact: ${a.expectedImpact}`, 10, false, 6);
+    }
+  }
+
+  if (result.detailed) {
+    writeText("Detailed Analysis", 14, true);
+    for (const b of result.detailed.bottlenecks ?? []) {
+      writeText(`- [${b.area}] ${b.name}  ${b.metric ?? ""}`, 11, true, 1);
+      if (b.finding) writeText(b.finding, 10, false, 6);
+    }
+    const blocks: [string, string | undefined][] = [
+      ["Ageing", result.detailed.ageingAnalysis],
+      ["Contractor", result.detailed.contractorAnalysis],
+      ["Throughput", result.detailed.throughput],
+    ];
+    for (const [title, body] of blocks) {
+      if (body) {
+        writeText(title, 12, true, 2);
+        writeText(body, 10, false, 6);
+      }
+    }
+    if (result.detailed.dataQuality?.length) {
+      writeText("Data quality", 12, true, 2);
+      for (const d of result.detailed.dataQuality) writeText(`- ${d}`, 10, false, 1);
+      y += 4;
+    }
+    if (result.detailed.assumptions?.length) {
+      writeText("Assumptions", 12, true, 2);
+      for (const d of result.detailed.assumptions) writeText(`- ${d}`, 10, false, 1);
+    }
+  }
+
+  doc.save(filename);
+}
+
 export function exportToJson(filename: string, data: any) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8;" });
   const url = URL.createObjectURL(blob);

@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useAiReport,
   useAiStatus,
   getAiStatusQueryKey,
+  useGetImportRecords,
+  getGetImportRecordsQueryKey,
   type ReportResult,
   type ReportRisk,
   type ReportAction,
@@ -11,18 +13,30 @@ import {
 import { useTracker, dateRangeWindow } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { SearchableSelect } from "@/components/ui/searchable-select";
+import {
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+} from "@/components/ui/table";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { exportToJson } from "@/lib/export";
+import { exportToJson, exportToXlsx, exportAiReportPdf } from "@/lib/export";
+import { formatWeight } from "@/lib/utils";
 import {
   Sparkles,
   ShieldCheck,
   AlertTriangle,
   XCircle,
   Download,
+  FileSpreadsheet,
+  FileText,
   Printer,
   ChevronDown,
   RefreshCw,
@@ -33,6 +47,177 @@ function ymd(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function uniqueSorted(values: (string | null | undefined)[] | undefined): string[] {
+  if (!values) return [];
+  return Array.from(new Set(values.filter((v): v is string => !!v))).sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true }),
+  );
+}
+
+// [header label, record field] — controls both the on-screen table and the
+// exported .xlsx. Length/Width/Balance Qty/Balance Wt export as raw numbers.
+const REPORT_COLUMNS: [string, string][] = [
+  ["Mark No.", "markId"],
+  ["Activity", "activity"],
+  ["Section", "section"],
+  ["Length", "length"],
+  ["Width", "width"],
+  ["Balance Qty", "balanceQty"],
+  ["Balance Wt", "balanceWt"],
+  ["Contractor", "contractor"],
+];
+
+const TABLE_CAP = 500;
+
+function num(v: number | null | undefined): string {
+  if (v == null) return "-";
+  return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function ReportBuilder() {
+  const { selectedImportId } = useTracker();
+  const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
+    query: {
+      enabled: selectedImportId != null,
+      queryKey: getGetImportRecordsQueryKey(selectedImportId as number),
+    },
+  });
+
+  const [job, setJob] = useState<string | null>(null);
+  const [activity, setActivity] = useState<string | null>(null);
+
+  useEffect(() => {
+    setJob(null);
+    setActivity(null);
+  }, [selectedImportId]);
+
+  const jobs = useMemo(() => uniqueSorted(allRecords?.map((r) => r.job)), [allRecords]);
+  const activities = useMemo(
+    () => uniqueSorted(allRecords?.map((r) => r.activity)),
+    [allRecords],
+  );
+
+  const rows = useMemo(() => {
+    let rs = allRecords ?? [];
+    if (job) rs = rs.filter((r) => r.job === job);
+    if (activity) rs = rs.filter((r) => r.activity === activity);
+    return rs;
+  }, [allRecords, job, activity]);
+
+  const totalQty = rows.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
+  const totalWt = rows.reduce((s, r) => s + (r.balanceWt ?? 0), 0);
+
+  const handleExcel = () => {
+    if (!rows.length) return;
+    const tag = `${job ?? "all"}_${activity ?? "all"}`.replace(/[^\w-]+/g, "-");
+    exportToXlsx(`report_${tag}.xlsx`, REPORT_COLUMNS, rows);
+  };
+
+  if (selectedImportId == null) {
+    return (
+      <Card className="border-border">
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Upload or select an import on the Data page to build a report.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const visible = rows.slice(0, TABLE_CAP);
+
+  return (
+    <Card className="border-border">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex flex-wrap items-center justify-between gap-3">
+          Report Builder
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5"
+            disabled={!rows.length}
+            onClick={handleExcel}
+          >
+            <FileSpreadsheet className="w-4 h-4" /> Export Excel
+          </Button>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-muted-foreground uppercase">Job</label>
+            <SearchableSelect
+              value={job}
+              onChange={setJob}
+              options={jobs}
+              allLabel="All Jobs"
+              searchPlaceholder="Search job..."
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-muted-foreground uppercase">Activity</label>
+            <SearchableSelect
+              value={activity}
+              onChange={setActivity}
+              options={activities}
+              allLabel="All Activities"
+              searchPlaceholder="Search activity..."
+            />
+          </div>
+        </div>
+
+        <div className="text-xs text-muted-foreground">
+          {rows.length.toLocaleString()} rows • {totalQty.toLocaleString()} pcs •{" "}
+          {formatWeight(totalWt)}
+        </div>
+
+        <div className="overflow-x-auto border border-border rounded-lg">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mark No.</TableHead>
+                <TableHead>Activity</TableHead>
+                <TableHead>Section</TableHead>
+                <TableHead className="text-right">Length</TableHead>
+                <TableHead className="text-right">Width</TableHead>
+                <TableHead className="text-right">Balance Qty</TableHead>
+                <TableHead className="text-right">Balance Wt</TableHead>
+                <TableHead>Contractor</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visible.map((r, i) => (
+                <TableRow key={`${r.markId}-${i}`}>
+                  <TableCell className="font-mono text-xs">{r.markId}</TableCell>
+                  <TableCell>{r.activity ?? "-"}</TableCell>
+                  <TableCell>{r.section ?? "-"}</TableCell>
+                  <TableCell className="text-right tabular-nums">{num(r.length)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{num(r.width)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{num(r.balanceQty)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatWeight(r.balanceWt)}</TableCell>
+                  <TableCell>{r.contractor ?? "Unassigned"}</TableCell>
+                </TableRow>
+              ))}
+              {rows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-sm text-muted-foreground py-8">
+                    No rows for the selected job / activity.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        {rows.length > TABLE_CAP && (
+          <div className="text-xs text-muted-foreground">
+            Showing first {TABLE_CAP.toLocaleString()} of {rows.length.toLocaleString()} rows. Export
+            to Excel for the full set.
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function HealthBadge({ health }: { health: "good" | "watch" | "critical" }) {
@@ -106,7 +291,7 @@ function Section({
   );
 }
 
-export default function ReportsView() {
+function AiReports() {
   const { selectedImportId, filters } = useTracker();
   const report = useAiReport();
   const { data: status } = useAiStatus({ query: { queryKey: getAiStatusQueryKey() } });
@@ -141,6 +326,11 @@ export default function ReportsView() {
     exportToJson(`ai_report_import_${result.importId ?? selectedImportId}.json`, result);
   };
 
+  const handleExportPdf = () => {
+    if (!result) return;
+    exportAiReportPdf(`ai_report_import_${result.importId ?? selectedImportId}.pdf`, result);
+  };
+
   const unavailable = !aiAvailable || (result != null && !result.available);
   const hasResult = result?.available === true;
 
@@ -160,8 +350,11 @@ export default function ReportsView() {
         <div className="flex items-center gap-2 shrink-0">
           {hasResult && (
             <>
+              <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={handleExportPdf}>
+                <FileText className="w-4 h-4" /> Export PDF
+              </Button>
               <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={handleExport}>
-                <Download className="w-4 h-4" /> Export
+                <Download className="w-4 h-4" /> Export JSON
               </Button>
               <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => window.print()}>
                 <Printer className="w-4 h-4" /> Print
@@ -396,6 +589,15 @@ export default function ReportsView() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+export default function ReportsView() {
+  return (
+    <div className="space-y-8">
+      <ReportBuilder />
+      <AiReports />
     </div>
   );
 }
