@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Clock, Users, Database, Filter, X } from "lucide-react";
-import { useTracker } from "@/lib/store";
+import { useTracker, dateRangeWindow } from "@/lib/store";
 import { useListImports, useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -110,7 +110,11 @@ function FilterBar() {
     [records]
   );
 
-  const activeFilterCount = Object.values(filters).filter(v => v !== null && v !== "").length;
+  const activeFilterCount = Object.entries(filters).filter(([k, v]) => {
+    if (v === null || v === "") return false;
+    if (k === "dateRange") return dateRangeWindow(v) !== null;
+    return true;
+  }).length;
 
   return (
     <div className="sticky top-0 md:top-14 z-30 bg-card border-b shadow-sm">

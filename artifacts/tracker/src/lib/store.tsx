@@ -91,6 +91,17 @@ function clampedDate(year: number, monthIndex: number, day: number): Date {
 
 export function dateRangeWindow(code: string | null): { start: Date; end: Date } | null {
   if (!code) return null;
+  // Custom range encoded as "custom:YYYY-MM-DD:YYYY-MM-DD" (either side may be
+  // blank while the user is still picking). End date is inclusive.
+  if (code.startsWith("custom:")) {
+    const [, s, e] = code.split(":");
+    const startD = parseAssignDate(s);
+    const endD = parseAssignDate(e);
+    if (!startD || !endD) return null;
+    const [lo, hi] = startD <= endD ? [startD, endD] : [endD, startD];
+    const end = new Date(hi.getFullYear(), hi.getMonth(), hi.getDate() + 1); // exclusive
+    return { start: lo, end };
+  }
   const now = new Date();
   const y = now.getFullYear();
   const mo = now.getMonth();
