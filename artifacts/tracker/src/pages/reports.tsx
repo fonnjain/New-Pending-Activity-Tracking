@@ -27,6 +27,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
 import { exportToJson, exportToXlsx, exportAiReportPdf } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import {
@@ -40,7 +47,24 @@ import {
   Printer,
   ChevronDown,
   RefreshCw,
+  ListFilter,
+  Check,
 } from "lucide-react";
+
+type ReportType = "jobwise" | "ai";
+
+const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
+  {
+    id: "jobwise",
+    name: "Job Wise Report",
+    description: "Filter pending work by job and activity, then export to Excel.",
+  },
+  {
+    id: "ai",
+    name: "AI Report",
+    description: "AI turnaround analysis with red flags, bottlenecks and a PDF/JSON export.",
+  },
+];
 
 function ymd(d: Date): string {
   const y = d.getFullYear();
@@ -131,7 +155,7 @@ function ReportBuilder() {
     <Card className="border-border">
       <CardHeader className="pb-3">
         <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex flex-wrap items-center justify-between gap-3">
-          Report Builder
+          Job Wise Report
           <Button
             variant="outline"
             size="sm"
@@ -594,10 +618,62 @@ function AiReports() {
 }
 
 export default function ReportsView() {
+  const [reportType, setReportType] = useState<ReportType>("jobwise");
+
   return (
     <div className="space-y-8">
-      <ReportBuilder />
-      <AiReports />
+      <Card className="border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+            <ListFilter className="w-4 h-4" /> Report Builder
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1 max-w-xs">
+            <label className="text-xs font-semibold text-muted-foreground uppercase">
+              Report type
+            </label>
+            <Select value={reportType} onValueChange={(v) => setReportType(v as ReportType)}>
+              <SelectTrigger className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {REPORT_TYPES.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {REPORT_TYPES.map((t) => {
+              const active = t.id === reportType;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setReportType(t.id)}
+                  className={`text-left rounded-lg border p-4 transition-colors ${
+                    active
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:border-primary/40 hover:bg-muted/50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-sm">{t.name}</span>
+                    {active && <Check className="w-4 h-4 text-primary" />}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">{t.description}</p>
+                </button>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      {reportType === "jobwise" ? <ReportBuilder /> : <AiReports />}
     </div>
   );
 }
