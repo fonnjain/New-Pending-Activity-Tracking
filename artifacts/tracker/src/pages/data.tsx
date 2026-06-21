@@ -109,7 +109,19 @@ export default function DataView() {
       </Card>
 
       {selectedImportId && <AiSanitizePanel importId={selectedImportId} />}
-      {selectedImportId && <AiReviewPanel importId={selectedImportId} />}
+
+      {selectedImportId && (
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">AI Review</h2>
+            <p className="text-muted-foreground text-sm mt-1">
+              An advisory audit of the computed results for the selected import. The deterministic
+              engine remains the source of truth; AI findings are suggestions only.
+            </p>
+          </div>
+          <AiReviewPanel importId={selectedImportId} />
+        </div>
+      )}
 
       {selectedImport && (
         <Card className="border-border">
