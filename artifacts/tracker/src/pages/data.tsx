@@ -6,6 +6,7 @@ import { Upload, FileDown, CheckCircle2, Trash2, DownloadCloud } from "lucide-re
 import { useToast } from "@/hooks/use-toast";
 import { exportToCsv, exportToJson } from "@/lib/export";
 import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
+import { AiReviewPanel } from "@/components/ai-review-panel";
 import { useQueryClient } from "@tanstack/react-query";
 
 export default function DataView() {
@@ -108,6 +109,7 @@ export default function DataView() {
       </Card>
 
       {selectedImportId && <AiSanitizePanel importId={selectedImportId} />}
+      {selectedImportId && <AiReviewPanel importId={selectedImportId} />}
 
       {selectedImport && (
         <Card className="border-border">
