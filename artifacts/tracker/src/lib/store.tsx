@@ -149,6 +149,15 @@ export function useFilteredRecords(records: Record[] | undefined) {
     if (!records) return [];
 
     const win = dateRangeWindow(filters.dateRange);
+    const q = filters.search.trim().toLowerCase();
+
+    // Smart search: if the query is exactly a job code, treat it as a job
+    // filter (show only that job). Otherwise it's a free-text mark search.
+    // This resolves the common confusion where a mark is literally named after
+    // another job's number (e.g. job 900 has a mark named "902"), which would
+    // otherwise make a "902" search surface job-900 rows.
+    const jobCodes = q ? new Set(records.map((r) => r.job?.toLowerCase()).filter(Boolean)) : null;
+    const searchIsJob = !!q && !!jobCodes && jobCodes.has(q);
 
     return records.filter((r) => {
       if (win) {
@@ -161,14 +170,17 @@ export function useFilteredRecords(records: Record[] | undefined) {
       if (filters.contractor && r.contractor !== filters.contractor) return false;
       if (filters.activity && r.activity !== filters.activity) return false;
 
-      if (filters.search) {
-        const q = filters.search.toLowerCase();
-        const matchSearch =
-          r.markId?.toLowerCase().includes(q) ||
-          r.markTail?.toLowerCase().includes(q) ||
-          r.section?.toLowerCase().includes(q) ||
-          r.contractor?.toLowerCase().includes(q);
-        if (!matchSearch) return false;
+      if (q) {
+        if (searchIsJob) {
+          if (r.job?.toLowerCase() !== q) return false;
+        } else {
+          const matchSearch =
+            r.markId?.toLowerCase().includes(q) ||
+            r.markTail?.toLowerCase().includes(q) ||
+            r.section?.toLowerCase().includes(q) ||
+            r.contractor?.toLowerCase().includes(q);
+          if (!matchSearch) return false;
+        }
       }
 
       return true;
