@@ -12,6 +12,7 @@ import ActivityView from "@/pages/activity";
 import AgeingView from "@/pages/ageing";
 import ContractorView from "@/pages/contractor";
 import DataView from "@/pages/data";
+import ReportsView from "@/pages/reports";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,6 +36,7 @@ function Router() {
         <Route path="/ageing" component={AgeingView} />
         <Route path="/contractor" component={ContractorView} />
         <Route path="/data" component={DataView} />
+        <Route path="/reports" component={ReportsView} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

@@ -379,3 +379,66 @@ export const AiReviewResponse = zod.object({
 })
 
 
+/**
+ * Optional, advisory-only and read-only. The server pre-computes a compact, deterministic analytics pack from the selected import's records (ageing = today - assignDate): totals, ageing buckets, by-activity / by-contractor / by-job / by-structure aggregates, WIP concentration, top stale items, data-quality notes, and change-set deltas versus the previous import (or compareTo). That pack - never the raw rows - is sent to the model, which acts as a fabrication-operations analyst and returns a structured turnaround report (summary, action plan, detailed analysis). Optional filters restrict the analysis to a slice. The AI never writes to record_pool, import_rows, or any computed field. If ANTHROPIC_API_KEY is unset the endpoint responds with available:false; the deterministic engine is unaffected.
+
+ * @summary Deep turnaround-time analytical report for an import (advisory, read-only)
+ */
+export const AiReportBody = zod.object({
+  "importId": zod.number().describe('The import to analyze.'),
+  "compareTo": zod.number().nullish().describe('Optional base import id for throughput deltas instead of the previous import.'),
+  "regenerate": zod.boolean().nullish().describe('Ignore any cached report and generate a fresh one.'),
+  "filters": zod.object({
+  "job": zod.string().nullish(),
+  "structure": zod.string().nullish(),
+  "mark": zod.string().nullish().describe('Matches a record\'s markId or markTail.'),
+  "contractor": zod.string().nullish(),
+  "activity": zod.string().nullish(),
+  "search": zod.string().nullish().describe('Case-insensitive substring over markId, markTail, section, contractor.'),
+  "dateStart": zod.string().nullish().describe('Inclusive assign-date lower bound (YYYY-MM-DD).'),
+  "dateEnd": zod.string().nullish().describe('Exclusive assign-date upper bound (YYYY-MM-DD).')
+}).optional().describe('Optional slice to analyze. When all fields are empty the whole import is analyzed.')
+})
+
+export const AiReportResponse = zod.object({
+  "available": zod.boolean().describe('False when ANTHROPIC_API_KEY is unset.'),
+  "generatedAt": zod.string().nullable(),
+  "importId": zod.number().nullable(),
+  "model": zod.string().nullable(),
+  "filtered": zod.boolean().describe('True when the analysis was restricted to a filtered slice.'),
+  "cached": zod.boolean().describe('True when the result was served from the advisory cache.'),
+  "summary": zod.union([zod.object({
+  "headline": zod.string().describe('1-2 sentence state of turnaround.'),
+  "health": zod.enum(['good', 'watch', 'critical']),
+  "topRisks": zod.array(zod.object({
+  "title": zod.string(),
+  "severity": zod.enum(['high', 'med', 'low']),
+  "metric": zod.string().describe('The figure from the analytics pack that backs this risk.'),
+  "why": zod.string()
+}))
+}),zod.null()]),
+  "actionPlan": zod.array(zod.object({
+  "priority": zod.number(),
+  "action": zod.string(),
+  "target": zod.string().describe('stage \/ contractor \/ job the action applies to.'),
+  "rationale": zod.string(),
+  "expectedImpact": zod.string(),
+  "effort": zod.enum(['low', 'med', 'high']),
+  "horizon": zod.enum(['now', 'week', 'month'])
+})),
+  "detailed": zod.union([zod.object({
+  "bottlenecks": zod.array(zod.object({
+  "area": zod.enum(['activity', 'contractor', 'job', 'structure']),
+  "name": zod.string(),
+  "metric": zod.string(),
+  "finding": zod.string()
+})),
+  "ageingAnalysis": zod.string(),
+  "contractorAnalysis": zod.string(),
+  "throughput": zod.string(),
+  "dataQuality": zod.array(zod.string()),
+  "assumptions": zod.array(zod.string())
+}),zod.null()])
+})
+
+

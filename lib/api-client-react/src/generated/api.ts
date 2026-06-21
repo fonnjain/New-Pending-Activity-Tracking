@@ -28,6 +28,8 @@ import type {
   Import,
   ImportUpload,
   Record,
+  ReportRequest,
+  ReportResult,
   ReviewRequest,
   ReviewResult,
   SanitizeRequest,
@@ -901,5 +903,78 @@ export const useAiReview = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getAiReviewMutationOptions(options));
+    }
+
+export const getAiReportUrl = () => {
+
+
+
+
+  return `/api/ai/report`
+}
+
+/**
+ * Optional, advisory-only and read-only. The server pre-computes a compact, deterministic analytics pack from the selected import's records (ageing = today - assignDate): totals, ageing buckets, by-activity / by-contractor / by-job / by-structure aggregates, WIP concentration, top stale items, data-quality notes, and change-set deltas versus the previous import (or compareTo). That pack - never the raw rows - is sent to the model, which acts as a fabrication-operations analyst and returns a structured turnaround report (summary, action plan, detailed analysis). Optional filters restrict the analysis to a slice. The AI never writes to record_pool, import_rows, or any computed field. If ANTHROPIC_API_KEY is unset the endpoint responds with available:false; the deterministic engine is unaffected.
+
+ * @summary Deep turnaround-time analytical report for an import (advisory, read-only)
+ */
+export const aiReport = async (reportRequest: ReportRequest, options?: RequestInit): Promise<ReportResult> => {
+
+  return customFetch<ReportResult>(getAiReportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      reportRequest,)
+  }
+);}
+
+
+
+
+export const getAiReportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiReport>>, TError,{data: BodyType<ReportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiReport>>, TError,{data: BodyType<ReportRequest>}, TContext> => {
+
+const mutationKey = ['aiReport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiReport>>, {data: BodyType<ReportRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiReport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiReportMutationResult = NonNullable<Awaited<ReturnType<typeof aiReport>>>
+    export type AiReportMutationBody = BodyType<ReportRequest>
+    export type AiReportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Deep turnaround-time analytical report for an import (advisory, read-only)
+ */
+export const useAiReport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiReport>>, TError,{data: BodyType<ReportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiReport>>,
+        TError,
+        {data: BodyType<ReportRequest>},
+        TContext
+      > => {
+      return useMutation(getAiReportMutationOptions(options));
     }
 

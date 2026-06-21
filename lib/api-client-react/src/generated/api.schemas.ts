@@ -274,6 +274,162 @@ export interface ReviewResult {
   deep: boolean;
 }
 
+/**
+ * Optional slice to analyze. When all fields are empty the whole import is analyzed.
+ */
+export interface ReportFilters {
+  /** @nullable */
+  job?: string | null;
+  /** @nullable */
+  structure?: string | null;
+  /**
+     * Matches a record's markId or markTail.
+     * @nullable
+     */
+  mark?: string | null;
+  /** @nullable */
+  contractor?: string | null;
+  /** @nullable */
+  activity?: string | null;
+  /**
+     * Case-insensitive substring over markId, markTail, section, contractor.
+     * @nullable
+     */
+  search?: string | null;
+  /**
+     * Inclusive assign-date lower bound (YYYY-MM-DD).
+     * @nullable
+     */
+  dateStart?: string | null;
+  /**
+     * Exclusive assign-date upper bound (YYYY-MM-DD).
+     * @nullable
+     */
+  dateEnd?: string | null;
+}
+
+export interface ReportRequest {
+  /** The import to analyze. */
+  importId: number;
+  /**
+     * Optional base import id for throughput deltas instead of the previous import.
+     * @nullable
+     */
+  compareTo?: number | null;
+  /**
+     * Ignore any cached report and generate a fresh one.
+     * @nullable
+     */
+  regenerate?: boolean | null;
+  filters?: ReportFilters;
+}
+
+export type ReportRiskSeverity = typeof ReportRiskSeverity[keyof typeof ReportRiskSeverity];
+
+
+export const ReportRiskSeverity = {
+  high: 'high',
+  med: 'med',
+  low: 'low',
+} as const;
+
+export interface ReportRisk {
+  title: string;
+  severity: ReportRiskSeverity;
+  /** The figure from the analytics pack that backs this risk. */
+  metric: string;
+  why: string;
+}
+
+export type ReportSummaryHealth = typeof ReportSummaryHealth[keyof typeof ReportSummaryHealth];
+
+
+export const ReportSummaryHealth = {
+  good: 'good',
+  watch: 'watch',
+  critical: 'critical',
+} as const;
+
+export interface ReportSummary {
+  /** 1-2 sentence state of turnaround. */
+  headline: string;
+  health: ReportSummaryHealth;
+  topRisks: ReportRisk[];
+}
+
+export type ReportActionEffort = typeof ReportActionEffort[keyof typeof ReportActionEffort];
+
+
+export const ReportActionEffort = {
+  low: 'low',
+  med: 'med',
+  high: 'high',
+} as const;
+
+export type ReportActionHorizon = typeof ReportActionHorizon[keyof typeof ReportActionHorizon];
+
+
+export const ReportActionHorizon = {
+  now: 'now',
+  week: 'week',
+  month: 'month',
+} as const;
+
+export interface ReportAction {
+  priority: number;
+  action: string;
+  /** stage / contractor / job the action applies to. */
+  target: string;
+  rationale: string;
+  expectedImpact: string;
+  effort: ReportActionEffort;
+  horizon: ReportActionHorizon;
+}
+
+export type ReportBottleneckArea = typeof ReportBottleneckArea[keyof typeof ReportBottleneckArea];
+
+
+export const ReportBottleneckArea = {
+  activity: 'activity',
+  contractor: 'contractor',
+  job: 'job',
+  structure: 'structure',
+} as const;
+
+export interface ReportBottleneck {
+  area: ReportBottleneckArea;
+  name: string;
+  metric: string;
+  finding: string;
+}
+
+export interface ReportDetailed {
+  bottlenecks: ReportBottleneck[];
+  ageingAnalysis: string;
+  contractorAnalysis: string;
+  throughput: string;
+  dataQuality: string[];
+  assumptions: string[];
+}
+
+export interface ReportResult {
+  /** False when ANTHROPIC_API_KEY is unset. */
+  available: boolean;
+  /** @nullable */
+  generatedAt: string | null;
+  /** @nullable */
+  importId: number | null;
+  /** @nullable */
+  model: string | null;
+  /** True when the analysis was restricted to a filtered slice. */
+  filtered: boolean;
+  /** True when the result was served from the advisory cache. */
+  cached: boolean;
+  summary: ReportSummary | null;
+  actionPlan: ReportAction[];
+  detailed: ReportDetailed | null;
+}
+
 export type CompareImportsParams = {
 from: number;
 to: number;

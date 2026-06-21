@@ -294,6 +294,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /ai/report:
+    post:
+      operationId: aiReport
+      tags: [ai]
+      summary: Deep turnaround-time analytical report for an import (advisory, read-only)
+      description: >
+        Optional, advisory-only and read-only. The server pre-computes a compact, deterministic
+        analytics pack from the selected import's records (ageing = today - assignDate): totals,
+        ageing buckets, by-activity / by-contractor / by-job / by-structure aggregates, WIP
+        concentration, top stale items, data-quality notes, and change-set deltas versus the previous
+        import (or compareTo). That pack - never the raw rows - is sent to the model, which acts as a
+        fabrication-operations analyst and returns a structured turnaround report (summary, action
+        plan, detailed analysis). Optional filters restrict the analysis to a slice. The AI never
+        writes to record_pool, import_rows, or any computed field. If ANTHROPIC_API_KEY is unset the
+        endpoint responds with available:false; the deterministic engine is unaffected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportRequest"
+      responses:
+        "200":
+          description: Turnaround report (or available:false when AI is disabled)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResult"
+        "404":
+          description: Import not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -759,3 +793,191 @@ components:
         - findings
         - plan
         - deep
+    ReportFilters:
+      type: object
+      description: Optional slice to analyze. When all fields are empty the whole import is analyzed.
+      properties:
+        job:
+          type: ["string", "null"]
+        structure:
+          type: ["string", "null"]
+        mark:
+          type: ["string", "null"]
+          description: Matches a record's markId or markTail.
+        contractor:
+          type: ["string", "null"]
+        activity:
+          type: ["string", "null"]
+        search:
+          type: ["string", "null"]
+          description: Case-insensitive substring over markId, markTail, section, contractor.
+        dateStart:
+          type: ["string", "null"]
+          description: Inclusive assign-date lower bound (YYYY-MM-DD).
+        dateEnd:
+          type: ["string", "null"]
+          description: Exclusive assign-date upper bound (YYYY-MM-DD).
+    ReportRequest:
+      type: object
+      properties:
+        importId:
+          type: integer
+          description: The import to analyze.
+        compareTo:
+          type: ["integer", "null"]
+          description: Optional base import id for throughput deltas instead of the previous import.
+        regenerate:
+          type: ["boolean", "null"]
+          description: Ignore any cached report and generate a fresh one.
+        filters:
+          $ref: "#/components/schemas/ReportFilters"
+      required:
+        - importId
+    ReportRisk:
+      type: object
+      properties:
+        title:
+          type: string
+        severity:
+          type: string
+          enum: [high, med, low]
+        metric:
+          type: string
+          description: The figure from the analytics pack that backs this risk.
+        why:
+          type: string
+      required:
+        - title
+        - severity
+        - metric
+        - why
+    ReportSummary:
+      type: object
+      properties:
+        headline:
+          type: string
+          description: 1-2 sentence state of turnaround.
+        health:
+          type: string
+          enum: [good, watch, critical]
+        topRisks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportRisk"
+      required:
+        - headline
+        - health
+        - topRisks
+    ReportAction:
+      type: object
+      properties:
+        priority:
+          type: integer
+        action:
+          type: string
+        target:
+          type: string
+          description: stage / contractor / job the action applies to.
+        rationale:
+          type: string
+        expectedImpact:
+          type: string
+        effort:
+          type: string
+          enum: [low, med, high]
+        horizon:
+          type: string
+          enum: [now, week, month]
+      required:
+        - priority
+        - action
+        - target
+        - rationale
+        - expectedImpact
+        - effort
+        - horizon
+    ReportBottleneck:
+      type: object
+      properties:
+        area:
+          type: string
+          enum: [activity, contractor, job, structure]
+        name:
+          type: string
+        metric:
+          type: string
+        finding:
+          type: string
+      required:
+        - area
+        - name
+        - metric
+        - finding
+    ReportDetailed:
+      type: object
+      properties:
+        bottlenecks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportBottleneck"
+        ageingAnalysis:
+          type: string
+        contractorAnalysis:
+          type: string
+        throughput:
+          type: string
+        dataQuality:
+          type: array
+          items:
+            type: string
+        assumptions:
+          type: array
+          items:
+            type: string
+      required:
+        - bottlenecks
+        - ageingAnalysis
+        - contractorAnalysis
+        - throughput
+        - dataQuality
+        - assumptions
+    ReportResult:
+      type: object
+      properties:
+        available:
+          type: boolean
+          description: False when ANTHROPIC_API_KEY is unset.
+        generatedAt:
+          type: ["string", "null"]
+        importId:
+          type: ["integer", "null"]
+        model:
+          type: ["string", "null"]
+        filtered:
+          type: boolean
+          description: True when the analysis was restricted to a filtered slice.
+        cached:
+          type: boolean
+          description: True when the result was served from the advisory cache.
+        summary:
+          oneOf:
+            - $ref: "#/components/schemas/ReportSummary"
+            - type: "null"
+        actionPlan:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportAction"
+        detailed:
+          oneOf:
+            - $ref: "#/components/schemas/ReportDetailed"
+            - type: "null"
+      required:
+        - available
+        - generatedAt
+        - importId
+        - model
+        - filtered
+        - cached
+        - summary
+        - actionPlan
+        - detailed

@@ -64,6 +64,10 @@ Mobile-first web app: each Excel upload = one append-only "import". Imports neve
 - **Accept-all sanitize round-trips through a cleaned .xlsx**, it never mutates the pool. The export must reproduce parse.ts's exact layout (Sheet1, two blank rows, header on row 3, the 18 columns in COL order) so re-upload recomputes everything; suggestions are matched to rows by full-row `hash` (exposed on the Record schema for this).
   **Why:** keeps the engine authoritative — the user re-uploads and the normal merge/diff runs; no special write path.
 - Model ids live in ONE place (`lib/ai.ts`): standard = sonnet, deep = opus. Review runs a deep pass when verdict!=pass or deep requested, adding a `plan[]`.
+- **AI Reports (`POST /ai/report`)** sends the model a pre-computed deterministic "analytics pack" ONLY — never raw rows. Every pack aggregate (totals/buckets/by-X/stale items/data-quality counts) must be multiplied by `copies`; forgetting it silently undercounts in-sheet duplicates.
+  **Why:** a code review caught stale-item weight and not-in-route counts ignoring `copies`.
+- **The whole-import report cache (`imports.ai_report` jsonb) is keyed by the DEFAULT baseline only.** Read/write the cache solely when unfiltered AND no `compareTo` — a custom `compareTo` changes the throughput baseline, so serving the default cache would return a report computed against a different baseline. Validate cached AND freshly built reports with `AiReportResponse.safeParse` before returning; on failure regenerate (cache) or return `available:false` (fresh).
+  **Why:** stale/mis-baselined cache and off-contract bodies are silent correctness bugs.
 
 ## Codegen / schema gotchas
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. Do not change `info.title` (controls generated filenames).

@@ -39,6 +39,9 @@ export const importsTable = pgTable("imports", {
   reportDate: date("report_date", { mode: "string" }),
   summary: jsonb("summary").$type<ParseSummary>().notNull(),
   changeSummary: jsonb("change_summary").$type<ChangeSummary>(),
+  // Advisory-only cache of the last whole-import AI turnaround report. Never on
+  // record_pool; holds no computed engine values. Filtered reports are never cached.
+  aiReport: jsonb("ai_report").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

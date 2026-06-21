@@ -1,0 +1,107 @@
+REPLIT AGENT PROMPT — ADD "AI REPORTS" PAGE (turnaround-time deep dive)
+=======================================================================
+Add a new "AI Reports" page to the Balance & Activity Tracker monorepo. Claude does a
+deep analytical dive on the selected import's data and returns a turnaround-time report:
+red flags in inventory hold-ups, bottlenecks, and other crucial turnaround parameters.
+Render SUMMARY first, then ACTION PLAN, then DETAILED ANALYSIS. Follow project
+conventions (contract-first OpenAPI, Drizzle, pino, generated hooks). Engine stays
+authoritative; this report is advisory analysis only — it never writes result data.
+
+NON-NEGOTIABLES
+- Server-side ANTHROPIC_API_KEY only (Replit Secret); never to browser, never logged.
+- App works with no key/network: the page shows "Set ANTHROPIC_API_KEY to enable" and
+  the rest of the app is unaffected. /ai/report returns { available:false } when unset.
+- Claude analyzes and advises; it does not modify record_pool, import_rows, or any
+  computed value.
+
+PRE-COMPUTE FACTS SERVER-SIDE (deterministic), THEN send to Claude
+Do NOT dump 48k raw rows to the model. In api-server, compute a compact, deterministic
+"analytics pack" from the selected import's records (ageing = today - assignDate) and
+send THAT to Claude. The pack must include:
+  - totals: pending marks, total qty, total weight (t), avg & median ageing.
+  - ageing buckets: 0-30 / 31-60 / 60-90 / 90-180 / 180+ (counts, qty, weight).
+  - by ACTIVITY (process order C,RFI,NH,B,Hab,W,TS,Q,G,GB,Y plus any extras): marks,
+    qty, weight, avg ageing, % of total weight, oldest item age. (This surfaces the
+    stage where work piles up — e.g. Quality/Q tends to hold the most aged backlog.)
+  - by CONTRACTOR: marks, weight, avg ageing, count of 90+ day items; rank worst by
+    avg ageing (min 20 marks to avoid noise).
+  - by JOB and by STRUCTURE: weight and avg ageing (top/bottom performers).
+  - WIP concentration: share of weight sitting in the slowest activities/contractors.
+  - stale items: top N oldest marks (mark, structure, activity, contractor, age, qty,wt).
+  - data-quality notes already known to the engine (null contractor/date counts,
+    activities not in their Operation route, backward route moves if a changeSet exists).
+  - if a previous import exists, include the changeSet deltas (throughput: completed vs
+    new, net qty change, activities that moved) so Claude can comment on momentum.
+Keep the pack small (tables of aggregates + top-N lists), deterministic, and reproducible.
+
+WHAT TO ASK CLAUDE TO PRODUCE (turnaround focus)
+Instruct Claude to act as a fabrication-operations analyst whose single goal is REDUCING
+TURNAROUND TIME. From the analytics pack it must identify:
+  - RED FLAGS in inventory hold-up: where weight/qty is stuck and ageing fast.
+  - BOTTLENECKS: the process stage(s) and contractor(s) throttling flow (high aged WIP,
+    large share of weight, oldest items concentrated there).
+  - CRUCIAL TURNAROUND PARAMETERS: aged-WIP %, stage dwell time, contractor lead-time
+    spread, WIP concentration, completion vs intake momentum, and any stage where items
+    sit far beyond the typical dwell for that stage.
+  - cross-cutting risks: single points of failure (one contractor holding huge aged WIP),
+    rework signals (qty increases / backward moves), and data gaps that hide problems.
+Tie each finding to the numbers in the pack (cite the stage/contractor and the figure).
+
+OUTPUT — strict JSON (no prose, no fences), shaped for the 3-section page:
+  ReportResult {
+    available: bool,
+    generatedAt, importId, model,
+    summary: {
+      headline,                         // 1-2 sentence state of turnaround
+      health: "good"|"watch"|"critical",
+      topRisks: [ {title, severity:"high|med|low", metric, why} ]   // 3-6 items
+    },
+    actionPlan: [
+      { priority:1.., action, target:"stage/contractor/job", rationale,
+        expectedImpact, effort:"low|med|high", horizon:"now|week|month" }
+    ],                                   // ordered, most impactful first
+    detailed: {
+      bottlenecks: [ {area:"activity|contractor|job|structure", name, metric, finding} ],
+      ageingAnalysis: string,           // narrative on dwell/aged WIP by stage
+      contractorAnalysis: string,
+      throughput: string,               // momentum vs previous import (if available)
+      dataQuality: [string],
+      assumptions: [string]
+    }
+  }
+Server validates the shape with Zod (generated from openapi) before returning; strip any
+accidental ``` fences. Use AI_MODEL = "claude-opus-4-8" for this deep report (it's the
+heavy-reasoning task); keep the model name in one config constant. Large packs may be
+chunked, but prefer one call on the compact aggregates.
+
+CONTRACT-FIRST
+- Add to lib/api-spec/openapi.yaml:
+    POST /ai/report  body { importId, compareTo? }  -> ReportResult
+  then run `pnpm --filter @workspace/api-spec run codegen`. Do not change info.title.
+- Optionally cache the last ReportResult on the imports row as jsonb `ai_report`
+  (advisory cache only; never on record_pool). Add a "regenerate" action that ignores
+  cache.
+
+FRONTEND — new page "AI Reports" (route /reports, add to nav)
+- A "Generate report" button (uses selected import + optional compare-to). Show a
+  progress state (it's a heavier call).
+- Render in THREE stacked sections, in this order:
+    1) SUMMARY: health badge (good/watch/critical), headline, and Top Risks as cards
+       (title, severity chip, the metric, one-line why).
+    2) ACTION PLAN: an ordered, numbered list/table — priority, action, target,
+       expected impact, effort, horizon (now/week/month). Most impactful first.
+    3) DETAILED ANALYSIS: collapsible subsections — Bottlenecks (table), Ageing,
+       Contractor, Throughput, Data quality, Assumptions.
+- Respect the global Job->Structure->Mark / contractor filters if feasible: if filters
+  are active, analyze the filtered slice (state this in the report header); otherwise the
+  whole selected import.
+- "Export report" (JSON + a print-friendly view). No emojis; use existing components.
+- If available===false, show the enable-key note and disable the button.
+
+GUARDRAILS / ACCEPTANCE
+- With no key: page shows enable note; rest of app works; /ai/report -> available:false.
+- The analytics pack is computed deterministically server-side; Claude only analyzes it
+  and never writes stored data.
+- Report renders Summary -> Action Plan -> Detailed, each populated from ReportResult.
+- Findings cite real figures from the pack (e.g. "Q stage holds X t at avg Y days").
+- Key never in client bundle, responses, or logs. openapi.yaml stays the source of truth.

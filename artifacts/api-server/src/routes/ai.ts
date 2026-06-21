@@ -7,9 +7,10 @@ import {
   importRowsTable,
   type RecordPoolRow,
 } from "@workspace/db";
-import { AiSanitizeBody, AiReviewBody } from "@workspace/api-zod";
+import { AiSanitizeBody, AiReviewBody, AiReportBody, AiReportResponse } from "@workspace/api-zod";
 import { buildChangeSet, type MembershipRow, type ChangeSet } from "../lib/diff";
 import { computeAgeing, computeRoute } from "../lib/parse";
+import { buildAnalyticsPack } from "../lib/report";
 import {
   AI_MODEL_STANDARD,
   AI_MODEL_DEEP,
@@ -460,6 +461,354 @@ router.post("/ai/review", async (req, res): Promise<void> => {
   }
   const deepReview = coerceReview(parseJsonObject(deepRes.text), true);
   res.json({ available: true, deep: true, ...deepReview });
+});
+
+// ---------------------------------------------------------------------------
+// AI turnaround report (deep, advisory, read-only)
+// ---------------------------------------------------------------------------
+
+type Health = "good" | "watch" | "critical";
+type RiskSeverity = "high" | "med" | "low";
+type Effort = "low" | "med" | "high";
+type Horizon = "now" | "week" | "month";
+type BottleneckArea = "activity" | "contractor" | "job" | "structure";
+
+interface ReportSummary {
+  headline: string;
+  health: Health;
+  topRisks: { title: string; severity: RiskSeverity; metric: string; why: string }[];
+}
+interface ReportAction {
+  priority: number;
+  action: string;
+  target: string;
+  rationale: string;
+  expectedImpact: string;
+  effort: Effort;
+  horizon: Horizon;
+}
+interface ReportDetailed {
+  bottlenecks: { area: BottleneckArea; name: string; metric: string; finding: string }[];
+  ageingAnalysis: string;
+  contractorAnalysis: string;
+  throughput: string;
+  dataQuality: string[];
+  assumptions: string[];
+}
+interface ReportBody {
+  summary: ReportSummary | null;
+  actionPlan: ReportAction[];
+  detailed: ReportDetailed | null;
+}
+
+function str(v: unknown, fallback = ""): string {
+  return typeof v === "string" ? v : fallback;
+}
+function oneOf<T extends string>(v: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
+}
+function strArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+function coerceReport(obj: unknown): ReportBody {
+  const o = obj && typeof obj === "object" ? (obj as Record<string, unknown>) : {};
+
+  let summary: ReportSummary | null = null;
+  if (o.summary && typeof o.summary === "object") {
+    const s = o.summary as Record<string, unknown>;
+    const risks = Array.isArray(s.topRisks) ? s.topRisks : [];
+    summary = {
+      headline: str(s.headline),
+      health: oneOf<Health>(s.health, ["good", "watch", "critical"], "watch"),
+      topRisks: risks
+        .filter((r): r is Record<string, unknown> => !!r && typeof r === "object")
+        .slice(0, 6)
+        .map((r) => ({
+          title: str(r.title),
+          severity: oneOf<RiskSeverity>(r.severity, ["high", "med", "low"], "med"),
+          metric: str(r.metric),
+          why: str(r.why),
+        })),
+    };
+  }
+
+  const actionsRaw = Array.isArray(o.actionPlan) ? o.actionPlan : [];
+  const actionPlan: ReportAction[] = actionsRaw
+    .filter((a): a is Record<string, unknown> => !!a && typeof a === "object")
+    .map((a, i) => ({
+      priority: typeof a.priority === "number" ? a.priority : i + 1,
+      action: str(a.action),
+      target: str(a.target),
+      rationale: str(a.rationale),
+      expectedImpact: str(a.expectedImpact),
+      effort: oneOf<Effort>(a.effort, ["low", "med", "high"], "med"),
+      horizon: oneOf<Horizon>(a.horizon, ["now", "week", "month"], "week"),
+    }))
+    .sort((x, y) => x.priority - y.priority);
+
+  let detailed: ReportDetailed | null = null;
+  if (o.detailed && typeof o.detailed === "object") {
+    const d = o.detailed as Record<string, unknown>;
+    const bn = Array.isArray(d.bottlenecks) ? d.bottlenecks : [];
+    detailed = {
+      bottlenecks: bn
+        .filter((b): b is Record<string, unknown> => !!b && typeof b === "object")
+        .map((b) => ({
+          area: oneOf<BottleneckArea>(
+            b.area,
+            ["activity", "contractor", "job", "structure"],
+            "activity",
+          ),
+          name: str(b.name),
+          metric: str(b.metric),
+          finding: str(b.finding),
+        })),
+      ageingAnalysis: str(d.ageingAnalysis),
+      contractorAnalysis: str(d.contractorAnalysis),
+      throughput: str(d.throughput),
+      dataQuality: strArray(d.dataQuality),
+      assumptions: strArray(d.assumptions),
+    };
+  }
+
+  return { summary, actionPlan, detailed };
+}
+
+function unavailableReport(): Record<string, unknown> {
+  return {
+    available: false,
+    generatedAt: null,
+    importId: null,
+    model: null,
+    filtered: false,
+    cached: false,
+    summary: null,
+    actionPlan: [],
+    detailed: null,
+  };
+}
+
+function filtersActive(f: {
+  job?: string | null;
+  structure?: string | null;
+  mark?: string | null;
+  contractor?: string | null;
+  activity?: string | null;
+  search?: string | null;
+  dateStart?: string | null;
+  dateEnd?: string | null;
+}): boolean {
+  return Boolean(
+    f.job ||
+      f.structure ||
+      f.mark ||
+      f.contractor ||
+      f.activity ||
+      (f.search && f.search.trim()) ||
+      f.dateStart ||
+      f.dateEnd,
+  );
+}
+
+function applyFilters(
+  membership: MembershipRow[],
+  f: {
+    job?: string | null;
+    structure?: string | null;
+    mark?: string | null;
+    contractor?: string | null;
+    activity?: string | null;
+    search?: string | null;
+    dateStart?: string | null;
+    dateEnd?: string | null;
+  },
+): MembershipRow[] {
+  const q = f.search?.trim().toLowerCase() ?? "";
+  return membership.filter(({ row }) => {
+    if (f.job && row.job !== f.job) return false;
+    if (f.structure && row.structure !== f.structure) return false;
+    if (f.mark && row.markId !== f.mark && row.markTail !== f.mark) return false;
+    if (f.contractor && row.contractor !== f.contractor) return false;
+    if (f.activity && row.activity !== f.activity) return false;
+    if (f.dateStart || f.dateEnd) {
+      const d = row.assignDate;
+      if (!d) return false;
+      if (f.dateStart && d < f.dateStart) return false;
+      if (f.dateEnd && d >= f.dateEnd) return false;
+    }
+    if (q) {
+      const hit =
+        row.markId?.toLowerCase().includes(q) ||
+        row.markTail?.toLowerCase().includes(q) ||
+        row.section?.toLowerCase().includes(q) ||
+        row.contractor?.toLowerCase().includes(q);
+      if (!hit) return false;
+    }
+    return true;
+  });
+}
+
+router.post("/ai/report", async (req, res): Promise<void> => {
+  const parsed = AiReportBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const { importId, compareTo, regenerate, filters } = parsed.data;
+
+  if (!isAiAvailable()) {
+    res.json(unavailableReport());
+    return;
+  }
+
+  const [toImport] = await db
+    .select()
+    .from(importsTable)
+    .where(eq(importsTable.id, importId));
+  if (!toImport) {
+    res.status(404).json({ error: "Import not found" });
+    return;
+  }
+
+  const filterObj = filters ?? {};
+  const isFiltered = filtersActive(filterObj);
+
+  // The cache represents the canonical whole-import report against the default
+  // (previous-import) baseline. A custom `compareTo` changes the throughput
+  // baseline, so it must never read or write that cache.
+  const cacheable = !isFiltered && compareTo == null;
+
+  // Serve the advisory cache for whole-import reports unless asked to regenerate.
+  if (cacheable && !regenerate && toImport.aiReport) {
+    const cachedParse = AiReportResponse.safeParse(toImport.aiReport);
+    if (cachedParse.success) {
+      res.json({ ...cachedParse.data, cached: true });
+      return;
+    }
+    // Stale/incompatible cache shape: fall through and regenerate.
+  }
+
+  // Resolve the base import for throughput: explicit compareTo, else previous.
+  let fromImport: typeof toImport | undefined;
+  if (compareTo != null) {
+    const [base] = await db
+      .select()
+      .from(importsTable)
+      .where(eq(importsTable.id, compareTo));
+    if (!base) {
+      res.status(404).json({ error: "Comparison import not found" });
+      return;
+    }
+    fromImport = base;
+  } else {
+    const [prev] = await db
+      .select()
+      .from(importsTable)
+      .where(lt(importsTable.id, toImport.id))
+      .orderBy(desc(importsTable.id))
+      .limit(1);
+    fromImport = prev;
+  }
+
+  const fullMembership = await loadMembershipLite(toImport.id);
+  const membership = isFiltered ? applyFilters(fullMembership, filterObj) : fullMembership;
+
+  // Throughput deltas use the unfiltered baseline (momentum is import-wide).
+  let changeSet: ChangeSet | null = null;
+  if (fromImport && !isFiltered) {
+    const prevMembership = await loadMembershipLite(fromImport.id);
+    changeSet = buildChangeSet(
+      prevMembership,
+      fullMembership,
+      { id: fromImport.id, label: fromImport.label },
+      { id: toImport.id, label: toImport.label },
+    );
+  }
+
+  const pack = buildAnalyticsPack(
+    membership,
+    { importId: toImport.id, importLabel: toImport.label, filtered: isFiltered },
+    changeSet,
+    !isFiltered && fromImport ? { id: fromImport.id, label: fromImport.label } : null,
+  );
+
+  const system =
+    "You are a fabrication-operations analyst for a steel-fabrication workshop. Your single " +
+    "goal is REDUCING TURNAROUND TIME. A deterministic engine has ALREADY computed every " +
+    "figure in the analytics pack below (ageing = today - assign date, weights in tonnes); you " +
+    "ONLY analyze it - you never recompute, never change values, and never invent data not in " +
+    "the pack. Identify: red flags where inventory is held up (weight/qty stuck and ageing " +
+    "fast); bottleneck process stage(s) and contractor(s) throttling flow (high aged WIP, large " +
+    "share of weight, oldest items concentrated there); crucial turnaround parameters (aged-WIP " +
+    "%, stage dwell, contractor lead-time spread, WIP concentration, completion-vs-intake " +
+    "momentum); and cross-cutting risks (single points of failure, rework signals such as qty " +
+    "increases or backward route moves, and data gaps that hide problems). Tie EVERY finding to " +
+    "a specific number from the pack and cite the stage/contractor/job and figure. Activities " +
+    "are process codes (e.g. Q = Quality). Respond with STRICT JSON only - no prose, no code " +
+    "fences - shaped EXACTLY as: " +
+    '{"summary":{"headline":string,"health":"good"|"watch"|"critical","topRisks":' +
+    '[{"title":string,"severity":"high"|"med"|"low","metric":string,"why":string}]},' +
+    '"actionPlan":[{"priority":number,"action":string,"target":string,"rationale":string,' +
+    '"expectedImpact":string,"effort":"low"|"med"|"high","horizon":"now"|"week"|"month"}],' +
+    '"detailed":{"bottlenecks":[{"area":"activity"|"contractor"|"job"|"structure","name":string,' +
+    '"metric":string,"finding":string}],"ageingAnalysis":string,"contractorAnalysis":string,' +
+    '"throughput":string,"dataQuality":[string],"assumptions":[string]}}. ' +
+    "topRisks has 3-6 items; actionPlan is ordered most-impactful-first.";
+
+  const user =
+    "Analytics pack (deterministic; already computed - analyze, do not recompute):\n" +
+    JSON.stringify(pack);
+
+  const result = await callClaude({
+    model: AI_MODEL_DEEP,
+    system,
+    user,
+    maxTokens: 8192,
+  });
+  if (!result.ok) {
+    req.log.warn({ importId }, "AI report call failed");
+    res.json(unavailableReport());
+    return;
+  }
+
+  const body = coerceReport(parseJsonObject(result.text));
+  const report = {
+    available: true,
+    generatedAt: new Date().toISOString(),
+    importId: toImport.id,
+    model: AI_MODEL_DEEP,
+    filtered: isFiltered,
+    cached: false,
+    summary: body.summary,
+    actionPlan: body.actionPlan,
+    detailed: body.detailed,
+  };
+
+  // Validate against the API contract before caching/returning. coerceReport
+  // already normalizes the model output, so a failure here means a contract
+  // drift, not malformed model JSON; fail safe rather than emit an off-contract body.
+  const validated = AiReportResponse.safeParse(report);
+  if (!validated.success) {
+    req.log.warn({ importId, err: validated.error.message }, "AI report failed contract validation");
+    res.json(unavailableReport());
+    return;
+  }
+
+  // Cache only the canonical whole-import report (default baseline). Filtered
+  // slices and custom comparisons vary too much to cache.
+  if (cacheable) {
+    try {
+      await db
+        .update(importsTable)
+        .set({ aiReport: validated.data })
+        .where(eq(importsTable.id, toImport.id));
+    } catch (err) {
+      req.log.warn({ importId, err }, "Failed to cache AI report");
+    }
+  }
+
+  res.json(validated.data);
 });
 
 export default router;
