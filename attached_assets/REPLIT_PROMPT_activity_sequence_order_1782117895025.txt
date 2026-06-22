@@ -1,0 +1,68 @@
+REPLIT AGENT PROMPT — CANONICAL ACTIVITY SEQUENCE + ORDER ACTIVITIES BY IT EVERYWHERE
+=====================================================================================
+Set the authoritative process-step sequence and use it to ORDER activities everywhere
+in the app (dropdowns, tables, reports, legends, charts). Replace any alphabetical or
+arbitrary ordering of activities. Deterministic/display change; do not alter parsing,
+quantities, ageing, dedup, or the single-source Activity values (Activity is still read
+straight from the file).
+
+1) DEFINE THE CANONICAL SEQUENCE (single source of truth)
+Create ONE shared constant (e.g. in a shared lib imported by both server and frontend):
+
+  PROCESS_SEQUENCE = ["C","RFI","NH","B","HAB","HG","W","Q","TS","G","GB","Y"]
+
+Meaning (for tooltips/reference only):
+   1  C    Cutting (with P,S)
+   2  RFI  Ready for Inspection
+   3  NH   Notching / Hole
+   4  B    Bending
+   5  HAB  Heat / Assembly-Bending
+   6  HG   Grinding            (rarely used, but part of the sequence)
+   7  W    Welding
+   8  Q    Quality
+   9  TS   Tee Stock
+  10  G    Galvanizing
+  11  GB   Galvanizing & Bundle
+  12  Y    Yard
+
+Rules:
+ - This is the ONLY place the order is defined; everything else imports it.
+ - Order is W -> Q -> TS (Q before TS). HG is included at position 6 even though it is
+   seldom populated.
+ - Provide a helper: activityRank(code) -> index in PROCESS_SEQUENCE, and a comparator
+   that sorts activity codes by this rank. Case-insensitive match (normalize "Hab"/"HAB").
+
+2) ORDER ACTIVITIES BY THIS SEQUENCE EVERYWHERE (not alphabetical, not by count)
+Anywhere the app lists, groups, sorts, or iterates ACTIVITIES, use activityRank order:
+ - Activity filter DROPDOWNS (global filter bar, Job-wise report Activity dropdown, any
+   activity selector).
+ - The ACTIVITY dashboard cards/rows (C, RFI, NH, ... , Y in this order).
+ - The AGEING dashboard "activity-wise ageing" table rows.
+ - Any REPORT (Job-wise report, AI Reports breakdowns, exports/Excel) that lists per
+   activity.
+ - Chart axes / legends / stacked-bar segment order that are keyed by activity.
+ - Route progress indicators (already follow Operation; unchanged) — but any standalone
+   activity legend uses PROCESS_SEQUENCE order.
+Default sort for activity groupings = PROCESS_SEQUENCE order. (Users may still re-sort a
+table by another column if that feature exists; the DEFAULT and any dropdown order is
+sequence order.)
+
+3) UNKNOWN / EXTRA CODES
+Some files contain codes outside the 12 (e.g. NTF, NTFSW, BL, P, S). For ordering:
+ - Known codes sort by PROCESS_SEQUENCE rank.
+ - Unknown codes sort AFTER all known ones, grouped together at the end, in a stable
+   (e.g. alphabetical) order, and are still shown (never dropped). Optionally label them
+   "(other)" in legends.
+
+4) VALIDATION HOOK (light)
+Where the app validates activities (sanity/AI review), use PROCESS_SEQUENCE membership to
+flag unknown activity codes and to detect backward route moves; reference the same
+constant (do not hardcode a second list).
+
+ACCEPTANCE CHECK
+ - Every activity dropdown and every per-activity table/report/legend lists steps in the
+   order C, RFI, NH, B, HAB, HG, W, Q, TS, G, GB, Y (NOT alphabetical).
+ - Q appears before TS everywhere; HG appears at position 6 when present.
+ - Codes not in the 12 appear after the known steps, still visible, never dropped.
+ - Only ONE PROCESS_SEQUENCE constant exists; server and frontend both import it.
+ - No change to parsing, Activity values, quantities, ageing, or dedup.

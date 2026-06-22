@@ -33,7 +33,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { exportToJson, exportToXlsx, exportAiReportPdf } from "@/lib/export";
+import { exportToJson, exportToXlsx, exportAiReportPdf, type XlsxColumn } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import {
   Sparkles,
@@ -72,17 +72,17 @@ function ymd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-// [header label, record field] — controls both the on-screen table and the
-// exported .xlsx. Length/Width/Balance Qty/Balance Wt export as raw numbers.
-const REPORT_COLUMNS: [string, string][] = [
-  ["Mark No.", "markId"],
-  ["Activity", "activity"],
-  ["Section", "section"],
-  ["Length", "length"],
-  ["Width", "width"],
-  ["Balance Qty", "balanceQty"],
-  ["Balance Wt", "balanceWt"],
-  ["Contractor", "contractor"],
+// Controls the exported .xlsx. Numeric columns are right-aligned and number
+// formatted; Balance Qty/Wt carry a totals-row SUM. Wt stays in raw kg numbers.
+const REPORT_COLUMNS: XlsxColumn[] = [
+  { label: "Mark No.", field: "markId" },
+  { label: "Activity", field: "activity" },
+  { label: "Section", field: "section" },
+  { label: "Length", field: "length", numeric: true, decimals: 2 },
+  { label: "Width", field: "width", numeric: true, decimals: 2 },
+  { label: "Balance Qty", field: "balanceQty", numeric: true, decimals: 0, total: true },
+  { label: "Balance Wt", field: "balanceWt", numeric: true, decimals: 2, total: true },
+  { label: "Contractor", field: "contractor" },
 ];
 
 const TABLE_CAP = 500;

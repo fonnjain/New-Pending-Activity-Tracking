@@ -83,29 +83,142 @@ export async function exportCleanedXlsx(
   XLSX.writeFile(wb, filename);
 }
 
-// Export a set of rows to a real .xlsx file. `columns` is a list of
-// [header label, record field] tuples controlling order and what is written.
+// Column spec for the styled .xlsx export. `numeric` right-aligns the column and
+// applies a thousands-separated number format (`decimals` controls precision);
+// `total` adds a SUM for that column in the totals row at the bottom.
+export type XlsxColumn = {
+  label: string;
+  field: string;
+  numeric?: boolean;
+  decimals?: number;
+  total?: boolean;
+};
+
+function numFmt(decimals: number): string {
+  return decimals > 0 ? `#,##0.${"0".repeat(decimals)}` : "#,##0";
+}
+
+// Export rows to a clean, professionally formatted .xlsx using ExcelJS: bold
+// header band, frozen header row, auto-filter, auto-sized columns, right-aligned
+// number columns, and a bold totals row summing the flagged numeric columns.
 export async function exportToXlsx(
   filename: string,
-  columns: [string, string][],
+  columns: XlsxColumn[],
   rows: any[],
   sheetName = "Report",
 ) {
-  const XLSX = await import("xlsx");
-  const header = columns.map(([label]) => label);
-  const aoa: any[][] = [header];
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  wb.created = new Date();
+  const ws = wb.addWorksheet(sheetName, {
+    views: [{ state: "frozen", ySplit: 1 }],
+  });
+
+  // Parse a value for a numeric column: a finite number when possible, else
+  // null (never NaN), so anomalous non-numeric data never corrupts a cell.
+  const toNum = (v: any): number | null => {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // Columns: header label, number format + right alignment for numeric columns,
+  // and an auto-computed width from the widest value (clamped 10..48).
+  ws.columns = columns.map((c) => {
+    const decimals = c.decimals ?? (c.numeric ? 2 : 0);
+    let maxLen = c.label.length;
+    for (const r of rows) {
+      const v = r[c.field];
+      if (v == null) continue;
+      let text: string;
+      if (c.numeric) {
+        const n = toNum(v);
+        text =
+          n == null
+            ? ""
+            : n.toLocaleString(undefined, {
+                minimumFractionDigits: decimals,
+                maximumFractionDigits: decimals,
+              });
+      } else {
+        text = String(v);
+      }
+      if (text.length > maxLen) maxLen = text.length;
+    }
+    return {
+      header: c.label,
+      key: c.field,
+      width: Math.min(48, Math.max(10, maxLen + 2)),
+      style: c.numeric
+        ? { numFmt: numFmt(decimals), alignment: { horizontal: "right" } }
+        : { alignment: { horizontal: "left" } },
+    };
+  });
+
+  // Data rows. Numeric cells are written as real (finite) numbers or left blank
+  // so Excel treats them as numbers; text cells fall back to "".
   for (const r of rows) {
-    aoa.push(
-      columns.map(([, field]) => {
-        const v = r[field];
-        return v == null ? "" : v;
-      }),
-    );
+    const rowObj: Record<string, any> = {};
+    for (const c of columns) {
+      const v = r[c.field];
+      rowObj[c.field] = c.numeric ? toNum(v) : v == null ? "" : v;
+    }
+    ws.addRow(rowObj);
   }
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  XLSX.writeFile(wb, filename);
+
+  // Header band: bold white text on a dark fill, centered, with a thin border.
+  const headerRow = ws.getRow(1);
+  headerRow.height = 20;
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF1F2937" },
+    };
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+    cell.border = {
+      bottom: { style: "thin", color: { argb: "FF111827" } },
+    };
+  });
+
+  // Totals row: label in the first column, SUM for each flagged numeric column.
+  const hasTotals = columns.some((c) => c.total);
+  if (hasTotals && rows.length) {
+    const totalObj: Record<string, any> = {};
+    columns.forEach((c, i) => {
+      if (i === 0) {
+        totalObj[c.field] = "TOTAL";
+      } else if (c.total) {
+        totalObj[c.field] = rows.reduce((s, r) => s + (toNum(r[c.field]) ?? 0), 0);
+      }
+    });
+    const totalRow = ws.addRow(totalObj);
+    totalRow.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.border = { top: { style: "thin", color: { argb: "FF9CA3AF" } } };
+    });
+  }
+
+  // Auto-filter over the header row (Excel extends the dropdowns down the data).
+  ws.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: 1, column: columns.length },
+  };
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  link.style.visibility = "hidden";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 // Render the AI report result into a downloadable PDF. Plain text layout with
