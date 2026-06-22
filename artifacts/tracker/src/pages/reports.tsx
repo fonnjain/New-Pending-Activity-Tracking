@@ -81,7 +81,7 @@ const REPORT_COLUMNS: XlsxColumn[] = [
   { label: "Length", field: "length", numeric: true, decimals: 2 },
   { label: "Width", field: "width", numeric: true, decimals: 2 },
   { label: "Balance Qty", field: "balanceQty", numeric: true, decimals: 0, total: true },
-  { label: "Balance Wt", field: "balanceWt", numeric: true, decimals: 2, total: true },
+  { label: "Balance Wt (kg)", field: "balanceWt", numeric: true, decimals: 2, total: true },
   { label: "Contractor", field: "contractor" },
 ];
 
