@@ -5,7 +5,9 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { useState, useMemo } from "react";
 import { Input } from "@/components/ui/input";
+import { SortControl } from "@/components/sort-control";
 import { formatWeight } from "@/lib/utils";
+import { sortRecords, type RecordSortKey } from "@/lib/sort";
 import { Search, ChevronLeft } from "lucide-react";
 import { compareActivity } from "@workspace/domain";
 
@@ -24,6 +26,7 @@ function AgeingContent() {
   });
   const records = useFilteredRecords(allRecords);
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<RecordSortKey>("activity");
 
   const [drill, setDrill] = useState<{ type: "contractor" | "activity"; value: string } | null>(null);
 
@@ -86,10 +89,7 @@ function AgeingContent() {
     return { totalMarks, totalQty, totalWt, avgAgeing, age0to30, age31to60, age60Plus, actStats, ctrStats };
   }, [records]);
 
-  const sortedFull = useMemo(
-    () => [...records].sort((a, b) => (b.ageingDays || 0) - (a.ageingDays || 0)),
-    [records]
-  );
+  const sortedFull = useMemo(() => sortRecords(records, sortBy), [records, sortBy]);
 
   const filteredFull = useMemo(() => {
     if (!search) return sortedFull;
@@ -236,15 +236,18 @@ function AgeingContent() {
                 : `${filteredFull.length} marks`}
             </span>
           </div>
-          <div className="relative w-64">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder="Search marks..."
-              className="pl-9 h-9"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+          <div className="flex items-center gap-2">
+            <SortControl value={sortBy} onChange={setSortBy} />
+            <div className="relative w-64">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder="Search marks..."
+                className="pl-9 h-9"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -288,12 +291,10 @@ function AgeingContent() {
 
 function AgeingDetail({ title, subtitle, records, onBack }: { title: string, subtitle: string, records: any[], onBack: () => void }) {
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<RecordSortKey>("activity");
   const [showAll, setShowAll] = useState(false);
 
-  const sorted = useMemo(
-    () => [...records].sort((a, b) => (b.ageingDays || 0) - (a.ageingDays || 0)),
-    [records]
-  );
+  const sorted = useMemo(() => sortRecords(records, sortBy), [records, sortBy]);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return sorted;
@@ -328,14 +329,17 @@ function AgeingDetail({ title, subtitle, records, onBack }: { title: string, sub
         </div>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search mark, structure, section, activity..."
-          className="pl-9"
-        />
+      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search mark, structure, section, activity..."
+            className="pl-9"
+          />
+        </div>
+        <SortControl value={sortBy} onChange={setSortBy} className="shrink-0" />
       </div>
 
       <Card>

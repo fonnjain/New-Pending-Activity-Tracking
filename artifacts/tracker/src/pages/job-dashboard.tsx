@@ -17,8 +17,10 @@ import {
 } from "@/components/ui/table";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DateRangeSelect } from "@/components/date-range-select";
+import { SortControl } from "@/components/sort-control";
 import { Input } from "@/components/ui/input";
 import { formatWeight } from "@/lib/utils";
+import { sortRecords, type RecordSortKey } from "@/lib/sort";
 import { ChevronLeft, Search } from "lucide-react";
 
 const ROW_CAP = 300;
@@ -361,6 +363,7 @@ function JobDetail({
   const [search, setSearch] = useState("");
   const [activity, setActivity] = useState<string | null>(null);
   const [contractor, setContractor] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<RecordSortKey>("activity");
   const [showAll, setShowAll] = useState(false);
 
   const activityOptions = useMemo(
@@ -392,15 +395,7 @@ function JobDetail({
     });
   }, [records, search, activity, contractor]);
 
-  const sortedRows = useMemo(() => {
-    return [...filtered].sort((a, b) => {
-      const s = String(a.structure ?? "").localeCompare(String(b.structure ?? ""));
-      if (s !== 0) return s;
-      const m = String(a.markId ?? "").localeCompare(String(b.markId ?? ""));
-      if (m !== 0) return m;
-      return (b.ageingDays ?? -1) - (a.ageingDays ?? -1);
-    });
-  }, [filtered]);
+  const sortedRows = useMemo(() => sortRecords(filtered, sortBy), [filtered, sortBy]);
 
   const structureCount = useMemo(
     () => new Set(filtered.map((r) => r.structure).filter(Boolean)).size,
@@ -473,6 +468,9 @@ function JobDetail({
 
       <Card>
         <CardContent className="p-0">
+          <div className="flex items-center justify-end px-4 py-3 border-b">
+            <SortControl value={sortBy} onChange={setSortBy} />
+          </div>
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
