@@ -48,7 +48,6 @@ import {
   ChevronDown,
   RefreshCw,
   ListFilter,
-  Check,
 } from "lucide-react";
 
 type ReportType = "jobwise" | "ai";
@@ -657,30 +656,6 @@ export default function ReportsView() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {REPORT_TYPES.map((t) => {
-              const active = t.id === reportType;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setReportType(t.id)}
-                  className={`text-left rounded-lg border p-4 transition-colors ${
-                    active
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:border-primary/40 hover:bg-muted/50"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-sm">{t.name}</span>
-                    {active && <Check className="w-4 h-4 text-primary" />}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">{t.description}</p>
-                </button>
-              );
-            })}
           </div>
         </CardContent>
       </Card>
