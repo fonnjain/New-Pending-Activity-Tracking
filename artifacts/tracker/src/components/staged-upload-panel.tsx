@@ -154,14 +154,14 @@ export function StagedUploadPanel({ onCommitted }: Props) {
           </div>
           <h3 className="text-lg font-bold mb-2">Upload Report</h3>
           <p className="text-sm text-muted-foreground mb-6 max-w-md">
-            Select an Excel (.xlsx) balance/activity report. The file is staged
-            and checked first. Nothing is imported until you accept. Re-uploading
-            the same file is safe and registers zero changes.
+            Select an Excel (.xlsx or .xls) balance/activity report. The file is
+            staged and checked first. Nothing is imported until you accept.
+            Re-uploading the same file is safe and registers zero changes.
           </p>
           <div className="relative">
             <input
               type="file"
-              accept=".xlsx"
+              accept=".xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               onChange={handleFileChange}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               disabled={busy}
@@ -195,7 +195,7 @@ export function StagedUploadPanel({ onCommitted }: Props) {
                 disabled={busy}
                 className="text-muted-foreground hover:text-destructive"
               >
-                Discard
+                Reset
               </Button>
             </div>
 

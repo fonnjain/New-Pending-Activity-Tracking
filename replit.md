@@ -1,6 +1,6 @@
 # Balance & Activity Tracker
 
-A mobile-first web app for steel-fabrication workshops. Upload an Excel (.xlsx) balance/activity report and instantly see pending work, live ageing, contractor workload, and activity progress across five views.
+A mobile-first web app for steel-fabrication workshops. Upload an Excel (.xlsx or legacy .xls) balance/activity report and instantly see pending work, live ageing, contractor workload, and activity progress across five views.
 
 ## Run & Operate
 
