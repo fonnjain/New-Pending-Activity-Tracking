@@ -21,7 +21,7 @@ sheet(
   "Upload Template",
   [
     ["Balance & Activity Report (sample template)"],
-    ["Header is on row 3. Fill data from row 4 onward. Keep these column names exactly."],
+    ["Header row is auto-detected (the row containing 'Project Code'); data starts on the next row. Keep these column names exactly."],
     headers,
     ["794", "Supply", "ABC Fabricators", "JC-1001", "TypeA", "SubA", "T01", "794 T01-M1", "ISA 75x75x6", 1500, 75, 12.5, 10, 125.0, "2026-06-01", "Cutting", "Cutting,Fit-up,Welding,Painting", ""],
     ["", "Supply", "ABC Fabricators", "JC-1001", "TypeA", "SubA", "T01", "794 T01-M2", "ISA 75x75x6", 1500, 75, 12.5, 4, 50.0, "2026-06-01", "Fit-up", "Cutting,Fit-up,Welding,Painting", ""],
@@ -94,11 +94,15 @@ sheet(
     ["Permanent, append-only store of distinct full rows (deduped across uploads by hash)"],
     ["Column", "Type", "Description"],
     ["id", "serial PK", "Pool row id"],
-    ["hash", "text unique", "SHA-256 of all 18 normalized fields; identical rows share it"],
+    ["hash", "text unique", "SHA-256 of the original 18 source fields; identical rows share it (derived mark fields excluded)"],
     ["job", "text", "Forward-filled, normalized Project Code"],
-    ["structure", "text", "Derived from Alias"],
-    ["mark_tail", "text", "Mark No. with '<job> <alias>-' prefix stripped"],
-    ["mark_id", "text", "job\\structure\\markTail (human-facing identity)"],
+    ["structure", "text", "= alias_corrected"],
+    ["mark_tail", "text", "= m_no"],
+    ["mark_id", "text", "= mark_number (human-facing + change-log identity)"],
+    ["m_no", "text", "Parsed bare mark tail (e.g. M101); notNull default ''"],
+    ["project_suffix", "text", "Project segment of a backslash mark, else ''; notNull default ''"],
+    ["alias_corrected", "text", "Structure/alias resolved from the mark (falls back to Alias); notNull default ''"],
+    ["mark_number", "text", "job\\alias_corrected\\m_no (canonical backslash identity); notNull default ''"],
     ["order_nature", "text/null", "Order Nature"],
     ["contractor", "text/null", "Contractor"],
     ["job_card_no", "text/null", "Job Card No."],
@@ -131,6 +135,22 @@ sheet(
     ["copies", "integer", "How many copies of this pool row this import contains (preserves in-sheet duplicates)"],
   ],
   [16, 14, 60],
+);
+
+// 6b. DB: upload_staging table
+sheet(
+  "Table - upload_staging",
+  [
+    ["Temporary holding for the gatekeeper flow; nothing is committed until the user accepts. Removed on commit or discard."],
+    ["Column", "Type", "Description"],
+    ["id", "text (uuid) PK", "Staging id returned by POST /imports/stage"],
+    ["source_filename", "text", "Original file name"],
+    ["label", "text/null", "Friendly name (optional)"],
+    ["report_date", "date/null", "'As of' date (optional)"],
+    ["file_data", "bytea", "Raw uploaded .xlsx bytes"],
+    ["created_at", "timestamp", "When it was staged"],
+  ],
+  [18, 16, 56],
 );
 
 // 7. ParseSummary
@@ -191,7 +211,11 @@ sheet(
     ["Method & path", "Input / parameters", "Returns"],
     ["GET /healthz", "none", "{ status }"],
     ["GET /imports", "none", "All imports, newest first"],
-    ["POST /imports", "multipart: file (req), label, reportDate", "Created import + change set"],
+    ["POST /imports", "multipart: file (req), label, reportDate", "Created import + change set (direct, no gate)"],
+    ["POST /imports/stage", "multipart: file (req), label, reportDate", "{ stagingId, sourceFilename, structural } — holds the file; nothing committed"],
+    ["POST /imports/validate", "json { stagingId }", "Gatekeeper verdict (ok/reject) + descriptive-only sanitize suggestions (advisory)"],
+    ["POST /imports/commit", "json { stagingId, acceptedSuggestions? }", "Applies accepted (field,from)->to cleanups, merges, returns created import + change set"],
+    ["DELETE /imports/stage/{id}", "path id", "204; discards a staged upload without committing"],
     ["DELETE /imports", "none", "{ importsDeleted, poolRowsDeleted } — full reset"],
     ["GET /imports/{id}", "path id", "One import with summaries"],
     ["DELETE /imports/{id}", "path id", "204; deletes the import only (pool stays)"],

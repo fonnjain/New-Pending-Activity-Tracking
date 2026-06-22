@@ -22,6 +22,7 @@ import type {
 import type {
   AiStatus,
   ChangeSet,
+  CommitRequest,
   CompareImportsParams,
   DeleteAllResult,
   ErrorResponse,
@@ -35,7 +36,10 @@ import type {
   ReviewResult,
   SanitizeRequest,
   SanitizeResult,
-  UploadResult
+  StageResult,
+  UploadResult,
+  ValidateRequest,
+  ValidationResult
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -358,6 +362,304 @@ export const useDeleteAllImports = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteAllImportsMutationOptions(options));
+    }
+
+export const getStageImportUrl = () => {
+
+
+
+
+  return `/api/imports/stage`
+}
+
+/**
+ * Accepts ANY uploaded file and holds its raw bytes in a short-lived staging area WITHOUT writing to the record pool or imports ledger. Performs a best-effort structural read (header detection, columns found vs expected, row count, problems) and returns a stagingId used by validate and commit. Nothing is committed here.
+
+ * @summary Stage a raw upload for validation
+ */
+export const stageImport = async (importUpload: ImportUpload, options?: RequestInit): Promise<StageResult> => {
+    const formData = new FormData();
+formData.append(`file`, importUpload.file);
+if(importUpload.label !== undefined) {
+ formData.append(`label`, importUpload.label);
+ }
+if(importUpload.reportDate !== undefined) {
+ formData.append(`reportDate`, importUpload.reportDate);
+ }
+
+  return customFetch<StageResult>(getStageImportUrl(),
+  {
+    ...options,
+    method: 'POST'
+    ,
+    body:
+      formData,
+  }
+);}
+
+
+
+
+export const getStageImportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stageImport>>, TError,{data: BodyType<ImportUpload>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof stageImport>>, TError,{data: BodyType<ImportUpload>}, TContext> => {
+
+const mutationKey = ['stageImport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof stageImport>>, {data: BodyType<ImportUpload>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  stageImport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StageImportMutationResult = NonNullable<Awaited<ReturnType<typeof stageImport>>>
+    export type StageImportMutationBody = BodyType<ImportUpload>
+    export type StageImportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Stage a raw upload for validation
+ */
+export const useStageImport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stageImport>>, TError,{data: BodyType<ImportUpload>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof stageImport>>,
+        TError,
+        {data: BodyType<ImportUpload>},
+        TContext
+      > => {
+      return useMutation(getStageImportMutationOptions(options));
+    }
+
+export const getValidateStagedImportUrl = () => {
+
+
+
+
+  return `/api/imports/validate`
+}
+
+/**
+ * Sends a compact, descriptive-only sample of the staged file to Claude, which acts as a gatekeeper: it returns a verdict (ok | reject) and, when ok, optional descriptive sanitize suggestions (never identity/quantity/engine fields). Read-only and advisory: it never writes data. When ANTHROPIC_API_KEY is unset, returns available:false so the UI can offer "Skip check & import as-is".
+
+ * @summary Validate a staged upload with the AI gatekeeper
+ */
+export const validateStagedImport = async (validateRequest: ValidateRequest, options?: RequestInit): Promise<ValidationResult> => {
+
+  return customFetch<ValidationResult>(getValidateStagedImportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      validateRequest,)
+  }
+);}
+
+
+
+
+export const getValidateStagedImportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof validateStagedImport>>, TError,{data: BodyType<ValidateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof validateStagedImport>>, TError,{data: BodyType<ValidateRequest>}, TContext> => {
+
+const mutationKey = ['validateStagedImport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof validateStagedImport>>, {data: BodyType<ValidateRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  validateStagedImport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ValidateStagedImportMutationResult = NonNullable<Awaited<ReturnType<typeof validateStagedImport>>>
+    export type ValidateStagedImportMutationBody = BodyType<ValidateRequest>
+    export type ValidateStagedImportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Validate a staged upload with the AI gatekeeper
+ */
+export const useValidateStagedImport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof validateStagedImport>>, TError,{data: BodyType<ValidateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof validateStagedImport>>,
+        TError,
+        {data: BodyType<ValidateRequest>},
+        TContext
+      > => {
+      return useMutation(getValidateStagedImportMutationOptions(options));
+    }
+
+export const getCommitStagedImportUrl = () => {
+
+
+
+
+  return `/api/imports/commit`
+}
+
+/**
+ * Applies any user-accepted descriptive suggestions to the staged data, then runs the SAME deterministic parse + append-only merge as a direct upload, creating a new import. The staged row is deleted afterwards. Accepted suggestions only touch descriptive fields and never change row identity, quantities, or any computed/engine field.
+
+ * @summary Commit a staged upload
+ */
+export const commitStagedImport = async (commitRequest: CommitRequest, options?: RequestInit): Promise<UploadResult> => {
+
+  return customFetch<UploadResult>(getCommitStagedImportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      commitRequest,)
+  }
+);}
+
+
+
+
+export const getCommitStagedImportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitStagedImport>>, TError,{data: BodyType<CommitRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof commitStagedImport>>, TError,{data: BodyType<CommitRequest>}, TContext> => {
+
+const mutationKey = ['commitStagedImport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof commitStagedImport>>, {data: BodyType<CommitRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  commitStagedImport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CommitStagedImportMutationResult = NonNullable<Awaited<ReturnType<typeof commitStagedImport>>>
+    export type CommitStagedImportMutationBody = BodyType<CommitRequest>
+    export type CommitStagedImportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Commit a staged upload
+ */
+export const useCommitStagedImport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitStagedImport>>, TError,{data: BodyType<CommitRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof commitStagedImport>>,
+        TError,
+        {data: BodyType<CommitRequest>},
+        TContext
+      > => {
+      return useMutation(getCommitStagedImportMutationOptions(options));
+    }
+
+export const getDiscardStagedImportUrl = (id: string,) => {
+
+
+
+
+  return `/api/imports/stage/${id}`
+}
+
+/**
+ * Removes a staged upload without committing it. Idempotent.
+ * @summary Discard a staged upload
+ */
+export const discardStagedImport = async (id: string, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDiscardStagedImportUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDiscardStagedImportMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardStagedImport>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof discardStagedImport>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['discardStagedImport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof discardStagedImport>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  discardStagedImport(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DiscardStagedImportMutationResult = NonNullable<Awaited<ReturnType<typeof discardStagedImport>>>
+
+    export type DiscardStagedImportMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Discard a staged upload
+ */
+export const useDiscardStagedImport = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardStagedImport>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof discardStagedImport>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getDiscardStagedImportMutationOptions(options));
     }
 
 export const getCompareImportsUrl = (params: CompareImportsParams,) => {

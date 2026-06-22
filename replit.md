@@ -48,12 +48,21 @@ A mobile-first web app for steel-fabrication workshops. Upload an Excel (.xlsx) 
 
 ## Parsing rules (parse.ts)
 
-- Reads `Sheet1` (falls back to first sheet); header is on the 3rd row (`range: 2`); reads all 18 columns.
+- Reads `Sheet1` (falls back to first sheet); reads all 18 columns.
+- **Header row auto-detected:** scans the first ~10 rows for the one containing `Project Code`; data starts on the next row. Falls back to the 3rd row (historical layout) with a problem note if not found.
 - Forward-fills `Project Code`; normalizes `"794."`→`794`, `"920.0"`→`920`.
 - Keeps only rows with a non-empty `Mark No.`.
-- `mark_id` = `job\structure\markTail`; `markTail` strips the `"<job> <alias>-"` prefix (not a naive split on first hyphen).
-- NO within-file dedup: every kept row becomes a pending unit; a full-row SHA-256 `hash` dedups across uploads only.
+- **Mark No. → 4 derived fields (check backslash FIRST):** (1) `794\T1\M101` → split on `\`: projectSuffix/aliasCorrected/mNo; (2) `794 T1-M101` → strip `"<job> <alias>-"` prefix: aliasCorrected=alias, mNo=tail; (3) plain/fallback → whole value (minus leading `"<job> "`) is mNo, aliasCorrected falls back to `Alias`. `markNumber` = `job\aliasCorrected\mNo`.
+- Legacy fields are aliases: `structure`=aliasCorrected, `markTail`=mNo, `markId`=markNumber. Change-log identity = `markId|jobCardNo`.
+- `hash` is SHA-256 over the **original 18 source columns ONLY** (derived mark fields excluded), so cleanups that touch derived fields don't change identity.
+- NO within-file dedup: every kept row becomes a pending unit; the `hash` dedups across uploads only.
 - Ageing color scale (used everywhere): green ≤30, amber 31–60, red >60, neutral when no date.
+
+## Upload: direct vs staged gatekeeper flow
+
+- **Direct:** `POST /imports` parses, merges, and commits in one step (no gate). Still available.
+- **Staged (gatekeeper):** `POST /imports/stage` holds the raw file in `upload_staging` (bytea) and returns a structural read; `POST /imports/validate` runs the Claude gatekeeper (verdict `ok`/`reject` + descriptive-only sanitize suggestions, `available:false` when no key); `POST /imports/commit` applies accepted `(field,from)→to` cleanups over the staged rows, re-hashes, then merges. `DELETE /imports/stage/{id}` discards. **Nothing is written to `record_pool`/`import_rows`/`imports` until commit.**
+- Both paths share `mergeImport()` in `routes/imports.ts`. Accepted cleanups are remapped onto the base 18 source fields BEFORE hashing; mark identity is untouched. The gatekeeper is advisory only — it never mutates computed fields; the engine stays authoritative. UI is `staged-upload-panel.tsx` (wired into the Data view).
 
 ## Product
 

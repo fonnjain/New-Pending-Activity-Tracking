@@ -1,18 +1,18 @@
-import { useListImports, useUploadImport, useGetImportRecords, useDeleteImport, useDeleteAllImports, getListImportsQueryKey, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, getListImportsQueryKey, getGetImportRecordsQueryKey, type UploadResult } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Upload, FileDown, CheckCircle2, Trash2, DownloadCloud, AlertTriangle } from "lucide-react";
+import { FileDown, CheckCircle2, Trash2, DownloadCloud, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToCsv, exportToJson } from "@/lib/export";
 import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { AiReviewPanel } from "@/components/ai-review-panel";
+import { StagedUploadPanel } from "@/components/staged-upload-panel";
 import { useQueryClient } from "@tanstack/react-query";
 
 export default function DataView() {
   const { data: imports = [], refetch } = useListImports();
   const { selectedImportId, setSelectedImportId } = useTracker();
-  const upload = useUploadImport();
   const deleteImport = useDeleteImport();
   const deleteAll = useDeleteAllImports();
   const { toast } = useToast();
@@ -25,27 +25,15 @@ export default function DataView() {
 
   const selectedImport = imports.find(s => s.id === selectedImportId);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    upload.mutate({ data: { file } }, {
-      onSuccess: (res) => {
-        const c = res.changeSet.counts;
-        toast({
-          title: "Import added",
-          description: `${res.import.summary.rowsKept.toLocaleString()} rows kept. ${c.addedRows.toLocaleString()} new, ${c.completed.toLocaleString()} completed since the last upload.`,
-        });
-        refetch();
-        setSelectedImportId(res.import.id);
-        queryClient.invalidateQueries({ queryKey: getListImportsQueryKey() });
-      },
-      onError: (err) => {
-        toast({ variant: "destructive", title: "Upload failed", description: err?.data?.error || err?.message || "Unknown error" });
-      }
+  const handleCommitted = (res: UploadResult) => {
+    const c = res.changeSet.counts;
+    toast({
+      title: "Import added",
+      description: `${res.import.summary.rowsKept.toLocaleString()} rows kept. ${c.addedRows.toLocaleString()} new, ${c.completed.toLocaleString()} completed since the last upload.`,
     });
-    // allow re-selecting the same file
-    e.target.value = "";
+    refetch();
+    setSelectedImportId(res.import.id);
+    queryClient.invalidateQueries({ queryKey: getListImportsQueryKey() });
   };
 
   const handleDelete = (id: number) => {
@@ -108,29 +96,7 @@ export default function DataView() {
         </p>
       </div>
 
-      <Card className="border-dashed border-2 bg-muted/10">
-        <CardContent className="flex flex-col items-center justify-center p-12 text-center">
-          <div className="w-16 h-16 bg-primary/10 text-primary rounded-full flex items-center justify-center mb-4">
-            <Upload className="w-8 h-8" />
-          </div>
-          <h3 className="text-lg font-bold mb-2">Upload Report</h3>
-          <p className="text-sm text-muted-foreground mb-6 max-w-md">
-            Upload an Excel (.xlsx) balance/activity report. It is appended as a new import and compared against the previous one. Re-uploading the same file is safe and registers zero changes.
-          </p>
-          <div className="relative">
-            <input
-              type="file"
-              accept=".xlsx"
-              onChange={handleFileChange}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              disabled={upload.isPending}
-            />
-            <Button disabled={upload.isPending} className="px-8 font-bold text-primary-foreground">
-              {upload.isPending ? "UPLOADING..." : "SELECT FILE"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <StagedUploadPanel onCommitted={handleCommitted} />
 
       {selectedImportId && <AiSanitizePanel importId={selectedImportId} />}
 

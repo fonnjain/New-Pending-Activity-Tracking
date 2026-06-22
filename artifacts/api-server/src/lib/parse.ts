@@ -94,29 +94,80 @@ const COL = {
   refJobCard: "Ref. Job Card No.",
 } as const;
 
-function deriveMark(
+// Derived identity for a Mark No. (col H). Decided by col H content; the
+// BACKSLASH case is checked FIRST. See the three cases below.
+export interface DerivedMark {
+  structure: string; // = aliasCorrected (authoritative; may override col G)
+  markTail: string; // = mNo (the mark's own number, kept intact)
+  mNo: string;
+  projectSuffix: string;
+  aliasCorrected: string;
+  markNumber: string; // canonical mark key (aligns with markId)
+}
+
+export function deriveMark(
   markNo: string,
   job: string,
   alias: string,
-): { structure: string; markTail: string } {
-  const structure = alias || "";
-  const fullPrefix = `${job} ${alias}-`;
-  const aliasPrefix = `${alias}-`;
-  let markTail = markNo;
-  if (alias && job && markNo.startsWith(fullPrefix)) {
-    markTail = markNo.slice(fullPrefix.length);
-  } else if (alias && markNo.startsWith(aliasPrefix)) {
-    markTail = markNo.slice(aliasPrefix.length);
-  } else {
-    // Fallback: strip a leading "<job> " token if present, then take after first hyphen group
-    let rest = markNo;
-    if (job && rest.startsWith(`${job} `)) rest = rest.slice(job.length + 1);
-    if (alias && rest.startsWith(`${alias}-`)) {
-      rest = rest.slice(alias.length + 1);
-    }
-    markTail = rest;
+): DerivedMark {
+  const h = markNo.trim();
+
+  // CASE 3 — col H CONTAINS a backslash, e.g. "775 IS-775\OB6M\3".
+  if (h.includes("\\")) {
+    const parts = h.split("\\");
+    const aliasCorrected = (parts[1] ?? "").trim();
+    const mNo = (parts[parts.length - 1] ?? "").trim();
+    const projectSuffix = alias; // excel Alias (col G) is really the suffix here
+    const markNumber = `${job}-${projectSuffix}\\${aliasCorrected}\\${mNo}`;
+    return {
+      structure: aliasCorrected,
+      markTail: mNo,
+      mNo,
+      projectSuffix,
+      aliasCorrected,
+      markNumber,
+    };
   }
-  return { structure, markTail: markTail.trim() };
+
+  // CASE 1 — col H has NO hyphen and NO backslash, e.g. "01", "11".
+  if (!h.includes("-")) {
+    const mNo = h;
+    const aliasCorrected = alias;
+    // No "<job> <alias>-" prefix because job & alias are normally empty here.
+    const markNumber =
+      job || aliasCorrected
+        ? `${job}\\${aliasCorrected}\\${mNo}`
+        : mNo;
+    return {
+      structure: aliasCorrected,
+      markTail: mNo,
+      mNo,
+      projectSuffix: "",
+      aliasCorrected,
+      markNumber,
+    };
+  }
+
+  // CASE 2 — col H has a hyphen, NO backslash, e.g. "811 3S5-143".
+  const aliasCorrected = alias;
+  const prefix = `${job} ${aliasCorrected}-`;
+  let mNo: string;
+  if (job && aliasCorrected && h.startsWith(prefix)) {
+    mNo = h.slice(prefix.length).trim();
+  } else {
+    // Defensive: strip up to and including the FIRST hyphen.
+    const idx = h.indexOf("-");
+    mNo = h.slice(idx + 1).trim();
+  }
+  const markNumber = `${job}\\${aliasCorrected}\\${mNo}`;
+  return {
+    structure: aliasCorrected,
+    markTail: mNo,
+    mNo,
+    projectSuffix: "",
+    aliasCorrected,
+    markNumber,
+  };
 }
 
 // Canonical, order-stable serialization of all normalized source fields, hashed
@@ -145,22 +196,185 @@ function hashRow(row: Omit<InsertRecordPool, "hash">): string {
   return createHash("sha256").update(parts.join("\u0001")).digest("hex");
 }
 
-export function parseWorkbook(buffer: Buffer): ParseResult {
+// Scan the first ~10 rows of a sheet-as-grid for a cell whose trimmed text
+// equals "Project Code" (case-insensitive); return that 0-based row index, or
+// null when none is found.
+function detectHeaderInGrid(grid: unknown[][]): number | null {
+  const limit = Math.min(grid.length, 10);
+  for (let i = 0; i < limit; i++) {
+    const cells = grid[i];
+    if (!Array.isArray(cells)) continue;
+    for (const cell of cells) {
+      if (
+        typeof cell === "string" &&
+        cell.trim().toLowerCase() === "project code"
+      ) {
+        return i;
+      }
+    }
+  }
+  return null;
+}
+
+// The header is no longer assumed to be on the third row. Falls back to index 2
+// when no "Project Code" header is found.
+export function detectHeaderRow(ws: XLSX.WorkSheet): number {
+  const grid = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+    header: 1,
+    defval: null,
+    raw: false,
+    blankrows: true,
+  });
+  return detectHeaderInGrid(grid) ?? 2;
+}
+
+// Descriptive fields that may be value-cleaned before commit. Deliberately
+// EXCLUDES anything that changes row identity (job/structure/markTail/markNo/
+// alias) or any computed/engine field. Mirrors the AI sanitize allow-list.
+export const CLEANABLE_FIELDS = [
+  "contractor",
+  "section",
+  "assignDate",
+  "towerType",
+  "towerSubType",
+  "orderNature",
+  "refJobCardNo",
+] as const;
+export type CleanableField = (typeof CLEANABLE_FIELDS)[number];
+
+export interface Cleanup {
+  field: string;
+  from: string | null;
+  to: string | null;
+}
+
+const NULL_SENTINEL = "\u0000__null__";
+
+function buildCleanupMap(
+  cleanups: Cleanup[] | undefined,
+): Map<CleanableField, Map<string, string | null>> {
+  const map = new Map<CleanableField, Map<string, string | null>>();
+  if (!cleanups) return map;
+  const allowed = new Set<string>(CLEANABLE_FIELDS);
+  for (const c of cleanups) {
+    if (!allowed.has(c.field)) continue;
+    const field = c.field as CleanableField;
+    let inner = map.get(field);
+    if (!inner) {
+      inner = new Map();
+      map.set(field, inner);
+    }
+    inner.set(c.from ?? NULL_SENTINEL, c.to);
+  }
+  return map;
+}
+
+// Resolve the worksheet to parse (Sheet1 when present, else the first sheet).
+function resolveSheet(buffer: Buffer): { name: string; ws: XLSX.WorkSheet } {
   const wb = XLSX.read(buffer, { cellDates: true });
-  const sheetName = wb.SheetNames.includes("Sheet1")
+  const name = wb.SheetNames.includes("Sheet1")
     ? "Sheet1"
     : wb.SheetNames[0];
-  if (!sheetName) {
-    throw new Error("Workbook has no sheets");
-  }
-  const ws = wb.Sheets[sheetName];
-  if (!ws) {
-    throw new Error("Could not read sheet");
+  if (!name) throw new Error("Workbook has no sheets");
+  const ws = wb.Sheets[name];
+  if (!ws) throw new Error("Could not read sheet");
+  return { name, ws };
+}
+
+export interface StructuralRead {
+  sheetName: string | null;
+  headerRow: number | null;
+  columnsFound: string[];
+  missingColumns: string[];
+  rowsRead: number;
+  rowsWithMark: number;
+  problems: string[];
+}
+
+// Best-effort, AI-free structural read of an uploaded file. Never authoritative;
+// used by the staging flow to describe the file before commit.
+export function readStructural(buffer: Buffer): StructuralRead {
+  let name: string;
+  let ws: XLSX.WorkSheet;
+  try {
+    ({ name, ws } = resolveSheet(buffer));
+  } catch {
+    return {
+      sheetName: null,
+      headerRow: null,
+      columnsFound: [],
+      missingColumns: Object.values(COL),
+      rowsRead: 0,
+      rowsWithMark: 0,
+      problems: ["The file could not be read as a spreadsheet."],
+    };
   }
 
-  // header on the third row => header index 2 (0-based)
+  const grid = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+    header: 1,
+    defval: null,
+    raw: false,
+    blankrows: true,
+  });
+  const detected = detectHeaderInGrid(grid);
+  const headerRow = detected ?? 2;
+  const headerCells = Array.isArray(grid[headerRow]) ? grid[headerRow] : [];
+  const columnsFound = headerCells
+    .map((c) => (typeof c === "string" ? c.trim() : c == null ? "" : String(c)))
+    .filter((c) => c.length > 0);
+
+  const found = new Set(columnsFound);
+  const expected = Object.values(COL);
+  const missingColumns = expected.filter((c) => !found.has(c));
+
   const rawRows = XLSX.utils.sheet_to_json<RawRow>(ws, {
-    range: 2,
+    range: headerRow,
+    defval: null,
+    raw: true,
+  });
+  const rowsRead = rawRows.length;
+  let rowsWithMark = 0;
+  for (const row of rawRows) {
+    if (cellToString(row[COL.markNo])) rowsWithMark++;
+  }
+
+  const problems: string[] = [];
+  if (detected === null) {
+    problems.push(
+      'No "Project Code" header row was found in the first rows; assuming the third row.',
+    );
+  }
+  if (missingColumns.length > 0) {
+    problems.push(`Missing expected columns: ${missingColumns.join(", ")}.`);
+  }
+  if (rowsWithMark === 0) {
+    problems.push('No data rows have a non-empty "Mark No.".');
+  }
+
+  return {
+    sheetName: name,
+    headerRow,
+    columnsFound,
+    missingColumns,
+    rowsRead,
+    rowsWithMark,
+    problems,
+  };
+}
+
+export function parseWorkbook(
+  buffer: Buffer,
+  cleanups?: Cleanup[],
+): ParseResult {
+  const { ws } = resolveSheet(buffer);
+
+  // Header is no longer fixed to the third row. Scan the first rows for the one
+  // that contains a cell exactly equal to "Project Code"; data begins on the
+  // next row. Falls back to the third row (index 2) when not found.
+  const headerRow = detectHeaderRow(ws);
+  const cleanupMap = buildCleanupMap(cleanups);
+  const rawRows = XLSX.utils.sheet_to_json<RawRow>(ws, {
+    range: headerRow,
     defval: null,
     raw: true,
   });
@@ -184,8 +398,10 @@ export function parseWorkbook(buffer: Buffer): ParseResult {
 
     const alias = emptyToNull(row[COL.alias]);
     const aliasStr = alias ?? "";
-    const { structure, markTail } = deriveMark(markNo, job, aliasStr);
-    const markId = `${job}\\${structure}\\${markTail}`;
+    const { structure, markTail, mNo, projectSuffix, aliasCorrected, markNumber } =
+      deriveMark(markNo, job, aliasStr);
+    // markNumber is the canonical mark key; markId aligns with it.
+    const markId = markNumber;
 
     if (job) projects.add(job);
 
@@ -194,6 +410,10 @@ export function parseWorkbook(buffer: Buffer): ParseResult {
       structure,
       markTail,
       markId,
+      mNo,
+      projectSuffix,
+      aliasCorrected,
+      markNumber,
       orderNature: emptyToNull(row[COL.orderNature]),
       contractor: emptyToNull(row[COL.contractor]),
       jobCardNo: emptyToNull(row[COL.jobCard]),
@@ -212,6 +432,20 @@ export function parseWorkbook(buffer: Buffer): ParseResult {
       operation: emptyToNull(row[COL.operation]),
       refJobCardNo: emptyToNull(row[COL.refJobCard]),
     };
+
+    // Apply accepted descriptive-field cleanups (value remap) BEFORE hashing so
+    // cleaned rows dedup correctly. Identity fields are never touched here.
+    if (cleanupMap.size > 0) {
+      for (const field of CLEANABLE_FIELDS) {
+        const inner = cleanupMap.get(field);
+        if (!inner) continue;
+        const cur = base[field] as string | null;
+        const key = cur ?? NULL_SENTINEL;
+        if (inner.has(key)) {
+          (base as Record<string, unknown>)[field] = inner.get(key) ?? null;
+        }
+      }
+    }
 
     rows.push({ ...base, hash: hashRow(base) });
   }

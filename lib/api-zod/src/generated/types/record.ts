@@ -15,6 +15,14 @@ export interface Record {
   job: string;
   structure: string;
   markTail: string;
+  /** The mark's own number, parsed from "Mark No." (col H). */
+  mNo: string;
+  /** Project suffix from the Alias column when col H uses backslashes. */
+  projectSuffix: string;
+  /** Authoritative alias parsed from col H; overrides the Alias column in the backslash case. */
+  aliasCorrected: string;
+  /** Canonical mark key (aligns with markId). */
+  markNumber: string;
   markNo: string;
   /** @nullable */
   alias: string | null;

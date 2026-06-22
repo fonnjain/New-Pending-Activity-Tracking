@@ -113,6 +113,107 @@ export interface DeleteAllResult {
   poolRowsDeleted: number;
 }
 
+/**
+ * Best-effort structural read of a staged file; never authoritative.
+ */
+export interface StructuralRead {
+  /**
+     * Sheet used (Sheet1 when present, else the first sheet).
+     * @nullable
+     */
+  sheetName: string | null;
+  /**
+     * Detected 0-based header row index, or null when not detected.
+     * @nullable
+     */
+  headerRow: number | null;
+  /** Header labels read from the detected header row. */
+  columnsFound: string[];
+  /** Expected columns not present in the header. */
+  missingColumns: string[];
+  /** Data rows below the header (before any filtering). */
+  rowsRead: number;
+  /** Rows that have a non-empty Mark No. (the rows the engine keeps). */
+  rowsWithMark: number;
+  /** Human-readable structural problems detected without AI. */
+  problems: string[];
+}
+
+export interface StageResult {
+  stagingId: string;
+  sourceFilename: string;
+  structural: StructuralRead;
+}
+
+export interface ValidateRequest {
+  stagingId: string;
+}
+
+/**
+ * A descriptive-only cleanup the user may accept before commit.
+ */
+export interface StagedSanitizeSuggestion {
+  /** One of the allowed descriptive fields (never identity/quantity/engine). */
+  field: string;
+  /**
+     * Current value to be replaced across all matching rows.
+     * @nullable
+     */
+  from: string | null;
+  /**
+     * Cleaned value to apply.
+     * @nullable
+     */
+  to: string | null;
+  reason: string;
+  /** Number of staged rows whose field currently equals "from". */
+  count: number;
+}
+
+/**
+ * @nullable
+ */
+export type ValidationResultVerdict = typeof ValidationResultVerdict[keyof typeof ValidationResultVerdict] | null;
+
+
+export const ValidationResultVerdict = {
+  ok: 'ok',
+  reject: 'reject',
+} as const;
+
+export interface ValidationResult {
+  /** False when ANTHROPIC_API_KEY is unset; UI then offers import as-is. */
+  available: boolean;
+  /** @nullable */
+  verdict: ValidationResultVerdict;
+  /**
+     * Why the file was rejected, when verdict is reject.
+     * @nullable
+     */
+  reason: string | null;
+  /**
+     * A short description of the expected report shape, on reject.
+     * @nullable
+     */
+  expectedShape: string | null;
+  /** Optional descriptive cleanups, present only when verdict is ok. */
+  sanitize: StagedSanitizeSuggestion[];
+}
+
+export interface AcceptedSuggestion {
+  field: string;
+  /** @nullable */
+  from: string | null;
+  /** @nullable */
+  to: string | null;
+}
+
+export interface CommitRequest {
+  stagingId: string;
+  /** Descriptive cleanups the user accepted; applied before parse+merge. */
+  acceptedSuggestions?: AcceptedSuggestion[];
+}
+
 export interface Record {
   id: number;
   importId: number;
@@ -122,6 +223,14 @@ export interface Record {
   job: string;
   structure: string;
   markTail: string;
+  /** The mark's own number, parsed from "Mark No." (col H). */
+  mNo: string;
+  /** Project suffix from the Alias column when col H uses backslashes. */
+  projectSuffix: string;
+  /** Authoritative alias parsed from col H; overrides the Alias column in the backslash case. */
+  aliasCorrected: string;
+  /** Canonical mark key (aligns with markId). */
+  markNumber: string;
   markNo: string;
   /** @nullable */
   alias: string | null;

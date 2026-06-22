@@ -71,7 +71,9 @@ interface Agg {
 }
 
 function identityKey(r: PoolRowLite): string {
-  return [r.job, r.structure, r.markTail, r.jobCardNo ?? ""].join("\u0001");
+  // markId is the canonical mark key (= mark_number) and already encodes
+  // job / suffix / alias / mNo, so it subsumes the old job+structure+markTail.
+  return [r.markId, r.jobCardNo ?? ""].join("\u0001");
 }
 
 function aggregate(membership: MembershipRow[]): Map<string, Agg> {

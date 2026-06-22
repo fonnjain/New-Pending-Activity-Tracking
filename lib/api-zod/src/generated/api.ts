@@ -77,6 +77,66 @@ export const DeleteAllImportsResponse = zod.object({
 
 
 /**
+ * Accepts ANY uploaded file and holds its raw bytes in a short-lived staging area WITHOUT writing to the record pool or imports ledger. Performs a best-effort structural read (header detection, columns found vs expected, row count, problems) and returns a stagingId used by validate and commit. Nothing is committed here.
+
+ * @summary Stage a raw upload for validation
+ */
+export const StageImportBody = zod.object({
+  "file": zod.instanceof(File),
+  "label": zod.string().optional(),
+  "reportDate": zod.string().optional()
+})
+
+
+/**
+ * Sends a compact, descriptive-only sample of the staged file to Claude, which acts as a gatekeeper: it returns a verdict (ok | reject) and, when ok, optional descriptive sanitize suggestions (never identity/quantity/engine fields). Read-only and advisory: it never writes data. When ANTHROPIC_API_KEY is unset, returns available:false so the UI can offer "Skip check & import as-is".
+
+ * @summary Validate a staged upload with the AI gatekeeper
+ */
+export const ValidateStagedImportBody = zod.object({
+  "stagingId": zod.string()
+})
+
+export const ValidateStagedImportResponse = zod.object({
+  "available": zod.boolean().describe('False when ANTHROPIC_API_KEY is unset; UI then offers import as-is.'),
+  "verdict": zod.union([zod.literal('ok'),zod.literal('reject'),zod.literal(null)]).nullable(),
+  "reason": zod.string().nullable().describe('Why the file was rejected, when verdict is reject.'),
+  "expectedShape": zod.string().nullable().describe('A short description of the expected report shape, on reject.'),
+  "sanitize": zod.array(zod.object({
+  "field": zod.string().describe('One of the allowed descriptive fields (never identity\/quantity\/engine).'),
+  "from": zod.string().nullable().describe('Current value to be replaced across all matching rows.'),
+  "to": zod.string().nullable().describe('Cleaned value to apply.'),
+  "reason": zod.string(),
+  "count": zod.number().describe('Number of staged rows whose field currently equals \"from\".')
+}).describe('A descriptive-only cleanup the user may accept before commit.')).describe('Optional descriptive cleanups, present only when verdict is ok.')
+})
+
+
+/**
+ * Applies any user-accepted descriptive suggestions to the staged data, then runs the SAME deterministic parse + append-only merge as a direct upload, creating a new import. The staged row is deleted afterwards. Accepted suggestions only touch descriptive fields and never change row identity, quantities, or any computed/engine field.
+
+ * @summary Commit a staged upload
+ */
+export const CommitStagedImportBody = zod.object({
+  "stagingId": zod.string(),
+  "acceptedSuggestions": zod.array(zod.object({
+  "field": zod.string(),
+  "from": zod.string().nullable(),
+  "to": zod.string().nullable()
+})).optional().describe('Descriptive cleanups the user accepted; applied before parse+merge.')
+})
+
+
+/**
+ * Removes a staged upload without committing it. Idempotent.
+ * @summary Discard a staged upload
+ */
+export const DiscardStagedImportParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+
+/**
  * Returns the full field-level change set between two arbitrary imports.
  * @summary Compare any two imports
  */
@@ -221,6 +281,10 @@ export const GetImportRecordsResponseItem = zod.object({
   "job": zod.string(),
   "structure": zod.string(),
   "markTail": zod.string(),
+  "mNo": zod.string().describe('The mark\'s own number, parsed from \"Mark No.\" (col H).'),
+  "projectSuffix": zod.string().describe('Project suffix from the Alias column when col H uses backslashes.'),
+  "aliasCorrected": zod.string().describe('Authoritative alias parsed from col H; overrides the Alias column in the backslash case.'),
+  "markNumber": zod.string().describe('Canonical mark key (aligns with markId).'),
   "markNo": zod.string(),
   "alias": zod.string().nullable(),
   "section": zod.string().nullable(),

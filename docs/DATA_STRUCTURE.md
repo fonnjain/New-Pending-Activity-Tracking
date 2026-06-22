@@ -12,11 +12,13 @@ You upload one `.xlsx` balance/activity report per import. The parser reads it
 with these fixed expectations:
 
 - **Sheet:** `Sheet1` (if absent, the first sheet is used).
-- **Header row:** the **3rd row** of the sheet (rows 1–2 are title/blank rows
-  and are ignored).
+- **Header row:** **auto-detected.** The parser scans the first ~10 rows for the
+  one containing `Project Code` and treats it as the header; data begins on the
+  next row. If no such row is found it falls back to the **3rd row** (the
+  historical layout) and records a problem note.
 - **Columns read:** the 18 columns below, matched by their exact header text.
 
-### Expected columns (header row, 3rd row of the sheet)
+### Expected columns (in the auto-detected header row)
 
 | Header text          | Meaning                                  | Type        | Required |
 |----------------------|------------------------------------------|-------------|----------|
@@ -68,15 +70,40 @@ For every kept row the parser produces a normalized record:
 
 - **`job`** = the (forward-filled, normalized) Project Code.
 - **`alias`** = the Alias cell (or `null`).
-- **`structure`** = the Alias value (empty string if no alias).
-- **`markTail`** = `Mark No.` with the `"<job> <alias>-"` prefix stripped (with
-  fallbacks for `"<alias>-"` or a leading `"<job> "` token). This is **not** a
-  naive split on the first hyphen.
-- **`markId`** = `job\structure\markTail` (backslash-separated). This is the
-  human-facing mark identity.
-- **`hash`** = a SHA-256 of all 18 normalized fields joined in a fixed order.
-  Two rows with byte-identical normalized content share a hash. This is the key
-  used to deduplicate **across** uploads.
+
+#### Mark No. parsing (4 derived fields)
+
+The raw `Mark No.` is parsed into four derived fields. The parser checks for a
+**backslash first**, then handles the two hyphen layouts:
+
+1. **Backslash form** (e.g. `794\T1\M101`): split on `\`. First segment →
+   `projectSuffix`, middle → `aliasCorrected`, last → `mNo`.
+2. **`<job> <alias>-<tail>` form** (e.g. `794 T1-M101`): the leading
+   `"<job> <alias>-"` prefix is stripped; `aliasCorrected` = the alias token,
+   `mNo` = the tail, `projectSuffix` = "".
+3. **Plain / fallback form**: the whole value (after stripping any leading
+   `"<job> "` token) becomes `mNo`; `aliasCorrected` falls back to the `Alias`
+   cell; `projectSuffix` = "".
+
+The four derived fields are:
+
+- **`mNo`** — the bare mark tail (e.g. `M101`).
+- **`projectSuffix`** — the project-code segment of a backslash mark, else "".
+- **`aliasCorrected`** — the structure/alias as resolved from the mark (falls
+  back to the `Alias` cell).
+- **`markNumber`** = `job\aliasCorrected\mNo` — the canonical backslash mark
+  identity.
+
+These then drive the legacy fields:
+
+- **`structure`** = `aliasCorrected`.
+- **`markTail`** = `mNo`.
+- **`markId`** = `markNumber`. This is the human-facing mark identity and the
+  change-log identity (with `jobCardNo`).
+- **`hash`** = a SHA-256 of the **original 18 source columns** joined in a fixed
+  order (the derived mark fields are **not** part of the hash). Two rows with
+  byte-identical source content share a hash. This is the key used to
+  deduplicate **across** uploads.
 
 ### Deduplication: two layers, opposite intent
 
@@ -117,22 +144,28 @@ immutable **import**; imports never overwrite each other.
 
 One row per distinct full-row `hash`. Rows are **never mutated or deleted**
 (except by a full "Delete all data" reset). Holds all 18 source fields plus the
-derived `structure`, `markTail`, `markId`, and `hash`.
+derived `structure`, `markTail`, `markId`, the four parsed mark fields (`m_no`,
+`project_suffix`, `alias_corrected`, `mark_number`), and `hash`.
 
 | Column | Type | | Column | Type |
 |---|---|---|---|---|
-| `id` | serial PK | | `mark_no` | text |
-| `hash` | text unique | | `section` | text/null |
-| `job` | text | | `length` | number/null |
-| `structure` | text | | `width` | number/null |
-| `mark_tail` | text | | `wt_pcs` | number/null |
-| `mark_id` | text | | `balance_qty` | number |
-| `order_nature` | text/null | | `balance_wt` | number |
-| `contractor` | text/null | | `assign_date` | date/null |
-| `job_card_no` | text/null | | `activity` | text/null |
-| `tower_type` | text/null | | `operation` | text/null |
-| `tower_sub_type` | text/null | | `ref_job_card_no` | text/null |
-| `alias` | text/null | | | |
+| `id` | serial PK | | `alias` | text/null |
+| `hash` | text unique | | `mark_no` | text |
+| `job` | text | | `section` | text/null |
+| `structure` | text | | `length` | number/null |
+| `mark_tail` | text | | `width` | number/null |
+| `mark_id` | text | | `wt_pcs` | number/null |
+| `m_no` | text | | `balance_qty` | number |
+| `project_suffix` | text | | `balance_wt` | number |
+| `alias_corrected` | text | | `assign_date` | date/null |
+| `mark_number` | text | | `activity` | text/null |
+| `order_nature` | text/null | | `operation` | text/null |
+| `contractor` | text/null | | `ref_job_card_no` | text/null |
+| `job_card_no` | text/null | | | |
+| `tower_type` | text/null | | | |
+| `tower_sub_type` | text/null | | | |
+
+The four parsed mark fields are `notNull` with default `""`.
 
 ### `import_rows` — which pool rows belong to which import
 
@@ -144,6 +177,21 @@ derived `structure`, `markTail`, `markId`, and `hash`.
 
 Primary key is `(import_id, pool_id)`. The `copies` count is what preserves
 in-sheet duplicate rows as separate pending units.
+
+### `upload_staging` — temporary holding for the gatekeeper flow
+
+A staged upload is the raw file held server-side **before** it is committed.
+Nothing in `record_pool` / `import_rows` / `imports` is written until the user
+accepts. A staged row is removed on commit or discard.
+
+| Column            | Type        | Description                              |
+|-------------------|-------------|------------------------------------------|
+| `id`              | text (uuid) PK | Staging id returned by `POST /imports/stage`. |
+| `source_filename` | text        | Original file name.                      |
+| `label`           | text/null   | Friendly name (optional).                |
+| `report_date`     | date/null   | "As of" date (optional).                 |
+| `file_data`       | bytea       | The raw uploaded `.xlsx` bytes.          |
+| `created_at`      | timestamp   | When it was staged.                      |
 
 ---
 
@@ -170,7 +218,11 @@ Base path: `/api`.
 |---------------------------|-----------------------------------------------------|------------------------------------------|
 | `GET /healthz`            | none                                                 | `{ status }`                             |
 | `GET /imports`            | none                                                 | All imports, newest first.               |
-| `POST /imports`           | multipart: `file` (req), `label`, `reportDate`       | The created import + its change set.      |
+| `POST /imports`           | multipart: `file` (req), `label`, `reportDate`       | The created import + its change set (direct, no gate). |
+| `POST /imports/stage`     | multipart: `file` (req), `label`, `reportDate`       | `{ stagingId, sourceFilename, structural }` — holds the file; nothing committed. |
+| `POST /imports/validate`  | json `{ stagingId }`                                 | Gatekeeper verdict (`ok`/`reject`) + descriptive-only sanitize suggestions (advisory). |
+| `POST /imports/commit`    | json `{ stagingId, acceptedSuggestions? }`           | Applies accepted `(field,from)->to` cleanups, merges, and returns the created import + change set. |
+| `DELETE /imports/stage/{id}` | path `id`                                         | `204`; discards a staged upload without committing. |
 | `DELETE /imports`         | none                                                 | `{ importsDeleted, poolRowsDeleted }` — **full reset** of all imports and the pool. |
 | `GET /imports/{id}`       | path `id`                                            | One import with summaries.               |
 | `DELETE /imports/{id}`    | path `id`                                            | `204`; deletes the import only (pool stays). |
@@ -183,11 +235,11 @@ Base path: `/api`.
 | `POST /ai/report`         | json `{ importId, compareTo?, filters? }`          | Turnaround analytical report (advisory).  |
 
 **Record fields returned by `GET /imports/{id}/records`**: `id`, `importId`,
-`hash`, `markId`, `job`, `structure`, `markTail`, `markNo`, `alias`, `section`,
-`jobCardNo`, `towerType`, `towerSubType`, `length`, `width`, `wtPcs`,
-`balanceQty`, `balanceWt`, `activity`, `operation`, `assignDate`, `contractor`,
-`orderNature`, `refJobCardNo`, plus the live `ageingDays`, `routeSteps`,
-`currentStepIndex`.
+`hash`, `markId`, `job`, `structure`, `markTail`, `mNo`, `projectSuffix`,
+`aliasCorrected`, `markNumber`, `markNo`, `alias`, `section`, `jobCardNo`,
+`towerType`, `towerSubType`, `length`, `width`, `wtPcs`, `balanceQty`,
+`balanceWt`, `activity`, `operation`, `assignDate`, `contractor`, `orderNature`,
+`refJobCardNo`, plus the live `ageingDays`, `routeSteps`, `currentStepIndex`.
 
 > The records response can be very large (tens of MB) and is gzip-compressed by
 > the server. All KPIs, buckets, and breakdowns shown in the five views are
@@ -199,6 +251,8 @@ Base path: `/api`.
 
 - **Excel parsing & derivation:** `artifacts/api-server/src/lib/parse.ts`
 - **API contract (source of truth):** `lib/api-spec/openapi.yaml`
-- **DB schema:** `lib/db/src/schema/imports.ts`, `recordPool.ts`, `importRows.ts`
+- **DB schema:** `lib/db/src/schema/imports.ts`, `recordPool.ts`, `importRows.ts`,
+  `uploadStaging.ts`
 - **Change/diff engine:** `artifacts/api-server/src/lib/diff.ts`
-- **Import routes:** `artifacts/api-server/src/routes/imports.ts`
+- **Import + staging/gatekeeper routes:** `artifacts/api-server/src/routes/imports.ts`
+- **Gatekeeper / AI layer:** `artifacts/api-server/src/lib/ai.ts`

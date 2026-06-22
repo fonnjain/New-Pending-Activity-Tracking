@@ -13,7 +13,7 @@ Mobile-first web app: each Excel upload = one append-only "import". Imports neve
 - **Two dedup layers, opposite intent.** WITHIN a file: NO dedup — in-sheet duplicate rows are preserved as separate pending units (tracked via `copies`/multiplicity and expanded in `/imports/{id}/records`). ACROSS uploads: dedup via a permanent `record_pool` keyed by full-row SHA-256 `hash`.
   **Why:** a mark listed twice in one sheet is two real pending units; the same unchanged row re-appearing in a later upload is not new work.
 - **Idempotent re-import.** Re-uploading an identical file yields zero changes (0 added, all unchanged, 0 new/completed). Proven via curl.
-- **Change identity = `job|structure|markTail|jobCardNo`; Activity (plus qty/wt) are tracked FIELDS.** A removed identity is flagged `completed`, never deleted.
+- **Change identity = `markId|jobCardNo` (markId = the canonical `markNumber`); Activity (plus qty/wt) are tracked FIELDS.** A removed identity is flagged `completed`, never deleted.
   **Why:** identity must be stable across uploads so moves/qty changes/completions are detectable; jobCardNo distinguishes otherwise-identical marks (so identity count can exceed distinct markId count).
 - **Pool rows are permanent and immutable.** Deleting an import cascades only `import_rows`; the pool is never pruned (truncate manually only for a clean slate).
 - **Ageing computed live at read time, never stored.** `ageingDays = today - Assign Date`.
@@ -28,10 +28,20 @@ Mobile-first web app: each Excel upload = one append-only "import". Imports neve
   **Why:** select-then-insert on the pool is otherwise racy and can fail a valid upload on the unique hash constraint.
 
 ## Parse rules (artifacts/api-server/src/lib/parse.ts)
-- Reads all 18 columns. Header on 3rd row (`range: 2`), forward-fill Project Code, normalize "794."->794 / "920.0"->920.
-- markTail strips the full `"<job> <alias>-"` prefix, NOT a naive split on first hyphen.
+- Reads all 18 columns. **Header row auto-detected** (scan first ~10 rows for "Project Code"; data on next row; fallback to 3rd row with a problem note). Forward-fill Project Code, normalize "794."->794 / "920.0"->920.
+- **Mark No. -> 4 derived fields, decided by col H, CHECK BACKSLASH FIRST.** Spec acceptance examples are exact and non-obvious:
+  - CASE 3 (col H has `\`, e.g. `775 IS-775\OB6M\3`): split on `\`; aliasCorrected = parts[1] (between backslashes, e.g. "OB6M"), mNo = last part, **projectSuffix = col G Alias** (e.g. "IS"), **markNumber = `<job>-<projectSuffix>\<aliasCorrected>\<mNo>`** = `775-IS\OB6M\3`. NOTE the hyphen and the suffix in the key — this is correct per spec, do NOT "simplify" to `job\alias\mNo`.
+  - CASE 1 (no hyphen, no backslash, e.g. "01"): mNo = col H, projectSuffix/aliasCorrected="", markNumber=mNo (defensive `job\alias\mNo` only if job/alias present).
+  - CASE 2 (hyphen, no backslash, e.g. `811 3S5-143`): strip `"<job> <alias>-"` prefix -> mNo; aliasCorrected = col G; markNumber = `job\aliasCorrected\mNo` = `811\3S5\143`.
+  - Legacy aliases: structure=aliasCorrected, markTail=mNo, markId=markNumber. "structure" groups Case-3 under the BETWEEN-backslash alias (OB6M), not raw col G.
+- `hash` is over the ORIGINAL 18 source columns ONLY (derived mark fields excluded) — so descriptive cleanups that touch derived fields can't change cross-upload identity.
 - Keeps rows with a non-empty Mark No.; NO within-file dedup (see above).
 - Ageing colors everywhere: green <=30, amber 31-60, red >60, neutral when no date.
+
+## Staging + gatekeeper upload flow (B)
+- Two upload paths share `mergeImport(parsed, meta, log)` in `routes/imports.ts`: direct `POST /imports` (no gate) and the staged path. **Nothing writes to record_pool/import_rows/imports until commit.**
+- Staged: `POST /imports/stage` (holds raw file bytes in `upload_staging` bytea, returns a structural read) -> `POST /imports/validate` (Claude gatekeeper: verdict ok|reject + descriptive-only sanitize suggestions; `available:false` when no key) -> `POST /imports/commit` (applies accepted `(field,from)->to` cleanups onto the base 18 source fields BEFORE hashing, then merges) ; `DELETE /imports/stage/{id}` discards.
+- Cleanups go through the SAME descriptive-field allow-list as the AI sanitize layer; identity/engine fields are never remappable. Gatekeeper is advisory — engine stays authoritative. UI: `staged-upload-panel.tsx` in the Data view.
 
 ## Units
 - **All UI weight is shown in metric TONS, not kg.** Storage stays in kg (`balanceWt`); convert at render time only, via `formatTons(kg)` in `lib/utils.ts` (kg/1000, 1 decimal, locale separators). Labels read "(t)" / "Wt (t)".

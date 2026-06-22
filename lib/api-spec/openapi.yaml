@@ -89,6 +89,115 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DeleteAllResult"
+  /imports/stage:
+    post:
+      operationId: stageImport
+      tags: [imports]
+      summary: Stage a raw upload for validation
+      description: >
+        Accepts ANY uploaded file and holds its raw bytes in a short-lived staging area
+        WITHOUT writing to the record pool or imports ledger. Performs a best-effort
+        structural read (header detection, columns found vs expected, row count, problems)
+        and returns a stagingId used by validate and commit. Nothing is committed here.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/ImportUpload"
+      responses:
+        "201":
+          description: File staged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StageResult"
+        "400":
+          description: Invalid upload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /imports/validate:
+    post:
+      operationId: validateStagedImport
+      tags: [imports]
+      summary: Validate a staged upload with the AI gatekeeper
+      description: >
+        Sends a compact, descriptive-only sample of the staged file to Claude, which acts as a
+        gatekeeper: it returns a verdict (ok | reject) and, when ok, optional descriptive
+        sanitize suggestions (never identity/quantity/engine fields). Read-only and advisory:
+        it never writes data. When ANTHROPIC_API_KEY is unset, returns available:false so the
+        UI can offer "Skip check & import as-is".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateRequest"
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationResult"
+        "404":
+          description: Staged upload not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /imports/commit:
+    post:
+      operationId: commitStagedImport
+      tags: [imports]
+      summary: Commit a staged upload
+      description: >
+        Applies any user-accepted descriptive suggestions to the staged data, then runs the
+        SAME deterministic parse + append-only merge as a direct upload, creating a new import.
+        The staged row is deleted afterwards. Accepted suggestions only touch descriptive fields
+        and never change row identity, quantities, or any computed/engine field.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommitRequest"
+      responses:
+        "201":
+          description: Import created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Staged upload not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /imports/stage/{id}:
+    delete:
+      operationId: discardStagedImport
+      tags: [imports]
+      summary: Discard a staged upload
+      description: Removes a staged upload without committing it. Idempotent.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Staged upload discarded
   /imports/compare:
     get:
       operationId: compareImports
@@ -588,6 +697,140 @@ components:
       required:
         - importsDeleted
         - poolRowsDeleted
+    StructuralRead:
+      type: object
+      description: Best-effort structural read of a staged file; never authoritative.
+      properties:
+        sheetName:
+          type: ["string", "null"]
+          description: Sheet used (Sheet1 when present, else the first sheet).
+        headerRow:
+          type: ["integer", "null"]
+          description: Detected 0-based header row index, or null when not detected.
+        columnsFound:
+          type: array
+          items:
+            type: string
+          description: Header labels read from the detected header row.
+        missingColumns:
+          type: array
+          items:
+            type: string
+          description: Expected columns not present in the header.
+        rowsRead:
+          type: integer
+          description: Data rows below the header (before any filtering).
+        rowsWithMark:
+          type: integer
+          description: Rows that have a non-empty Mark No. (the rows the engine keeps).
+        problems:
+          type: array
+          items:
+            type: string
+          description: Human-readable structural problems detected without AI.
+      required:
+        - sheetName
+        - headerRow
+        - columnsFound
+        - missingColumns
+        - rowsRead
+        - rowsWithMark
+        - problems
+    StageResult:
+      type: object
+      properties:
+        stagingId:
+          type: string
+        sourceFilename:
+          type: string
+        structural:
+          $ref: "#/components/schemas/StructuralRead"
+      required:
+        - stagingId
+        - sourceFilename
+        - structural
+    ValidateRequest:
+      type: object
+      properties:
+        stagingId:
+          type: string
+      required:
+        - stagingId
+    StagedSanitizeSuggestion:
+      type: object
+      description: A descriptive-only cleanup the user may accept before commit.
+      properties:
+        field:
+          type: string
+          description: One of the allowed descriptive fields (never identity/quantity/engine).
+        from:
+          type: ["string", "null"]
+          description: Current value to be replaced across all matching rows.
+        to:
+          type: ["string", "null"]
+          description: Cleaned value to apply.
+        reason:
+          type: string
+        count:
+          type: integer
+          description: Number of staged rows whose field currently equals "from".
+      required:
+        - field
+        - from
+        - to
+        - reason
+        - count
+    ValidationResult:
+      type: object
+      properties:
+        available:
+          type: boolean
+          description: False when ANTHROPIC_API_KEY is unset; UI then offers import as-is.
+        verdict:
+          type: ["string", "null"]
+          enum: [ok, reject, null]
+        reason:
+          type: ["string", "null"]
+          description: Why the file was rejected, when verdict is reject.
+        expectedShape:
+          type: ["string", "null"]
+          description: A short description of the expected report shape, on reject.
+        sanitize:
+          type: array
+          items:
+            $ref: "#/components/schemas/StagedSanitizeSuggestion"
+          description: Optional descriptive cleanups, present only when verdict is ok.
+      required:
+        - available
+        - verdict
+        - reason
+        - expectedShape
+        - sanitize
+    AcceptedSuggestion:
+      type: object
+      properties:
+        field:
+          type: string
+        from:
+          type: ["string", "null"]
+        to:
+          type: ["string", "null"]
+      required:
+        - field
+        - from
+        - to
+    CommitRequest:
+      type: object
+      properties:
+        stagingId:
+          type: string
+        acceptedSuggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AcceptedSuggestion"
+          description: Descriptive cleanups the user accepted; applied before parse+merge.
+      required:
+        - stagingId
     Record:
       type: object
       properties:
@@ -606,6 +849,18 @@ components:
           type: string
         markTail:
           type: string
+        mNo:
+          type: string
+          description: The mark's own number, parsed from "Mark No." (col H).
+        projectSuffix:
+          type: string
+          description: Project suffix from the Alias column when col H uses backslashes.
+        aliasCorrected:
+          type: string
+          description: Authoritative alias parsed from col H; overrides the Alias column in the backslash case.
+        markNumber:
+          type: string
+          description: Canonical mark key (aligns with markId).
         markNo:
           type: string
         alias:
@@ -656,6 +911,10 @@ components:
         - job
         - structure
         - markTail
+        - mNo
+        - projectSuffix
+        - aliasCorrected
+        - markNumber
         - markNo
         - alias
         - section

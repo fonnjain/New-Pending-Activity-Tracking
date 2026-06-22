@@ -6,11 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './acceptedSuggestion';
 export * from './aiStatus';
 export * from './changeCounts';
 export * from './changeItem';
 export * from './changeSet';
 export * from './changeSummary';
+export * from './commitRequest';
 export * from './compareImportsParams';
 export * from './deleteAllResult';
 export * from './errorResponse';
@@ -42,4 +44,10 @@ export * from './sanitizeCounts';
 export * from './sanitizeRequest';
 export * from './sanitizeResult';
 export * from './sanitizeSuggestion';
+export * from './stagedSanitizeSuggestion';
+export * from './stageResult';
+export * from './structuralRead';
 export * from './uploadResult';
+export * from './validateRequest';
+export * from './validationResult';
+export * from './validationResultVerdict';

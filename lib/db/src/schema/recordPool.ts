@@ -17,6 +17,11 @@ export const recordPoolTable = pgTable("record_pool", {
   structure: text("structure").notNull(),
   markTail: text("mark_tail").notNull(),
   markId: text("mark_id").notNull(),
+  // Derived from "Mark No." (col H). See parse.ts deriveMark for the three cases.
+  mNo: text("m_no").notNull().default(""),
+  projectSuffix: text("project_suffix").notNull().default(""),
+  aliasCorrected: text("alias_corrected").notNull().default(""),
+  markNumber: text("mark_number").notNull().default(""),
   orderNature: text("order_nature"),
   contractor: text("contractor"),
   jobCardNo: text("job_card_no"),
