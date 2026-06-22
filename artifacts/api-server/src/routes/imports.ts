@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router, type IRouter, type RequestHandler } from "express";
 import multer from "multer";
-import { desc, eq, lt, inArray, sql } from "drizzle-orm";
+import { desc, eq, lt, inArray, sql, and, isNull } from "drizzle-orm";
 import {
   db,
   importsTable,
@@ -99,6 +99,35 @@ function toMembershipRows(
   rows: { pool: RecordPoolRow; copies: number }[],
 ): MembershipRow[] {
   return rows.map((r) => ({ row: poolToLite(r.pool), copies: r.copies }));
+}
+
+// Rebuild a ChangeSet-shaped object from an import's stored changeSummary. Used
+// only for the idempotent commit re-return (a duplicate/retried commit): the
+// per-item arrays are not reconstructed (they are not needed to acknowledge an
+// already-applied import), but the counts/labels are accurate.
+function changeSetFromImport(imp: typeof importsTable.$inferSelect) {
+  const cs = imp.changeSummary;
+  return {
+    fromImportId: cs?.prevImportId ?? null,
+    toImportId: imp.id,
+    fromLabel: null,
+    toLabel: imp.label,
+    counts: {
+      addedRows: cs?.addedRows ?? 0,
+      unchangedRows: cs?.unchangedRows ?? 0,
+      movedActivity: cs?.movedActivity ?? 0,
+      qtyChanged: cs?.qtyChanged ?? 0,
+      newMarks: cs?.newMarks ?? 0,
+      completed: cs?.completed ?? 0,
+    },
+    netPendingQtyChange: cs?.netPendingQtyChange ?? 0,
+    netPendingWtChange: cs?.netPendingWtChange ?? 0,
+    movedActivity: [],
+    qtyChanged: [],
+    newMarks: [],
+    completed: [],
+    flags: cs?.flags ?? [],
+  };
 }
 
 function serializeRecord(r: RecordPoolRow, importId: number, id: number) {
@@ -633,6 +662,25 @@ router.post("/imports/commit", async (req, res): Promise<void> => {
     return;
   }
 
+  // Idempotency: this staged file was already committed (e.g. a proxy/timeout
+  // retry of a slow commit, or a double submit). Return the existing import
+  // instead of re-merging or failing with a misleading error.
+  if (staged.committedImportId != null) {
+    const [imp] = await db
+      .select()
+      .from(importsTable)
+      .where(eq(importsTable.id, staged.committedImportId));
+    if (imp) {
+      req.log.info(
+        { stagingId, importId: imp.id },
+        "Commit replayed: staged file already committed",
+      );
+      res.status(200).json({ import: imp, changeSet: changeSetFromImport(imp) });
+      return;
+    }
+    // The committed import was later deleted; fall through and re-commit.
+  }
+
   let parsed;
   try {
     parsed = parseWorkbook(staged.fileData, accepted);
@@ -662,10 +710,58 @@ router.post("/imports/commit", async (req, res): Promise<void> => {
     req.log,
   );
 
-  // Best-effort cleanup of the staged bytes now that they are committed.
-  await db
-    .delete(uploadStagingTable)
-    .where(eq(uploadStagingTable.id, stagingId));
+  // Atomically claim this staged row for the import we just created. Only the
+  // first commit to reach here wins (committed_import_id IS NULL); a concurrent
+  // duplicate that also merged loses the claim, so we discard its orphan import
+  // and return the winner's — guaranteeing one import per staged file.
+  const claimed = await db
+    .update(uploadStagingTable)
+    .set({ committedImportId: result.import.id })
+    .where(
+      and(
+        eq(uploadStagingTable.id, stagingId),
+        isNull(uploadStagingTable.committedImportId),
+      ),
+    )
+    .returning({ id: uploadStagingTable.id });
+
+  if (claimed.length === 0) {
+    // Lost the race: another concurrent commit already claimed this staged file.
+    // Resolve the winner FIRST; only drop our orphan import once a real winner
+    // is confirmed, so we never return a deleted import.
+    const [winnerRow] = await db
+      .select({ committedImportId: uploadStagingTable.committedImportId })
+      .from(uploadStagingTable)
+      .where(eq(uploadStagingTable.id, stagingId));
+    const winnerId = winnerRow?.committedImportId ?? null;
+    const [winner] =
+      winnerId != null && winnerId !== result.import.id
+        ? await db
+            .select()
+            .from(importsTable)
+            .where(eq(importsTable.id, winnerId))
+        : [];
+    if (winner) {
+      // Roll back the duplicate import we just created (cascades its
+      // import_rows; the shared record pool is permanent and untouched).
+      await db.delete(importsTable).where(eq(importsTable.id, result.import.id));
+      req.log.warn(
+        { stagingId, droppedImportId: result.import.id, importId: winner.id },
+        "Concurrent commit detected: dropped duplicate import",
+      );
+      res
+        .status(200)
+        .json({ import: winner, changeSet: changeSetFromImport(winner) });
+      return;
+    }
+    // Could not resolve a distinct winner (e.g. the row was discarded mid-flight
+    // or the winner import vanished). Keep the import we just built and return
+    // it rather than emitting a phantom (deleted) import.
+    req.log.warn(
+      { stagingId, importId: result.import.id },
+      "Commit claim not recorded but no distinct winner found; keeping import",
+    );
+  }
 
   res.status(201).json(result);
 });
