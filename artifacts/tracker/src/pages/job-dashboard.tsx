@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { sortActivities } from "@workspace/domain";
+import { compareActivity, sortActivities } from "@workspace/domain";
 import { useTracker, isWithinDateRange } from "@/lib/store";
 import {
   useGetImportRecords,
@@ -105,7 +105,7 @@ function JobDashboardContent() {
     [records, project, structure, mark],
   );
 
-  const { totalProjects, totalMarks, totalQty, totalWt, avgAgeing, byProject, byStructure } =
+  const { totalProjects, totalMarks, totalQty, totalWt, avgAgeing, byProject, byStructure, byActivity } =
     useMemo(() => {
       const withAge = filtered.filter((r) => r.ageingDays !== null);
       const avg = (recs: typeof filtered) => {
@@ -157,6 +157,23 @@ function JobDashboardContent() {
         }))
         .sort((a, b) => b.weight - a.weight);
 
+      const actGroups = new Map<string, typeof filtered>();
+      filtered.forEach((r) => {
+        const key = r.activity || "Unknown";
+        if (!actGroups.has(key)) actGroups.set(key, []);
+        actGroups.get(key)!.push(r);
+      });
+
+      const byActivity = Array.from(actGroups.entries())
+        .map(([activity, recs]) => ({
+          activity,
+          marks: recs.length,
+          qty: recs.reduce((s, r) => s + r.balanceQty, 0),
+          weight: recs.reduce((s, r) => s + r.balanceWt, 0),
+          avgAge: avg(recs),
+        }))
+        .sort((a, b) => compareActivity(a.activity, b.activity));
+
       return {
         totalProjects: projGroups.size,
         totalMarks: filtered.length,
@@ -167,6 +184,7 @@ function JobDashboardContent() {
           : 0,
         byProject,
         byStructure,
+        byActivity,
       };
     }, [filtered]);
 
@@ -340,6 +358,51 @@ function JobDashboardContent() {
                 {byStructure.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center py-4 text-muted-foreground">
+                      No data for the selected filters.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+            By Activity
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto max-h-[600px]">
+            <Table>
+              <TableHeader className="sticky top-0 bg-card z-10 shadow-sm">
+                <TableRow>
+                  <TableHead>Activity</TableHead>
+                  <TableHead className="text-right">Marks</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Wt</TableHead>
+                  <TableHead className="text-right">Avg Ageing</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {byActivity.map((a) => (
+                  <TableRow key={a.activity}>
+                    <TableCell className="font-medium">{a.activity}</TableCell>
+                    <TableCell className="text-right">{a.marks}</TableCell>
+                    <TableCell className="text-right">{a.qty}</TableCell>
+                    <TableCell className="text-right">{formatWeight(a.weight)}</TableCell>
+                    <TableCell
+                      className={`text-right font-bold tabular-nums ${getAgeingColor(a.avgAge)}`}
+                    >
+                      {a.avgAge !== null ? `${a.avgAge}d` : "-"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {byActivity.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center py-4 text-muted-foreground">
                       No data for the selected filters.
                     </TableCell>
                   </TableRow>

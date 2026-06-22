@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { compareActivity } from "@workspace/domain";
 import {
   useAiReport,
   useAiStatus,
@@ -52,6 +53,14 @@ import {
 
 type ReportType = "jobwise" | "ai";
 
+type SortKey = "activity" | "ageing" | "contractor";
+
+const SORT_OPTIONS: { id: SortKey; name: string }[] = [
+  { id: "activity", name: "Activity" },
+  { id: "ageing", name: "Ageing" },
+  { id: "contractor", name: "Contractor" },
+];
+
 const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
   {
     id: "jobwise",
@@ -103,14 +112,39 @@ function ReportBuilder() {
 
   // Driven entirely by the universal header filters (job, activity,
   // contractor, structure, mark, search, date) — no report-local filters.
-  const rows = useFilteredRecords(allRecords);
+  const unsorted = useFilteredRecords(allRecords);
+
+  const [sortBy, setSortBy] = useState<SortKey>("activity");
+
+  // Sort the report rows by the selected key. Activity uses the canonical
+  // process sequence (@workspace/domain); ageing is oldest-first; contractor
+  // is alphabetical. The same order drives both this table and the export.
+  const rows = useMemo(() => {
+    const arr = [...unsorted];
+    if (sortBy === "activity") {
+      arr.sort(
+        (a, b) =>
+          compareActivity(a.activity, b.activity) ||
+          String(a.markId ?? "").localeCompare(String(b.markId ?? "")),
+      );
+    } else if (sortBy === "ageing") {
+      arr.sort((a, b) => (b.ageingDays ?? -1) - (a.ageingDays ?? -1));
+    } else {
+      arr.sort(
+        (a, b) =>
+          String(a.contractor ?? "").localeCompare(String(b.contractor ?? "")) ||
+          String(a.markId ?? "").localeCompare(String(b.markId ?? "")),
+      );
+    }
+    return arr;
+  }, [unsorted, sortBy]);
 
   const totalQty = rows.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
   const totalWt = rows.reduce((s, r) => s + (r.balanceWt ?? 0), 0);
 
   const handleExcel = () => {
     if (!rows.length) return;
-    const tag = `${filters.job ?? "all"}_${filters.activity ?? "all"}`.replace(
+    const tag = `${filters.job ?? "all"}_${filters.activity ?? "all"}_by-${sortBy}`.replace(
       /[^\w-]+/g,
       "-",
     );
@@ -150,9 +184,28 @@ function ReportBuilder() {
           Filtered by the header filters (job, activity, contractor, and more).
         </div>
 
-        <div className="text-xs text-muted-foreground">
-          {rows.length.toLocaleString()} rows • {totalQty.toLocaleString()} pcs •{" "}
-          {formatWeight(totalWt)}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs text-muted-foreground">
+            {rows.length.toLocaleString()} rows • {totalQty.toLocaleString()} pcs •{" "}
+            {formatWeight(totalWt)}
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-semibold text-muted-foreground uppercase">
+              Sort by
+            </label>
+            <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortKey)}>
+              <SelectTrigger className="h-9 w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <div className="overflow-x-auto border border-border rounded-lg">
