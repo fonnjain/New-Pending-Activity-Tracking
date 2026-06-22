@@ -6,3 +6,9 @@ id = "6jwkkWKCJuBu2J8VJLGqr"
 uri = "file://docs/ARCHITECTURE.md"
 type = "text"
 title = "Balance & Activity Tracker — Architecture"
+
+[[outputs]]
+id = "Jk-rN0ms4vMLfLLY7sKvm"
+uri = "file://docs/DATA_STRUCTURE.md"
+type = "text"
+title = "Data Structure, Inputs & Parameters"
