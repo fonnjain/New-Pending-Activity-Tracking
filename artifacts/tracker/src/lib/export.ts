@@ -94,6 +94,14 @@ export type XlsxColumn = {
   total?: boolean;
 };
 
+// A summary/subtotal row inserted between the data and the grand-total row.
+// `label` goes in the first column; `values` maps a column field to its numeric
+// subtotal. A row with empty `values` acts as a bold section heading.
+export type XlsxSummaryRow = {
+  label: string;
+  values: Record<string, number>;
+};
+
 function numFmt(decimals: number): string {
   return decimals > 0 ? `#,##0.${"0".repeat(decimals)}` : "#,##0";
 }
@@ -105,8 +113,9 @@ export async function exportToXlsx(
   filename: string,
   columns: XlsxColumn[],
   rows: any[],
-  sheetName = "Report",
+  options: { sheetName?: string; summaryRows?: XlsxSummaryRow[] } = {},
 ) {
+  const { sheetName = "Report", summaryRows = [] } = options;
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
   wb.created = new Date();
@@ -164,6 +173,27 @@ export async function exportToXlsx(
       rowObj[c.field] = c.numeric ? toNum(v) : v == null ? "" : v;
     }
     ws.addRow(rowObj);
+  }
+
+  // Optional summary rows (e.g. per-activity subtotals) inserted between the data
+  // and the grand-total row. Bold with a light fill to set them apart; a row
+  // with no values renders as a section heading.
+  for (const s of summaryRows) {
+    const obj: Record<string, any> = {};
+    columns.forEach((c, i) => {
+      if (i === 0) obj[c.field] = s.label;
+      else if (c.total && c.field in s.values) obj[c.field] = s.values[c.field];
+    });
+    const row = ws.addRow(obj);
+    for (let c = 1; c <= columns.length; c++) {
+      const cell = row.getCell(c);
+      cell.font = { bold: true };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF3F4F6" },
+      };
+    }
   }
 
   // Header band: bold white text on a dark fill, centered, with a thin border.

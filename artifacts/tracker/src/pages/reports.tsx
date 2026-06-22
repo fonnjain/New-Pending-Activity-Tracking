@@ -34,7 +34,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { exportToXlsx, exportAiReportPdf, type XlsxColumn } from "@/lib/export";
+import { exportToXlsx, exportAiReportPdf, type XlsxColumn, type XlsxSummaryRow } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import {
   Sparkles,
@@ -139,13 +139,34 @@ function ReportBuilder() {
   const totalQty = rows.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
   const totalWt = rows.reduce((s, r) => s + (r.balanceWt ?? 0), 0);
 
+  // Per-activity subtotals (Qty + Wt) appended to the Excel export, ordered by
+  // the canonical process sequence, under an "Activity-wise subtotal" heading.
+  const activitySubtotals = useMemo<XlsxSummaryRow[]>(() => {
+    const groups = new Map<string, { balanceQty: number; balanceWt: number }>();
+    for (const r of rows) {
+      const key = r.activity || "Unknown";
+      const g = groups.get(key) ?? { balanceQty: 0, balanceWt: 0 };
+      g.balanceQty += r.balanceQty ?? 0;
+      g.balanceWt += r.balanceWt ?? 0;
+      groups.set(key, g);
+    }
+    const ordered = [...groups.keys()].sort(compareActivity);
+    if (!ordered.length) return [];
+    return [
+      { label: "ACTIVITY-WISE SUBTOTAL", values: {} },
+      ...ordered.map((act) => ({ label: act, values: groups.get(act)! })),
+    ];
+  }, [rows]);
+
   const handleExcel = () => {
     if (!rows.length) return;
     const tag = `${filters.job ?? "all"}_${filters.activity ?? "all"}_by-${sortBy}`.replace(
       /[^\w-]+/g,
       "-",
     );
-    exportToXlsx(`report_${tag}.xlsx`, REPORT_COLUMNS, rows);
+    exportToXlsx(`report_${tag}.xlsx`, REPORT_COLUMNS, rows, {
+      summaryRows: activitySubtotals,
+    });
   };
 
   if (selectedImportId == null) {
