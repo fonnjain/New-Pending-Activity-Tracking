@@ -57,15 +57,6 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
   const withAge = records.filter(r => r.ageingDays !== null);
   const avgAge = withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays, 0) / withAge.length) : null;
 
-  const age0to30 = withAge.filter(r => r.ageingDays !== null && r.ageingDays <= 30).length;
-  const age31to60 = withAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length;
-  const age60Plus = withAge.filter(r => r.ageingDays !== null && r.ageingDays > 60).length;
-  const totalAged = age0to30 + age31to60 + age60Plus || 1;
-
-  const p0to30 = (age0to30 / totalAged) * 100;
-  const p31to60 = (age31to60 / totalAged) * 100;
-  const p60Plus = (age60Plus / totalAged) * 100;
-
   const sortedRows = useMemo(() => {
     return [...records].sort((a, b) => {
       const j = String(a.job ?? "").localeCompare(String(b.job ?? ""));
@@ -90,13 +81,6 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
               <div className="min-w-[120px]">
                 <div className="font-bold text-lg">{formatWeight(wt)}</div>
                 <div className="text-xs text-muted-foreground">{records.length} marks</div>
-              </div>
-              <div className="hidden md:flex flex-col ml-6 w-32 justify-center">
-                <div className="flex h-1.5 rounded-full overflow-hidden w-full bg-muted">
-                  <div style={{ width: `${p0to30}%` }} className="bg-ageing-green" />
-                  <div style={{ width: `${p31to60}%` }} className="bg-ageing-amber" />
-                  <div style={{ width: `${p60Plus}%` }} className="bg-ageing-red" />
-                </div>
               </div>
             </div>
             <div className="flex items-center gap-4 text-right">
