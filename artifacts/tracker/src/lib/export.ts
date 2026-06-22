@@ -177,9 +177,6 @@ export async function exportToXlsx(
       fgColor: { argb: "FF1F2937" },
     };
     cell.alignment = { horizontal: "center", vertical: "middle" };
-    cell.border = {
-      bottom: { style: "thin", color: { argb: "FF111827" } },
-    };
   });
 
   // Totals row: label in the first column, SUM for each flagged numeric column.
@@ -196,8 +193,25 @@ export async function exportToXlsx(
     const totalRow = ws.addRow(totalObj);
     totalRow.eachCell((cell) => {
       cell.font = { bold: true };
-      cell.border = { top: { style: "thin", color: { argb: "FF9CA3AF" } } };
     });
+  }
+
+  // Grid borders: a thin line around every cell so the report reads as a table,
+  // with a darker bottom under the header and a darker top above the totals row.
+  const thin = { style: "thin" as const, color: { argb: "FFD1D5DB" } };
+  const headerBottom = { style: "thin" as const, color: { argb: "FF111827" } };
+  const totalsTop = { style: "thin" as const, color: { argb: "FF9CA3AF" } };
+  const totalsRowNum = hasTotals && rows.length ? ws.rowCount : -1;
+  for (let r = 1; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    for (let c = 1; c <= columns.length; c++) {
+      row.getCell(c).border = {
+        top: r === totalsRowNum ? totalsTop : thin,
+        bottom: r === 1 ? headerBottom : thin,
+        left: thin,
+        right: thin,
+      };
+    }
   }
 
   // Auto-filter over the header row (Excel extends the dropdowns down the data).
