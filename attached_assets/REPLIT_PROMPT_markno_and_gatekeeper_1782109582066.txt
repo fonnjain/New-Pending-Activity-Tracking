@@ -1,0 +1,145 @@
+REPLIT AGENT PROMPT — MARK-NO PARSING UPGRADE + CLAUDE GATEKEEPER UPLOAD FLOW
+=============================================================================
+Two changes to the Balance & Activity Tracker, matching the existing architecture
+(parse.ts, openapi.yaml, Drizzle schema, append-only record_pool / import_rows, diff.ts,
+routes/imports.ts). Deterministic engine stays authoritative; Claude is advisory/gate
+only. Server-side ANTHROPIC_API_KEY (Replit Secret); never to browser, never logged.
+
+====================================================================
+CHANGE 1 — UPGRADE Mark No. PARSING + HEADER AUTO-DETECT (parse.ts)
+====================================================================
+1a. HEADER ROW IS NO LONGER FIXED.
+    The doc currently says "header = 3rd row". That is WRONG for some files (a company
+    banner pushes the header to row 4; other files have it on row 1). Replace the fixed
+    header assumption with AUTO-DETECT: scan the first ~10 rows of Sheet1 and use the
+    first row that contains a cell exactly equal to "Project Code" as the header row;
+    read data from the next row. Keep "Sheet1 else first sheet". Update the doc text.
+
+1b. NEW DERIVED FIELDS from "Mark No." (col H). Add to the normalized record, to
+    record_pool, and to the records API response:
+        m_no             text     -- the mark's own number
+        project_suffix   text     -- only set in the backslash case; else ""
+        alias_corrected  text     -- authoritative alias (may override col G)
+        mark_number      text     -- canonical mark key (replaces/aligns with markId)
+    Keep the raw col H too (mark_no stays as the raw value).
+
+1c. PARSE RULES — exactly three cases, decided by col H content. CHECK BACKSLASH FIRST.
+
+  CASE 3 (col H CONTAINS "\"), e.g. "775 IS-775\OB6M\3"
+    - split on "\"  -> parts = ["775 IS-775", "OB6M", "3"]
+    - alias_corrected = parts[1]            (string BETWEEN backslashes -> "OB6M";
+                                             OVERRIDES col G for this row)
+    - m_no            = substring AFTER the LAST "\" -> "3"   (keep intact; do NOT split
+                                             further — "R-4" stays "R-4")
+    - project_suffix  = the col G (Alias) value -> "IS"   (excel Alias is really a suffix)
+    - mark_number     = "<job>-<project_suffix>\<alias_corrected>\<m_no>"  -> "775-IS\OB6M\3"
+
+  CASE 1 (col H has NO hyphen and NO backslash), e.g. "01","11"
+    - occurs when Project Code AND Alias are empty (EARTHING / RSJ POLE / GENERAL rows)
+    - m_no = col H ; project_suffix = "" ; alias_corrected = "" (col G)
+    - mark_number = m_no   (no "job\alias\" prefix because job & alias empty)
+    - defensive: if job or alias is somehow present, mark_number = "<job>\<alias>\<m_no>"
+
+  CASE 2 (col H has a hyphen, NO backslash), e.g. "811 3S5-143"
+    - prefix = job + " " + alias + "-"   ("811 3S5-")
+    - m_no = col H minus that prefix -> "143"  (m_no may contain hyphens like "363RH","20X";
+             only the leading "<job> <alias>-" prefix is stripped)
+    - project_suffix = "" ; alias_corrected = col G ("3S5")
+    - mark_number = "<job>\<alias>\<m_no>" -> "811\3S5\143"
+    - defensive: if col H doesn't start with the expected prefix, strip up to and including
+      the FIRST hyphen, use remainder as m_no, and log the row.
+
+  WORKED EXAMPLES (acceptance tests):
+    "01"                   A="" G=""   -> m_no=01,   suffix="", alias="",    mark="01"
+    "11"                   A="" G=""   -> m_no=11,   suffix="", alias="",    mark="11"
+    "811 3S5-143"          A=811 G=3S5 -> m_no=143,  suffix="", alias=3S5,   mark="811\3S5\143"
+    "821 2DD3-363RH"       A=821 G=2DD3-> m_no=363RH,suffix="", alias=2DD3,  mark="821\2DD3\363RH"
+    "824. LM-20X"          A=824.G=LM  -> m_no=20X,  suffix="", alias=LM,    mark="824\LM\20X"
+    "775 IS-775\OB6M\3"    A=775 G=IS  -> m_no=3,    suffix=IS, alias=OB6M,  mark="775-IS\OB6M\3"
+    "775 IS-775\OC15M\322" A=775 G=IS  -> m_no=322,  suffix=IS, alias=OC15M, mark="775-IS\OC15M\322"
+    "775 IS-775\OB6M\R-4"  A=775 G=IS  -> m_no=R-4,  suffix=IS, alias=OB6M,  mark="775-IS\OB6M\R-4"
+
+1d. DOWNSTREAM ALIGNMENT
+    - "structure" (Job->Structure->Mark filters, By-Project structure count) = alias_corrected,
+      NOT raw col G. So Case-3 rows group under "OB6M", not "IS". project_suffix is shown
+      separately in the Data view / mark detail.
+    - markId / mark_number must be consistent: use mark_number as the canonical mark key.
+    - IMPORTANT: the across-upload full-row HASH must stay based on the original 18 source
+      columns (so dedup behaviour is unchanged). The new derived fields are added columns,
+      not hash inputs.
+    - Migrate record_pool (Drizzle) to add m_no, project_suffix, alias_corrected,
+      mark_number; add them to openapi.yaml record schema and regenerate hooks/Zod.
+
+====================================================================
+CHANGE 2 — ACCEPT ANY UPLOAD, CLAUDE GATEKEEPS (validate -> reject or sanitize)
+====================================================================
+New behaviour: the user may upload ANY file (even wrong/garbage). Nothing is committed to
+the database until Claude has checked it and the user accepts the result.
+
+NEW FLOW (replace the "parse straight into DB" path for the UI upload; keep POST /imports
+for the final commit):
+  STEP A — STAGE: user uploads a file -> server STAGES it (saves the raw file + a light
+    parse attempt) but does NOT write to imports/record_pool yet. Return a staging_id and
+    a quick structural read (sheet names, detected header row, columns found vs the 18
+    expected, row count, obvious problems). Accept .xlsx and .xls (convert .xls if needed).
+    Do not reject here — accept anything.
+  STEP B — SEND TO CLAUDE FOR SANITY CHECK: user clicks "Check & sanitize with Claude".
+    Server builds a COMPACT validation payload from the staged file (the detected columns,
+    a sample of rows, counts, and the structural read — NOT all 48k rows) and calls Claude.
+    Claude returns ONE of two verdicts:
+      verdict = "reject"  -> the file is not a valid balance/activity report (wrong file,
+                 wrong columns, empty, unrelated content). Include a short human reason and
+                 what the correct file should look like. UI shows: "This doesn't look like a
+                 valid report — please upload the correct file," with Claude's reason.
+                 NOTHING is committed; the staged file can be discarded.
+      verdict = "ok"      -> it is a valid report. Claude returns SANITIZATION suggestions
+                 for DESCRIPTIVE fields only (date normalization, contractor/section spelling
+                 standardization, whitespace/typos) as a diff list. It must NOT touch
+                 balance_qty, balance_wt, activity, operation, mark identity, or hash inputs.
+  STEP C — USER REVIEW + ACCEPT: UI shows the verdict.
+      If reject: user uploads a different file (back to Step A).
+      If ok: show the sanitization diff with ONE "Accept & import" button (and "Discard").
+             On accept, apply the accepted descriptive cleanups to the staged data, THEN
+             run the normal deterministic parse + merge (POST /imports path) so the engine —
+             not Claude — produces the stored records. Sanitize runs BEFORE merge so a
+             spelling fix never shows as a fake "changed" diff.
+  Engine remains the source of truth: Claude only (a) gates validity and (b) suggests
+  descriptive cleanups the user accepts; it never writes result data.
+
+CONTRACT (openapi.yaml, then regenerate)
+  POST /imports/stage     multipart { file, label?, reportDate? } -> { stagingId,
+        structural: {sheet, headerRow, columnsFound, missingColumns, rowsRead, problems[]} }
+  POST /imports/validate  json { stagingId } -> ValidationResult {
+        available, verdict: "ok"|"reject", reason?, expectedShape?,
+        sanitize?: { suggestions:[{rowRef, field, from, to, reason}], counts } }
+  POST /imports/commit    json { stagingId, acceptedSuggestions?: [...] } -> Import + changeSet
+        (runs deterministic parse+merge on the cleaned staged data; this is the existing
+         /imports behaviour, now fed from a staged+sanitized source)
+  Keep existing /ai/* endpoints. If ANTHROPIC_API_KEY is unset, /imports/validate returns
+  available:false and the UI offers a "Skip check & import as-is" fallback (deterministic
+  parse still runs; no AI gate).
+
+DB
+  - Add a lightweight staging store (e.g. a staging table or temp storage) for raw uploads
+    awaiting validation; clean up staged files on commit/discard/expiry. Do NOT touch
+    record_pool/imports until commit.
+
+FRONTEND (Data view)
+  - Upload accepts any file -> shows the structural read.
+  - "Check & sanitize with Claude" button -> shows verdict.
+      reject: red panel + reason + "Upload correct file".
+      ok: sanitization diff table + "Accept & import" / "Discard".
+  - If AI unavailable: "Skip check & import as-is" path.
+  - No emojis; reuse existing components/styling.
+
+GUARDRAILS / ACCEPTANCE
+  - Header auto-detected (row 1 OR row 4 banner files both parse); doc updated.
+  - All 8 Mark-No examples parse to the stated m_no/suffix/alias_corrected/mark_number;
+    Case-3 structure groups under the between-backslash alias.
+  - A wrong/garbage file can be uploaded and STAGED without error; Claude returns
+    verdict "reject" and nothing is committed.
+  - A valid file returns "ok" + sanitize diff; only on user "Accept & import" does the
+    deterministic engine parse+merge and write to the DB.
+  - Across-upload dedup/hash behaviour unchanged (hash still over original 18 columns).
+  - Key never in client bundle, responses, or logs. App still works (import-as-is) with
+    no key/network.

@@ -12,3 +12,9 @@ id = "Jk-rN0ms4vMLfLLY7sKvm"
 uri = "file://docs/DATA_STRUCTURE.md"
 type = "text"
 title = "Data Structure, Inputs & Parameters"
+
+[[outputs]]
+id = "QwKduUd3alm8CYy5IsUED"
+uri = "file://docs/DATA_STRUCTURE.xlsx"
+type = "table"
+title = "Data Structure, Inputs & Parameters (Excel)"
