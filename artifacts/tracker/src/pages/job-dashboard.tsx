@@ -105,7 +105,7 @@ function JobDashboardContent() {
     [records, project, structure, mark],
   );
 
-  const { totalProjects, totalMarks, totalQty, totalWt, avgAgeing, byProject, byStructure, byActivity } =
+  const { totalProjects, totalMarks, totalQty, totalWt, avgAgeing, byProject, byActivity } =
     useMemo(() => {
       const withAge = filtered.filter((r) => r.ageingDays !== null);
       const avg = (recs: typeof filtered) => {
@@ -138,25 +138,6 @@ function JobDashboardContent() {
         }))
         .sort((a, b) => b.weight - a.weight);
 
-      const structGroups = new Map<string, typeof filtered>();
-      filtered.forEach((r) => {
-        const key = `${r.job || "Unknown"}\\${r.structure || "Unknown"}`;
-        if (!structGroups.has(key)) structGroups.set(key, []);
-        structGroups.get(key)!.push(r);
-      });
-
-      const byStructure = Array.from(structGroups.entries())
-        .map(([key, recs]) => ({
-          key,
-          job: recs[0]?.job || "Unknown",
-          structure: recs[0]?.structure || "Unknown",
-          marks: recs.length,
-          qty: recs.reduce((s, r) => s + r.balanceQty, 0),
-          weight: recs.reduce((s, r) => s + r.balanceWt, 0),
-          avgAge: avg(recs),
-        }))
-        .sort((a, b) => b.weight - a.weight);
-
       const actGroups = new Map<string, typeof filtered>();
       filtered.forEach((r) => {
         const key = r.activity || "Unknown";
@@ -183,7 +164,6 @@ function JobDashboardContent() {
           ? Math.round(withAge.reduce((s, r) => s + (r.ageingDays || 0), 0) / withAge.length)
           : 0,
         byProject,
-        byStructure,
         byActivity,
       };
     }, [filtered]);
@@ -311,53 +291,6 @@ function JobDashboardContent() {
                 {byProject.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">
-                      No data for the selected filters.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
-            By Structure
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto max-h-[600px]">
-            <Table>
-              <TableHeader className="sticky top-0 bg-card z-10 shadow-sm">
-                <TableRow>
-                  <TableHead>Project</TableHead>
-                  <TableHead>Structure</TableHead>
-                  <TableHead className="text-right">Marks</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Wt</TableHead>
-                  <TableHead className="text-right">Avg Ageing</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {byStructure.map((s) => (
-                  <TableRow key={s.key}>
-                    <TableCell className="font-medium">{s.job}</TableCell>
-                    <TableCell className="max-w-[200px] truncate">{s.structure}</TableCell>
-                    <TableCell className="text-right">{s.marks}</TableCell>
-                    <TableCell className="text-right">{s.qty}</TableCell>
-                    <TableCell className="text-right">{formatWeight(s.weight)}</TableCell>
-                    <TableCell
-                      className={`text-right font-bold tabular-nums ${getAgeingColor(s.avgAge)}`}
-                    >
-                      {s.avgAge !== null ? `${s.avgAge}d` : "-"}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {byStructure.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center py-4 text-muted-foreground">
                       No data for the selected filters.
                     </TableCell>
                   </TableRow>
