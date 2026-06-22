@@ -197,7 +197,8 @@ function ReportBuilder() {
     const activitySheets = [...byActivity.keys()]
       .sort(compareActivity)
       .map((act) => ({ name: act, columns: REPORT_COLUMNS, rows: byActivity.get(act)! }));
-    exportToXlsxSheets(`report_${tag}.xlsx`, [
+    const date = new Date().toISOString().slice(0, 10);
+    exportToXlsxSheets(`report_${tag}_${date}.xlsx`, [
       { name: "Summary", columns: REPORT_COLUMNS, rows, summaryRows: activitySubtotals },
       ...activitySheets,
     ]);
@@ -448,7 +449,8 @@ function AiReports() {
 
   const handleExportPdf = () => {
     if (!result) return;
-    exportAiReportPdf(`ai_report_import_${result.importId ?? selectedImportId}.pdf`, result);
+    const date = new Date().toISOString().slice(0, 10);
+    exportAiReportPdf(`ai_report_import_${result.importId ?? selectedImportId}_${date}.pdf`, result);
   };
 
   const unavailable = !aiAvailable || (result != null && !result.available);

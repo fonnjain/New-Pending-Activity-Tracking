@@ -84,7 +84,8 @@ export default function DataView() {
       toast({ variant: "destructive", title: "No data to export" });
       return;
     }
-    exportToJson(`import_${selectedImportId}.json`, { import: selectedImport, records: allRecords });
+    const date = new Date().toISOString().slice(0, 10);
+    exportToJson(`import_${selectedImportId}_${date}.json`, { import: selectedImport, records: allRecords });
   };
 
   return (
