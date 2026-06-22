@@ -140,7 +140,7 @@ function FilterBar() {
                 searchPlaceholder="Search activities..."
               />
             </div>
-            <div className="w-[160px]">
+            <div className="flex-1 min-w-[200px] max-w-[360px]">
               <SearchableSelect
                 value={filters.contractor}
                 onChange={(v) => setFilter("contractor", v)}
