@@ -18,12 +18,34 @@ import {
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DateRangeSelect } from "@/components/date-range-select";
 import { SortControl } from "@/components/sort-control";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { formatWeight } from "@/lib/utils";
 import { sortRecords, type RecordSortKey } from "@/lib/sort";
 import { ChevronLeft, Search } from "lucide-react";
 
 const ROW_CAP = 300;
+
+type ProjectSortKey = "assignDate" | "project" | "weight" | "marks" | "ageing";
+
+const PROJECT_SORT_OPTIONS: { id: ProjectSortKey; name: string }[] = [
+  { id: "assignDate", name: "First Assign Date" },
+  { id: "project", name: "Project wise" },
+  { id: "weight", name: "Weight" },
+  { id: "marks", name: "Marks" },
+  { id: "ageing", name: "Avg Ageing" },
+];
+
+const isoDate = (s: unknown): string | null => {
+  const v = String(s ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+};
 
 export default function JobDashboard() {
   const { selectedImportId } = useTracker();
@@ -49,6 +71,7 @@ function JobDashboardContent() {
   const [structure, setStructure] = useState<string | null>(null);
   const [mark, setMark] = useState<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
+  const [projectSort, setProjectSort] = useState<ProjectSortKey>("assignDate");
 
   // Cascading dropdown options
   const projectOptions = useMemo(
@@ -124,21 +147,24 @@ function JobDashboardContent() {
         projGroups.get(key)!.push(r);
       });
 
-      const byProject = Array.from(projGroups.entries())
-        .map(([job, recs]) => ({
-          job,
-          structures: new Set(recs.map((r) => r.structure).filter(Boolean)).size,
-          marks: recs.length,
-          qty: recs.reduce((s, r) => s + r.balanceQty, 0),
-          weight: recs.reduce((s, r) => s + r.balanceWt, 0),
-          avgAge: avg(recs),
-          c0to30: recs.filter((r) => r.ageingDays !== null && r.ageingDays <= 30).length,
-          c31to60: recs.filter(
-            (r) => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60,
-          ).length,
-          c60Plus: recs.filter((r) => r.ageingDays !== null && r.ageingDays > 60).length,
-        }))
-        .sort((a, b) => b.weight - a.weight);
+      const byProject = Array.from(projGroups.entries()).map(([job, recs]) => ({
+        job,
+        structures: new Set(recs.map((r) => r.structure).filter(Boolean)).size,
+        marks: recs.length,
+        qty: recs.reduce((s, r) => s + r.balanceQty, 0),
+        weight: recs.reduce((s, r) => s + r.balanceWt, 0),
+        avgAge: avg(recs),
+        firstAssign: recs.reduce<string | null>((min, r) => {
+          const d = isoDate(r.assignDate);
+          if (!d) return min;
+          return min === null || d < min ? d : min;
+        }, null),
+        c0to30: recs.filter((r) => r.ageingDays !== null && r.ageingDays <= 30).length,
+        c31to60: recs.filter(
+          (r) => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60,
+        ).length,
+        c60Plus: recs.filter((r) => r.ageingDays !== null && r.ageingDays > 60).length,
+      }));
 
       const actGroups = new Map<string, typeof filtered>();
       filtered.forEach((r) => {
@@ -169,6 +195,40 @@ function JobDashboardContent() {
         byActivity,
       };
     }, [filtered]);
+
+  const sortedProjects = useMemo(() => {
+    const arr = [...byProject];
+    switch (projectSort) {
+      case "project":
+        arr.sort((a, b) => a.job.localeCompare(b.job));
+        break;
+      case "weight":
+        arr.sort((a, b) => b.weight - a.weight);
+        break;
+      case "marks":
+        arr.sort((a, b) => b.marks - a.marks);
+        break;
+      case "ageing":
+        arr.sort((a, b) => (b.avgAge ?? -1) - (a.avgAge ?? -1));
+        break;
+      case "assignDate":
+      default:
+        // Earliest first assign date first; projects with no date sort last.
+        arr.sort((a, b) => {
+          if (a.firstAssign && b.firstAssign)
+            return a.firstAssign < b.firstAssign
+              ? -1
+              : a.firstAssign > b.firstAssign
+                ? 1
+                : a.job.localeCompare(b.job);
+          if (a.firstAssign) return -1;
+          if (b.firstAssign) return 1;
+          return a.job.localeCompare(b.job);
+        });
+        break;
+    }
+    return arr;
+  }, [byProject, projectSort]);
 
   if (selectedJob) {
     return (
@@ -247,10 +307,30 @@ function JobDashboardContent() {
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
           <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
             By Project
           </CardTitle>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-semibold text-muted-foreground uppercase whitespace-nowrap">
+              Sort by
+            </label>
+            <Select
+              value={projectSort}
+              onValueChange={(v) => setProjectSort(v as ProjectSortKey)}
+            >
+              <SelectTrigger className="h-9 w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROJECT_SORT_OPTIONS.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -269,7 +349,7 @@ function JobDashboardContent() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {byProject.map((p) => (
+                {sortedProjects.map((p) => (
                   <TableRow
                     key={p.job}
                     className="cursor-pointer hover:bg-muted/40"
