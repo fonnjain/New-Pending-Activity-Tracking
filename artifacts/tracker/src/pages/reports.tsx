@@ -34,17 +34,15 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { exportToJson, exportToXlsx, exportAiReportPdf, type XlsxColumn } from "@/lib/export";
+import { exportToXlsx, exportAiReportPdf, type XlsxColumn } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import {
   Sparkles,
   ShieldCheck,
   AlertTriangle,
   XCircle,
-  Download,
   FileSpreadsheet,
   FileText,
-  Printer,
   ChevronDown,
   RefreshCw,
   ListFilter,
@@ -356,11 +354,6 @@ function AiReports() {
     );
   };
 
-  const handleExport = () => {
-    if (!result) return;
-    exportToJson(`ai_report_import_${result.importId ?? selectedImportId}.json`, result);
-  };
-
   const handleExportPdf = () => {
     if (!result) return;
     exportAiReportPdf(`ai_report_import_${result.importId ?? selectedImportId}.pdf`, result);
@@ -387,12 +380,6 @@ function AiReports() {
             <>
               <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={handleExportPdf}>
                 <FileText className="w-4 h-4" /> Export PDF
-              </Button>
-              <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={handleExport}>
-                <Download className="w-4 h-4" /> Export JSON
-              </Button>
-              <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => window.print()}>
-                <Printer className="w-4 h-4" /> Print
               </Button>
               <Button
                 variant="outline"
