@@ -9,7 +9,7 @@ import {
 } from "@workspace/db";
 import { AiSanitizeBody, AiReviewBody, AiReportBody, AiReportResponse } from "@workspace/api-zod";
 import { buildChangeSet, type MembershipRow, type ChangeSet } from "../lib/diff";
-import { computeAgeing, computeRoute } from "../lib/parse";
+import { computeAgeing, computeRoute, isTruncatingCleanup } from "../lib/parse";
 import { buildAnalyticsPack } from "../lib/report";
 import {
   AI_MODEL_STANDARD,
@@ -120,10 +120,14 @@ router.post("/ai/sanitize", async (req, res): Promise<void> => {
     "Allowed fields: " +
     SANITIZE_FIELDS.join(", ") +
     ". NEVER suggest changes to any other field, to quantities, weights, activity, " +
-    "operation, or mark identity. Suggest only when a value is clearly malformed or " +
-    "inconsistent: normalize dates to YYYY-MM-DD, canonicalize inconsistent " +
-    "contractor/section spellings to the most common spelling (most-common wins), " +
-    "trim whitespace, and fix obvious typos. Do not suggest a change when the value " +
+    "operation, or mark identity. For name fields (contractor, section, and any " +
+    "other non-date field) ONLY fix whitespace, punctuation spacing, and casing. " +
+    "NEVER remove or shorten any suffix, unit designation, branch code, " +
+    "parenthetical, or hyphenated tag (e.g. GP-2, UNIT-II, (JW), - JW, BDM). Names " +
+    "that differ only by such a tag are DIFFERENT contractors and must stay " +
+    "separate — never merge them. If the only difference between two names is real " +
+    "text tokens, make no suggestion. For assignDate only, normalize to " +
+    "YYYY-MM-DD. Do not suggest a change when the value " +
     "is already clean. Respond with STRICT JSON only, no prose, no code fences, " +
     'shaped exactly as: {"suggestions":[{"poolHash":string,"field":string,' +
     '"from":string|null,"to":string|null,"reason":string}],' +
@@ -167,6 +171,15 @@ router.post("/ai/sanitize", async (req, res): Promise<void> => {
         : null;
       const toVal = typeof to === "string" ? to : to === null ? null : null;
       if (toVal === fromVal) continue;
+      // Block truncating/merging name changes (e.g. dropping a "GP-2"/"(UNIT-II)"
+      // suffix) server-side so two distinct entities are never collapsed into one.
+      if (isTruncatingCleanup(field, fromVal, toVal)) {
+        req.log.warn(
+          { importId, field, from: fromVal, to: toVal },
+          "Dropped truncating sanitize suggestion (token set changed)",
+        );
+        continue;
+      }
       const reason = (s as { reason?: unknown }).reason;
       suggestions.push({
         poolHash,

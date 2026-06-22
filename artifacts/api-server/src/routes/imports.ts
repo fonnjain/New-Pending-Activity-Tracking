@@ -25,6 +25,7 @@ import {
   computeAgeing,
   computeRoute,
   CLEANABLE_FIELDS,
+  isTruncatingCleanup,
   type Cleanup,
 } from "../lib/parse";
 import {
@@ -499,9 +500,13 @@ router.post("/imports/validate", async (req, res): Promise<void> => {
     "cleanups for these fields and NOTHING else: " +
     CLEANABLE_FIELDS.join(", ") +
     ". Never suggest changes to mark identity, quantities, weights, activity, or " +
-    "operation. Suggest a cleanup only when a value is clearly malformed or " +
-    "inconsistent (normalize dates to YYYY-MM-DD, canonicalize inconsistent " +
-    "spellings to the most common one, trim whitespace, fix obvious typos). " +
+    "operation. For name fields (contractor, section, and any other non-date " +
+    "field) ONLY fix whitespace, punctuation spacing, and casing. NEVER remove or " +
+    "shorten any suffix, unit designation, branch code, parenthetical, or " +
+    "hyphenated tag (e.g. GP-2, UNIT-II, (JW), - JW, BDM). Names that differ only " +
+    "by such a tag are DIFFERENT contractors and must be kept separate — do not " +
+    "merge them. If the only difference between two names is real text tokens, " +
+    "make no suggestion. For assignDate only, normalize to YYYY-MM-DD. " +
     "Respond with STRICT JSON only, no prose, no code fences, shaped exactly as: " +
     '{"verdict":"ok"|"reject","reason":string|null,"expectedShape":string|null,' +
     '"sanitize":[{"field":string,"from":string|null,"to":string|null,' +
@@ -550,6 +555,15 @@ router.post("/imports/validate", async (req, res): Promise<void> => {
         typeof fromRaw === "string" ? fromRaw : fromRaw === null ? null : null;
       const to = typeof toRaw === "string" ? toRaw : toRaw === null ? null : null;
       if (to === from) continue;
+      // Block truncating/merging name changes (e.g. dropping "GP-2"/"(UNIT-II)")
+      // server-side so they never reach the user even if the model proposes them.
+      if (isTruncatingCleanup(field, from, to)) {
+        req.log.warn(
+          { stagingId, field, from, to },
+          "Dropped truncating sanitize suggestion (token set changed)",
+        );
+        continue;
+      }
       const reasonRaw = (s as { reason?: unknown }).reason;
       let count = 0;
       for (const row of parsed.rows) {
@@ -595,11 +609,18 @@ router.post("/imports/commit", async (req, res): Promise<void> => {
       if (typeof field !== "string" || !allowed.has(field)) continue;
       const fromRaw = (s as { from?: unknown }).from;
       const toRaw = (s as { to?: unknown }).to;
-      accepted.push({
-        field,
-        from: typeof fromRaw === "string" ? fromRaw : null,
-        to: typeof toRaw === "string" ? toRaw : null,
-      });
+      const from = typeof fromRaw === "string" ? fromRaw : null;
+      const to = typeof toRaw === "string" ? toRaw : null;
+      // Defense in depth: reject truncating/merging name changes even if a
+      // caller posts them directly to commit (bypassing /validate).
+      if (isTruncatingCleanup(field, from, to)) {
+        req.log.warn(
+          { stagingId, field, from, to },
+          "Dropped truncating cleanup at commit (token set changed)",
+        );
+        continue;
+      }
+      accepted.push({ field, from, to });
     }
   }
 

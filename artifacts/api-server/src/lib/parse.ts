@@ -242,6 +242,38 @@ export const CLEANABLE_FIELDS = [
 ] as const;
 export type CleanableField = (typeof CLEANABLE_FIELDS)[number];
 
+// Descriptive fields whose cleanups must preserve the exact alphanumeric token
+// sequence (formatting-only: whitespace, punctuation-spacing, casing). Every
+// cleanable field EXCEPT assignDate is token-preserving — date normalization
+// (e.g. "1/5/2025" -> "2025-01-05") legitimately changes the tokens, names do
+// not.
+const TOKEN_PRESERVING_FIELDS = new Set<string>(
+  CLEANABLE_FIELDS.filter((f) => f !== "assignDate"),
+);
+
+// Canonical alphanumeric token sequence of a value: lowercased, runs of
+// non-alphanumeric collapsed to a single space, trimmed. Two values share this
+// when they differ only by whitespace, punctuation-spacing, or casing.
+export function alnumTokens(s: string | null): string {
+  return (s ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// A cleanup on a name-like field is "truncating/merging" when it drops or adds
+// real tokens (e.g. "DASHMESH ENTERPRISES GP-2" -> "DASHMESH ENTERPRISES").
+// Such a change merges DISTINCT entities and corrupts analytics, so it must be
+// rejected server-side regardless of what the model proposes.
+export function isTruncatingCleanup(
+  field: string,
+  from: string | null,
+  to: string | null,
+): boolean {
+  if (!TOKEN_PRESERVING_FIELDS.has(field)) return false;
+  return alnumTokens(from) !== alnumTokens(to);
+}
+
 export interface Cleanup {
   field: string;
   from: string | null;

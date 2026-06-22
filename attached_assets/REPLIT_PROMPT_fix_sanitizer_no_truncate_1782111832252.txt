@@ -1,0 +1,67 @@
+REPLIT AGENT PROMPT — FIX SANITIZER: NEVER TRUNCATE / MERGE DISTINCT NAMES
+==========================================================================
+Constrain the AI "sanitize" step so it only normalizes formatting and NEVER removes
+meaningful parts of a name or merges two distinct entities. Applies to the Claude
+sanitize prompt and the server-side validation of its suggestions.
+
+THE PROBLEM
+The sanitizer is suggesting changes that DROP identity-bearing suffixes, e.g.:
+  - "DASHMESH ENTERPRISES GP-2"      -> "DASHMESH ENTERPRISES"   (WRONG)
+  - "DASHMESH ENTERPRISES (UNIT-II)" -> "DASHMESH ENTERPRISES"   (WRONG)
+GP-2 and (UNIT-II) are DIFFERENT production units / entities. Collapsing them merges
+distinct contractors and corrupts the contractor and ageing analytics. Do NOT do this.
+
+ALLOWED vs FORBIDDEN
+
+ALLOWED (formatting only — the visible token set stays the same):
+  - collapse repeated internal whitespace to single spaces; trim leading/trailing spaces
+    e.g. "DASHMESH ENGINEERING WORKS  (JW)" -> "DASHMESH ENGINEERING WORKS (JW)"
+         "KHYATI ISPAT PRIVATE LIMITED   - JW" -> "KHYATI ISPAT PRIVATE LIMITED - JW"
+  - normalize spacing AROUND punctuation only (e.g. " -JW" / "-  JW" -> " - JW"),
+    without adding/removing the punctuation's meaning.
+  - fix obvious casing inconsistencies of the SAME full string (e.g. "unit-ii" vs
+    "UNIT-II") -> pick the dominant casing, but keep ALL tokens.
+  - normalize a clearly mistyped duplicate of the SAME full name (true typo of the entire
+    string, every token still present).
+
+FORBIDDEN (never do any of these for contractor, section, or any name field):
+  - removing or shortening a suffix/qualifier: "GP-2", "GP2", "(UNIT-II)", "UNIT-II",
+    "- JW", "(JW)", "BDM", "GP-1", numbers, parentheticals, or unit/branch tags.
+  - merging two strings that differ by such a suffix into one (they are DISTINCT entities).
+  - dropping parenthetical content, hyphenated tags, or trailing codes.
+  - changing the token set in any way (no token added or removed) — only whitespace,
+    punctuation-spacing, and casing may change.
+
+HARD RULE FOR THE MODEL + SERVER VALIDATION
+A suggestion is valid ONLY IF, after removing all whitespace and lowercasing, the
+"from" and "to" still contain the SAME alphanumeric token sequence. Concretely:
+  normalize(s) = lowercase(s), replace runs of non-alphanumeric with a single space, trim.
+  A contractor/section suggestion is REJECTED unless
+     set/sequence of alphanumeric tokens of `from` == that of `to`.
+  This passes the whitespace fixes (tokens identical) and BLOCKS the truncations
+  (e.g. "...enterprises gp 2" vs "...enterprises" -> token sets differ -> reject).
+Apply this validation on the SERVER to every returned suggestion; silently drop any
+suggestion that fails it (and log it), so even if the model misbehaves, no truncating
+change reaches the user.
+
+CLAUDE PROMPT UPDATE
+Tell Claude explicitly: "Only fix whitespace, punctuation spacing, and casing. NEVER
+remove or shorten any suffix, unit designation, branch code, parenthetical, or hyphenated
+tag (e.g. GP-2, UNIT-II, (JW), - JW, BDM). Names that differ only by such a tag are
+DIFFERENT contractors and must be kept separate. Do not propose merging them. If the only
+difference between two names is real text tokens, make no suggestion."
+
+UI
+  - Keep the existing "Suggested cleanups" review with per-item checkboxes and Accept.
+  - For each suggestion show the kind ("whitespace" / "casing"); since truncations are
+    now blocked server-side, the list should only contain safe formatting fixes.
+  - The note already says it never changes mark identity/quantities/etc.; keep it.
+
+ACCEPTANCE CHECK
+  - "DASHMESH ENTERPRISES GP-2" and "DASHMESH ENTERPRISES (UNIT-II)" are NOT suggested for
+    change to "DASHMESH ENTERPRISES"; they remain distinct contractors everywhere.
+  - "DASHMESH ENGINEERING WORKS  (JW)" -> single-space "(JW)" is still suggested (allowed).
+  - "KHYATI ISPAT PRIVATE LIMITED   - JW" -> normalized spacing, name fully preserved.
+  - Server rejects (and logs) any suggestion whose alphanumeric token set changes.
+  - Contractor counts in the Contractor dashboard do not collapse GP-2 / UNIT-II into the
+    base name.
