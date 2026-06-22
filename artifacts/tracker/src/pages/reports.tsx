@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import {
   useAiReport,
   useAiStatus,
@@ -10,10 +10,9 @@ import {
   type ReportAction,
   type ReportBottleneck,
 } from "@workspace/api-client-react";
-import { useTracker, dateRangeWindow } from "@/lib/store";
+import { useTracker, dateRangeWindow, useFilteredRecords } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Table,
   TableHeader,
@@ -57,7 +56,7 @@ const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
   {
     id: "jobwise",
     name: "Job Wise Report",
-    description: "Filter pending work by job and activity, then export to Excel.",
+    description: "Filter pending work with the header filters, then export to Excel.",
   },
   {
     id: "ai",
@@ -71,13 +70,6 @@ function ymd(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
-}
-
-function uniqueSorted(values: (string | null | undefined)[] | undefined): string[] {
-  if (!values) return [];
-  return Array.from(new Set(values.filter((v): v is string => !!v))).sort((a, b) =>
-    a.localeCompare(b, undefined, { numeric: true }),
-  );
 }
 
 // [header label, record field] — controls both the on-screen table and the
@@ -101,7 +93,7 @@ function num(v: number | null | undefined): string {
 }
 
 function ReportBuilder() {
-  const { selectedImportId } = useTracker();
+  const { selectedImportId, filters } = useTracker();
   const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
     query: {
       enabled: selectedImportId != null,
@@ -109,33 +101,19 @@ function ReportBuilder() {
     },
   });
 
-  const [job, setJob] = useState<string | null>(null);
-  const [activity, setActivity] = useState<string | null>(null);
-
-  useEffect(() => {
-    setJob(null);
-    setActivity(null);
-  }, [selectedImportId]);
-
-  const jobs = useMemo(() => uniqueSorted(allRecords?.map((r) => r.job)), [allRecords]);
-  const activities = useMemo(
-    () => uniqueSorted(allRecords?.map((r) => r.activity)),
-    [allRecords],
-  );
-
-  const rows = useMemo(() => {
-    let rs = allRecords ?? [];
-    if (job) rs = rs.filter((r) => r.job === job);
-    if (activity) rs = rs.filter((r) => r.activity === activity);
-    return rs;
-  }, [allRecords, job, activity]);
+  // Driven entirely by the universal header filters (job, activity,
+  // contractor, structure, mark, search, date) — no report-local filters.
+  const rows = useFilteredRecords(allRecords);
 
   const totalQty = rows.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
   const totalWt = rows.reduce((s, r) => s + (r.balanceWt ?? 0), 0);
 
   const handleExcel = () => {
     if (!rows.length) return;
-    const tag = `${job ?? "all"}_${activity ?? "all"}`.replace(/[^\w-]+/g, "-");
+    const tag = `${filters.job ?? "all"}_${filters.activity ?? "all"}`.replace(
+      /[^\w-]+/g,
+      "-",
+    );
     exportToXlsx(`report_${tag}.xlsx`, REPORT_COLUMNS, rows);
   };
 
@@ -168,27 +146,8 @@ function ReportBuilder() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-muted-foreground uppercase">Job</label>
-            <SearchableSelect
-              value={job}
-              onChange={setJob}
-              options={jobs}
-              allLabel="All Jobs"
-              searchPlaceholder="Search job..."
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-muted-foreground uppercase">Activity</label>
-            <SearchableSelect
-              value={activity}
-              onChange={setActivity}
-              options={activities}
-              allLabel="All Activities"
-              searchPlaceholder="Search activity..."
-            />
-          </div>
+        <div className="text-xs text-muted-foreground">
+          Filtered by the header filters (job, activity, contractor, and more).
         </div>
 
         <div className="text-xs text-muted-foreground">
@@ -226,7 +185,7 @@ function ReportBuilder() {
               {rows.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center text-sm text-muted-foreground py-8">
-                    No rows for the selected job / activity.
+                    No rows match the current filters.
                   </TableCell>
                 </TableRow>
               )}

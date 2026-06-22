@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Clock, Users, Database, FileText, Filter, X } from "lucide-react";
 import { useTracker, dateRangeWindow } from "@/lib/store";
-import { useListImports, useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
+import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -131,6 +131,24 @@ function FilterBar() {
                 searchPlaceholder="Search jobs..."
               />
             </div>
+            <div className="w-[150px]">
+              <SearchableSelect
+                value={filters.activity}
+                onChange={(v) => setFilter("activity", v)}
+                options={activities}
+                allLabel="All Activities"
+                searchPlaceholder="Search activities..."
+              />
+            </div>
+            <div className="w-[160px]">
+              <SearchableSelect
+                value={filters.contractor}
+                onChange={(v) => setFilter("contractor", v)}
+                options={contractors}
+                allLabel="All Contractors"
+                searchPlaceholder="Search contractors..."
+              />
+            </div>
             <Input 
               placeholder="Search mark name, section..." 
               value={filters.search}
@@ -160,7 +178,7 @@ function FilterBar() {
         </div>
         
         <CollapsibleContent>
-          <div className="p-3 md:px-6 pt-0 border-t bg-muted/30 grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="p-3 md:px-6 pt-0 border-t bg-muted/30 grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">Structure</label>
               <SearchableSelect
@@ -181,26 +199,6 @@ function FilterBar() {
                 allLabel="All Marks"
                 searchPlaceholder="Search marks..."
                 disabled={marks.length === 0}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">Contractor</label>
-              <SearchableSelect
-                value={filters.contractor}
-                onChange={(v) => setFilter("contractor", v)}
-                options={contractors}
-                allLabel="All Contractors"
-                searchPlaceholder="Search contractors..."
-              />
-            </div>
-            <div className="space-y-1 col-span-2 md:col-span-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">Activity</label>
-              <SearchableSelect
-                value={filters.activity}
-                onChange={(v) => setFilter("activity", v)}
-                options={activities}
-                allLabel="All Activities"
-                searchPlaceholder="Search activities..."
               />
             </div>
           </div>
