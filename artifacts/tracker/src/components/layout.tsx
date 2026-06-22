@@ -4,7 +4,6 @@ import { BarChart3, Briefcase, Activity, Clock, Users, Database, FileText, Filte
 import { useTracker, dateRangeWindow } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DateRangeSelect } from "@/components/date-range-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -150,12 +149,6 @@ function FilterBar() {
                 searchPlaceholder="Search contractors..."
               />
             </div>
-            <Input 
-              placeholder="Search mark name, section..." 
-              value={filters.search}
-              onChange={(e) => setFilter("search", e.target.value)}
-              className="flex-1 min-w-[140px] max-w-[280px] h-9"
-            />
             <DateRangeSelect className="h-9 w-[170px]" />
           </div>
           <div className="flex items-center gap-2">
