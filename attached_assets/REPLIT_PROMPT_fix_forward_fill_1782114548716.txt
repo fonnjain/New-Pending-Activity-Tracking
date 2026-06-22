@@ -1,0 +1,60 @@
+REPLIT AGENT PROMPT — FIX PROJECT-CODE FORWARD-FILL (don't absorb blank-project rows)
+=====================================================================================
+Bug fix in the import parser (parse.ts). The current forward-fill of "Project Code"
+incorrectly assigns project-less rows (RSJ POLE / EARTHING / GENERAL) to whatever project
+appears above them. These rows have a genuinely BLANK Project Code in the source and must
+NOT inherit a project. Deterministic engine change only; do not touch dashboards/AI.
+
+THE BUG (confirmed in data)
+In WIP/Balance files, "Project Code" (col A) is sparse: a project code appears on the
+first row of a structure group, and member rows below are blank until the next group.
+The parser forward-fills these blanks — which is CORRECT for real project marks
+(Order Nature = "Structure"). But some rows with a BLANK project code are NOT members of
+the project above them: they are standalone RSJ POLE / EARTHING / GENERAL items that have
+no project code at all. Example (file WIP_OVER_ALL-22-Jun-2026):
+  - Excel row 27145: Project Code = BLANK, Order Nature = "RSJ POLE", Mark No. = "1"
+  - Excel row 27618: Project Code = BLANK, Order Nature = "RSJ POLE", Mark No. = "1"
+Both currently get forward-filled to "921" (the Structure row above), so they wrongly
+show up under job 921. In Excel, filtering job 921 does NOT show them (their col A is
+blank). The app must match that: they are NOT 921.
+
+THE FIX — conditional forward-fill
+Forward-fill the Project Code ONLY into rows that are real project/structure members.
+Concretely, when a row's Project Code cell is blank:
+  - If the row's Order Nature is "Structure" (a normal project mark) -> forward-fill with
+    the last seen project code (current behaviour, keep it).
+  - If the row's Order Nature is "RSJ POLE", "EARTHING", or "GENERAL" (project-less item
+    types) -> DO NOT forward-fill. Leave job empty and assign it to a dedicated bucket:
+        job = ""  (or null) and a derived group label = "(Unassigned)" / the Order Nature.
+  - Defensive: if Order Nature is blank/unknown AND project code is blank, do NOT
+    forward-fill either; treat as "(Unassigned)" and log it for review (don't guess).
+Rows that DO have a non-blank Project Code are unaffected.
+
+RATIONALE / RULE OF THUMB
+A blank Project Code is only a "continuation of the group above" for Structure rows.
+For RSJ POLE / EARTHING / GENERAL, a blank Project Code means the item genuinely has no
+project — never borrow the project from an adjacent row.
+
+DOWNSTREAM EFFECTS (make sure these hold)
+- Job 921 (and every other job) no longer includes these blank-project RSJ POLE/EARTHING/
+  GENERAL rows. Counts/weights for 921 drop by exactly those mis-assigned rows.
+- The project-less rows still EXIST in the data (not dropped) under an "(Unassigned)" /
+  "General" job group, so totals across the whole dataset are unchanged — only their
+  attribution changes.
+- The Job / Job->Structure->Mark filters list "(Unassigned)" (or by Order Nature) as a
+  selectable group so these rows are still viewable.
+- Mark Number parsing for these rows is unchanged (bare m_no like "1"; mark_number = "1"
+  since job and alias are empty) — they were Case 1 already.
+- The across-upload full-row hash is unaffected in spirit, but note the stored `job` value
+  for these rows changes from a wrong project to ""/null; that is the correct value.
+  (If a re-import diff shows these moving from "921" to "(Unassigned)", that is the fix
+  taking effect, expected once.)
+
+ACCEPTANCE CHECK
+- Excel rows 27145 and 27618 (blank col A, RSJ POLE) are NOT attributed to job 921;
+  filtering job 921 in the app excludes them, matching Excel.
+- A Structure row with a blank Project Code still inherits the project above it (unchanged).
+- RSJ POLE / EARTHING / GENERAL rows with blank Project Code appear under "(Unassigned)"
+  /their Order Nature, not under the preceding project.
+- Dataset-wide totals (all rows) unchanged; only per-job attribution corrected.
+- No row is dropped; project-less rows remain visible in their own group.

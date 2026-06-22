@@ -22,6 +22,12 @@ function cellToString(value: Cell): string {
   return String(value).trim();
 }
 
+// Bucket label for rows that genuinely have no Project Code (project-less item
+// types like RSJ POLE / EARTHING / GENERAL, or rows whose Order Nature is
+// blank/unknown). Stored as the `job` value so they group/filter under their own
+// selectable group in the UI without borrowing a project from an adjacent row.
+export const UNASSIGNED_JOB = "(Unassigned)";
+
 function normalizeProject(value: Cell): string {
   let s = cellToString(value);
   if (!s) return "";
@@ -419,10 +425,29 @@ export function parseWorkbook(
   for (const row of rawRows) {
     rowsRead++;
 
-    // forward-fill project code
+    const orderNature = emptyToNull(row[COL.orderNature]);
+
+    // Conditional forward-fill of Project Code. A blank Project Code is only a
+    // "continuation of the structure group above" for Structure rows, which
+    // inherit the last seen project. Project-less item types (RSJ POLE,
+    // EARTHING, GENERAL) — and any row whose Order Nature is blank/unknown —
+    // genuinely have no project and must NOT borrow one from an adjacent row;
+    // they are bucketed under "(Unassigned)" instead.
     const rawProject = normalizeProject(row[COL.projectCode]);
     if (rawProject) lastProject = rawProject;
-    const job = lastProject;
+
+    // The real project for this row: its own code, or — only for Structure
+    // members with a blank code — the inherited group project. Project-less item
+    // types (RSJ POLE / EARTHING / GENERAL) and blank/unknown Order Nature get
+    // no project (and a leading Structure row with no project yet also falls
+    // through to "(Unassigned)" rather than a silent empty job).
+    const isStructure = (orderNature ?? "").trim().toLowerCase() === "structure";
+    const effectiveProject = rawProject || (isStructure ? lastProject : "");
+    // Stored/displayed grouping value.
+    const job = effectiveProject || UNASSIGNED_JOB;
+    // Value fed to mark derivation: empty for unassigned rows so their mark
+    // identity stays the bare m_no (e.g. "1") and does not embed a borrowed job.
+    const jobForMark = effectiveProject;
 
     // keep only rows with a Mark No.
     const markNo = cellToString(row[COL.markNo]);
@@ -431,11 +456,11 @@ export function parseWorkbook(
     const alias = emptyToNull(row[COL.alias]);
     const aliasStr = alias ?? "";
     const { structure, markTail, mNo, projectSuffix, aliasCorrected, markNumber } =
-      deriveMark(markNo, job, aliasStr);
+      deriveMark(markNo, jobForMark, aliasStr);
     // markNumber is the canonical mark key; markId aligns with it.
     const markId = markNumber;
 
-    if (job) projects.add(job);
+    if (job && job !== UNASSIGNED_JOB) projects.add(job);
 
     const base: Omit<InsertRecordPool, "hash"> = {
       job,
@@ -446,7 +471,7 @@ export function parseWorkbook(
       projectSuffix,
       aliasCorrected,
       markNumber,
-      orderNature: emptyToNull(row[COL.orderNature]),
+      orderNature,
       contractor: emptyToNull(row[COL.contractor]),
       jobCardNo: emptyToNull(row[COL.jobCard]),
       towerType: emptyToNull(row[COL.towerType]),
