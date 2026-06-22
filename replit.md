@@ -33,6 +33,7 @@ A mobile-first web app for steel-fabrication workshops. Upload an Excel (.xlsx o
 - Overview "Changes since last upload" panel: `artifacts/tracker/src/components/changes-panel.tsx`
 - Frontend state (selected import + cascading filters): `artifacts/tracker/src/lib/store.tsx`
 - Theme + ageing colors: `artifacts/tracker/src/index.css`
+- **Canonical activity-step order (single source of truth):** `lib/domain/src/index.ts` (`@workspace/domain`) — `PROCESS_SEQUENCE = ["C","RFI","NH","B","HAB","HG","W","Q","TS","G","GB","Y"]` plus `activityRank`/`isKnownActivity`/`compareActivity`/`sortActivities` (case-insensitive; unknown codes sort after known ones, grouped alphabetically, never dropped). Imported by BOTH the tracker frontend and the api-server. Every activity dropdown, dashboard card, ageing table, report/export, and the AI review signal list orders activities by this. Do NOT re-define a local order array anywhere — import from here.
 
 ## Architecture decisions
 
@@ -80,6 +81,7 @@ Five views: Overview (KPIs + "Changes since last upload" panel + ageing breakdow
 - After changing DB schema, run `pnpm --filter @workspace/db run push`.
 - Tailwind v4: do not `@apply` a custom utility class; use raw CSS properties for things like `font-variant-numeric: tabular-nums`.
 - React Query hooks need an explicit `queryKey` in `query` options (e.g. `getGetSnapshotRecordsQueryKey(id)`).
+- **Activity ordering is centralized in `@workspace/domain` (`lib/domain`).** Never add a local `PROCESS_ORDER`/`ACTIVITY_ORDER` array or sort activities alphabetically — always use `compareActivity`/`sortActivities`. This is a display/ordering concern only; it must never change parsing, Activity values, quantities, ageing, or dedup. `unknownActivityCodes` in the AI review signals is internal (prompt-only), not part of the OpenAPI/Zod response schema — adding to it needs no codegen.
 
 ## Pointers
 

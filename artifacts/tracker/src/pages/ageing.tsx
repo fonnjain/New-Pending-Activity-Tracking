@@ -7,6 +7,7 @@ import { useState, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { formatWeight } from "@/lib/utils";
 import { Search, ChevronLeft } from "lucide-react";
+import { compareActivity } from "@workspace/domain";
 
 const ROW_CAP = 200;
 
@@ -59,7 +60,7 @@ function AgeingContent() {
         c31to60: actWithAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length,
         c60Plus: actWithAge.filter(r => r.ageingDays !== null && r.ageingDays > 60).length,
       };
-    }).sort((a, b) => (b.avgAge || 0) - (a.avgAge || 0));
+    }).sort((a, b) => compareActivity(a.activity, b.activity));
 
     // Group by contractor
     const contractors = new Map<string, any[]>();

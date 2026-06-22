@@ -8,22 +8,7 @@
 import type { MembershipRow } from "./diff";
 import type { ChangeSet } from "./diff";
 import { computeAgeing, computeRoute } from "./parse";
-
-// Canonical process order for fabrication activities. Anything not listed is
-// appended afterwards (alphabetically) so unexpected codes still appear.
-const ACTIVITY_ORDER = [
-  "C",
-  "RFI",
-  "NH",
-  "B",
-  "Hab",
-  "W",
-  "TS",
-  "Q",
-  "G",
-  "GB",
-  "Y",
-] as const;
+import { sortActivities } from "@workspace/domain";
 
 const STALE_N = 25;
 const TOP_GROUPS = 10;
@@ -83,13 +68,6 @@ function addToAgg(agg: Agg, copies: number, qty: number, wt: number, age: number
 
 function avg(agg: Agg): number | null {
   return agg.ageCount > 0 ? Math.round(agg.ageSum / agg.ageCount) : null;
-}
-
-function orderActivities(codes: string[]): string[] {
-  const known = ACTIVITY_ORDER as readonly string[];
-  const inOrder = known.filter((c) => codes.includes(c));
-  const extras = codes.filter((c) => !known.includes(c)).sort();
-  return [...inOrder, ...extras];
 }
 
 export interface AnalyticsPack {
@@ -261,7 +239,7 @@ export function buildAnalyticsPack(
     return { bucket, marks: a.marks, qty: Math.round(a.qty), weightT: tons(a.weightKg) };
   });
 
-  const activityList = orderActivities(Array.from(byActivity.keys())).map((activity) => {
+  const activityList = sortActivities(Array.from(byActivity.keys())).map((activity) => {
     const a = byActivity.get(activity)!;
     return {
       activity,

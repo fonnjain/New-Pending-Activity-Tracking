@@ -7,8 +7,8 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import { ChevronDown } from "lucide-react";
 import { formatWeight } from "@/lib/utils";
 import { useState, useMemo } from "react";
+import { compareActivity } from "@workspace/domain";
 
-const PROCESS_ORDER = ["C", "RFI", "NH", "B", "HAB", "W", "TS", "Q", "G", "GB", "Y"];
 const ROW_CAP = 300;
 
 export default function ActivityView() {
@@ -33,14 +33,7 @@ function ActivityContent() {
       activities.get(act)!.push(r);
     });
 
-    const sortedActivities = Array.from(activities.keys()).sort((a, b) => {
-      const idxA = PROCESS_ORDER.indexOf(a);
-      const idxB = PROCESS_ORDER.indexOf(b);
-      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-      if (idxA !== -1) return -1;
-      if (idxB !== -1) return 1;
-      return a.localeCompare(b);
-    });
+    const sortedActivities = Array.from(activities.keys()).sort(compareActivity);
 
     return { activities, sortedActivities };
   }, [records]);

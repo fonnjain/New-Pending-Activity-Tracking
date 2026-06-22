@@ -8,6 +8,7 @@ import {
   type RecordPoolRow,
 } from "@workspace/db";
 import { AiSanitizeBody, AiReviewBody, AiReportBody, AiReportResponse } from "@workspace/api-zod";
+import { sortActivities, isKnownActivity } from "@workspace/domain";
 import { buildChangeSet, type MembershipRow, type ChangeSet } from "../lib/diff";
 import { computeAgeing, computeRoute, isTruncatingCleanup } from "../lib/parse";
 import { buildAnalyticsPack } from "../lib/report";
@@ -208,6 +209,7 @@ interface ReviewSignals {
   nullDate: number;
   ageing: { min: number | null; max: number | null; avg: number | null; counted: number };
   activityCodes: string[];
+  unknownActivityCodes: string[];
   activityNotInRoute: { markId: string; activity: string; operation: string }[];
   changeCounts: ChangeSet["counts"];
   netPendingQtyChange: number;
@@ -264,7 +266,10 @@ function computeSignals(membership: MembershipRow[], changeSet: ChangeSet): Revi
       avg: agCount > 0 ? Math.round(agSum / agCount) : null,
       counted: agCount,
     },
-    activityCodes: Array.from(activityCodes).sort(),
+    activityCodes: sortActivities(Array.from(activityCodes)),
+    unknownActivityCodes: sortActivities(
+      Array.from(activityCodes).filter((c) => !isKnownActivity(c)),
+    ),
     activityNotInRoute: notInRoute,
     changeCounts: changeSet.counts,
     netPendingQtyChange: changeSet.netPendingQtyChange,

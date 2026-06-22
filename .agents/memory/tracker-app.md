@@ -93,6 +93,10 @@ Mobile-first web app: each Excel upload = one append-only "import". Imports neve
 - **The whole-import report cache (`imports.ai_report` jsonb) is keyed by the DEFAULT baseline only.** Read/write the cache solely when unfiltered AND no `compareTo` — a custom `compareTo` changes the throughput baseline, so serving the default cache would return a report computed against a different baseline. Validate cached AND freshly built reports with `AiReportResponse.safeParse` before returning; on failure regenerate (cache) or return `available:false` (fresh).
   **Why:** stale/mis-baselined cache and off-contract bodies are silent correctness bugs.
 
+## Activity ordering
+- **Activity display order has exactly ONE source: `@workspace/domain` (`lib/domain`).** `PROCESS_SEQUENCE` order is C,RFI,NH,B,HAB,HG,W,Q,TS,G,GB,Y (intentional: Q before TS; HG at pos 6 though seldom populated). Use `compareActivity`/`sortActivities` (case-insensitive; unknown codes sort after knowns, alphabetical, never dropped).
+  **Why:** three divergent local arrays had previously drifted (wrong TS-before-Q, missing HG); a single shared constant is the only way to keep dropdowns/cards/ageing-table/reports/AI-signals consistent. **How to apply:** never add a local order array or alphabetical `.sort()` for activities; this is display-only and must never touch parsing/Activity values/qty/ageing/dedup. A new pure-constant shared lib just needs composite tsconfig + root + per-artifact `references` + `workspace:*` dep; `customConditions:["workspace"]` resolves it straight from TS source for both vite and esbuild.
+
 ## Codegen / schema gotchas
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. Do not change `info.title` (controls generated filenames).
 - `drizzle-kit push` needs a TTY to confirm table renames; for non-interactive renames, drop the old tables via SQL first, then push.

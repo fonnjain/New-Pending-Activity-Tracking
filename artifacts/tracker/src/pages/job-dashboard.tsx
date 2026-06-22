@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { sortActivities } from "@workspace/domain";
 import { useTracker, isWithinDateRange } from "@/lib/store";
 import {
   useGetImportRecords,
@@ -368,7 +369,7 @@ function JobDetail({
 
   const activityOptions = useMemo(
     () =>
-      Array.from(new Set(records.map((r) => r.activity).filter(Boolean))).sort(),
+      sortActivities(Array.from(new Set(records.map((r) => r.activity).filter(Boolean)))),
     [records],
   );
   const contractorOptions = useMemo(

@@ -8,8 +8,8 @@ import { Input } from "@/components/ui/input";
 import { formatWeight } from "@/lib/utils";
 import { ChevronDown, ChevronLeft, Search } from "lucide-react";
 import { useMemo, useState } from "react";
+import { compareActivity } from "@workspace/domain";
 
-const PROCESS_ORDER = ["C", "RFI", "NH", "B", "HAB", "W", "TS", "Q", "G", "GB", "Y"];
 const ROW_CAP = 300;
 
 export default function ContractorView() {
@@ -203,14 +203,7 @@ function ContractorDetail({ name, records, onBack }: { name: string, records: an
       if (!activities.has(act)) activities.set(act, []);
       activities.get(act)!.push(r);
     });
-    const sortedActivities = Array.from(activities.keys()).sort((a, b) => {
-      const idxA = PROCESS_ORDER.indexOf(a);
-      const idxB = PROCESS_ORDER.indexOf(b);
-      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-      if (idxA !== -1) return -1;
-      if (idxB !== -1) return 1;
-      return a.localeCompare(b);
-    });
+    const sortedActivities = Array.from(activities.keys()).sort(compareActivity);
     return { activities, sortedActivities };
   }, [filtered]);
 

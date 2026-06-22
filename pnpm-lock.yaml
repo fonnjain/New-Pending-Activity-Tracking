@@ -172,6 +172,9 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
+      '@workspace/domain':
+        specifier: workspace:*
+        version: link:../../lib/domain
       compression:
         specifier: ^1.8.1
         version: 1.8.1
@@ -533,6 +536,9 @@ importers:
       '@workspace/api-client-react':
         specifier: workspace:*
         version: link:../../lib/api-client-react
+      '@workspace/domain':
+        specifier: workspace:*
+        version: link:../../lib/domain
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -657,6 +663,8 @@ importers:
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
+
+  lib/domain: {}
 
   scripts:
     devDependencies:

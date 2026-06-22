@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DateRangeSelect } from "@/components/date-range-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { sortActivities } from "@workspace/domain";
 
 const navItems = [
   { href: "/", icon: BarChart3, label: "Overview" },
@@ -107,7 +108,7 @@ function FilterBar() {
   );
 
   const activities = useMemo(
-    () => Array.from(new Set(records.map(r => r.activity).filter((a): a is string => Boolean(a)))).sort(),
+    () => sortActivities(Array.from(new Set(records.map(r => r.activity).filter((a): a is string => Boolean(a))))),
     [records]
   );
 
