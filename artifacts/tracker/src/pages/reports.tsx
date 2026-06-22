@@ -34,7 +34,12 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { exportToXlsx, exportAiReportPdf, type XlsxColumn, type XlsxSummaryRow } from "@/lib/export";
+import {
+  exportToXlsxSheets,
+  exportAiReportPdf,
+  type XlsxColumn,
+  type XlsxSummaryRow,
+} from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import {
   Sparkles,
@@ -81,9 +86,9 @@ function ymd(d: Date): string {
 // Controls the exported .xlsx. Numeric columns are right-aligned and number
 // formatted; Balance Qty/Wt carry a totals-row SUM. Wt stays in raw kg numbers.
 const REPORT_COLUMNS: XlsxColumn[] = [
-  { label: "Mark No.", field: "markId" },
   { label: "Activity", field: "activity" },
   { label: "Section", field: "section" },
+  { label: "Mark No.", field: "markId" },
   { label: "Length", field: "length", numeric: true, decimals: 2 },
   { label: "Width", field: "width", numeric: true, decimals: 2 },
   { label: "Balance Qty", field: "balanceQty", numeric: true, decimals: 0, total: true },
@@ -181,9 +186,21 @@ function ReportBuilder() {
       /[^\w-]+/g,
       "-",
     );
-    exportToXlsx(`report_${tag}.xlsx`, REPORT_COLUMNS, rows, {
-      summaryRows: activitySubtotals,
-    });
+    // First sheet: the full report with activity-wise subtotals + grand total.
+    // Then one worksheet per activity (process-ordered) with its own TOTAL row.
+    const byActivity = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const key = r.activity || "Unknown";
+      if (!byActivity.has(key)) byActivity.set(key, []);
+      byActivity.get(key)!.push(r);
+    }
+    const activitySheets = [...byActivity.keys()]
+      .sort(compareActivity)
+      .map((act) => ({ name: act, columns: REPORT_COLUMNS, rows: byActivity.get(act)! }));
+    exportToXlsxSheets(`report_${tag}.xlsx`, [
+      { name: "Summary", columns: REPORT_COLUMNS, rows, summaryRows: activitySubtotals },
+      ...activitySheets,
+    ]);
   };
 
   if (selectedImportId == null) {
@@ -247,9 +264,9 @@ function ReportBuilder() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Mark No.</TableHead>
                 <TableHead>Activity</TableHead>
                 <TableHead>Section</TableHead>
+                <TableHead>Mark No.</TableHead>
                 <TableHead className="text-right">Length</TableHead>
                 <TableHead className="text-right">Width</TableHead>
                 <TableHead className="text-right">Balance Qty</TableHead>
@@ -273,11 +290,11 @@ function ReportBuilder() {
                       key={`sub-${s.activity}`}
                       className="bg-muted/30 hover:bg-muted/30 font-semibold"
                     >
-                      <TableCell></TableCell>
                       <TableCell>{s.activity}</TableCell>
                       <TableCell className="text-xs font-normal text-muted-foreground">
                         {s.marks.toLocaleString()} marks
                       </TableCell>
+                      <TableCell></TableCell>
                       <TableCell></TableCell>
                       <TableCell></TableCell>
                       <TableCell className="text-right tabular-nums">{num(s.qty)}</TableCell>
@@ -297,9 +314,9 @@ function ReportBuilder() {
               )}
               {visible.map((r, i) => (
                 <TableRow key={`${r.markId}-${i}`}>
-                  <TableCell className="font-mono text-xs">{r.markId}</TableCell>
                   <TableCell>{r.activity ?? "-"}</TableCell>
                   <TableCell>{r.section ?? "-"}</TableCell>
+                  <TableCell className="font-mono text-xs">{r.markId}</TableCell>
                   <TableCell className="text-right tabular-nums">{num(r.length)}</TableCell>
                   <TableCell className="text-right tabular-nums">{num(r.width)}</TableCell>
                   <TableCell className="text-right tabular-nums">{num(r.balanceQty)}</TableCell>

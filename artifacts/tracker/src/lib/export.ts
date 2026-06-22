@@ -106,30 +106,44 @@ function numFmt(decimals: number): string {
   return decimals > 0 ? `#,##0.${"0".repeat(decimals)}` : "#,##0";
 }
 
-// Export rows to a clean, professionally formatted .xlsx using ExcelJS: bold
-// header band, frozen header row, auto-filter, auto-sized columns, right-aligned
-// number columns, and a bold totals row summing the flagged numeric columns.
-export async function exportToXlsx(
-  filename: string,
-  columns: XlsxColumn[],
-  rows: any[],
-  options: { sheetName?: string; summaryRows?: XlsxSummaryRow[] } = {},
-) {
-  const { sheetName = "Report", summaryRows = [] } = options;
-  const ExcelJS = (await import("exceljs")).default;
-  const wb = new ExcelJS.Workbook();
-  wb.created = new Date();
-  const ws = wb.addWorksheet(sheetName, {
+// A single worksheet definition for a multi-sheet export.
+export type XlsxSheet = {
+  name: string;
+  columns: XlsxColumn[];
+  rows: any[];
+  summaryRows?: XlsxSummaryRow[];
+};
+
+// Parse a value for a numeric column: a finite number when possible, else
+// null (never NaN), so anomalous non-numeric data never corrupts a cell.
+function toNum(v: any): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Excel sheet names: <=31 chars, no \ / ? * [ ] : characters, and unique within
+// a workbook. Falls back to "Sheet" and disambiguates collisions with a suffix.
+function uniqueSheetName(name: string, used: Set<string>): string {
+  const base = (name || "Sheet").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 31) || "Sheet";
+  let candidate = base;
+  let i = 2;
+  while (used.has(candidate.toLowerCase())) {
+    const suffix = ` (${i})`;
+    candidate = base.slice(0, 31 - suffix.length) + suffix;
+    i++;
+  }
+  used.add(candidate.toLowerCase());
+  return candidate;
+}
+
+// Write one fully-styled worksheet (header band, auto-sized columns, optional
+// summary rows, totals row, and grid borders around every cell).
+function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
+  const { columns, rows, summaryRows = [] } = sheet;
+  const ws = wb.addWorksheet(uniqueSheetName(sheet.name, usedNames), {
     views: [{ state: "frozen", ySplit: 1 }],
   });
-
-  // Parse a value for a numeric column: a finite number when possible, else
-  // null (never NaN), so anomalous non-numeric data never corrupts a cell.
-  const toNum = (v: any): number | null => {
-    if (v == null || v === "") return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
 
   // Columns: header label, number format + right alignment for numeric columns,
   // and an auto-computed width from the widest value (clamped 10..48).
@@ -199,7 +213,7 @@ export async function exportToXlsx(
   // Header band: bold white text on a dark fill, centered, with a thin border.
   const headerRow = ws.getRow(1);
   headerRow.height = 20;
-  headerRow.eachCell((cell) => {
+  headerRow.eachCell((cell: any) => {
     cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
     cell.fill = {
       type: "pattern",
@@ -221,7 +235,7 @@ export async function exportToXlsx(
       }
     });
     const totalRow = ws.addRow(totalObj);
-    totalRow.eachCell((cell) => {
+    totalRow.eachCell((cell: any) => {
       cell.font = { bold: true };
     });
   }
@@ -250,6 +264,11 @@ export async function exportToXlsx(
     to: { row: 1, column: columns.length },
   };
 
+  return ws;
+}
+
+// Stream a finished workbook to the browser as a .xlsx download.
+async function downloadWorkbook(wb: any, filename: string) {
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -263,6 +282,34 @@ export async function exportToXlsx(
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+// Export rows to a clean, professionally formatted single-sheet .xlsx: bold
+// header band, frozen header row, auto-filter, auto-sized columns, right-aligned
+// number columns, and a bold totals row summing the flagged numeric columns.
+export async function exportToXlsx(
+  filename: string,
+  columns: XlsxColumn[],
+  rows: any[],
+  options: { sheetName?: string; summaryRows?: XlsxSummaryRow[] } = {},
+) {
+  const { sheetName = "Report", summaryRows = [] } = options;
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  wb.created = new Date();
+  writeSheet(wb, { name: sheetName, columns, rows, summaryRows }, new Set<string>());
+  await downloadWorkbook(wb, filename);
+}
+
+// Export a workbook with one styled worksheet per supplied sheet definition
+// (e.g. one sheet per activity). Every sheet gets the same formatting + borders.
+export async function exportToXlsxSheets(filename: string, sheets: XlsxSheet[]) {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  wb.created = new Date();
+  const used = new Set<string>();
+  for (const sheet of sheets) writeSheet(wb, sheet, used);
+  await downloadWorkbook(wb, filename);
 }
 
 // Render the AI report result into a downloadable PDF. Plain text layout with
