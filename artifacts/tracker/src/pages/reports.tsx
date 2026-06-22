@@ -158,6 +158,23 @@ function ReportBuilder() {
     ];
   }, [rows]);
 
+  // On-screen activity-wise subtotals (marks + Qty + Wt), process-ordered,
+  // shown at the top of the table above the itemwise rows.
+  const subtotalRows = useMemo(() => {
+    const groups = new Map<string, { marks: number; qty: number; wt: number }>();
+    for (const r of rows) {
+      const key = r.activity || "Unknown";
+      const g = groups.get(key) ?? { marks: 0, qty: 0, wt: 0 };
+      g.marks += 1;
+      g.qty += r.balanceQty ?? 0;
+      g.wt += r.balanceWt ?? 0;
+      groups.set(key, g);
+    }
+    return [...groups.keys()]
+      .sort(compareActivity)
+      .map((activity) => ({ activity, ...groups.get(activity)! }));
+  }, [rows]);
+
   const handleExcel = () => {
     if (!rows.length) return;
     const tag = `${filters.job ?? "all"}_${filters.activity ?? "all"}_by-${sortBy}`.replace(
@@ -241,6 +258,43 @@ function ReportBuilder() {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {subtotalRows.length > 0 && (
+                <>
+                  <TableRow className="bg-muted/60 hover:bg-muted/60">
+                    <TableCell
+                      colSpan={8}
+                      className="font-semibold text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Activity-wise Subtotal
+                    </TableCell>
+                  </TableRow>
+                  {subtotalRows.map((s) => (
+                    <TableRow
+                      key={`sub-${s.activity}`}
+                      className="bg-muted/30 hover:bg-muted/30 font-semibold"
+                    >
+                      <TableCell></TableCell>
+                      <TableCell>{s.activity}</TableCell>
+                      <TableCell className="text-xs font-normal text-muted-foreground">
+                        {s.marks.toLocaleString()} marks
+                      </TableCell>
+                      <TableCell></TableCell>
+                      <TableCell></TableCell>
+                      <TableCell className="text-right tabular-nums">{num(s.qty)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatWeight(s.wt)}</TableCell>
+                      <TableCell></TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="bg-muted/60 hover:bg-muted/60">
+                    <TableCell
+                      colSpan={8}
+                      className="font-semibold text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Itemwise Data
+                    </TableCell>
+                  </TableRow>
+                </>
+              )}
               {visible.map((r, i) => (
                 <TableRow key={`${r.markId}-${i}`}>
                   <TableCell className="font-mono text-xs">{r.markId}</TableCell>
