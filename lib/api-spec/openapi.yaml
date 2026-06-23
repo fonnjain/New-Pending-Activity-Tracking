@@ -852,9 +852,12 @@ components:
         mNo:
           type: string
           description: The mark's own number, parsed from "Mark No." (col H).
+        proMno:
+          type: string
+          description: IS/SC/S rows only — the project-mark token in the 4-part markNumber; "" otherwise.
         projectSuffix:
           type: string
-          description: Project suffix from the Alias column when col H uses backslashes.
+          description: Legacy; superseded by proMno. Always "" under the current parser.
         aliasCorrected:
           type: string
           description: Authoritative alias parsed from col H; overrides the Alias column in the backslash case.
@@ -912,6 +915,7 @@ components:
         - structure
         - markTail
         - mNo
+        - proMno
         - projectSuffix
         - aliasCorrected
         - markNumber

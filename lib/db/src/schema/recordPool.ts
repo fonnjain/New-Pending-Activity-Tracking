@@ -19,6 +19,8 @@ export const recordPoolTable = pgTable("record_pool", {
   markId: text("mark_id").notNull(),
   // Derived from "Mark No." (col H). See parse.ts deriveMark for the three cases.
   mNo: text("m_no").notNull().default(""),
+  // IS/SC/S rows only (the 4-part markNumber's project-mark token); "" otherwise.
+  proMno: text("pro_mno").notNull().default(""),
   projectSuffix: text("project_suffix").notNull().default(""),
   aliasCorrected: text("alias_corrected").notNull().default(""),
   markNumber: text("mark_number").notNull().default(""),

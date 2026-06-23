@@ -141,6 +141,7 @@ function serializeRecord(r: RecordPoolRow, importId: number, id: number) {
     structure: r.structure,
     markTail: r.markTail,
     mNo: r.mNo,
+    proMno: r.proMno,
     projectSuffix: r.projectSuffix,
     aliasCorrected: r.aliasCorrected,
     markNumber: r.markNumber,

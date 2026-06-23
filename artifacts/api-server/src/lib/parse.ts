@@ -100,15 +100,48 @@ const COL = {
   refJobCard: "Ref. Job Card No.",
 } as const;
 
-// Derived identity for a Mark No. (col H). Decided by col H content; the
-// BACKSLASH case is checked FIRST. See the three cases below.
+// Derived identity for a Mark No. (col H). See the consolidated Rules A-D below
+// (VTPL Mark-Number parsing). Only IS/SC/S rows (col G) get a `proMno` and a
+// 4-part markNumber; every other row keeps the 3-part form.
 export interface DerivedMark {
-  structure: string; // = aliasCorrected (authoritative; may override col G)
-  markTail: string; // = mNo (the mark's own number, kept intact)
+  structure: string; // = aliasCorrected (the structure/alias code)
+  markTail: string; // = mNo (the mark's own number, kept whole)
   mNo: string;
-  projectSuffix: string;
-  aliasCorrected: string;
+  proMno: string; // IS/SC/S rows only; "" otherwise
+  projectSuffix: string; // legacy; superseded by proMno (kept for back-compat)
+  aliasCorrected: string; // = structure
   markNumber: string; // canonical mark key (aligns with markId)
+}
+
+// Separator used to compose markNumber: " \ " (space-backslash-space).
+const MARK_SEP = " \\ ";
+
+// Compose a DerivedMark. 4-part markNumber when proMno is set (IS/SC/S), else a
+// 3-part "project \ structure \ mNo", or the bare mNo when there is no project
+// or structure (bare marks).
+function makeMark(
+  project: string,
+  structure: string,
+  mNo: string,
+  proMno: string,
+): DerivedMark {
+  let markNumber: string;
+  if (proMno) {
+    markNumber = [project, proMno, structure, mNo].join(MARK_SEP);
+  } else if (project || structure) {
+    markNumber = [project, structure, mNo].join(MARK_SEP);
+  } else {
+    markNumber = mNo;
+  }
+  return {
+    structure,
+    markTail: mNo,
+    mNo,
+    proMno,
+    projectSuffix: "",
+    aliasCorrected: structure,
+    markNumber,
+  };
 }
 
 export function deriveMark(
@@ -117,63 +150,94 @@ export function deriveMark(
   alias: string,
 ): DerivedMark {
   const h = markNo.trim();
+  const A = job.trim();
+  const G = alias.trim();
+  const gUpper = G.toUpperCase();
+  const isISSC = gUpper === "IS" || gUpper === "SC" || gUpper === "S";
 
-  // CASE 3 — col H CONTAINS a backslash, e.g. "775 IS-775\OB6M\3".
+  // RULE A — bare mark: no space, no backslash, and both col A and col G empty
+  // (Earthing / General / RSJ Pole). markNumber = mNo (may be non-numeric).
+  if (!h.includes(" ") && !h.includes("\\") && A === "" && G === "") {
+    return makeMark("", "", h, "");
+  }
+
+  // RULE B — IS / SC / S rows: the only rows that get a proMno and a 4-part
+  // markNumber "project \ proMno \ structure \ mNo".
+  if (isISSC) {
+    // 1. Strip the "<A> <G>-" prefix to get the body.
+    const prefix = `${A} ${G}-`;
+    let body: string;
+    if (h.startsWith(prefix)) {
+      body = h.slice(prefix.length);
+    } else {
+      // Defensive: peel a leading "<A> " then a leading "<G>" + separator.
+      let rest = A && h.startsWith(`${A} `) ? h.slice(A.length + 1) : h;
+      if (rest.toUpperCase().startsWith(gUpper)) {
+        rest = rest.slice(G.length).replace(/^[\\\- ]/, "");
+      }
+      body = rest;
+    }
+    body = body.trim();
+
+    // 2. Strip a leading "VT" only when it sits directly before the inner
+    // project digits (e.g. "VT837" -> "837"). "VT" inside structure codes like
+    // "3IVTS"/"2CVT" is left intact because it is not at the start.
+    if (/^VT\d/.test(body)) body = body.slice(2);
+
+    // 3. Absorb an inner numeric project token (optional trailing dot) into
+    // proMno when it is followed by a separator/letters or ends the body.
+    let proMno: string;
+    const m = body.match(/^(\d+\.?)(?=$|[\\\- ]|[A-Za-z])/);
+    if (m) {
+      const num = m[1];
+      proMno = `${G}-${num}`;
+      body = body.slice(num.length).replace(/^[\\\- ]/, "");
+    } else {
+      proMno = G;
+    }
+
+    // 4. structure = first token (split on first \, -, or space); mNo = the
+    // rest, kept whole (variant letters and trailing tokens like "R-4" intact).
+    const sepIdx = body.search(/[\\\- ]/);
+    let structure: string;
+    let mNo: string;
+    if (sepIdx === -1) {
+      structure = body;
+      mNo = "";
+    } else {
+      structure = body.slice(0, sepIdx);
+      mNo = body.slice(sepIdx + 1).trim();
+    }
+    return makeMark(A, structure, mNo, proMno);
+  }
+
+  // RULE D — backslash form, non-IS/SC: structure = segment before the LAST
+  // backslash, mNo = segment after it (kept whole). 3-part markNumber.
   if (h.includes("\\")) {
-    const parts = h.split("\\");
-    const aliasCorrected = (parts[1] ?? "").trim();
-    const mNo = (parts[parts.length - 1] ?? "").trim();
-    const projectSuffix = alias; // excel Alias (col G) is really the suffix here
-    const markNumber = `${job}-${projectSuffix}\\${aliasCorrected}\\${mNo}`;
-    return {
-      structure: aliasCorrected,
-      markTail: mNo,
-      mNo,
-      projectSuffix,
-      aliasCorrected,
-      markNumber,
-    };
+    const idx = h.lastIndexOf("\\");
+    let structure = h.slice(0, idx).trim();
+    const mNo = h.slice(idx + 1).trim();
+    // Drop a leading "<A> " so the project is not duplicated inside structure.
+    if (A && structure.startsWith(`${A} `)) {
+      structure = structure.slice(A.length + 1).trim();
+    }
+    return makeMark(A, structure, mNo, "");
   }
 
-  // CASE 1 — col H has NO hyphen and NO backslash, e.g. "01", "11".
-  if (!h.includes("-")) {
-    const mNo = h;
-    const aliasCorrected = alias;
-    // No "<job> <alias>-" prefix because job & alias are normally empty here.
-    const markNumber =
-      job || aliasCorrected
-        ? `${job}\\${aliasCorrected}\\${mNo}`
-        : mNo;
-    return {
-      structure: aliasCorrected,
-      markTail: mNo,
-      mNo,
-      projectSuffix: "",
-      aliasCorrected,
-      markNumber,
-    };
-  }
-
-  // CASE 2 — col H has a hyphen, NO backslash, e.g. "811 3S5-143".
-  const aliasCorrected = alias;
-  const prefix = `${job} ${aliasCorrected}-`;
+  // RULE C — standard space form "<A> <G>-<mNo>", non-IS/SC. structure = col G;
+  // mNo = remainder after the known prefix, kept whole (do NOT split on the
+  // first dash — the alias itself may contain a dash, e.g. "2DF-5").
+  const structure = G;
+  const prefix = `${A} ${G}-`;
   let mNo: string;
-  if (job && aliasCorrected && h.startsWith(prefix)) {
+  if (A && G && h.startsWith(prefix)) {
     mNo = h.slice(prefix.length).trim();
   } else {
-    // Defensive: strip up to and including the FIRST hyphen.
+    // Defensive: strip up to and including the FIRST hyphen (or keep as-is).
     const idx = h.indexOf("-");
-    mNo = h.slice(idx + 1).trim();
+    mNo = idx >= 0 ? h.slice(idx + 1).trim() : h;
   }
-  const markNumber = `${job}\\${aliasCorrected}\\${mNo}`;
-  return {
-    structure: aliasCorrected,
-    markTail: mNo,
-    mNo,
-    projectSuffix: "",
-    aliasCorrected,
-    markNumber,
-  };
+  return makeMark(A, structure, mNo, "");
 }
 
 // Canonical, order-stable serialization of all normalized source fields, hashed
@@ -455,7 +519,7 @@ export function parseWorkbook(
 
     const alias = emptyToNull(row[COL.alias]);
     const aliasStr = alias ?? "";
-    const { structure, markTail, mNo, projectSuffix, aliasCorrected, markNumber } =
+    const { structure, markTail, mNo, proMno, projectSuffix, aliasCorrected, markNumber } =
       deriveMark(markNo, jobForMark, aliasStr);
     // markNumber is the canonical mark key; markId aligns with it.
     const markId = markNumber;
@@ -468,6 +532,7 @@ export function parseWorkbook(
       markTail,
       markId,
       mNo,
+      proMno,
       projectSuffix,
       aliasCorrected,
       markNumber,

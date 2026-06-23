@@ -17,7 +17,9 @@ export interface Record {
   markTail: string;
   /** The mark's own number, parsed from "Mark No." (col H). */
   mNo: string;
-  /** Project suffix from the Alias column when col H uses backslashes. */
+  /** IS/SC/S rows only — the project-mark token in the 4-part markNumber; "" otherwise. */
+  proMno: string;
+  /** Legacy; superseded by proMno. Always "" under the current parser. */
   projectSuffix: string;
   /** Authoritative alias parsed from col H; overrides the Alias column in the backslash case. */
   aliasCorrected: string;
