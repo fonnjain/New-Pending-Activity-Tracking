@@ -684,3 +684,242 @@ export function lifecycleStatus(
 
   return { status, target, overrun, consumedPct, daysToTarget };
 }
+
+// ---------------------------------------------------------------------------
+// Velocity engine — pace / pace-based ETA / trend (deterministic)
+// ---------------------------------------------------------------------------
+// A mark's VELOCITY is derived from MULTIPLE snapshots over time (the upload /
+// change-log history): how fast it advances down PROCESS_SEQUENCE. This layer is
+// purely additive and read-time — it NEVER changes parsing, Activity values,
+// dedup, ageing, or the alert/threshold/lifecycle math above. The functions here
+// are pure: the backend walks import history to build the per-mark snapshot
+// series, then this engine computes pace, a pace-based ETA, the gap vs the
+// budget-based target, a trend, and a movement status. AI may comment on the
+// result, never set it.
+
+// MOVING: advancing at/around its expected pace. SLOW: moving but materially
+// slower than its expected pace. STALLED: no movement for >= stalledDays.
+// insufficient: fewer than 2 usable snapshots (cold start — no pace/ETA).
+export type VelocityStatus = "moving" | "slow" | "stalled" | "insufficient";
+
+// Direction of the recent pace vs the earlier pace. "stalled" when there is no
+// recent movement; "unknown" when there is not enough history to compare.
+export type VelocityTrend =
+  | "accelerating"
+  | "steady"
+  | "decelerating"
+  | "stalled"
+  | "unknown";
+
+// One historical observation of a mark (one import it appeared in).
+export interface VelocitySnapshot {
+  // Epoch ms of the import this observation came from (report date, fallback
+  // upload time). Used as the time axis for pace.
+  importDate: number;
+  // Position of the mark's activity in PROCESS_SEQUENCE at that snapshot
+  // (activityRank); PROCESS_SEQUENCE.length for an unknown activity.
+  stageIndex: number;
+  // The mark's last production date string at that snapshot (movement signal).
+  lastProductionDate: string | null;
+}
+
+export interface VelocityInput {
+  // Snapshot series (any order; sorted ascending by importDate internally).
+  series: VelocitySnapshot[];
+  // Current activity code (case-insensitive) — drives stages-remaining + target.
+  activity: string | null | undefined;
+  // Current live ageing (today - last production date); null when no date.
+  ageingDays: number | null;
+  // Days since the mark last moved (from the history walk); null when unknown.
+  daysSinceLastMovement: number | null;
+  // Optional route-aware steps remaining (overrides the PROCESS_SEQUENCE default).
+  routeRemaining?: number | null;
+  // Project key for per-project ideal-days / stalled resolution.
+  project?: string | null;
+}
+
+export interface VelocityResult {
+  status: VelocityStatus;
+  trend: VelocityTrend;
+  // Observed days per advanced stage; null when no measurable advance / cold start.
+  daysPerStage: number | null;
+  // Expected days per stage from the ideal-days settings (resolved per project).
+  expectedDaysPerStage: number | null;
+  // Stages left to reach Yard (route-aware when provided); null for unknown activity.
+  stagesRemaining: number | null;
+  // Projected days from today to completion at the observed pace; null when the
+  // mark is not moving or has no measurable pace.
+  etaDays: number | null;
+  // etaDays - budget days-to-target. > 0 => projected LATE by that many days.
+  etaGap: number | null;
+  // Span (days) of the snapshot window the pace was measured over.
+  observedWindowDays: number | null;
+  // Number of snapshots used.
+  snapshotsUsed: number;
+  // Days since last movement, echoed through for display.
+  daysSinceLastMovement: number | null;
+  // True when there are fewer than 2 usable snapshots (no fabricated ETA).
+  insufficientHistory: boolean;
+}
+
+// A mark is SLOW when its observed pace exceeds its expected pace by at least
+// this factor (25% slower than expected).
+export const DEFAULT_SLOW_FACTOR = 1.25;
+// Recent vs earlier pace within this relative band reads as "steady".
+const TREND_STEADY_BAND = 0.1;
+const MS_PER_DAY = 86_400_000;
+const Y_RANK = PROCESS_SEQUENCE.length - 1;
+
+function daysBetween(aMs: number, bMs: number): number {
+  return (bMs - aMs) / MS_PER_DAY;
+}
+
+// Mean resolved ideal-days over the inclusive step range [fromRank, toRank].
+function expectedPaceForRange(
+  settings: TurnaroundSettings,
+  project: string | null | undefined,
+  fromRank: number,
+  toRank: number,
+): number | null {
+  const lo = Math.max(0, Math.min(fromRank, toRank));
+  const hi = Math.min(Y_RANK, Math.max(fromRank, toRank));
+  const steps: number[] = [];
+  for (let i = lo; i <= hi; i++) {
+    const step = PROCESS_SEQUENCE[i];
+    steps.push(safeDays(resolveActivityGrace(settings, project, step).idealDays));
+  }
+  if (steps.length === 0) return null;
+  const mean = steps.reduce((a, b) => a + b, 0) / steps.length;
+  return mean > 0 ? mean : null;
+}
+
+// Observed pace (days per advanced stage) over a sorted sub-series. Returns null
+// when there is no net forward stage advance in the window.
+function paceOver(series: VelocitySnapshot[]): number | null {
+  if (series.length < 2) return null;
+  const first = series[0];
+  const last = series[series.length - 1];
+  const advanced = last.stageIndex - first.stageIndex;
+  if (advanced <= 0) return null;
+  const days = daysBetween(first.importDate, last.importDate);
+  if (days <= 0) return null;
+  return days / advanced;
+}
+
+// Compute the full velocity result for one mark from its snapshot series.
+// Deterministic and pure. Degrades gracefully: < 2 usable snapshots =>
+// insufficientHistory (no ETA); no measurable advance => not moving (stalled or
+// no-pace) rather than a fabricated pace.
+export function velocityForMark(
+  input: VelocityInput,
+  settings: TurnaroundSettings,
+): VelocityResult {
+  const stalledDays = resolveStalledDays(settings);
+  const series = [...input.series]
+    .filter((s) => Number.isFinite(s.importDate))
+    .sort((a, b) => a.importDate - b.importDate);
+
+  const currentRank = activityRank(input.activity);
+  const knownActivity = isKnownActivity(input.activity);
+  const stagesRemaining = knownActivity
+    ? input.routeRemaining != null && input.routeRemaining >= 0
+      ? Math.round(input.routeRemaining)
+      : Math.max(0, Y_RANK - currentRank)
+    : null;
+
+  const movedRecently =
+    input.daysSinceLastMovement != null &&
+    input.daysSinceLastMovement < stalledDays;
+  const isStalled =
+    input.daysSinceLastMovement != null &&
+    input.daysSinceLastMovement >= stalledDays;
+
+  const base = {
+    stagesRemaining,
+    daysSinceLastMovement: input.daysSinceLastMovement,
+    snapshotsUsed: series.length,
+  };
+
+  // Cold start: not enough history to compute any pace.
+  if (series.length < 2) {
+    return {
+      ...base,
+      status: isStalled ? "stalled" : "insufficient",
+      trend: "unknown",
+      daysPerStage: null,
+      expectedDaysPerStage: null,
+      etaDays: null,
+      etaGap: null,
+      observedWindowDays: null,
+      insufficientHistory: true,
+    };
+  }
+
+  const firstRank = series[0].stageIndex;
+  const observedWindowDays = daysBetween(
+    series[0].importDate,
+    series[series.length - 1].importDate,
+  );
+  const daysPerStage = paceOver(series);
+  const expectedDaysPerStage = expectedPaceForRange(
+    settings,
+    input.project,
+    firstRank,
+    currentRank,
+  );
+
+  // ETA + gap (only when we have a real pace, a target stage, and ageing).
+  let etaDays: number | null = null;
+  let etaGap: number | null = null;
+  if (daysPerStage != null && stagesRemaining != null) {
+    etaDays = daysPerStage * stagesRemaining;
+    const target = cumulativeTarget(input.activity, settings, input.project);
+    if (target != null && input.ageingDays != null) {
+      const budgetDaysToTarget = target - input.ageingDays;
+      etaGap = etaDays - budgetDaysToTarget;
+    }
+  }
+
+  // Trend: recent (last 2 snapshots) vs earlier pace.
+  let trend: VelocityTrend;
+  if (isStalled || (!movedRecently && daysPerStage == null)) {
+    trend = "stalled";
+  } else {
+    const recentPace = paceOver(series.slice(-2));
+    const earlierPace = paceOver(series.slice(0, -1));
+    if (recentPace == null || earlierPace == null) {
+      trend = "unknown";
+    } else {
+      const rel = (recentPace - earlierPace) / earlierPace;
+      if (rel < -TREND_STEADY_BAND) trend = "accelerating";
+      else if (rel > TREND_STEADY_BAND) trend = "decelerating";
+      else trend = "steady";
+    }
+  }
+
+  // Movement status.
+  let status: VelocityStatus;
+  if (isStalled) {
+    status = "stalled";
+  } else if (
+    daysPerStage != null &&
+    expectedDaysPerStage != null &&
+    daysPerStage > expectedDaysPerStage * DEFAULT_SLOW_FACTOR
+  ) {
+    status = "slow";
+  } else {
+    status = "moving";
+  }
+
+  return {
+    ...base,
+    status,
+    trend,
+    daysPerStage,
+    expectedDaysPerStage,
+    etaDays,
+    etaGap,
+    observedWindowDays,
+    insufficientHistory: false,
+  };
+}
