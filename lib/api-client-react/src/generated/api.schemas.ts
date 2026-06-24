@@ -352,16 +352,40 @@ export interface ActivityGrace {
 }
 
 /**
- * Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
+ * Sparse per-project override of any subset of grace fields. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value. All fields optional.
+
+ */
+export interface PartialActivityGrace {
+  /** Override ideal days for this activity (feeds the cumulative target). */
+  idealDays?: number;
+  /** Override yellow grace (overrun days beyond the cumulative target). */
+  yellowGrace?: number;
+  /** Override orange grace; beyond this is Red. */
+  orangeGrace?: number;
+  /** Override upper edge of Orange. */
+  redGrace?: number;
+}
+
+/**
+ * Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
  */
 export type TurnaroundSettingsActivities = {[key: string]: ActivityGrace};
 
 /**
- * App-level turnaround-warning configuration. Singleton; per-activity ideal days and grace bands keyed by canonical activity code.
+ * Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden fields are stored; everything else inherits `activities`.
+
+ */
+export type TurnaroundSettingsPerProject = {[key: string]: {[key: string]: PartialActivityGrace}};
+
+/**
+ * App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace bands keyed by canonical activity code, plus optional sparse per-project overrides.
  */
 export interface TurnaroundSettings {
-  /** Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). */
+  /** Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). */
   activities: TurnaroundSettingsActivities;
+  /** Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden fields are stored; everything else inherits `activities`.
+   */
+  perProject?: TurnaroundSettingsPerProject;
 }
 
 export interface ReviewRequest {

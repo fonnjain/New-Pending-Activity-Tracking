@@ -117,7 +117,7 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
                     <TableRow key={r.id}>
                       <TableCell className="font-medium whitespace-nowrap">{r.job || '-'}</TableCell>
                       <TableCell className="whitespace-nowrap">{r.structure || '-'}</TableCell>
-                      <TableCell className="font-mono font-medium whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><StatusDot activity={r.activity} ageingDays={r.ageingDays} />{r.markId}</span></TableCell>
+                      <TableCell className="font-mono font-medium whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><StatusDot activity={r.activity} ageingDays={r.ageingDays} project={r.job} />{r.markId}</span></TableCell>
                       <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || '-'}</TableCell>
                       <TableCell className="text-right">{r.balanceQty}</TableCell>
                       <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>

@@ -173,6 +173,72 @@ export function normalizeGrace(g: ActivityGrace): ActivityGrace {
   return { idealDays, yellowGrace, orangeGrace, redGrace };
 }
 
+const GRACE_FIELDS = [
+  "idealDays",
+  "yellowGrace",
+  "orangeGrace",
+  "redGrace",
+] as const;
+
+// Clamp a SPARSE override to non-negative integers, keeping ONLY the fields that
+// are actually present. The ordering invariant (yellow <= orange <= red) is NOT
+// enforced here because the row is partial — it is enforced after merging with
+// the global row in `resolveActivityGrace`.
+export function normalizePartialGrace(
+  raw: unknown,
+): PartialActivityGrace {
+  const obj = (raw ?? {}) as Record<string, unknown>;
+  const out: PartialActivityGrace = {};
+  for (const f of GRACE_FIELDS) {
+    const v = obj[f];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      out[f] = Math.max(0, Math.round(v));
+    }
+  }
+  return out;
+}
+
+// Sanitize the sparse per-project override map: keep only known activities, only
+// present fields, and drop empty rows/projects so the stored shape stays minimal.
+function migratePerProject(
+  raw: unknown,
+): Record<string, Record<string, PartialActivityGrace>> {
+  const obj = (raw ?? {}) as Record<string, unknown>;
+  const out: Record<string, Record<string, PartialActivityGrace>> = {};
+  for (const [project, acts] of Object.entries(obj)) {
+    if (!project || !acts || typeof acts !== "object") continue;
+    const cleanedActs: Record<string, PartialActivityGrace> = {};
+    for (const step of PROCESS_SEQUENCE) {
+      const cell = (acts as Record<string, unknown>)[step];
+      if (!cell || typeof cell !== "object") continue;
+      const cleaned = normalizePartialGrace(cell);
+      if (Object.keys(cleaned).length > 0) cleanedActs[step] = cleaned;
+    }
+    if (Object.keys(cleanedActs).length > 0) out[project] = cleanedActs;
+  }
+  return out;
+}
+
+// Resolve the EFFECTIVE grace for one (project, activity): start from the global
+// row, replace any field the project overrides, then enforce the ordering
+// invariant on the merged row. With no project (or no override) this is just the
+// global row. This is the single resolution point used by targets + status.
+export function resolveActivityGrace(
+  settings: TurnaroundSettings,
+  project: string | null | undefined,
+  step: ProcessStep,
+): ActivityGrace {
+  const base = settings.activities[step] ?? DEFAULT_ACTIVITY_GRACE;
+  const ov = project ? settings.perProject?.[project]?.[step] : undefined;
+  if (!ov) return base;
+  return normalizeGrace({
+    idealDays: ov.idealDays ?? base.idealDays,
+    yellowGrace: ov.yellowGrace ?? base.yellowGrace,
+    orangeGrace: ov.orangeGrace ?? base.orangeGrace,
+    redGrace: ov.redGrace ?? base.redGrace,
+  });
+}
+
 // Normalize any stored/legacy settings object into the current per-activity
 // shape. Accepts the new `{activities}` shape OR the legacy
 // `{idealDays, yellowMax, orangeMax, overrides}` shape (global bands +
@@ -216,33 +282,38 @@ export function migrateTurnaroundSettings(raw: unknown): TurnaroundSettings {
       });
     }
   }
-  return { activities };
+  return { activities, perProject: migratePerProject(obj.perProject) };
 }
 
 // Cumulative target per canonical step: sum of ideal-days from the FIRST step up
 // to and INCLUDING that step, in PROCESS_SEQUENCE order.
 // e.g. C=2, RFI=1, NH=3 -> target(C)=2, target(RFI)=3, target(NH)=6.
+// Optional `project` resolves per-project ideal-days overrides; omit (or pass
+// null) for the global "All Projects" targets.
 export function cumulativeTargets(
   settings: TurnaroundSettings,
+  project?: string | null,
 ): Record<ProcessStep, number> {
   const out = {} as Record<ProcessStep, number>;
   let acc = 0;
   for (const step of PROCESS_SEQUENCE) {
-    acc += safeDays(settings.activities[step]?.idealDays);
+    acc += safeDays(resolveActivityGrace(settings, project, step).idealDays);
     out[step] = acc;
   }
   return out;
 }
 
 // Cumulative target for a single activity (case-insensitive). Returns null for
-// activities outside PROCESS_SEQUENCE — they have no defined target.
+// activities outside PROCESS_SEQUENCE — they have no defined target. Optional
+// `project` applies that project's ideal-days overrides.
 export function cumulativeTarget(
   activity: string | null | undefined,
   settings: TurnaroundSettings,
+  project?: string | null,
 ): number | null {
   if (!isKnownActivity(activity)) return null;
   const norm = normalizeActivity(activity) as ProcessStep;
-  return cumulativeTargets(settings)[norm];
+  return cumulativeTargets(settings, project)[norm];
 }
 
 // Classify a mark's ageing against its cumulative target using THAT activity's
@@ -255,17 +326,21 @@ export function cumulativeTarget(
 //   overrun <= orangeGrace  -> orange
 //   overrun >  orangeGrace  -> red
 export function alertStatus(
-  input: { activity: string | null | undefined; ageingDays: number | null },
+  input: {
+    activity: string | null | undefined;
+    ageingDays: number | null;
+    project?: string | null;
+  },
   settings: TurnaroundSettings,
 ): AlertResult {
-  const target = cumulativeTarget(input.activity, settings);
+  const target = cumulativeTarget(input.activity, settings, input.project);
   if (target === null || input.ageingDays === null) {
     return { status: "na", target, overrun: null };
   }
 
   const overrun = input.ageingDays - target;
-  const norm = normalizeActivity(input.activity);
-  const grace = settings.activities[norm] ?? DEFAULT_ACTIVITY_GRACE;
+  const norm = normalizeActivity(input.activity) as ProcessStep;
+  const grace = resolveActivityGrace(settings, input.project, norm);
 
   let status: AlertStatus;
   if (overrun <= 0) status = "green";

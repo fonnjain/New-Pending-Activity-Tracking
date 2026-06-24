@@ -9,7 +9,7 @@ import * as zod from 'zod';
 
 
 /**
- * Returns the singleton turnaround-warning configuration (ideal days per activity, global grace bands, grace mode, and per-activity overrides). When nothing has been saved yet, returns the built-in defaults.
+ * Returns the singleton turnaround-warning configuration: a per-activity map where each PROCESS_SEQUENCE activity has its own ideal days plus yellow/orange/red grace bands. When nothing has been saved yet, returns the built-in defaults. Public (read-only).
 
  * @summary Get turnaround settings
  */
@@ -19,12 +19,19 @@ export const GetSettingsResponse = zod.object({
   "yellowGrace": zod.number().describe('Overrun (days beyond the cumulative target) up to which the alert stays Yellow.'),
   "orangeGrace": zod.number().describe('Overrun up to which the alert is Orange; beyond this is Red.'),
   "redGrace": zod.number().describe('Upper edge of Orange (yellowGrace <= orangeGrace <= redGrace); overrun past Orange is Red.')
-}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace\/orangeGrace\/redGrace are the day-overruns BEYOND that activity\'s cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.\n')).describe('Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).')
-}).describe('App-level turnaround-warning configuration. Singleton; per-activity ideal days and grace bands keyed by canonical activity code.')
+}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace\/orangeGrace\/redGrace are the day-overruns BEYOND that activity\'s cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.\n')).describe('Global (\"All Projects\") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).'),
+  "perProject": zod.record(zod.string(), zod.record(zod.string(), zod.object({
+  "idealDays": zod.number().optional().describe('Override ideal days for this activity (feeds the cumulative target).'),
+  "yellowGrace": zod.number().optional().describe('Override yellow grace (overrun days beyond the cumulative target).'),
+  "orangeGrace": zod.number().optional().describe('Override orange grace; beyond this is Red.'),
+  "redGrace": zod.number().optional().describe('Override upper edge of Orange.')
+}).describe('Sparse per-project override of any subset of grace fields. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value. All fields optional.\n'))).optional().describe('Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden fields are stored; everything else inherits `activities`.\n')
+}).describe('App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace bands keyed by canonical activity code, plus optional sparse per-project overrides.')
 
 
 /**
- * Upserts the singleton turnaround-warning configuration.
+ * Upserts the singleton turnaround-warning configuration. Requires authentication. Bands are validated and normalized server-side (non-negative; yellow <= orange <= red) and the normalized object is echoed back.
+
  * @summary Update turnaround settings
  */
 export const UpdateSettingsBody = zod.object({
@@ -33,8 +40,14 @@ export const UpdateSettingsBody = zod.object({
   "yellowGrace": zod.number().describe('Overrun (days beyond the cumulative target) up to which the alert stays Yellow.'),
   "orangeGrace": zod.number().describe('Overrun up to which the alert is Orange; beyond this is Red.'),
   "redGrace": zod.number().describe('Upper edge of Orange (yellowGrace <= orangeGrace <= redGrace); overrun past Orange is Red.')
-}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace\/orangeGrace\/redGrace are the day-overruns BEYOND that activity\'s cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.\n')).describe('Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).')
-}).describe('App-level turnaround-warning configuration. Singleton; per-activity ideal days and grace bands keyed by canonical activity code.')
+}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace\/orangeGrace\/redGrace are the day-overruns BEYOND that activity\'s cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.\n')).describe('Global (\"All Projects\") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).'),
+  "perProject": zod.record(zod.string(), zod.record(zod.string(), zod.object({
+  "idealDays": zod.number().optional().describe('Override ideal days for this activity (feeds the cumulative target).'),
+  "yellowGrace": zod.number().optional().describe('Override yellow grace (overrun days beyond the cumulative target).'),
+  "orangeGrace": zod.number().optional().describe('Override orange grace; beyond this is Red.'),
+  "redGrace": zod.number().optional().describe('Override upper edge of Orange.')
+}).describe('Sparse per-project override of any subset of grace fields. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value. All fields optional.\n'))).optional().describe('Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden fields are stored; everything else inherits `activities`.\n')
+}).describe('App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace bands keyed by canonical activity code, plus optional sparse per-project overrides.')
 
 export const UpdateSettingsResponse = zod.object({
   "activities": zod.record(zod.string(), zod.object({
@@ -42,8 +55,14 @@ export const UpdateSettingsResponse = zod.object({
   "yellowGrace": zod.number().describe('Overrun (days beyond the cumulative target) up to which the alert stays Yellow.'),
   "orangeGrace": zod.number().describe('Overrun up to which the alert is Orange; beyond this is Red.'),
   "redGrace": zod.number().describe('Upper edge of Orange (yellowGrace <= orangeGrace <= redGrace); overrun past Orange is Red.')
-}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace\/orangeGrace\/redGrace are the day-overruns BEYOND that activity\'s cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.\n')).describe('Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).')
-}).describe('App-level turnaround-warning configuration. Singleton; per-activity ideal days and grace bands keyed by canonical activity code.')
+}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace\/orangeGrace\/redGrace are the day-overruns BEYOND that activity\'s cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.\n')).describe('Global (\"All Projects\") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).'),
+  "perProject": zod.record(zod.string(), zod.record(zod.string(), zod.object({
+  "idealDays": zod.number().optional().describe('Override ideal days for this activity (feeds the cumulative target).'),
+  "yellowGrace": zod.number().optional().describe('Override yellow grace (overrun days beyond the cumulative target).'),
+  "orangeGrace": zod.number().optional().describe('Override orange grace; beyond this is Red.'),
+  "redGrace": zod.number().optional().describe('Override upper edge of Orange.')
+}).describe('Sparse per-project override of any subset of grace fields. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value. All fields optional.\n'))).optional().describe('Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden fields are stored; everything else inherits `activities`.\n')
+}).describe('App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace bands keyed by canonical activity code, plus optional sparse per-project overrides.')
 
 
 /**

@@ -41,13 +41,21 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
     const counts = emptyCounts();
     const actMap = new Map<
       string,
-      { target: number | null; counts: globalThis.Record<AlertStatus, number>; total: number }
+      {
+        target: number | null;
+        // With per-project overrides the same activity can resolve to different
+        // targets across projects in a mixed-project set; flag that so we don't
+        // show a single misleading number.
+        targetVaries: boolean;
+        counts: globalThis.Record<AlertStatus, number>;
+        total: number;
+      }
     >();
     const drill: Array<{ r: ApiRecord; res: AlertResult }> = [];
 
     for (const r of records) {
       const res = alertStatus(
-        { activity: r.activity, ageingDays: r.ageingDays },
+        { activity: r.activity, ageingDays: r.ageingDays, project: r.job },
         settings,
       );
       counts[res.status]++;
@@ -57,10 +65,13 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
       if (!bucket) {
         bucket = {
           target: res.target,
+          targetVaries: false,
           counts: emptyCounts(),
           total: 0,
         };
         actMap.set(norm, bucket);
+      } else if (res.target !== bucket.target) {
+        bucket.targetVaries = true;
       }
       bucket.counts[res.status]++;
       bucket.total++;
@@ -80,11 +91,30 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
 
   const total = records.length;
 
+  // When the filtered records belong to a single project that has its own
+  // overrides, flag that custom (non-global) parameters are in effect.
+  const customProject = useMemo(() => {
+    const jobs = new Set<string>();
+    for (const r of records) if (r.job) jobs.add(r.job);
+    if (jobs.size !== 1) return null;
+    const only = [...jobs][0];
+    const ov = settings.perProject?.[only];
+    return ov && Object.keys(ov).length > 0 ? only : null;
+  }, [records, settings]);
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+        <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex items-center gap-2">
           Turnaround Warnings
+          {customProject && (
+            <span
+              className="text-[10px] uppercase tracking-wider text-primary font-semibold normal-case"
+              title={`Custom warning parameters are set for project ${customProject}`}
+            >
+              custom params
+            </span>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -126,7 +156,11 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
                   {a.activity}
                 </span>
                 <span className="text-xs text-muted-foreground w-20 shrink-0 tabular-nums">
-                  {a.target === null ? "no target" : `target ${a.target}d`}
+                  {a.targetVaries
+                    ? "target varies"
+                    : a.target === null
+                      ? "no target"
+                      : `target ${a.target}d`}
                 </span>
                 <div className="flex h-4 flex-1 rounded-sm overflow-hidden min-w-[80px]">
                   {STATUS_ORDER.map((s) =>

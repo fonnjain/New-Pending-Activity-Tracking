@@ -6,11 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { TurnaroundSettingsActivities } from './turnaroundSettingsActivities';
+import type { TurnaroundSettingsPerProject } from './turnaroundSettingsPerProject';
 
 /**
- * App-level turnaround-warning configuration. Singleton; per-activity ideal days and grace bands keyed by canonical activity code.
+ * App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace bands keyed by canonical activity code, plus optional sparse per-project overrides.
  */
 export interface TurnaroundSettings {
-  /** Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). */
+  /** Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). */
   activities: TurnaroundSettingsActivities;
+  /** Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden fields are stored; everything else inherits `activities`.
+   */
+  perProject?: TurnaroundSettingsPerProject;
 }

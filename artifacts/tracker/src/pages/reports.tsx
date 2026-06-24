@@ -160,7 +160,7 @@ function ReportBuilder() {
     () =>
       rows.map((r) => {
         const res = alertStatus(
-          { activity: r.activity, ageingDays: r.ageingDays },
+          { activity: r.activity, ageingDays: r.ageingDays, project: r.job },
           settings,
         );
         return {

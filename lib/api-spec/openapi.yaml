@@ -1179,15 +1179,44 @@ components:
         - yellowGrace
         - orangeGrace
         - redGrace
+    PartialActivityGrace:
+      type: object
+      description: >
+        Sparse per-project override of any subset of grace fields. Any field
+        present REPLACES the global value for that (project, activity); any field
+        absent INHERITS the global value. All fields optional.
+      properties:
+        idealDays:
+          type: number
+          description: Override ideal days for this activity (feeds the cumulative target).
+        yellowGrace:
+          type: number
+          description: Override yellow grace (overrun days beyond the cumulative target).
+        orangeGrace:
+          type: number
+          description: Override orange grace; beyond this is Red.
+        redGrace:
+          type: number
+          description: Override upper edge of Orange.
     TurnaroundSettings:
       type: object
-      description: App-level turnaround-warning configuration. Singleton; per-activity ideal days and grace bands keyed by canonical activity code.
+      description: App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace bands keyed by canonical activity code, plus optional sparse per-project overrides.
       properties:
         activities:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/ActivityGrace"
-          description: Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
+          description: Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
+        perProject:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              $ref: "#/components/schemas/PartialActivityGrace"
+          description: >
+            Sparse per-project overrides keyed by project (Job) then canonical
+            activity code. Only overridden fields are stored; everything else
+            inherits `activities`.
       required:
         - activities
     ReviewRequest:

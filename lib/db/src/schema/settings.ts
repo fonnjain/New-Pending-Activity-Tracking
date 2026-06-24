@@ -16,13 +16,23 @@ export type ActivityGrace = {
   redGrace: number;
 };
 
+// Sparse per-project override of any subset of grace fields. Absent fields
+// inherit the global `activities` value.
+export type PartialActivityGrace = Partial<ActivityGrace>;
+
 export const settingsTable = pgTable("settings", {
   id: text("id").primaryKey(),
-  // Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE):
-  // ideal days + yellow/orange/red grace days for that activity.
+  // GLOBAL ("All Projects") per-activity config keyed by canonical activity code
+  // (PROCESS_SEQUENCE): ideal days + yellow/orange/red grace days.
   activities: jsonb("activities")
     .$type<Record<string, ActivityGrace>>()
     .notNull(),
+  // Sparse per-project overrides: project -> activity code -> partial grace.
+  // Only overridden fields are stored; everything else inherits `activities`.
+  perProject: jsonb("per_project")
+    .$type<Record<string, Record<string, PartialActivityGrace>>>()
+    .notNull()
+    .default({}),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

@@ -8,12 +8,14 @@ import { statusBgColor, ALERT_LABELS } from "@/lib/turnaround";
 export function StatusDot({
   activity,
   ageingDays,
+  project,
 }: {
   activity: string | null;
   ageingDays: number | null;
+  project?: string | null;
 }) {
   const { settings } = useSettings();
-  const res = alertStatus({ activity, ageingDays }, settings);
+  const res = alertStatus({ activity, ageingDays, project }, settings);
   if (res.status === "na") return null;
   const title =
     res.overrun !== null && res.overrun > 0

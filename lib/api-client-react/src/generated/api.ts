@@ -66,7 +66,7 @@ export const getGetSettingsUrl = () => {
 }
 
 /**
- * Returns the singleton turnaround-warning configuration (ideal days per activity, global grace bands, grace mode, and per-activity overrides). When nothing has been saved yet, returns the built-in defaults.
+ * Returns the singleton turnaround-warning configuration: a per-activity map where each PROCESS_SEQUENCE activity has its own ideal days plus yellow/orange/red grace bands. When nothing has been saved yet, returns the built-in defaults. Public (read-only).
 
  * @summary Get turnaround settings
  */
@@ -145,7 +145,8 @@ export const getUpdateSettingsUrl = () => {
 }
 
 /**
- * Upserts the singleton turnaround-warning configuration.
+ * Upserts the singleton turnaround-warning configuration. Requires authentication. Bands are validated and normalized server-side (non-negative; yellow <= orange <= red) and the normalized object is echoed back.
+
  * @summary Update turnaround settings
  */
 export const updateSettings = async (turnaroundSettings: TurnaroundSettings, options?: RequestInit): Promise<TurnaroundSettings> => {

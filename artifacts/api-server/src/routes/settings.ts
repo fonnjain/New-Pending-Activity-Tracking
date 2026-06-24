@@ -27,8 +27,14 @@ router.get("/settings", async (_req, res): Promise<void> => {
   }
 
   // Normalize any stored shape (including legacy) into the current per-activity
-  // shape so older rows keep working without a manual data migration.
-  res.json(migrateTurnaroundSettings({ activities: row.activities }));
+  // shape so older rows keep working without a manual data migration. Carries
+  // the sparse per-project overrides through unchanged (sanitized).
+  res.json(
+    migrateTurnaroundSettings({
+      activities: row.activities,
+      perProject: row.perProject,
+    }),
+  );
 });
 
 router.put("/settings", requireAuth, async (req, res): Promise<void> => {
@@ -42,7 +48,11 @@ router.put("/settings", requireAuth, async (req, res): Promise<void> => {
   // PROCESS_SEQUENCE coverage) and echo the SAME object we persist, so the
   // client cache never drifts from what was actually stored.
   const normalized = migrateTurnaroundSettings(parsed.data);
-  const values = { activities: normalized.activities, updatedAt: new Date() };
+  const values = {
+    activities: normalized.activities,
+    perProject: normalized.perProject ?? {},
+    updatedAt: new Date(),
+  };
 
   await db
     .insert(settingsTable)

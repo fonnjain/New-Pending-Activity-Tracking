@@ -8,6 +8,6 @@
 import type { ActivityGrace } from './activityGrace';
 
 /**
- * Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
+ * Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
  */
 export type TurnaroundSettingsActivities = {[key: string]: ActivityGrace};
