@@ -140,53 +140,6 @@ function AgeingContent() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Contractor-wise Ageing</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto max-h-[500px]">
-            <Table>
-              <TableHeader className="sticky top-0 bg-card z-10 shadow-sm">
-                <TableRow>
-                  <TableHead>Contractor</TableHead>
-                  <TableHead className="text-right">Marks</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Wt</TableHead>
-                  <TableHead className="text-right">Avg Ageing</TableHead>
-                  <TableHead className="text-right">0-30</TableHead>
-                  <TableHead className="text-right">31-60</TableHead>
-                  <TableHead className="text-right">60+</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {ctrStats.map(stat => (
-                  <TableRow
-                    key={stat.contractor}
-                    className="cursor-pointer hover:bg-muted/40"
-                    onClick={() => setDrill({ type: "contractor", value: stat.contractor })}
-                  >
-                    <TableCell className="font-bold">{stat.contractor}</TableCell>
-                    <TableCell className="text-right">{stat.marks}</TableCell>
-                    <TableCell className="text-right">{stat.qty}</TableCell>
-                    <TableCell className="text-right">{formatWeight(stat.weight)}</TableCell>
-                    <TableCell className={`text-right font-bold ${getAgeingColor(stat.avgAge)}`}>{stat.avgAge !== null ? `${stat.avgAge}d` : '-'}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">{stat.c0to30}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">{stat.c31to60}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">{stat.c60Plus}</TableCell>
-                  </TableRow>
-                ))}
-                {ctrStats.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center py-4 text-muted-foreground">No contractors to display.</TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
           <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Activity-wise Ageing</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -224,6 +177,53 @@ function AgeingContent() {
                 {actStats.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center py-4 text-muted-foreground">No activities to display.</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Contractor-wise Ageing</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto max-h-[500px]">
+            <Table>
+              <TableHeader className="sticky top-0 bg-card z-10 shadow-sm">
+                <TableRow>
+                  <TableHead>Contractor</TableHead>
+                  <TableHead className="text-right">Marks</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Wt</TableHead>
+                  <TableHead className="text-right">Avg Ageing</TableHead>
+                  <TableHead className="text-right">0-30</TableHead>
+                  <TableHead className="text-right">31-60</TableHead>
+                  <TableHead className="text-right">60+</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {ctrStats.map(stat => (
+                  <TableRow
+                    key={stat.contractor}
+                    className="cursor-pointer hover:bg-muted/40"
+                    onClick={() => setDrill({ type: "contractor", value: stat.contractor })}
+                  >
+                    <TableCell className="font-bold">{stat.contractor}</TableCell>
+                    <TableCell className="text-right">{stat.marks}</TableCell>
+                    <TableCell className="text-right">{stat.qty}</TableCell>
+                    <TableCell className="text-right">{formatWeight(stat.weight)}</TableCell>
+                    <TableCell className={`text-right font-bold ${getAgeingColor(stat.avgAge)}`}>{stat.avgAge !== null ? `${stat.avgAge}d` : '-'}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">{stat.c0to30}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">{stat.c31to60}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">{stat.c60Plus}</TableCell>
+                  </TableRow>
+                ))}
+                {ctrStats.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-4 text-muted-foreground">No contractors to display.</TableCell>
                   </TableRow>
                 )}
               </TableBody>
