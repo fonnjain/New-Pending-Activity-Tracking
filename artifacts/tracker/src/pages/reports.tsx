@@ -41,6 +41,8 @@ import {
   type XlsxSummaryRow,
 } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
+import { ageingCell } from "@/lib/ageing";
+import { getAgeingColor } from "./overview";
 import {
   Sparkles,
   ShieldCheck,
@@ -94,6 +96,7 @@ const REPORT_COLUMNS: XlsxColumn[] = [
   { label: "Balance Qty", field: "balanceQty", numeric: true, decimals: 0, total: true },
   { label: "Balance Wt (kg)", field: "balanceWt", numeric: true, decimals: 2, total: true },
   { label: "Contractor", field: "contractor" },
+  { label: "Ageing (days)", field: "ageingDays", numeric: true, decimals: 0 },
 ];
 
 const TABLE_CAP = 500;
@@ -147,37 +150,66 @@ function ReportBuilder() {
   // Per-activity subtotals (Qty + Wt) appended to the Excel export, ordered by
   // the canonical process sequence, under an "Activity-wise subtotal" heading.
   const activitySubtotals = useMemo<XlsxSummaryRow[]>(() => {
-    const groups = new Map<string, { balanceQty: number; balanceWt: number }>();
+    const groups = new Map<
+      string,
+      { balanceQty: number; balanceWt: number; ageSum: number; ageCount: number }
+    >();
     for (const r of rows) {
       const key = r.activity || "Unknown";
-      const g = groups.get(key) ?? { balanceQty: 0, balanceWt: 0 };
+      const g = groups.get(key) ?? { balanceQty: 0, balanceWt: 0, ageSum: 0, ageCount: 0 };
       g.balanceQty += r.balanceQty ?? 0;
       g.balanceWt += r.balanceWt ?? 0;
+      if (r.ageingDays != null) {
+        g.ageSum += r.ageingDays;
+        g.ageCount += 1;
+      }
       groups.set(key, g);
     }
     const ordered = [...groups.keys()].sort(compareActivity);
     if (!ordered.length) return [];
     return [
       { label: "ACTIVITY-WISE SUBTOTAL", values: {} },
-      ...ordered.map((act) => ({ label: act, values: groups.get(act)! })),
+      ...ordered.map((act) => {
+        const g = groups.get(act)!;
+        const values: Record<string, number> = {
+          balanceQty: g.balanceQty,
+          balanceWt: g.balanceWt,
+        };
+        if (g.ageCount) values.ageingDays = Math.round(g.ageSum / g.ageCount);
+        return { label: act, values };
+      }),
     ];
   }, [rows]);
 
   // On-screen activity-wise subtotals (marks + Qty + Wt), process-ordered,
   // shown at the top of the table above the itemwise rows.
   const subtotalRows = useMemo(() => {
-    const groups = new Map<string, { marks: number; qty: number; wt: number }>();
+    const groups = new Map<
+      string,
+      { marks: number; qty: number; wt: number; ageSum: number; ageCount: number }
+    >();
     for (const r of rows) {
       const key = r.activity || "Unknown";
-      const g = groups.get(key) ?? { marks: 0, qty: 0, wt: 0 };
+      const g = groups.get(key) ?? { marks: 0, qty: 0, wt: 0, ageSum: 0, ageCount: 0 };
       g.marks += 1;
       g.qty += r.balanceQty ?? 0;
       g.wt += r.balanceWt ?? 0;
+      if (r.ageingDays != null) {
+        g.ageSum += r.ageingDays;
+        g.ageCount += 1;
+      }
       groups.set(key, g);
     }
-    return [...groups.keys()]
-      .sort(compareActivity)
-      .map((activity) => ({ activity, ...groups.get(activity)! }));
+    return [...groups.keys()].sort(compareActivity).map((activity) => {
+      const g = groups.get(activity)!;
+      return {
+        activity,
+        marks: g.marks,
+        qty: g.qty,
+        wt: g.wt,
+        avgAge: g.ageCount ? Math.round(g.ageSum / g.ageCount) : null,
+      };
+    });
   }, [rows]);
 
   const handleExcel = () => {
@@ -273,6 +305,7 @@ function ReportBuilder() {
                 <TableHead className="text-right">Balance Qty</TableHead>
                 <TableHead className="text-right">Balance Wt</TableHead>
                 <TableHead>Contractor</TableHead>
+                <TableHead className="text-right">Ageing</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -280,7 +313,7 @@ function ReportBuilder() {
                 <>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
-                      colSpan={8}
+                      colSpan={9}
                       className="font-semibold text-xs uppercase tracking-wider text-muted-foreground"
                     >
                       Activity-wise Subtotal
@@ -301,11 +334,14 @@ function ReportBuilder() {
                       <TableCell className="text-right tabular-nums">{num(s.qty)}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatWeight(s.wt)}</TableCell>
                       <TableCell></TableCell>
+                      <TableCell className={`text-right tabular-nums ${getAgeingColor(s.avgAge)}`}>
+                        {s.avgAge !== null ? `${s.avgAge}d` : "-"}
+                      </TableCell>
                     </TableRow>
                   ))}
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
-                      colSpan={8}
+                      colSpan={9}
                       className="font-semibold text-xs uppercase tracking-wider text-muted-foreground"
                     >
                       Itemwise Data
@@ -323,11 +359,14 @@ function ReportBuilder() {
                   <TableCell className="text-right tabular-nums">{num(r.balanceQty)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatWeight(r.balanceWt)}</TableCell>
                   <TableCell>{r.contractor ?? "Unassigned"}</TableCell>
+                  <TableCell className={`text-right font-bold ${getAgeingColor(r.ageingDays)}`}>
+                    {ageingCell(r)}
+                  </TableCell>
                 </TableRow>
               ))}
               {rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-sm text-muted-foreground py-8">
+                  <TableCell colSpan={9} className="text-center text-sm text-muted-foreground py-8">
                     No rows match the current filters.
                   </TableCell>
                 </TableRow>

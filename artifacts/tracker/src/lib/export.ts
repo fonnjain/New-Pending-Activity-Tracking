@@ -197,7 +197,7 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
     const obj: Record<string, any> = {};
     columns.forEach((c, i) => {
       if (i === 0) obj[c.field] = s.label;
-      else if (c.total && c.field in s.values) obj[c.field] = s.values[c.field];
+      else if (c.field in s.values) obj[c.field] = s.values[c.field];
     });
     const row = ws.addRow(obj);
     for (let c = 1; c <= columns.length; c++) {
