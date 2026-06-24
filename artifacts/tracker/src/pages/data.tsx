@@ -93,7 +93,7 @@ export default function DataView() {
       <div className="bg-primary/10 border border-primary/20 rounded-md p-4 flex gap-4 text-sm items-start">
         <div className="text-primary mt-0.5 font-bold">i</div>
         <p className="text-primary-foreground/90 font-medium">
-          Every upload is added as a new import. Rows are kept as-is (in-sheet duplicates included) and deduplicated only across uploads. Ageing is computed live (today − Assign Date).
+          Every upload is added as a new import. Rows are kept as-is (in-sheet duplicates included) and deduplicated only across uploads. Ageing is computed live (today − Last Production Entry Date).
         </p>
       </div>
 
@@ -158,6 +158,18 @@ export default function DataView() {
               <div>
                 <span className="block text-muted-foreground text-xs uppercase mb-1">Missing Date</span>
                 <span className="font-bold text-lg tabular-nums">{selectedImport.summary.missingDate}</span>
+              </div>
+              <div>
+                <span className="block text-muted-foreground text-xs uppercase mb-1">Not Started (C)</span>
+                <span className="font-bold text-lg tabular-nums">{selectedImport.summary.notStarted.toLocaleString()}</span>
+              </div>
+              <div>
+                <span className="block text-muted-foreground text-xs uppercase mb-1">No Production Date</span>
+                <span className="font-bold text-lg tabular-nums">{selectedImport.summary.noProductionDate.toLocaleString()}</span>
+              </div>
+              <div>
+                <span className="block text-muted-foreground text-xs uppercase mb-1">Future Prod. Date</span>
+                <span className="font-bold text-lg tabular-nums">{selectedImport.summary.futureProductionDate.toLocaleString()}</span>
               </div>
             </div>
           </CardContent>

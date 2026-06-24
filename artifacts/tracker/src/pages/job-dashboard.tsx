@@ -6,6 +6,7 @@ import {
   getGetImportRecordsQueryKey,
 } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
+import { ageingCell } from "@/lib/ageing";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
   Table,
@@ -578,7 +579,7 @@ function JobDetail({
                     <TableCell className="text-xs whitespace-nowrap">{r.contractor || "-"}</TableCell>
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || "-"}</TableCell>
                     <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
-                      {r.ageingDays !== null ? `${r.ageingDays}d` : "-"}
+                      {ageingCell(r)}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -10,6 +10,7 @@ import { formatWeight } from "@/lib/utils";
 import { sortRecords, type RecordSortKey } from "@/lib/sort";
 import { Search, ChevronLeft } from "lucide-react";
 import { compareActivity } from "@workspace/domain";
+import { ageingCell, isCutting } from "@/lib/ageing";
 
 const ROW_CAP = 200;
 
@@ -31,7 +32,8 @@ function AgeingContent() {
   const [drill, setDrill] = useState<{ type: "contractor" | "activity"; value: string } | null>(null);
 
   const {
-    totalMarks, totalQty, totalWt, avgAgeing, age0to30, age31to60, age60Plus, actStats, ctrStats,
+    totalMarks, totalQty, totalWt, avgAgeing, age0to30, age31to60, age60Plus, noDate,
+    notStarted, noProductionDate, actStats, ctrStats,
   } = useMemo(() => {
     const withAge = records.filter(r => r.ageingDays !== null);
     const totalMarks = records.length;
@@ -42,6 +44,9 @@ function AgeingContent() {
     const age0to30 = withAge.filter(r => r.ageingDays !== null && r.ageingDays <= 30);
     const age31to60 = withAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60);
     const age60Plus = withAge.filter(r => r.ageingDays !== null && r.ageingDays > 60);
+    const noDate = records.filter(r => r.ageingDays === null);
+    const notStarted = noDate.filter(r => isCutting(r.activity)).length;
+    const noProductionDate = noDate.length - notStarted;
 
     // Group by activity for matrix
     const activities = new Map<string, any[]>();
@@ -86,7 +91,7 @@ function AgeingContent() {
       };
     }).sort((a, b) => (b.avgAge || 0) - (a.avgAge || 0));
 
-    return { totalMarks, totalQty, totalWt, avgAgeing, age0to30, age31to60, age60Plus, actStats, ctrStats };
+    return { totalMarks, totalQty, totalWt, avgAgeing, age0to30, age31to60, age60Plus, noDate, notStarted, noProductionDate, actStats, ctrStats };
   }, [records]);
 
   const sortedFull = useMemo(() => sortRecords(records, sortBy), [records, sortBy]);
@@ -126,10 +131,11 @@ function AgeingContent() {
         <KpiTile title="Avg Ageing (d)" value={avgAgeing} />
       </div>
 
-      <div className="grid md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <BucketCard title="0-30 Days" records={age0to30} colorClass="bg-ageing-green" textColorClass="ageing-green" />
         <BucketCard title="31-60 Days" records={age31to60} colorClass="bg-ageing-amber" textColorClass="ageing-amber" />
         <BucketCard title="60+ Days" records={age60Plus} colorClass="bg-ageing-red" textColorClass="ageing-red" />
+        <BucketCard title="No Ageing Date" records={noDate} colorClass="bg-ageing-neutral" textColorClass="ageing-neutral" subtitle={`${notStarted} not started, ${noProductionDate} no prod. date`} />
       </div>
 
       <Card>
@@ -276,7 +282,7 @@ function AgeingContent() {
                     <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">{r.assignDate}</TableCell>
                     <TableCell className={`text-right font-bold ${getAgeingColor(r.ageingDays)}`}>
-                      {r.ageingDays !== null ? `${r.ageingDays}d` : '-'}
+                      {ageingCell(r)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -371,7 +377,7 @@ function AgeingDetail({ title, subtitle, records, onBack }: { title: string, sub
                     <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">{r.assignDate}</TableCell>
                     <TableCell className={`text-right font-bold ${getAgeingColor(r.ageingDays)}`}>
-                      {r.ageingDays !== null ? `${r.ageingDays}d` : '-'}
+                      {ageingCell(r)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -416,7 +422,7 @@ function KpiTile({ title, value }: { title: string, value: string | number }) {
   );
 }
 
-function BucketCard({ title, records, colorClass, textColorClass }: { title: string, records: any[], colorClass: string, textColorClass: string }) {
+function BucketCard({ title, records, colorClass, textColorClass, subtitle }: { title: string, records: any[], colorClass: string, textColorClass: string, subtitle?: string }) {
   const marks = records.length;
   const wt = records.reduce((sum, r) => sum + r.balanceWt, 0);
   
@@ -428,6 +434,7 @@ function BucketCard({ title, records, colorClass, textColorClass }: { title: str
           <div className="text-2xl font-bold">{marks} <span className="text-sm font-normal text-muted-foreground">marks</span></div>
           <div className="text-sm font-medium text-muted-foreground">{formatWeight(wt)}</div>
         </div>
+        {subtitle && <div className="text-[11px] text-muted-foreground mt-1">{subtitle}</div>}
       </CardContent>
     </Card>
   );

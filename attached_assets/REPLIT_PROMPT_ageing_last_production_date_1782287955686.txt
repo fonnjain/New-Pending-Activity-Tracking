@@ -1,0 +1,79 @@
+REPLIT AGENT PROMPT — AGEING FROM "LAST PRODUCTION ENTRY DATE"
+==============================================================
+The source file now has a new column "Last Production Entry Date" (col S, the 19th
+column, after "Ref. Job Card No."). Switch AGEING to be computed from THIS date — it is
+the operationally correct basis (how long since the last production activity on the
+mark). Deterministic/engine + display change; do not alter parsing of other fields,
+quantities, dedup, or the single-source Activity values.
+
+1) READ THE NEW COLUMN
+- The file now has 19 columns; add "Last Production Entry Date" -> field
+  last_production_date (date). Header is still auto-detected (this file's header is on
+  row 4 due to the company banner) — keep auto-detect; just map the new column by NAME.
+- Normalize last_production_date to YYYY-MM-DD. Keep the existing assign_date too (do not
+  remove it; it's still useful as a secondary/assignment reference).
+- Add last_production_date to record_pool / records schema (Drizzle migration) and to the
+  openapi record schema; regenerate hooks/Zod. Keep it OUT of the across-upload full-row
+  hash inputs (hash stays over the original source columns as before; adding a derived/
+  mapped display field must not change dedup behaviour — but since this is a NEW source
+  column, decide once: include col S in the hash so a changed production date counts as a
+  real row change. PREFERRED: include "Last Production Entry Date" in the row hash so that
+  when production advances, the diff/change-log captures it.)
+
+2) AGEING DEFINITION (this is the change)
+  ageing_days = today - last_production_date   (whole days), recomputed live, never cached.
+Replace the previous "today - assign_date" ageing everywhere (KPIs, buckets, activity-wise
+ageing, contractor ageing, ageing table colours, reports, AI analytics pack).
+
+3) HANDLE ROWS WITH NO LAST PRODUCTION DATE  (important)
+About 32% of rows have a blank Last Production Entry Date. These are NOT all at Cutting —
+in the latest data they appear at C, TS, G, and special codes (BL, NTF, NTFSW). So do NOT
+label them all "Not started". Rules:
+  - If last_production_date is blank -> ageing_days = null (NOT zero, not today-assign).
+  - LABEL depends on the activity:
+       * activity == "C" (Cutting, production genuinely not begun) -> label "Not started".
+       * any other activity with a blank production date -> label "No production date"
+         (a neutral "date missing" state, NOT "not started", because the mark has clearly
+         progressed past cutting).
+  - Group BOTH states outside the numeric ageing buckets. Show them as their own
+    segment(s): either one combined "No ageing date" group, or two sub-labels
+    ("Not started" vs "No production date") — but keep them separate from 0-30/31-60/60+.
+  - They still appear in tables (qty/weight count normally); their ageing cell shows the
+    label (not a number), and they are EXCLUDED from average-ageing calculations.
+  - Optional KPIs: count of "Not started" (at C) and count of "No production date"
+    (progressed but missing date) so both backlogs are visible; the latter is also a
+    data-quality signal worth surfacing.
+
+4) FUTURE / INVALID DATES (light guard)
+  - A small number of rows have a Last Production Entry Date slightly in the FUTURE (e.g.
+    2026-06-30 when today is 2026-06-24). For these, BRING THE DATE TO TODAY: set the
+    effective last_production_date used for ageing = today (so ageing_days = 0). Do this
+    by clamping any last_production_date > today down to today before computing ageing.
+    Keep the original date stored as-is; only the ageing computation uses the clamped
+    (today) value. FLAG these rows in the sanity/AI review as "future production date -
+    clamped to today - verify" (do not drop them).
+  - Same for any unparseable date -> treat as blank ("Not started"/null) and flag.
+
+5) AGEING BUCKETS (unchanged thresholds, plus the new state)
+  Not started (null) | 0-30 (green) | 31-60 (amber) | 60+ (red).
+  Colour scale and thresholds unchanged; just sourced from last_production_date and with
+  the extra "Not started" group.
+
+6) WHERE IT APPLIES
+  Overview KPIs, Activity dashboard (avg ageing + buckets per activity), Ageing dashboard
+  (activity-wise ageing, full table, cascading filters), Contractor dashboard (avg ageing,
+  contractor x ageing matrix), Reports/Excel, and the AI Reports analytics pack — all use
+  last_production_date for ageing now.
+
+ACCEPTANCE CHECK
+- Ageing = today - Last Production Entry Date everywhere; assign_date no longer drives
+  ageing.
+- Rows with blank Last Production Entry Date show a label not a number, ageing null,
+  excluded from averages: "Not started" when at activity C, "No production date" when at
+  any later activity (TS, G, BL, NTF, NTFSW, etc.); kept separate from numeric buckets.
+- Future-dated production entries are brought to today (effective date = today, ageing 0)
+  and flagged for review, not dropped; the original date stays stored.
+- "Last Production Entry Date" column is read by NAME with header auto-detect (row 4
+  banner file parses correctly).
+- No change to Activity values, quantities, weights, dedup logic (other than optionally
+  including the new column in the row hash so production-date changes are tracked).

@@ -181,7 +181,7 @@ export function buildAnalyticsPack(
 
   for (const { row, copies } of membership) {
     distinct.add(row.hash);
-    const age = computeAgeing(row.assignDate);
+    const age = computeAgeing(row.lastProductionDate);
     const qty = row.balanceQty;
     const wt = row.balanceWt;
 
@@ -299,7 +299,7 @@ export function buildAnalyticsPack(
   const top3Act = sortedActWeights.slice(0, 3).reduce((s, n) => s + n, 0);
   const top3Con = sortedContractorWeights.slice(0, 3).reduce((s, n) => s + n, 0);
   const weight90Kg = membership.reduce((s, { row, copies }) => {
-    const age = computeAgeing(row.assignDate);
+    const age = computeAgeing(row.lastProductionDate);
     return age !== null && age >= 90 ? s + row.balanceWt * copies : s;
   }, 0);
 

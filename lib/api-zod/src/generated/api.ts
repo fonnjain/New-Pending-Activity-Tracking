@@ -35,7 +35,10 @@ export const ListImportsResponseItem = zod.object({
   "duplicateRowCopies": zod.number(),
   "projectsFound": zod.number(),
   "missingContractor": zod.number(),
-  "missingDate": zod.number()
+  "missingDate": zod.number(),
+  "notStarted": zod.number().describe('Blank Last Production Entry Date AND activity == C (production not begun).'),
+  "noProductionDate": zod.number().describe('Blank Last Production Entry Date AND activity != C (progressed past cutting; data-quality flag).'),
+  "futureProductionDate": zod.number().describe('Last Production Entry Date later than today (clamped to today for ageing).')
 }),
   "changeSummary": zod.union([zod.object({
   "prevImportId": zod.number().nullable(),
@@ -237,7 +240,10 @@ export const GetImportResponse = zod.object({
   "duplicateRowCopies": zod.number(),
   "projectsFound": zod.number(),
   "missingContractor": zod.number(),
-  "missingDate": zod.number()
+  "missingDate": zod.number(),
+  "notStarted": zod.number().describe('Blank Last Production Entry Date AND activity == C (production not begun).'),
+  "noProductionDate": zod.number().describe('Blank Last Production Entry Date AND activity != C (progressed past cutting; data-quality flag).'),
+  "futureProductionDate": zod.number().describe('Last Production Entry Date later than today (clamped to today for ageing).')
 }),
   "changeSummary": zod.union([zod.object({
   "prevImportId": zod.number().nullable(),
@@ -300,10 +306,11 @@ export const GetImportRecordsResponseItem = zod.object({
   "activity": zod.string().nullable(),
   "operation": zod.string().nullable(),
   "assignDate": zod.string().nullable(),
+  "lastProductionDate": zod.string().nullable().describe('Last Production Entry Date (col S); drives ageing. Null when blank\/unparseable.'),
   "contractor": zod.string().nullable(),
   "orderNature": zod.string().nullable(),
   "refJobCardNo": zod.string().nullable(),
-  "ageingDays": zod.number().nullable(),
+  "ageingDays": zod.number().nullable().describe('today - lastProductionDate (whole days; future clamped to 0). Null when no production date.'),
   "routeSteps": zod.array(zod.string()),
   "currentStepIndex": zod.number().nullable()
 })
@@ -456,7 +463,7 @@ export const AiReviewResponse = zod.object({
 
 
 /**
- * Optional, advisory-only and read-only. The server pre-computes a compact, deterministic analytics pack from the selected import's records (ageing = today - assignDate): totals, ageing buckets, by-activity / by-contractor / by-job / by-structure aggregates, WIP concentration, top stale items, data-quality notes, and change-set deltas versus the previous import (or compareTo). That pack - never the raw rows - is sent to the model, which acts as a fabrication-operations analyst and returns a structured turnaround report (summary, action plan, detailed analysis). Optional filters restrict the analysis to a slice. The AI never writes to record_pool, import_rows, or any computed field. If ANTHROPIC_API_KEY is unset the endpoint responds with available:false; the deterministic engine is unaffected.
+ * Optional, advisory-only and read-only. The server pre-computes a compact, deterministic analytics pack from the selected import's records (ageing = today - lastProductionDate): totals, ageing buckets, by-activity / by-contractor / by-job / by-structure aggregates, WIP concentration, top stale items, data-quality notes, and change-set deltas versus the previous import (or compareTo). That pack - never the raw rows - is sent to the model, which acts as a fabrication-operations analyst and returns a structured turnaround report (summary, action plan, detailed analysis). Optional filters restrict the analysis to a slice. The AI never writes to record_pool, import_rows, or any computed field. If ANTHROPIC_API_KEY is unset the endpoint responds with available:false; the deterministic engine is unaffected.
 
  * @summary Deep turnaround-time analytical report for an import (advisory, read-only)
  */

@@ -38,6 +38,9 @@ export const recordPoolTable = pgTable("record_pool", {
   balanceQty: doublePrecision("balance_qty").notNull(),
   balanceWt: doublePrecision("balance_wt").notNull(),
   assignDate: date("assign_date", { mode: "string" }),
+  // Col S (19th). Drives ageing (today - lastProductionDate). Blank for ~32% of
+  // rows; nullable. Part of the row hash so a changed production date is a real change.
+  lastProductionDate: date("last_production_date", { mode: "string" }),
   activity: text("activity"),
   operation: text("operation"),
   refJobCardNo: text("ref_job_card_no"),

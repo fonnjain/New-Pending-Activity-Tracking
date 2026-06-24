@@ -425,7 +425,7 @@ paths:
       summary: Deep turnaround-time analytical report for an import (advisory, read-only)
       description: >
         Optional, advisory-only and read-only. The server pre-computes a compact, deterministic
-        analytics pack from the selected import's records (ageing = today - assignDate): totals,
+        analytics pack from the selected import's records (ageing = today - lastProductionDate): totals,
         ageing buckets, by-activity / by-contractor / by-job / by-structure aggregates, WIP
         concentration, top stale items, data-quality notes, and change-set deltas versus the previous
         import (or compareTo). That pack - never the raw rows - is sent to the model, which acts as a
@@ -497,6 +497,15 @@ components:
           type: integer
         missingDate:
           type: integer
+        notStarted:
+          type: integer
+          description: Blank Last Production Entry Date AND activity == C (production not begun).
+        noProductionDate:
+          type: integer
+          description: Blank Last Production Entry Date AND activity != C (progressed past cutting; data-quality flag).
+        futureProductionDate:
+          type: integer
+          description: Last Production Entry Date later than today (clamped to today for ageing).
       required:
         - rowsRead
         - rowsKept
@@ -505,6 +514,9 @@ components:
         - projectsFound
         - missingContractor
         - missingDate
+        - notStarted
+        - noProductionDate
+        - futureProductionDate
     ChangeSummary:
       type: object
       properties:
@@ -892,6 +904,9 @@ components:
           type: ["string", "null"]
         assignDate:
           type: ["string", "null"]
+        lastProductionDate:
+          type: ["string", "null"]
+          description: Last Production Entry Date (col S); drives ageing. Null when blank/unparseable.
         contractor:
           type: ["string", "null"]
         orderNature:
@@ -900,6 +915,7 @@ components:
           type: ["string", "null"]
         ageingDays:
           type: ["integer", "null"]
+          description: today - lastProductionDate (whole days; future clamped to 0). Null when no production date.
         routeSteps:
           type: array
           items:
@@ -933,6 +949,7 @@ components:
         - activity
         - operation
         - assignDate
+        - lastProductionDate
         - contractor
         - orderNature
         - refJobCardNo

@@ -11,6 +11,7 @@ export interface PoolRowLite {
   contractor: string | null;
   section: string | null;
   assignDate: string | null;
+  lastProductionDate: string | null;
   activity: string | null;
   operation: string | null;
   balanceQty: number;

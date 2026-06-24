@@ -50,13 +50,21 @@ export interface Record {
   operation: string | null;
   /** @nullable */
   assignDate: string | null;
+  /**
+     * Last Production Entry Date (col S); drives ageing. Null when blank/unparseable.
+     * @nullable
+     */
+  lastProductionDate: string | null;
   /** @nullable */
   contractor: string | null;
   /** @nullable */
   orderNature: string | null;
   /** @nullable */
   refJobCardNo: string | null;
-  /** @nullable */
+  /**
+     * today - lastProductionDate (whole days; future clamped to 0). Null when no production date.
+     * @nullable
+     */
   ageingDays: number | null;
   routeSteps: string[];
   /** @nullable */

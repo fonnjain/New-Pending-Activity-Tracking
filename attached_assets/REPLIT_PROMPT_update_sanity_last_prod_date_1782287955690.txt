@@ -1,0 +1,72 @@
+REPLIT AGENT PROMPT — UPDATE INPUT SANITY LAYER (Last Production Date + new states)
+===================================================================================
+Extend the existing input sanity / validation layer to cover the new "Last Production
+Entry Date" column and the wider variety now seen in the data. Keep all existing checks
+(idempotency, multiset/dedup, no-truncate name rule, mark-no parse checks, forward-fill
+rule). These are ADDITIONS. Deterministic engine checks run on every import; the AI/
+gatekeeper review also gets the relevant new flags. Engine stays authoritative.
+
+CONTEXT — what changed in the data
+- New column "Last Production Entry Date" (col S) now drives ageing.
+- ~32% of rows have a BLANK last production date. They are NO LONGER all at activity "C":
+  they appear at C, TS, G, and special codes BL, NTF, NTFSW.
+- A few rows (~64) have a FUTURE last production date (clamped to today for ageing).
+- Activity values now include codes OUTSIDE the 12-step sequence: BL, NTF, NTFSW (and
+  P, S as sub-steps of C). PROCESS_SEQUENCE = [C,RFI,NH,B,HAB,HG,W,Q,TS,G,GB,Y].
+
+NEW DETERMINISTIC CHECKS (engine-side, per import; flag for review, do not block/drop)
+
+1) Last Production Date presence vs activity
+   - Compute, per import: count of rows with blank last_production_date, split by activity.
+   - "Not started" (blank date AND activity == C) is NORMAL -> info only.
+   - "No production date" (blank date AND activity != C) is a DATA-QUALITY flag: the mark
+     has progressed past cutting but has no production date. Report count and a sample
+     (mark, activity, contractor). Surface prominently if the count is large or rising.
+
+2) Future production dates
+   - Flag rows where last_production_date > today (these are clamped to today for ageing).
+     Report count + sample. Label "future production date - clamped - verify".
+
+3) Date ordering sanity (light)
+   - Flag rows where last_production_date is EARLIER than assign_date by a large margin,
+     or wildly old (e.g. > ~3 years) while the mark is at a late activity — possible stale
+     or mis-entered date. Report, don't block.
+
+4) Unknown activity codes
+   - Any Activity not in PROCESS_SEQUENCE (e.g. BL, NTF, NTFSW) -> list them with counts.
+     They are VALID data (keep them; they sort after known steps as "(other)"), but the
+     report should name which unknown codes appeared so a genuinely new/garbage code is
+     noticed. Do NOT auto-map or rename them.
+
+5) Ageing-completeness summary
+   - Report: rows with numeric ageing (have date) vs rows with no ageing (blank date),
+     and confirm the no-ageing rows are excluded from average-ageing. This makes the
+     average trustworthy and visible.
+
+ADJUST THE SANITIZE-INPUT (descriptive cleanup) STEP
+- The new column is a DATE: sanitize may normalize last_production_date formatting to
+  YYYY-MM-DD (and assign_date) — formatting only. It must NOT invent a missing production
+  date, must NOT shift a real date, and must NOT change a future date (the engine handles
+  clamping for ageing; the stored value stays as uploaded). Blank stays blank.
+- Activity codes are NEVER sanitized/renamed (BL/NTF/NTFSW stay as-is). Reinforce: the
+  no-truncate / same-token rule already blocks name changes; add that ACTIVITY and
+  date-VALUE fields are off-limits to content changes (format-only for dates, no change
+  for activity).
+- Keep sanitize running BEFORE merge so date-format normalization doesn't create false
+  "changed" diffs.
+
+AI / GATEKEEPER REVIEW (advisory, read-only)
+- Include in the AI review payload: the no-production-date-by-activity breakdown, the
+  future-date count, the unknown-activity-code list, and the ageing-completeness summary.
+- Ask Claude to comment on whether the "No production date" backlog or unknown codes look
+  like a process/data issue. It never modifies data.
+
+ACCEPTANCE CHECK
+- Import reports: blank-production-date counts split into "Not started (C)" vs
+  "No production date (post-C)"; future-date count; unknown-activity-code list
+  (BL/NTF/NTFSW) with counts; ageing-completeness summary.
+- Sanitize only normalizes date FORMAT; never fills, shifts, or alters activity codes;
+  blanks remain blank; no false "changed" diffs from formatting.
+- All rows retained (nothing dropped); flags are advisory.
+- Existing checks (idempotency, multiset dedup, no-truncate, mark-no parse, forward-fill)
+  still pass unchanged.

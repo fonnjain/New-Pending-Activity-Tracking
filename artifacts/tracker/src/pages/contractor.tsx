@@ -1,6 +1,7 @@
 import { useTracker, useFilteredRecords } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
+import { ageingCell } from "@/lib/ageing";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -321,7 +322,7 @@ function ContractorActivityCard({ activity, records }: { activity: string, recor
                       <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
                       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || '-'}</TableCell>
                       <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
-                        {r.ageingDays !== null ? `${r.ageingDays}d` : '-'}
+                        {ageingCell(r)}
                       </TableCell>
                     </TableRow>
                   ))}

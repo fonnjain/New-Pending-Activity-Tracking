@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { formatWeight } from "@/lib/utils";
 import { useMemo } from "react";
 import { ChangesPanel } from "@/components/changes-panel";
+import { ageingCell, isCutting } from "@/lib/ageing";
 
 export default function Overview() {
   const { selectedImportId } = useTracker();
@@ -27,7 +28,8 @@ function OverviewContent() {
   const {
     totalMarks, totalQty, totalWt, avgAgeing, contractorsCount, structuresCount,
     topAgedMarks, busiestContractors, age0to30, age31to60, age60Plus,
-    p0to30, p31to60, p60Plus,
+    notStarted, noProductionDate, noAgeing,
+    p0to30, p31to60, p60Plus, pNoAgeing,
   } = useMemo(() => {
     const totalMarks = records.length;
     const totalQty = records.reduce((sum, r) => sum + r.balanceQty, 0);
@@ -60,14 +62,21 @@ function OverviewContent() {
     const age0to30 = recordsWithAgeing.filter(r => r.ageingDays !== null && r.ageingDays <= 30).length;
     const age31to60 = recordsWithAgeing.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length;
     const age60Plus = recordsWithAgeing.filter(r => r.ageingDays !== null && r.ageingDays > 60).length;
-    const totalAged = age0to30 + age31to60 + age60Plus || 1;
+
+    const noDate = records.filter(r => r.ageingDays === null);
+    const notStarted = noDate.filter(r => isCutting(r.activity)).length;
+    const noProductionDate = noDate.length - notStarted;
+    const noAgeing = noDate.length;
+    const totalAged = age0to30 + age31to60 + age60Plus + noAgeing || 1;
 
     return {
       totalMarks, totalQty, totalWt, avgAgeing, contractorsCount, structuresCount,
       topAgedMarks, busiestContractors, age0to30, age31to60, age60Plus,
+      notStarted, noProductionDate, noAgeing,
       p0to30: (age0to30 / totalAged) * 100,
       p31to60: (age31to60 / totalAged) * 100,
       p60Plus: (age60Plus / totalAged) * 100,
+      pNoAgeing: (noAgeing / totalAged) * 100,
     };
   }, [records]);
 
@@ -93,11 +102,13 @@ function OverviewContent() {
             <div style={{ width: `${p0to30}%` }} className="bg-ageing-green transition-all" title="0-30 Days" />
             <div style={{ width: `${p31to60}%` }} className="bg-ageing-amber transition-all" title="31-60 Days" />
             <div style={{ width: `${p60Plus}%` }} className="bg-ageing-red transition-all" title="60+ Days" />
+            <div style={{ width: `${pNoAgeing}%` }} className="bg-ageing-neutral transition-all" title="No ageing date" />
           </div>
-          <div className="flex justify-between text-xs font-semibold">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold">
             <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-ageing-green" />0-30d ({age0to30})</div>
             <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-ageing-amber" />31-60d ({age31to60})</div>
             <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-ageing-red" />60d+ ({age60Plus})</div>
+            <div className="flex items-center gap-1.5" title="Not started: activity C, no production date. No production date: progressed past cutting but date missing."><div className="w-3 h-3 rounded-sm bg-ageing-neutral" />No ageing date ({noAgeing}) — {notStarted} not started, {noProductionDate} no prod. date</div>
           </div>
         </CardContent>
       </Card>

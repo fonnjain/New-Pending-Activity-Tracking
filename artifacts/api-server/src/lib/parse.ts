@@ -98,6 +98,7 @@ const COL = {
   activity: "Activity",
   operation: "Operation",
   refJobCard: "Ref. Job Card No.",
+  lastProductionDate: "Last Production Entry Date",
 } as const;
 
 // Derived identity for a Mark No. (col H). See the consolidated Rules A-D below
@@ -259,6 +260,7 @@ function hashRow(row: Omit<InsertRecordPool, "hash">): string {
     row.balanceQty,
     row.balanceWt,
     row.assignDate,
+    row.lastProductionDate,
     row.activity,
     row.operation,
     row.refJobCardNo,
@@ -305,6 +307,7 @@ export const CLEANABLE_FIELDS = [
   "contractor",
   "section",
   "assignDate",
+  "lastProductionDate",
   "towerType",
   "towerSubType",
   "orderNature",
@@ -318,7 +321,9 @@ export type CleanableField = (typeof CLEANABLE_FIELDS)[number];
 // (e.g. "1/5/2025" -> "2025-01-05") legitimately changes the tokens, names do
 // not.
 const TOKEN_PRESERVING_FIELDS = new Set<string>(
-  CLEANABLE_FIELDS.filter((f) => f !== "assignDate"),
+  CLEANABLE_FIELDS.filter(
+    (f) => f !== "assignDate" && f !== "lastProductionDate",
+  ),
 );
 
 // Canonical alphanumeric token sequence of a value: lowercased, runs of
@@ -550,6 +555,7 @@ export function parseWorkbook(
       balanceQty: toNumber(row[COL.balanceQty]) ?? 0,
       balanceWt: toNumber(row[COL.balanceWt]) ?? 0,
       assignDate: formatDate(row[COL.assignDate]),
+      lastProductionDate: formatDate(row[COL.lastProductionDate]),
       activity: emptyToNull(row[COL.activity]),
       operation: emptyToNull(row[COL.operation]),
       refJobCardNo: emptyToNull(row[COL.refJobCard]),
@@ -576,6 +582,19 @@ export function parseWorkbook(
   const missingContractor = rows.filter((r) => r.contractor == null).length;
   const missingDate = rows.filter((r) => r.assignDate == null).length;
 
+  // Last Production Entry Date (col S) sanity counts.
+  let notStarted = 0;
+  let noProductionDate = 0;
+  let futureProductionDate = 0;
+  for (const r of rows) {
+    if (r.lastProductionDate == null) {
+      if (isCuttingActivity(r.activity ?? null)) notStarted++;
+      else noProductionDate++;
+    } else if (isFutureDate(r.lastProductionDate)) {
+      futureProductionDate++;
+    }
+  }
+
   return {
     rows,
     summary: {
@@ -586,21 +605,43 @@ export function parseWorkbook(
       projectsFound: projects.size,
       missingContractor,
       missingDate,
+      notStarted,
+      noProductionDate,
+      futureProductionDate,
     },
   };
 }
 
-export function computeAgeing(assignDate: string | null): number | null {
-  if (!assignDate) return null;
-  const d = new Date(`${assignDate}T00:00:00Z`);
-  if (isNaN(d.getTime())) return null;
+// Today at UTC midnight (ms). Ageing is whole-day differences in UTC.
+function todayUtcMs(): number {
   const now = new Date();
-  const todayUtc = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-  );
-  const diff = todayUtc - d.getTime();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+}
+
+// Activity "C" (Cutting) means production has genuinely not begun.
+export function isCuttingActivity(activity: string | null): boolean {
+  return (activity ?? "").trim().toUpperCase() === "C";
+}
+
+// True when a YYYY-MM-DD date is strictly after today (UTC). Such dates are
+// clamped to today for ageing (ageing 0) and flagged for review, never dropped.
+export function isFutureDate(date: string | null): boolean {
+  if (!date) return false;
+  const d = new Date(`${date}T00:00:00Z`);
+  if (isNaN(d.getTime())) return false;
+  return d.getTime() > todayUtcMs();
+}
+
+// Ageing = today - lastProductionDate (whole days, UTC), recomputed live and
+// never cached. Blank/unparseable dates yield null (the caller labels them
+// "Not started" at activity C, else "No production date"). A future production
+// date is clamped to today, so ageing is 0 (never negative).
+export function computeAgeing(lastProductionDate: string | null): number | null {
+  if (!lastProductionDate) return null;
+  const d = new Date(`${lastProductionDate}T00:00:00Z`);
+  if (isNaN(d.getTime())) return null;
+  const diff = todayUtcMs() - d.getTime();
+  if (diff <= 0) return 0;
   return Math.floor(diff / 86400000);
 }
 

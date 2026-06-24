@@ -49,6 +49,7 @@ const CLEANED_COLUMNS: [string, string][] = [
   ["Activity", "activity"],
   ["Operation", "operation"],
   ["Ref. Job Card No.", "refJobCardNo"],
+  ["Last Production Entry Date", "lastProductionDate"],
 ];
 
 // Build a cleaned .xlsx in the exact layout parse.ts reads (Sheet1, header on

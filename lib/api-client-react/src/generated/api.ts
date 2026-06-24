@@ -1289,7 +1289,7 @@ export const getAiReportUrl = () => {
 }
 
 /**
- * Optional, advisory-only and read-only. The server pre-computes a compact, deterministic analytics pack from the selected import's records (ageing = today - assignDate): totals, ageing buckets, by-activity / by-contractor / by-job / by-structure aggregates, WIP concentration, top stale items, data-quality notes, and change-set deltas versus the previous import (or compareTo). That pack - never the raw rows - is sent to the model, which acts as a fabrication-operations analyst and returns a structured turnaround report (summary, action plan, detailed analysis). Optional filters restrict the analysis to a slice. The AI never writes to record_pool, import_rows, or any computed field. If ANTHROPIC_API_KEY is unset the endpoint responds with available:false; the deterministic engine is unaffected.
+ * Optional, advisory-only and read-only. The server pre-computes a compact, deterministic analytics pack from the selected import's records (ageing = today - lastProductionDate): totals, ageing buckets, by-activity / by-contractor / by-job / by-structure aggregates, WIP concentration, top stale items, data-quality notes, and change-set deltas versus the previous import (or compareTo). That pack - never the raw rows - is sent to the model, which acts as a fabrication-operations analyst and returns a structured turnaround report (summary, action plan, detailed analysis). Optional filters restrict the analysis to a slice. The AI never writes to record_pool, import_rows, or any computed field. If ANTHROPIC_API_KEY is unset the endpoint responds with available:false; the deterministic engine is unaffected.
 
  * @summary Deep turnaround-time analytical report for an import (advisory, read-only)
  */

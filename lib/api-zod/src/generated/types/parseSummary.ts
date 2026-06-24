@@ -14,4 +14,10 @@ export interface ParseSummary {
   projectsFound: number;
   missingContractor: number;
   missingDate: number;
+  /** Blank Last Production Entry Date AND activity == C (production not begun). */
+  notStarted: number;
+  /** Blank Last Production Entry Date AND activity != C (progressed past cutting; data-quality flag). */
+  noProductionDate: number;
+  /** Last Production Entry Date later than today (clamped to today for ageing). */
+  futureProductionDate: number;
 }

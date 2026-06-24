@@ -1,1 +1,2 @@
 - [Balance & Activity Tracker](tracker-app.md) — xlsx-driven snapshot/records app; live ageing, jsonb summary, OR-based replace, parse rules.
+- [Tracker ageing source](tracker-ageing.md) — ageing = today − col S Last Production Entry Date; future→0, blank→null (Not started at C / No production date); col S in hash.

@@ -10,7 +10,13 @@ import {
 import { AiSanitizeBody, AiReviewBody, AiReportBody, AiReportResponse } from "@workspace/api-zod";
 import { sortActivities, isKnownActivity } from "@workspace/domain";
 import { buildChangeSet, type MembershipRow, type ChangeSet } from "../lib/diff";
-import { computeAgeing, computeRoute, isTruncatingCleanup } from "../lib/parse";
+import {
+  computeAgeing,
+  computeRoute,
+  isTruncatingCleanup,
+  isCuttingActivity,
+  isFutureDate,
+} from "../lib/parse";
 import { buildAnalyticsPack } from "../lib/report";
 import {
   AI_MODEL_STANDARD,
@@ -35,6 +41,7 @@ const SANITIZE_FIELDS = [
   "contractor",
   "section",
   "assignDate",
+  "lastProductionDate",
   "towerType",
   "towerSubType",
   "orderNature",
@@ -70,6 +77,7 @@ async function loadMembershipLite(importId: number): Promise<MembershipRow[]> {
       contractor: pool.contractor,
       section: pool.section,
       assignDate: pool.assignDate,
+      lastProductionDate: pool.lastProductionDate,
       activity: pool.activity,
       operation: pool.operation,
       balanceQty: pool.balanceQty,
@@ -127,8 +135,11 @@ router.post("/ai/sanitize", async (req, res): Promise<void> => {
     "parenthetical, or hyphenated tag (e.g. GP-2, UNIT-II, (JW), - JW, BDM). Names " +
     "that differ only by such a tag are DIFFERENT contractors and must stay " +
     "separate — never merge them. If the only difference between two names is real " +
-    "text tokens, make no suggestion. For assignDate only, normalize to " +
-    "YYYY-MM-DD. Do not suggest a change when the value " +
+    "text tokens, make no suggestion. For the date fields (assignDate, " +
+    "lastProductionDate) ONLY normalize the format to YYYY-MM-DD: NEVER invent a " +
+    "missing date, NEVER shift a real date, and NEVER change a future date (blank " +
+    "stays blank). Activity codes are NEVER changed (BL/NTF/NTFSW and any other code " +
+    "stay exactly as-is). Do not suggest a change when the value " +
     "is already clean. Respond with STRICT JSON only, no prose, no code fences, " +
     'shaped exactly as: {"suggestions":[{"poolHash":string,"field":string,' +
     '"from":string|null,"to":string|null,"reason":string}],' +
@@ -194,7 +205,7 @@ router.post("/ai/sanitize", async (req, res): Promise<void> => {
 
   const counts = { dates: 0, names: 0, other: 0 };
   for (const s of suggestions) {
-    if (s.field === "assignDate") counts.dates++;
+    if (s.field === "assignDate" || s.field === "lastProductionDate") counts.dates++;
     else if (s.field === "contractor" || s.field === "section") counts.names++;
     else counts.other++;
   }
@@ -207,6 +218,11 @@ interface ReviewSignals {
   distinctRows: number;
   nullContractor: number;
   nullDate: number;
+  // Last Production Entry Date (col S) data-quality signals.
+  notStarted: number; // blank production date AND activity == C
+  noProductionDate: number; // blank production date AND activity != C (progressed but date missing)
+  noProductionDateByActivity: { activity: string; count: number }[];
+  futureProductionDate: number; // production date > today (clamped to today for ageing)
   ageing: { min: number | null; max: number | null; avg: number | null; counted: number };
   activityCodes: string[];
   unknownActivityCodes: string[];
@@ -227,15 +243,32 @@ function computeSignals(membership: MembershipRow[], changeSet: ChangeSet): Revi
   const activityCodes = new Set<string>();
   const notInRoute: { markId: string; activity: string; operation: string }[] = [];
   const distinctHashes = new Set<string>();
+  let notStarted = 0;
+  let noProductionDate = 0;
+  let futureProductionDate = 0;
+  const noProdByActivity = new Map<string, number>();
 
-  for (const { row } of membership) {
+  for (const { row, copies } of membership) {
+    // Production-date and ageing counts mirror the parse summary, which counts
+    // every kept (expanded) row — so weight them by `copies` (in-file duplicates).
     distinctHashes.add(row.hash);
     if (row.contractor == null) nullContractor++;
     if (row.assignDate == null) nullDate++;
-    const ag = computeAgeing(row.assignDate);
+    if (row.lastProductionDate == null) {
+      if (isCuttingActivity(row.activity)) {
+        notStarted += copies;
+      } else {
+        noProductionDate += copies;
+        const key = row.activity ?? "(none)";
+        noProdByActivity.set(key, (noProdByActivity.get(key) ?? 0) + copies);
+      }
+    } else if (isFutureDate(row.lastProductionDate)) {
+      futureProductionDate += copies;
+    }
+    const ag = computeAgeing(row.lastProductionDate);
     if (ag !== null) {
-      agSum += ag;
-      agCount++;
+      agSum += ag * copies;
+      agCount += copies;
       agMin = agMin === null ? ag : Math.min(agMin, ag);
       agMax = agMax === null ? ag : Math.max(agMax, ag);
     }
@@ -260,6 +293,12 @@ function computeSignals(membership: MembershipRow[], changeSet: ChangeSet): Revi
     distinctRows: distinctHashes.size,
     nullContractor,
     nullDate,
+    notStarted,
+    noProductionDate,
+    noProductionDateByActivity: sortActivities(
+      Array.from(noProdByActivity.keys()),
+    ).map((activity) => ({ activity, count: noProdByActivity.get(activity) ?? 0 })),
+    futureProductionDate,
     ageing: {
       min: agMin,
       max: agMax,
@@ -410,7 +449,12 @@ router.post("/ai/review", async (req, res): Promise<void> => {
     "You are a meticulous QA reviewer for a steel-fabrication balance/activity " +
     "report. A deterministic engine has ALREADY computed the results; you confirm " +
     "consistency and surface anomalies, you do NOT recompute results or change any " +
-    "value. Audit: ageing math sanity, unknown/odd activity codes, activity not in " +
+    "value. Ageing = today - Last Production Entry Date (blank date is excluded from " +
+    "averages; future dates are clamped to today). Audit: ageing math sanity, the " +
+    "'No production date' backlog (marks past Cutting with no production date — a " +
+    "data-quality issue) via noProductionDate/noProductionDateByActivity, the " +
+    "futureProductionDate count, unknown/odd activity codes (e.g. BL/NTF/NTFSW; valid " +
+    "data, never rename), activity not in " +
     "its operation route, null contractor or date, backward route moves, balance " +
     "quantity increases, mass contractor reassignment, and a flood of completed " +
     "marks (which can indicate a partial file). Be precise and conservative: a clean " +

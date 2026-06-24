@@ -27,6 +27,12 @@ export interface ParseSummary {
   projectsFound: number;
   missingContractor: number;
   missingDate: number;
+  /** Blank Last Production Entry Date AND activity == C (production not begun). */
+  notStarted: number;
+  /** Blank Last Production Entry Date AND activity != C (progressed past cutting; data-quality flag). */
+  noProductionDate: number;
+  /** Last Production Entry Date later than today (clamped to today for ageing). */
+  futureProductionDate: number;
 }
 
 export interface ChangeSummary {
@@ -258,13 +264,21 @@ export interface Record {
   operation: string | null;
   /** @nullable */
   assignDate: string | null;
+  /**
+     * Last Production Entry Date (col S); drives ageing. Null when blank/unparseable.
+     * @nullable
+     */
+  lastProductionDate: string | null;
   /** @nullable */
   contractor: string | null;
   /** @nullable */
   orderNature: string | null;
   /** @nullable */
   refJobCardNo: string | null;
-  /** @nullable */
+  /**
+     * today - lastProductionDate (whole days; future clamped to 0). Null when no production date.
+     * @nullable
+     */
   ageingDays: number | null;
   routeSteps: string[];
   /** @nullable */

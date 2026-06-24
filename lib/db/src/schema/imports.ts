@@ -17,6 +17,13 @@ export interface ParseSummary {
   projectsFound: number;
   missingContractor: number;
   missingDate: number;
+  // Last Production Entry Date (col S) sanity counts.
+  // notStarted: blank production date AND activity == "C" (genuinely not begun).
+  // noProductionDate: blank production date AND activity != "C" (progressed but date missing — data-quality flag).
+  // futureProductionDate: production date later than today (clamped to today for ageing).
+  notStarted: number;
+  noProductionDate: number;
+  futureProductionDate: number;
 }
 
 export interface ChangeSummary {
