@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router, type IRouter, type RequestHandler } from "express";
 import multer from "multer";
+import { requireAuth } from "./auth";
 import { desc, eq, lt, inArray, sql, and, isNull } from "drizzle-orm";
 import {
   db,
@@ -337,7 +338,7 @@ router.get("/imports", async (_req, res): Promise<void> => {
   res.json(rows);
 });
 
-router.post("/imports", uploadSingle, async (req, res): Promise<void> => {
+router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<void> => {
   const file = req.file;
   if (!file) {
     res.status(400).json({ error: "No file uploaded" });
@@ -403,7 +404,7 @@ async function expireStagedUploads(): Promise<void> {
 
 // POST /imports/stage — accept ANY file; store bytes and return a structural
 // (AI-free) read. Never parses into the engine.
-router.post("/imports/stage", uploadSingle, async (req, res): Promise<void> => {
+router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promise<void> => {
   const file = req.file;
   if (!file) {
     res.status(400).json({ error: "No file uploaded" });
@@ -458,7 +459,7 @@ router.post("/imports/stage", uploadSingle, async (req, res): Promise<void> => {
 // a verdict (ok/reject) plus optional descriptive-only sanitize suggestions.
 // With no key (or on any AI failure) returns available:false so the UI can offer
 // "import as-is".
-router.post("/imports/validate", async (req, res): Promise<void> => {
+router.post("/imports/validate", requireAuth, async (req, res): Promise<void> => {
   const stagingId =
     typeof req.body?.stagingId === "string" ? req.body.stagingId : "";
   if (!stagingId) {
@@ -624,7 +625,7 @@ router.post("/imports/validate", async (req, res): Promise<void> => {
 
 // POST /imports/commit — apply any accepted descriptive cleanups, then run the
 // real parse+merge into the engine. Deletes the staged row on success.
-router.post("/imports/commit", async (req, res): Promise<void> => {
+router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   const stagingId =
     typeof req.body?.stagingId === "string" ? req.body.stagingId : "";
   if (!stagingId) {
@@ -770,8 +771,8 @@ router.post("/imports/commit", async (req, res): Promise<void> => {
 });
 
 // DELETE /imports/stage/:id — discard a staged upload without committing.
-router.delete("/imports/stage/:id", async (req, res): Promise<void> => {
-  const id = req.params.id;
+router.delete("/imports/stage/:id", requireAuth, async (req, res): Promise<void> => {
+  const id = String(req.params.id);
   await db.delete(uploadStagingTable).where(eq(uploadStagingTable.id, id));
   res.status(204).end();
 });
@@ -830,7 +831,7 @@ router.get("/imports/:id", async (req, res): Promise<void> => {
   res.json(imp);
 });
 
-router.delete("/imports", async (req, res): Promise<void> => {
+router.delete("/imports", requireAuth, async (req, res): Promise<void> => {
   const result = await db.transaction(async (tx) => {
     // Serialize against concurrent uploads (which take the same lock) so a reset
     // can never interleave with an upload and leave a partial/inconsistent state.
@@ -847,7 +848,7 @@ router.delete("/imports", async (req, res): Promise<void> => {
   res.json(result);
 });
 
-router.delete("/imports/:id", async (req, res): Promise<void> => {
+router.delete("/imports/:id", requireAuth, async (req, res): Promise<void> => {
   const params = DeleteImportParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });

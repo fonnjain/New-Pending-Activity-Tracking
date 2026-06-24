@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, lt, desc } from "drizzle-orm";
+import { requireAuth } from "./auth";
 import {
   db,
   importsTable,
@@ -87,7 +88,7 @@ async function loadMembershipLite(importId: number): Promise<MembershipRow[]> {
   }));
 }
 
-router.post("/ai/sanitize", async (req, res): Promise<void> => {
+router.post("/ai/sanitize", requireAuth, async (req, res): Promise<void> => {
   const parsed = AiSanitizeBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -380,7 +381,7 @@ const REVIEW_SCHEMA_HINT =
   '"markId":string|null,"message":string,"expected":string|null,' +
   '"actual":string|null}]';
 
-router.post("/ai/review", async (req, res): Promise<void> => {
+router.post("/ai/review", requireAuth, async (req, res): Promise<void> => {
   const parsed = AiReviewBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -711,7 +712,7 @@ function applyFilters(
   });
 }
 
-router.post("/ai/report", async (req, res): Promise<void> => {
+router.post("/ai/report", requireAuth, async (req, res): Promise<void> => {
   const parsed = AiReportBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });

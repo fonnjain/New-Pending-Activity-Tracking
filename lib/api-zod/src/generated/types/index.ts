@@ -8,6 +8,8 @@
 
 export * from './acceptedSuggestion';
 export * from './aiStatus';
+export * from './authCredentials';
+export * from './authStatus';
 export * from './changeCounts';
 export * from './changeItem';
 export * from './changeSet';

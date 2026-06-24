@@ -13,6 +13,15 @@ export interface ErrorResponse {
   error: string;
 }
 
+export interface AuthCredentials {
+  email: string;
+  password: string;
+}
+
+export interface AuthStatus {
+  authenticated: boolean;
+}
+
 export interface ImportUpload {
   file: Blob;
   label?: string;

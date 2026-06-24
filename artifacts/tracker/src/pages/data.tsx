@@ -8,9 +8,18 @@ import { exportToCsv, exportToJson } from "@/lib/export";
 import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { AiReviewPanel } from "@/components/ai-review-panel";
 import { StagedUploadPanel } from "@/components/staged-upload-panel";
+import { LoginGate, LogoutButton } from "@/components/login-gate";
 import { useQueryClient } from "@tanstack/react-query";
 
 export default function DataView() {
+  return (
+    <LoginGate>
+      <DataViewContent />
+    </LoginGate>
+  );
+}
+
+function DataViewContent() {
   const { data: imports = [], refetch } = useListImports();
   const { selectedImportId, setSelectedImportId } = useTracker();
   const deleteImport = useDeleteImport();
@@ -90,6 +99,10 @@ export default function DataView() {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight">Data</h1>
+        <LogoutButton />
+      </div>
       <div className="bg-primary/10 border border-primary/20 rounded-md p-4 flex gap-4 text-sm items-start">
         <div className="text-primary mt-0.5 font-bold">i</div>
         <p className="text-primary-foreground/90 font-medium">

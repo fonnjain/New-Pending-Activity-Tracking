@@ -18,6 +18,40 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * Returns whether the current request carries a valid signed session cookie. Used by the frontend to gate the Data view behind login.
+
+ * @summary Current authentication status
+ */
+export const GetAuthStatusResponse = zod.object({
+  "authenticated": zod.boolean()
+})
+
+
+/**
+ * Validates the submitted email and password against the server-side AUTH_EMAIL/AUTH_PASSWORD credentials. On success, sets a signed, httpOnly session cookie. Returns 401 on invalid credentials and 503 when no credentials are configured on the server.
+
+ * @summary Log in
+ */
+export const LoginBody = zod.object({
+  "email": zod.string(),
+  "password": zod.string()
+})
+
+export const LoginResponse = zod.object({
+  "authenticated": zod.boolean()
+})
+
+
+/**
+ * Clears the session cookie.
+ * @summary Log out
+ */
+export const LogoutResponse = zod.object({
+  "authenticated": zod.boolean()
+})
+
+
+/**
  * Returns every import in the append-only ledger, newest first, each with its parse summary and (when available) a compact change summary versus the prior import.
 
  * @summary List imports
