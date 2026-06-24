@@ -109,22 +109,37 @@ export interface GraceCell {
   value?: number;
 }
 
-// Full per-activity config: ideal days plus the three band cells.
+// Three escalating PRE-WARNING thresholds, each a PERCENT of the activity's
+// cumulative target consumed (consumed = ageing / cumulativeTarget). They apply
+// only while the mark is still WITHIN target (overrun <= 0); once the target is
+// exceeded the existing breach bands (grace cells) take over. Invariant after
+// resolution: 0 <= pw1 <= pw2 <= pw3 <= 100.
+export interface PreWarnConfig {
+  pw1: number;
+  pw2: number;
+  pw3: number;
+}
+
+// Full per-activity config: ideal days, the three grace-band cells (breach
+// phase), and the three pre-warning percentage thresholds (within-target phase).
 export interface ActivityConfig {
   idealDays: number;
   yellow: GraceCell;
   orange: GraceCell;
   red: GraceCell;
+  preWarn: PreWarnConfig;
 }
 
 // A sparse per-project override. Any field present REPLACES the global value for
 // that (project, activity); any field absent INHERITS the global cell/ideal.
-// Whole rows/projects may be omitted entirely. Inheritance is PER CELL.
+// Whole rows/projects may be omitted entirely. Inheritance is PER CELL. The
+// pre-warning override is itself sparse (any subset of pw1/pw2/pw3).
 export interface PartialActivityConfig {
   idealDays?: number;
   yellow?: GraceCell;
   orange?: GraceCell;
   red?: GraceCell;
+  preWarn?: Partial<PreWarnConfig>;
 }
 
 // The RESOLVED, effective numeric grace for one (project, activity): plain day
@@ -145,6 +160,10 @@ export interface TurnaroundSettings {
   // Sparse per-project overrides: project -> activity code -> partial config.
   // Only overridden cells/fields are stored; everything else inherits `activities`.
   perProject?: Record<string, Record<string, PartialActivityConfig>>;
+  // Stalled-mark threshold (days). A mark whose activity/last-production signature
+  // has not changed for >= this many days is flagged stalled. App-level (not
+  // per-activity). Defaults to DEFAULT_STALLED_DAYS when unset.
+  stalledDays?: number;
 }
 
 // green: at/under target. yellow/orange/red: increasing overrun. na: no defined
@@ -163,6 +182,11 @@ const DEFAULT_YELLOW_GRACE = 7;
 const DEFAULT_ORANGE_GRACE = 21;
 const DEFAULT_RED_GRACE = 21;
 
+// Default pre-warning thresholds (percent of cumulative target consumed) and the
+// default stalled threshold (days).
+export const DEFAULT_PRE_WARN: PreWarnConfig = { pw1: 70, pw2: 85, pw3: 95 };
+export const DEFAULT_STALLED_DAYS = 10;
+
 // Defaults preserve the prior behaviour: MANUAL grace cells at 7/21/21 days
 // (percentages start unset / auto-off until the user opts a cell into a %).
 export const DEFAULT_ACTIVITY_CONFIG: ActivityConfig = {
@@ -170,6 +194,7 @@ export const DEFAULT_ACTIVITY_CONFIG: ActivityConfig = {
   yellow: { mode: "manual", value: DEFAULT_YELLOW_GRACE },
   orange: { mode: "manual", value: DEFAULT_ORANGE_GRACE },
   red: { mode: "manual", value: DEFAULT_RED_GRACE },
+  preWarn: { ...DEFAULT_PRE_WARN },
 };
 
 export const DEFAULT_TURNAROUND_SETTINGS: TurnaroundSettings = {
@@ -209,7 +234,54 @@ function cloneConfig(c: ActivityConfig): ActivityConfig {
     yellow: cloneCell(c.yellow),
     orange: cloneCell(c.orange),
     red: cloneCell(c.red),
+    preWarn: { ...c.preWarn },
   };
+}
+
+// Clamp a single pre-warning threshold to an integer percent in [0, 100].
+function clampPct(v: unknown, fallback: number): number {
+  const n =
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.round(v) : fallback;
+  return Math.min(100, Math.max(0, n));
+}
+
+// Optional integer percent in [0,100] (undefined when absent/invalid).
+function optPct(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0
+    ? Math.min(100, Math.max(0, Math.round(v)))
+    : undefined;
+}
+
+// Order a resolved pre-warning row so pw1 <= pw2 <= pw3 (raise later bands).
+function orderPreWarn(p: PreWarnConfig): PreWarnConfig {
+  const pw1 = clampPct(p.pw1, DEFAULT_PRE_WARN.pw1);
+  const pw2 = Math.max(pw1, clampPct(p.pw2, DEFAULT_PRE_WARN.pw2));
+  const pw3 = Math.max(pw2, clampPct(p.pw3, DEFAULT_PRE_WARN.pw3));
+  return { pw1, pw2, pw3 };
+}
+
+// Migrate a stored full pre-warning row (defaults seeded + clamped + ordered).
+function migratePreWarn(raw: unknown): PreWarnConfig {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  return orderPreWarn({
+    pw1: clampPct(o.pw1, DEFAULT_PRE_WARN.pw1),
+    pw2: clampPct(o.pw2, DEFAULT_PRE_WARN.pw2),
+    pw3: clampPct(o.pw3, DEFAULT_PRE_WARN.pw3),
+  });
+}
+
+// Migrate a SPARSE per-project pre-warning override (keep only present fields).
+function normalizePartialPreWarn(raw: unknown): Partial<PreWarnConfig> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const out: Partial<PreWarnConfig> = {};
+  const pw1 = optPct(o.pw1);
+  const pw2 = optPct(o.pw2);
+  const pw3 = optPct(o.pw3);
+  if (pw1 !== undefined) out.pw1 = pw1;
+  if (pw2 !== undefined) out.pw2 = pw2;
+  if (pw3 !== undefined) out.pw3 = pw3;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 // Resolve ONE grace band cell to effective overrun-days for a given ideal-days.
@@ -314,6 +386,8 @@ function normalizePartialConfig(raw: unknown): PartialActivityConfig {
       };
     }
   }
+  const preWarn = normalizePartialPreWarn(o.preWarn);
+  if (preWarn) out.preWarn = preWarn;
   return out;
 }
 
@@ -403,9 +477,38 @@ export function migrateTurnaroundSettings(raw: unknown): TurnaroundSettings {
       yellow: cellFor(p, "yellow", "yellowGrace", yellow),
       orange: cellFor(p, "orange", "orangeGrace", orange),
       red: cellFor(p, "red", "redGrace", orange),
+      preWarn: migratePreWarn(p?.preWarn),
     };
   }
-  return { activities, perProject: migratePerProject(obj.perProject) };
+  const stalledDays = pInt(obj.stalledDays, DEFAULT_STALLED_DAYS);
+  return {
+    activities,
+    perProject: migratePerProject(obj.perProject),
+    stalledDays,
+  };
+}
+
+// Resolve the EFFECTIVE pre-warning thresholds for one (project, activity).
+// Per-field inheritance: a project override field replaces the global; absent
+// fields inherit the global. The merged row is clamped to [0,100] and ordered
+// pw1 <= pw2 <= pw3 (raise later bands), mirroring grace resolution.
+export function resolvePreWarn(
+  settings: TurnaroundSettings,
+  project: string | null | undefined,
+  step: ProcessStep,
+): PreWarnConfig {
+  const base = settings.activities[step]?.preWarn ?? DEFAULT_PRE_WARN;
+  const ov = project ? settings.perProject?.[project]?.[step]?.preWarn : undefined;
+  return orderPreWarn({
+    pw1: ov?.pw1 ?? base.pw1,
+    pw2: ov?.pw2 ?? base.pw2,
+    pw3: ov?.pw3 ?? base.pw3,
+  });
+}
+
+// Effective stalled threshold in days (non-negative integer; default when unset).
+export function resolveStalledDays(settings: TurnaroundSettings): number {
+  return pInt(settings.stalledDays, DEFAULT_STALLED_DAYS);
 }
 
 // Cumulative target per canonical step: sum of ideal-days from the FIRST step up
@@ -472,4 +575,112 @@ export function alertStatus(
   else status = "red";
 
   return { status, target, overrun };
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle status — the full 8-state ladder
+// ---------------------------------------------------------------------------
+// A SUPERSET view layered on top of alertStatus (the breach engine, untouched).
+// While a mark is still within target (overrun <= 0) it is classified by how much
+// of its cumulative target it has CONSUMED (ageing / target), against the
+// per-activity pre-warning thresholds. Once the target is exceeded (overrun > 0)
+// the existing grace bands take over — yellow/orange/red are simply renamed
+// breach1/breach2/breach3 here so the ladder reads as one escalating sequence.
+//
+//   na                                  -> no target or no ageing
+//   within target (overrun <= 0):
+//     consumed < pw1                    -> green
+//     pw1 <= consumed < pw2             -> prewarn1
+//     pw2 <= consumed < pw3             -> prewarn2
+//     pw3 <= consumed (<= 100)          -> prewarn3
+//   over target (overrun > 0):
+//     alertStatus yellow/orange/red     -> breach1/breach2/breach3
+//
+// Breach classification is delegated verbatim to alertStatus, so pre-warning is
+// strictly ADDITIVE and never changes breach bands, targets, ageing, or n/a.
+export type LifecycleStatus =
+  | "green"
+  | "prewarn1"
+  | "prewarn2"
+  | "prewarn3"
+  | "breach1"
+  | "breach2"
+  | "breach3"
+  | "na";
+
+// Canonical render order (best -> worst) for legends, summaries and sorting.
+export const LIFECYCLE_ORDER: LifecycleStatus[] = [
+  "green",
+  "prewarn1",
+  "prewarn2",
+  "prewarn3",
+  "breach1",
+  "breach2",
+  "breach3",
+  "na",
+];
+
+export interface LifecycleResult {
+  status: LifecycleStatus;
+  target: number | null;
+  overrun: number | null;
+  // Percent of the cumulative target consumed (round(ageing/target*100)); null
+  // when there is no usable target (na, or target 0).
+  consumedPct: number | null;
+  // Projected days remaining before the target is reached (max(0, target -
+  // ageing)); 0 once breached; null when na.
+  daysToTarget: number | null;
+}
+
+const BREACH_BY_ALERT: Record<"yellow" | "orange" | "red", LifecycleStatus> = {
+  yellow: "breach1",
+  orange: "breach2",
+  red: "breach3",
+};
+
+export function lifecycleStatus(
+  input: {
+    activity: string | null | undefined;
+    ageingDays: number | null;
+    project?: string | null;
+  },
+  settings: TurnaroundSettings,
+): LifecycleResult {
+  const base = alertStatus(input, settings);
+  const { target, overrun } = base;
+
+  if (base.status === "na" || target === null || input.ageingDays === null) {
+    return { status: "na", target, overrun, consumedPct: null, daysToTarget: null };
+  }
+
+  const ageing = input.ageingDays;
+  const consumedPct = target > 0 ? Math.round((ageing / target) * 100) : null;
+
+  // Breach phase: reuse the breach engine's band verbatim.
+  if ((overrun ?? 0) > 0) {
+    const status =
+      base.status === "green" ? "green" : BREACH_BY_ALERT[base.status];
+    return { status, target, overrun, consumedPct, daysToTarget: 0 };
+  }
+
+  // Within-target phase: classify by consumed percentage of the target.
+  const daysToTarget = Math.max(0, target - ageing);
+  if (target <= 0) {
+    return { status: "green", target, overrun, consumedPct, daysToTarget };
+  }
+
+  const consumed = (ageing / target) * 100;
+  const pw = resolvePreWarn(
+    settings,
+    input.project,
+    normalizeActivity(input.activity) as ProcessStep,
+  );
+
+  let status: LifecycleStatus;
+  if (consumed < pw.pw1) status = "green";
+  else if (consumed < pw.pw2) status = "prewarn1";
+  else if (consumed < pw.pw3) status = "prewarn2";
+  else status = "prewarn3";
+
+  return { status, target, overrun, consumedPct, daysToTarget };
 }

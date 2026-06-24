@@ -17,6 +17,7 @@ import {
   GetImportParams,
   GetImportRecordsParams,
   GetImportChangesParams,
+  GetImportMovementParams,
   DeleteImportParams,
   CompareImportsQueryParams,
 } from "@workspace/api-zod";
@@ -101,6 +102,71 @@ function toMembershipRows(
   rows: { pool: RecordPoolRow; copies: number }[],
 ): MembershipRow[] {
   return rows.map((r) => ({ row: poolToLite(r.pool), copies: r.copies }));
+}
+
+// ---------------------------------------------------------------------------
+// Movement (stalled) detection support
+// ---------------------------------------------------------------------------
+// Identity key matches the diff engine (markId + jobCardNo) so movement lines up
+// with the change log.
+function movementIdentityKey(
+  markId: string,
+  jobCardNo: string | null,
+): string {
+  return [markId, jobCardNo ?? ""].join("\u0001");
+}
+
+interface IdentityState {
+  markId: string;
+  jobCardNo: string | null;
+  // Signature = sorted distinct activities + sorted distinct last-production
+  // dates for this identity. A change in EITHER counts as movement.
+  sig: string;
+}
+
+// Load a light per-identity signature map for one import (no full record
+// expansion). Used to walk history backwards for stalled detection.
+async function loadIdentityStates(
+  importId: number,
+): Promise<Map<string, IdentityState>> {
+  const rows = await db
+    .select({
+      markId: recordPoolTable.markId,
+      jobCardNo: recordPoolTable.jobCardNo,
+      activity: recordPoolTable.activity,
+      lastProductionDate: recordPoolTable.lastProductionDate,
+    })
+    .from(importRowsTable)
+    .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+    .where(eq(importRowsTable.importId, importId));
+
+  const acts = new Map<string, Set<string>>();
+  const lpds = new Map<string, Set<string>>();
+  const meta = new Map<string, { markId: string; jobCardNo: string | null }>();
+  for (const r of rows) {
+    const key = movementIdentityKey(r.markId, r.jobCardNo);
+    if (!meta.has(key)) {
+      meta.set(key, { markId: r.markId, jobCardNo: r.jobCardNo });
+      acts.set(key, new Set<string>());
+      lpds.set(key, new Set<string>());
+    }
+    acts.get(key)!.add((r.activity ?? "").trim().toUpperCase());
+    lpds.get(key)!.add(r.lastProductionDate ?? "");
+  }
+
+  const out = new Map<string, IdentityState>();
+  for (const [key, m] of meta) {
+    const a = Array.from(acts.get(key)!).sort().join(",");
+    const l = Array.from(lpds.get(key)!).sort().join(",");
+    out.set(key, { markId: m.markId, jobCardNo: m.jobCardNo, sig: `${a}\u0002${l}` });
+  }
+  return out;
+}
+
+// Whole days between an import's createdAt and now (>= 0).
+function daysSince(createdAt: Date | string): number {
+  const t = createdAt instanceof Date ? createdAt.getTime() : new Date(createdAt).getTime();
+  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
 }
 
 // Rebuild a ChangeSet-shaped object from an import's stored changeSummary. Used
@@ -929,6 +995,67 @@ router.get("/imports/:id/changes", async (req, res): Promise<void> => {
     { id: toImport.id, label: toImport.label },
   );
   res.json(changeSet);
+});
+
+// Per-identity movement: how many days each mark in the target import has gone
+// without its (activity-set + last-production-date-set) signature changing.
+// Walks prior imports newest -> oldest; daysSinceLastMovement = days since the
+// OLDEST consecutive prior import that still carried the same signature. null
+// when there is no matching history (new mark, just changed, or no prior
+// imports) -> the frontend degrades gracefully (never flags as stalled).
+router.get("/imports/:id/movement", async (req, res): Promise<void> => {
+  const params = GetImportMovementParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const [target] = await db
+    .select()
+    .from(importsTable)
+    .where(eq(importsTable.id, params.data.id));
+  if (!target) {
+    res.status(404).json({ error: "Import not found" });
+    return;
+  }
+
+  const current = await loadIdentityStates(target.id);
+
+  const priorImports = await db
+    .select({ id: importsTable.id, createdAt: importsTable.createdAt })
+    .from(importsTable)
+    .where(lt(importsTable.id, target.id))
+    .orderBy(desc(importsTable.id));
+
+  const days = new Map<string, number | null>();
+  for (const key of current.keys()) days.set(key, null);
+
+  const stillMatching = new Set(current.keys());
+  for (const imp of priorImports) {
+    if (stillMatching.size === 0) break;
+    const priorSigs = await loadIdentityStates(imp.id);
+    const age = daysSince(imp.createdAt);
+    for (const key of Array.from(stillMatching)) {
+      const prior = priorSigs.get(key);
+      if (prior && prior.sig === current.get(key)!.sig) {
+        days.set(key, age);
+      } else {
+        stillMatching.delete(key);
+      }
+    }
+  }
+
+  const items = Array.from(current.entries()).map(([key, st]) => ({
+    markId: st.markId,
+    jobCardNo: st.jobCardNo,
+    daysSinceLastMovement: days.get(key) ?? null,
+  }));
+
+  res.json({
+    importId: target.id,
+    hasHistory: priorImports.length > 0,
+    items,
+  });
 });
 
 export default router;

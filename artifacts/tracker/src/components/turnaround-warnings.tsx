@@ -8,24 +8,35 @@ import {
 import { formatWeight } from "@/lib/utils";
 import { useSettings } from "@/lib/settings";
 import {
-  alertStatus,
+  lifecycleStatus,
   migrateTurnaroundSettings,
   normalizeActivity,
   sortActivities,
-  type AlertStatus,
-  type AlertResult,
+  LIFECYCLE_ORDER,
+  type LifecycleStatus,
+  type LifecycleResult,
 } from "@workspace/domain";
 import {
-  ALERT_LABELS,
-  statusBgColor,
-  statusTextColor,
+  LIFECYCLE_LABELS,
+  LIFECYCLE_IS_BREACH,
+  lifecycleBgColor,
+  lifecycleTextColor,
 } from "@/lib/turnaround";
 import type { Record as ApiRecord } from "@workspace/api-client-react";
 
-const STATUS_ORDER: AlertStatus[] = ["green", "yellow", "orange", "red", "na"];
+const STATUS_ORDER: LifecycleStatus[] = LIFECYCLE_ORDER;
 
-function emptyCounts(): globalThis.Record<AlertStatus, number> {
-  return { green: 0, yellow: 0, orange: 0, red: 0, na: 0 };
+function emptyCounts(): globalThis.Record<LifecycleStatus, number> {
+  return {
+    green: 0,
+    prewarn1: 0,
+    prewarn2: 0,
+    prewarn3: 0,
+    breach1: 0,
+    breach2: 0,
+    breach3: 0,
+    na: 0,
+  };
 }
 
 export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
@@ -47,14 +58,14 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
         // targets across projects in a mixed-project set; flag that so we don't
         // show a single misleading number.
         targetVaries: boolean;
-        counts: globalThis.Record<AlertStatus, number>;
+        counts: globalThis.Record<LifecycleStatus, number>;
         total: number;
       }
     >();
-    const drill: Array<{ r: ApiRecord; res: AlertResult }> = [];
+    const drill: Array<{ r: ApiRecord; res: LifecycleResult }> = [];
 
     for (const r of records) {
-      const res = alertStatus(
+      const res = lifecycleStatus(
         { activity: r.activity, ageingDays: r.ageingDays, project: r.job },
         settings,
       );
@@ -76,7 +87,7 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
       bucket.counts[res.status]++;
       bucket.total++;
 
-      if (res.status === "orange" || res.status === "red") {
+      if (LIFECYCLE_IS_BREACH[res.status]) {
         drill.push({ r, res });
       }
     }
@@ -90,6 +101,9 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
   }, [records, settings]);
 
   const total = records.length;
+  const preWarnTotal =
+    counts.prewarn1 + counts.prewarn2 + counts.prewarn3;
+  const breachTotal = counts.breach1 + counts.breach2 + counts.breach3;
 
   // When the filtered records belong to a single project that has its own
   // overrides, flag that custom (non-global) parameters are in effect.
@@ -106,7 +120,7 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
     <Card>
       <CardHeader>
         <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-          Turnaround Warnings
+          Turnaround Lifecycle
           {customProject && (
             <span
               className="text-[10px] uppercase tracking-wider text-primary font-semibold normal-case"
@@ -118,27 +132,72 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Summary strip */}
-        <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
+        {/* Phase summary */}
+        <div className="grid grid-cols-3 gap-3">
+          <PhaseTile
+            label="On track"
+            value={counts.green}
+            total={total}
+            cls="bg-lc-green"
+          />
+          <PhaseTile
+            label="Pre-warning"
+            value={preWarnTotal}
+            total={total}
+            cls="bg-lc-prewarn2"
+          />
+          <PhaseTile
+            label="Breached"
+            value={breachTotal}
+            total={total}
+            cls="bg-lc-breach3"
+          />
+        </div>
+
+        {/* Full 8-state strip */}
+        <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
           {STATUS_ORDER.map((s) => (
             <div
               key={s}
-              className="flex flex-col items-center justify-center rounded-md border border-border p-3 text-center"
+              className="flex flex-col items-center justify-center rounded-md border border-border p-2 text-center"
             >
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className={`w-3 h-3 rounded-sm ${statusBgColor(s)}`} />
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {ALERT_LABELS[s]}
-                </span>
+              <div className="flex items-center gap-1 mb-1">
+                <span className={`w-3 h-3 rounded-sm ${lifecycleBgColor(s)}`} />
               </div>
-              <span className="text-2xl font-bold tabular-nums">
-                {counts[s]}
-              </span>
-              <span className="text-[10px] text-muted-foreground tabular-nums">
-                {total ? Math.round((counts[s] / total) * 100) : 0}%
+              <span className="text-lg font-bold tabular-nums">{counts[s]}</span>
+              <span className="text-[9px] uppercase tracking-wider text-muted-foreground leading-tight">
+                {LIFECYCLE_LABELS[s]}
               </span>
             </div>
           ))}
+        </div>
+
+        {/* Legend: pre-warning vs breach */}
+        <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted-foreground">
+          <span className="font-semibold uppercase tracking-wider">
+            Pre-warning (within target):
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-sm bg-lc-prewarn1" /> 1
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-sm bg-lc-prewarn2" /> 2
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-sm bg-lc-prewarn3" /> 3
+          </span>
+          <span className="font-semibold uppercase tracking-wider">
+            Breach (over target):
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-sm bg-lc-breach1" /> 1
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-sm bg-lc-breach2" /> 2
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-sm bg-lc-breach3" /> 3
+          </span>
         </div>
 
         {/* Per-activity breakdown */}
@@ -167,9 +226,9 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
                     a.counts[s] > 0 ? (
                       <div
                         key={s}
-                        className={statusBgColor(s)}
+                        className={lifecycleBgColor(s)}
                         style={{ width: `${(a.counts[s] / a.total) * 100}%` }}
-                        title={`${ALERT_LABELS[s]}: ${a.counts[s]}`}
+                        title={`${LIFECYCLE_LABELS[s]}: ${a.counts[s]}`}
                       />
                     ) : null,
                   )}
@@ -187,14 +246,14 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
           </div>
         </div>
 
-        {/* Orange/Red drill list */}
+        {/* Breach drill list */}
         <div>
           <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
             Over target ({drill.length})
           </div>
           {drill.length === 0 ? (
             <div className="text-sm text-muted-foreground">
-              Nothing past the orange threshold. Good standing.
+              Nothing past the target. Good standing.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -225,7 +284,7 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
                         {res.target}d
                       </td>
                       <td
-                        className={`py-1.5 pr-3 text-right tabular-nums font-bold ${statusTextColor(res.status)}`}
+                        className={`py-1.5 pr-3 text-right tabular-nums font-bold ${lifecycleTextColor(res.status)}`}
                       >
                         +{res.overrun}d
                       </td>
@@ -249,5 +308,32 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function PhaseTile({
+  label,
+  value,
+  total,
+  cls,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  cls: string;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-md border border-border p-3 text-center">
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className={`w-3 h-3 rounded-sm ${cls}`} />
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+      </div>
+      <span className="text-2xl font-bold tabular-nums">{value}</span>
+      <span className="text-[10px] text-muted-foreground tabular-nums">
+        {total ? Math.round((value / total) * 100) : 0}%
+      </span>
+    </div>
   );
 }

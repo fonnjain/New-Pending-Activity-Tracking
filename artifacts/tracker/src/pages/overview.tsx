@@ -1,5 +1,5 @@
 import { useTracker, useFilteredRecords } from "@/lib/store";
-import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
+import { useGetImportRecords, getGetImportRecordsQueryKey, type Record as ApiRecord } from "@workspace/api-client-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,11 @@ import { useMemo } from "react";
 import { ChangesPanel } from "@/components/changes-panel";
 import { ageingCell, isCutting } from "@/lib/ageing";
 import { TurnaroundWarnings } from "@/components/turnaround-warnings";
-import { SlidersHorizontal } from "lucide-react";
+import { useSettings } from "@/lib/settings";
+import { lifecycleStatus, migrateTurnaroundSettings, LIFECYCLE_ORDER, type LifecycleResult, type LifecycleStatus } from "@workspace/domain";
+import { LIFECYCLE_LABELS, lifecycleBgColor, lifecycleTextColor } from "@/lib/turnaround";
+import { useStalledInfo } from "@/lib/movement";
+import { SlidersHorizontal, AlertTriangle } from "lucide-react";
 
 export default function Overview() {
   const { selectedImportId } = useTracker();
@@ -94,6 +98,7 @@ function OverviewContent() {
           </Button>
         </Link>
       </div>
+      <NeedsAttention records={records} importId={selectedImportId as number} />
       <TurnaroundWarnings records={records} />
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -169,6 +174,175 @@ function OverviewContent() {
         </Card>
       </div>
     </div>
+  );
+}
+
+// Priority for the worklist: most-severe breach first, then advanced
+// pre-warnings. Stalled is an orthogonal flag layered on top.
+const ATTENTION_RANK: globalThis.Record<LifecycleStatus, number> = {
+  breach3: 0,
+  breach2: 1,
+  breach1: 2,
+  prewarn3: 3,
+  prewarn2: 4,
+  prewarn1: 5,
+  green: 6,
+  na: 7,
+};
+
+// Overview "Needs attention" worklist: marks that are breached, in the final
+// pre-warning stage, or stalled (no movement for >= the stalled threshold).
+// Respects the active header filters and degrades gracefully when there is no
+// movement history to compare against.
+function NeedsAttention({
+  records,
+  importId,
+}: {
+  records: ApiRecord[];
+  importId: number;
+}) {
+  const { settings: rawSettings } = useSettings();
+  const settings = useMemo(
+    () => migrateTurnaroundSettings(rawSettings),
+    [rawSettings],
+  );
+  const stalled = useStalledInfo(importId);
+
+  const items = useMemo(() => {
+    const out: Array<{
+      r: ApiRecord;
+      res: LifecycleResult;
+      isStalled: boolean;
+      stalledDays: number | null;
+    }> = [];
+    for (const r of records) {
+      const res = lifecycleStatus(
+        { activity: r.activity, ageingDays: r.ageingDays, project: r.job },
+        settings,
+      );
+      const isStalled = stalled.isStalled(r.markId, r.jobCardNo);
+      const breached = res.status.startsWith("breach");
+      const finalPreWarn = res.status === "prewarn3";
+      if (breached || finalPreWarn || isStalled) {
+        out.push({
+          r,
+          res,
+          isStalled,
+          stalledDays: stalled.daysFor(r.markId, r.jobCardNo),
+        });
+      }
+    }
+    out.sort((a, b) => {
+      const ra = ATTENTION_RANK[a.res.status];
+      const rb = ATTENTION_RANK[b.res.status];
+      if (ra !== rb) return ra - rb;
+      return (b.res.overrun ?? -1) - (a.res.overrun ?? -1);
+    });
+    return out;
+  }, [records, settings, stalled]);
+
+  const breachCount = items.filter((i) => i.res.status.startsWith("breach")).length;
+  const preWarnCount = items.filter((i) => i.res.status === "prewarn3").length;
+  const stalledCount = items.filter((i) => i.isStalled).length;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-ageing-red" />
+          Needs Attention ({items.length})
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground mb-3">
+          <span>{breachCount} breached</span>
+          <span>{preWarnCount} final pre-warning</span>
+          <span>
+            {stalled.hasHistory
+              ? `${stalledCount} stalled (>= ${stalled.stalledDays}d no movement)`
+              : "stalled detection needs a prior import"}
+          </span>
+        </div>
+        {items.length === 0 ? (
+          <div className="text-sm text-muted-foreground">
+            Nothing needs attention for the current filters. All marks are on
+            track.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
+                  <th className="py-1.5 pr-3 font-medium">Mark</th>
+                  <th className="py-1.5 pr-3 font-medium">Activity</th>
+                  <th className="py-1.5 pr-3 font-medium">Status</th>
+                  <th className="py-1.5 pr-3 font-medium text-right">Ageing</th>
+                  <th className="py-1.5 pr-3 font-medium text-right">Target</th>
+                  <th className="py-1.5 pr-3 font-medium text-right">Consumed</th>
+                  <th className="py-1.5 pr-3 font-medium text-right">To Target</th>
+                  <th className="py-1.5 pr-3 font-medium">Stalled</th>
+                  <th className="py-1.5 pr-3 font-medium">Contractor</th>
+                  <th className="py-1.5 font-medium text-right">Wt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.slice(0, 100).map(({ r, res, isStalled, stalledDays }) => (
+                  <tr
+                    key={r.id}
+                    className="border-b border-border/50 hover:bg-muted/30"
+                  >
+                    <td className="py-1.5 pr-3 font-mono">{r.markId}</td>
+                    <td className="py-1.5 pr-3 font-mono">{r.activity}</td>
+                    <td className="py-1.5 pr-3">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className={`w-2 h-2 rounded-full ${lifecycleBgColor(res.status)}`}
+                        />
+                        <span
+                          className={`text-xs font-semibold ${lifecycleTextColor(res.status)}`}
+                        >
+                          {LIFECYCLE_LABELS[res.status]}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums">
+                      {r.ageingDays !== null ? `${r.ageingDays}d` : "-"}
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
+                      {res.target !== null ? `${res.target}d` : "-"}
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
+                      {res.consumedPct !== null ? `${res.consumedPct}%` : "-"}
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
+                      {res.daysToTarget !== null ? `${res.daysToTarget}d` : "-"}
+                    </td>
+                    <td className="py-1.5 pr-3">
+                      {isStalled ? (
+                        <span className="text-xs font-semibold text-ageing-red">
+                          {stalledDays !== null ? `${stalledDays}d` : "yes"}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">-</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 pr-3">{r.contractor || "Unassigned"}</td>
+                    <td className="py-1.5 text-right tabular-nums">
+                      {formatWeight(r.balanceWt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {items.length > 100 && (
+              <div className="text-xs text-muted-foreground mt-2">
+                Showing top 100 of {items.length}.
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

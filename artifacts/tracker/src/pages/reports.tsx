@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { compareActivity, alertStatus, migrateTurnaroundSettings } from "@workspace/domain";
+import { compareActivity, lifecycleStatus, migrateTurnaroundSettings } from "@workspace/domain";
 import { useSettings } from "@/lib/settings";
-import { ALERT_LABELS, statusTextColor } from "@/lib/turnaround";
+import { LIFECYCLE_LABELS, lifecycleTextColor } from "@/lib/turnaround";
+import { useStalledInfo } from "@/lib/movement";
 import {
   useAiReport,
   useAiStatus,
@@ -99,7 +100,10 @@ const REPORT_COLUMNS: XlsxColumn[] = [
   { label: "Ageing (days)", field: "ageingDays", numeric: true, decimals: 0 },
   { label: "Cumulative Target (days)", field: "cumulativeTarget", numeric: true, decimals: 0 },
   { label: "Overrun (days)", field: "overrun", numeric: true, decimals: 0 },
-  { label: "Alert Status", field: "alertStatus" },
+  { label: "Consumed %", field: "consumedPct", numeric: true, decimals: 0 },
+  { label: "Days to Target", field: "daysToTarget", numeric: true, decimals: 0 },
+  { label: "Lifecycle Status", field: "lifecycleStatus" },
+  { label: "Stalled", field: "stalledLabel" },
 ];
 
 const TABLE_CAP = 500;
@@ -156,22 +160,29 @@ function ReportBuilder() {
   // Enrich each row with the turnaround classification (cumulative target,
   // overrun, alert status) for the table + export. Advisory/display only — does
   // not touch ageing, activity, or any computed engine field.
+  const stalled = useStalledInfo(selectedImportId ?? null);
+
   const enrichedRows = useMemo(
     () =>
       rows.map((r) => {
-        const res = alertStatus(
+        const res = lifecycleStatus(
           { activity: r.activity, ageingDays: r.ageingDays, project: r.job },
           settings,
         );
+        const isStalled = stalled.isStalled(r.markId, r.jobCardNo);
         return {
           ...r,
           cumulativeTarget: res.target,
           overrun: res.overrun,
-          alertStatus: ALERT_LABELS[res.status],
-          alertStatusRaw: res.status,
+          consumedPct: res.consumedPct,
+          daysToTarget: res.daysToTarget,
+          lifecycleStatus: LIFECYCLE_LABELS[res.status],
+          lifecycleStatusRaw: res.status,
+          stalled: isStalled,
+          stalledLabel: isStalled ? "Yes" : "",
         };
       }),
-    [rows, settings],
+    [rows, settings, stalled],
   );
 
   const totalQty = rows.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
@@ -330,7 +341,7 @@ function ReportBuilder() {
                 <>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
-                      colSpan={12}
+                      colSpan={15}
                       className="font-semibold text-xs uppercase tracking-wider text-muted-foreground"
                     >
                       Activity-wise Subtotal
@@ -357,6 +368,9 @@ function ReportBuilder() {
                       <TableCell></TableCell>
                       <TableCell></TableCell>
                       <TableCell></TableCell>
+                      <TableCell></TableCell>
+                      <TableCell></TableCell>
+                      <TableCell></TableCell>
                     </TableRow>
                   ))}
                 </>
@@ -365,7 +379,7 @@ function ReportBuilder() {
                 <>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
-                      colSpan={12}
+                      colSpan={15}
                       className="font-semibold text-xs uppercase tracking-wider text-muted-foreground"
                     >
                       Itemwise Data
@@ -383,7 +397,10 @@ function ReportBuilder() {
                     <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Ageing</TableCell>
                     <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Target</TableCell>
                     <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Overrun</TableCell>
-                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Alert</TableCell>
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Consumed</TableCell>
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">To Target</TableCell>
+                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Status</TableCell>
+                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Stalled</TableCell>
                   </TableRow>
                 </>
               )}
@@ -403,17 +420,30 @@ function ReportBuilder() {
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {r.cumulativeTarget !== null ? `${r.cumulativeTarget}d` : "-"}
                   </TableCell>
-                  <TableCell className={`text-right tabular-nums font-bold ${statusTextColor(r.alertStatusRaw)}`}>
+                  <TableCell className={`text-right tabular-nums font-bold ${lifecycleTextColor(r.lifecycleStatusRaw)}`}>
                     {r.overrun !== null && r.overrun > 0 ? `+${r.overrun}d` : r.overrun !== null ? `${r.overrun}d` : "-"}
                   </TableCell>
-                  <TableCell className={`text-xs font-semibold ${statusTextColor(r.alertStatusRaw)}`}>
-                    {r.alertStatus}
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {r.consumedPct !== null ? `${r.consumedPct}%` : "-"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {r.daysToTarget !== null ? `${r.daysToTarget}d` : "-"}
+                  </TableCell>
+                  <TableCell className={`text-xs font-semibold ${lifecycleTextColor(r.lifecycleStatusRaw)}`}>
+                    {r.lifecycleStatus}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {r.stalled ? (
+                      <span className="font-semibold text-ageing-red">Stalled</span>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
               {rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={12} className="text-center text-sm text-muted-foreground py-8">
+                  <TableCell colSpan={15} className="text-center text-sm text-muted-foreground py-8">
                     No rows match the current filters.
                   </TableCell>
                 </TableRow>

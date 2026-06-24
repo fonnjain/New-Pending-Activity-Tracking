@@ -9,7 +9,7 @@ import type { TurnaroundSettingsActivities } from './turnaroundSettingsActivitie
 import type { TurnaroundSettingsPerProject } from './turnaroundSettingsPerProject';
 
 /**
- * App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace cells keyed by canonical activity code, plus optional sparse per-project overrides.
+ * App-level turnaround-warning configuration. Singleton; global per-activity ideal days, grace cells and pre-warning thresholds keyed by canonical activity code, plus optional sparse per-project overrides and the stalled-mark threshold.
  */
 export interface TurnaroundSettings {
   /** Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). */
@@ -17,4 +17,7 @@ export interface TurnaroundSettings {
   /** Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden cells/fields are stored; everything else inherits `activities`.
    */
   perProject?: TurnaroundSettingsPerProject;
+  /** Stalled-mark threshold in days. A mark whose activity/last-production signature has not changed for >= this many days is flagged stalled.
+   */
+  stalledDays?: number;
 }

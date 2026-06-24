@@ -194,3 +194,34 @@
   );
   opacity: 0.85;
 }
+
+/* Lifecycle ladder (8 states) — display only; never affects thresholds, target
+   math, ageing or n/a. PRE-WARNING phase (within target) = warm warning ramp
+   yellow -> orange -> red. BREACH phase (over target) reuses the established
+   breach palette: light blue -> grey -> black. green=on track, na=faded hatch. */
+.lc-green { color: hsl(142 71% 38%); }
+.bg-lc-green { background-color: hsl(142 71% 45%); }
+.lc-prewarn1 { color: hsl(45 90% 38%); }
+.bg-lc-prewarn1 { background-color: hsl(48 96% 53%); color: hsl(0 0% 10%); }
+.lc-prewarn2 { color: hsl(28 90% 45%); }
+.bg-lc-prewarn2 { background-color: hsl(28 92% 52%); color: hsl(0 0% 100%); }
+.lc-prewarn3 { color: hsl(0 75% 48%); }
+.bg-lc-prewarn3 { background-color: hsl(0 78% 52%); color: hsl(0 0% 100%); }
+.lc-breach1 { color: hsl(204 80% 42%); }
+.bg-lc-breach1 { background-color: hsl(200 90% 60%); }
+.lc-breach2 { color: hsl(0 0% 36%); }
+.bg-lc-breach2 { background-color: hsl(0 0% 50%); color: hsl(0 0% 100%); }
+.lc-breach3 { color: hsl(0 0% 8%); }
+.bg-lc-breach3 { background-color: hsl(0 0% 0%); color: hsl(0 0% 100%); }
+.lc-na { color: hsl(215 16% 58%); }
+.bg-lc-na {
+  background-color: hsl(215 25% 90%);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 3px,
+    hsl(215 18% 76%) 3px,
+    hsl(215 18% 76%) 6px
+  );
+  opacity: 0.85;
+}

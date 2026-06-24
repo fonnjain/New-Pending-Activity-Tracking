@@ -6,9 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { GraceCell } from './graceCell';
+import type { PreWarnConfig } from './preWarnConfig';
 
 /**
- * Per-activity turnaround configuration. idealDays feeds the cumulative target; yellow/orange/red are grace-band CELLS (auto/manual). Resolved effective grace is validated non-negative with yellow <= orange <= red.
+ * Per-activity turnaround configuration. idealDays feeds the cumulative target; yellow/orange/red are grace-band CELLS (auto/manual). Resolved effective grace is validated non-negative with yellow <= orange <= red. preWarn holds the within-target pre-warning percentage thresholds.
 
  */
 export interface ActivityConfig {
@@ -17,4 +18,5 @@ export interface ActivityConfig {
   yellow: GraceCell;
   orange: GraceCell;
   red: GraceCell;
+  preWarn: PreWarnConfig;
 }

@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, integer } from "drizzle-orm/pg-core";
 
 // App-level turnaround-warning configuration. This is a SINGLETON row (one
 // config for the whole app, not per-import) keyed by a constant id. The
@@ -17,16 +17,27 @@ export type GraceCell = {
   value?: number;
 };
 
+// Three within-target pre-warning thresholds (percent of cumulative target
+// consumed). Resolved/ordered by the domain engine.
+export type PreWarnConfig = {
+  pw1: number;
+  pw2: number;
+  pw3: number;
+};
+
 export type ActivityConfig = {
   idealDays: number;
   yellow: GraceCell;
   orange: GraceCell;
   red: GraceCell;
+  preWarn: PreWarnConfig;
 };
 
 // Sparse per-project override of any subset of {idealDays, yellow/orange/red
-// cell}. Absent fields inherit the global `activities` value (per cell).
-export type PartialActivityConfig = Partial<ActivityConfig>;
+// cell, preWarn}. Absent fields inherit the global `activities` value (per cell).
+export type PartialActivityConfig = Partial<
+  Omit<ActivityConfig, "preWarn">
+> & { preWarn?: Partial<PreWarnConfig> };
 
 export const settingsTable = pgTable("settings", {
   id: text("id").primaryKey(),
@@ -41,6 +52,9 @@ export const settingsTable = pgTable("settings", {
     .$type<Record<string, Record<string, PartialActivityConfig>>>()
     .notNull()
     .default({}),
+  // App-level stalled-mark threshold (days). A mark whose activity/last-production
+  // signature has not changed for >= this many days is flagged stalled.
+  stalledDays: integer("stalled_days").notNull().default(10),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

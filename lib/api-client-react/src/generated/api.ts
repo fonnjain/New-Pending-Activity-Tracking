@@ -31,6 +31,7 @@ import type {
   HealthStatus,
   Import,
   ImportUpload,
+  MovementResponse,
   Record,
   ReportRequest,
   ReportResult,
@@ -1342,6 +1343,85 @@ export function useGetImportRecords<TData = Awaited<ReturnType<typeof getImportR
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetImportRecordsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetImportMovementUrl = (id: number,) => {
+
+
+
+
+  return `/api/imports/${id}/movement`
+}
+
+/**
+ * For each mark identity in the given import, returns how many days it has been since its activity / last-production signature last changed, computed by walking the preceding imports. Used (with the live stalledDays setting) to flag stalled marks. daysSinceLastMovement is null when there is no prior history for that mark (first appearance / no earlier import), so stalled detection degrades gracefully until snapshots accumulate.
+
+ * @summary Get per-mark days-since-last-movement for an import
+ */
+export const getImportMovement = async (id: number, options?: RequestInit): Promise<MovementResponse> => {
+
+  return customFetch<MovementResponse>(getGetImportMovementUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetImportMovementQueryKey = (id: number,) => {
+    return [
+    `/api/imports/${id}/movement`
+    ] as const;
+    }
+
+
+export const getGetImportMovementQueryOptions = <TData = Awaited<ReturnType<typeof getImportMovement>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportMovement>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImportMovementQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImportMovement>>> = ({ signal }) => getImportMovement(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImportMovement>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetImportMovementQueryResult = NonNullable<Awaited<ReturnType<typeof getImportMovement>>>
+export type GetImportMovementQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get per-mark days-since-last-movement for an import
+ */
+
+export function useGetImportMovement<TData = Awaited<ReturnType<typeof getImportMovement>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportMovement>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetImportMovementQueryOptions(id,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

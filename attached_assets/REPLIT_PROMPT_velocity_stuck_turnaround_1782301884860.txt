@@ -1,0 +1,131 @@
+REPLIT AGENT PROMPT — VELOCITY LAYER + STUCK PROJECTS & TURNAROUND PAGES + OVERVIEW HUB
+=======================================================================================
+Add a true VELOCITY layer (pace, pace-based ETA, trend) and reorganise the front end so:
+- a new "Turnaround" page holds the turnaround-time deep dive,
+- a new "Stuck Projects" page holds velocity / stalled / slow-moving work,
+- the Overview becomes a SNAPSHOT hub that shows small summaries of both and links to them.
+Build on the existing engine (PROCESS_SEQUENCE, cumulative targets, ageing =
+today - last_production_date, pre-warning/breach status, change-log between uploads).
+Deterministic engine authoritative; AI advisory only. Do not change parsing, Activity
+values, dedup, or the alert/threshold math.
+
+====================================================================
+A. VELOCITY ENGINE (deterministic, from upload-to-upload history)
+====================================================================
+Velocity needs MULTIPLE snapshots over time (the change-log/import history). Compute from
+the stored snapshots; degrade gracefully when history is thin (see "cold start").
+
+Per MARK (keyed by mark_id, tracked across snapshots):
+  - stage_index = position of current Activity in PROCESS_SEQUENCE.
+  - movement events = changes in stage_index and/or last_production_date across snapshots.
+  - days_per_stage (pace) = (days observed for this mark across history) /
+        (net stages advanced over that window). If 0 stages advanced -> pace = infinite/
+        "not moving".
+  - stages_remaining = (index of Y) - current stage_index   (within its Operation route if
+        the route is shorter than full sequence, use the route's remaining steps).
+  - ETA (pace-based) = today + days_per_stage * stages_remaining.
+        If the mark isn't moving (no advance in the window) -> ETA = "unknown / stalled".
+  - TREND = compare recent pace (last 2-3 snapshots) vs earlier pace:
+        accelerating / steady / decelerating (or "stalled").
+  - velocity_status:
+        MOVING (advancing at/around expected pace),
+        SLOW (moving but slower than its target pace),
+        STALLED (no movement for >= stalled-days, configurable — reuse existing setting).
+
+Target pace (for SLOW/ahead comparison):
+  - expected_days_per_stage(activity-window) derived from the Ideal-days settings
+    (resolved per project). A mark is SLOW if its observed days_per_stage materially
+    exceeds the expected pace for the stages it has been in.
+
+Per CONTRACTOR (and optionally per STAGE/activity):
+  - avg_days_per_stage across that contractor's marks (median + mean), and per activity
+    (e.g. how long Quality typically holds work for this contractor).
+  - throughput = stages advanced per week (or marks completed/week) across recent
+    snapshots.
+  - Rank slowest contractors / slowest stages by avg_days_per_stage.
+
+Per PROJECT:
+  - project velocity = aggregate throughput (stages advanced/week, weight cleared/week),
+    avg days_per_stage, and a count of its marks by velocity_status.
+  - "Stuck score" = share of the project's weight that is STALLED or SLOW (and/or in
+    breach). Use this to rank projects on the Stuck Projects page.
+
+COLD START / DATA SUFFICIENCY
+  - With < 2 usable snapshots for a mark: velocity = "insufficient history"; show ageing/
+    stalled info only, no ETA. Don't fabricate pace.
+  - Clearly label velocity figures with the window used (e.g. "over last 3 reports").
+  - All velocity is computed deterministically in the engine; AI may comment, never set it.
+
+ETA vs TARGET (the actionable bit)
+  - target_completion = today + (cumulative_target(Y) - ageing)  [budget-based finish].
+  - eta_gap = ETA(pace-based) - target_completion.
+        eta_gap <= 0  -> on pace to finish on time,
+        eta_gap > 0   -> projected LATE by eta_gap days (flag).
+  - Stalled marks -> "won't finish on current pace" (treat as high-priority late).
+
+====================================================================
+B. NEW PAGE — "Turnaround" (deep dive on turnaround time)
+====================================================================
+Move the turnaround-time deep-dive here (today it may be split across Overview/Reports):
+  - Turnaround status summary: counts/weight in each pre-warning + breach state, the
+    per-activity breakdown (which stage breaches most), and the Orange/Red+pre-warning
+    worklist sorted by urgency (days_to_target).
+  - Per-activity ageing vs target, average overrun by stage and by contractor.
+  - The AI turnaround deep-dive report (bottlenecks, red flags, action plan, detailed) —
+    its "Generate report" lives here.
+  - Respects global Job->Structure->Mark / contractor filters. Results only; settings stay
+    on Warning Parameters.
+
+====================================================================
+C. NEW PAGE — "Stuck Projects" (velocity / stalled / slow movement)
+====================================================================
+  - PROJECT LEADERBOARD ranked by "stuck score" (most stuck first): project, stuck weight,
+    % of weight stalled/slow, avg days_per_stage, throughput/week, trend arrow.
+  - Drill into a project -> its STALLED and SLOW marks: mark, structure, activity, ageing,
+    days since last movement, observed pace, pace-based ETA, eta_gap (projected late by),
+    contractor, trend.
+  - CONTRACTOR view: slowest contractors by avg days_per_stage and by stalled weight.
+  - STAGE view: which activities hold work longest (avg days_per_stage), where flow stalls.
+  - Filters apply. A "stalled" badge + trend (accelerating/steady/decelerating/stalled)
+    on each row. This is the corrective-action worklist for movement (complements the
+    Turnaround page which is about time-vs-target).
+
+====================================================================
+D. OVERVIEW — SNAPSHOT HUB (small summaries + links, no deep tables)
+====================================================================
+Make Overview a clean landing page with two compact summary cards:
+  1) TURNAROUND snapshot: a small stacked bar / chips of Green/pre-warning/breach counts
+     (and % weight), the single most-breaching stage, and a "View Turnaround >" link to
+     the Turnaround page.
+  2) VELOCITY / STUCK snapshot: counts of Stalled / Slow / Moving marks (and stuck
+     weight), the top 1-2 most-stuck projects, overall throughput trend arrow, and a
+     "View Stuck Projects >" link to that page.
+  Keep the existing headline KPIs (pending marks, qty, weight) at the top. Remove the
+  large worklists/tables from Overview (they now live on the two pages); Overview only
+  SNAPSHOTS and links. No settings/inputs on Overview.
+
+NAV ORDER (suggested): Overview · Turnaround · Stuck Projects · Activity · Job-wise ·
+Contractor · Ageing · Reports · Data · Warning Parameters.
+
+====================================================================
+E. PERSISTENCE / CONTRACT
+====================================================================
+  - Velocity is derived at read-time from stored snapshots; optionally cache per-import
+    velocity aggregates for speed (advisory cache, recomputable).
+  - Add velocity fields to the record/report API (days_per_stage, eta, eta_gap,
+    velocity_status, trend) and project/contractor aggregates via openapi.yaml; regenerate
+    hooks/Zod. Reuse the existing stalled-days setting (Warning Parameters).
+  - Exports gain: velocity_status, days_per_stage, eta, eta_gap, trend.
+
+ACCEPTANCE CHECK
+  - With >= 2 snapshots, each mark gets days_per_stage, a pace-based ETA, eta_gap vs
+    target, and a trend; marks with < 2 snapshots show "insufficient history" (no fake
+    ETA).
+  - Stalled marks (no movement >= stalled-days) are flagged regardless of ageing and show
+    "won't finish on current pace".
+  - "Turnaround" page shows the turnaround deep-dive + AI report; "Stuck Projects" page
+    shows the velocity/stalled leaderboard + drills; both honour filters.
+  - Overview shows ONLY a turnaround snapshot card and a velocity/stuck snapshot card, each
+    linking to its page; no large tables or inputs on Overview.
+  - Velocity is deterministic (engine), labelled with its window; AI only comments.
+  - Nothing changes in parsing, Activity values, dedup, ageing, or threshold math.

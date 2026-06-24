@@ -30,12 +30,21 @@ import {
   cumulativeTargets,
   resolveCell,
   DEFAULT_ACTIVITY_CONFIG,
+  DEFAULT_PRE_WARN,
+  DEFAULT_STALLED_DAYS,
   type ProcessStep,
 } from "@workspace/domain";
 
 const ALL = "__ALL__";
 
 type BandKey = "yellow" | "orange" | "red";
+type PreWarnKey = "pw1" | "pw2" | "pw3";
+
+const PRE_WARNS: ReadonlyArray<{ key: PreWarnKey; label: string }> = [
+  { key: "pw1", label: "Pre-warn 1" },
+  { key: "pw2", label: "Pre-warn 2" },
+  { key: "pw3", label: "Pre-warn 3" },
+];
 
 const BANDS: ReadonlyArray<{ key: BandKey; label: string }> = [
   { key: "yellow", label: "Yellow" },
@@ -48,12 +57,19 @@ function toNum(v: string): number {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
+function toPct(v: string): number {
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(100, Math.max(0, n));
+}
+
 function cloneConfig(c: ActivityConfig): ActivityConfig {
   return {
     idealDays: c.idealDays,
     yellow: { ...c.yellow },
     orange: { ...c.orange },
     red: { ...c.red },
+    preWarn: { ...c.preWarn },
   };
 }
 
@@ -210,6 +226,61 @@ function WarningParametersContent() {
       return { ...prev, perProject };
     });
 
+  // Edit a pre-warning threshold (percent of cumulative target consumed).
+  // Global = full value; project = sparse per-field override (empty clears).
+  const setPreWarn = (step: ProcessStep, key: PreWarnKey, v: string) => {
+    if (isAll) {
+      setActivity(step, (c) => {
+        const n = cloneConfig(c);
+        n.preWarn = { ...n.preWarn, [key]: toPct(v) };
+        return n;
+      });
+    } else {
+      setProjectRow(step, (row) => {
+        const pw = { ...(row.preWarn ?? {}) };
+        if (v.trim() === "") delete pw[key];
+        else pw[key] = toPct(v);
+        if (Object.keys(pw).length === 0) delete row.preWarn;
+        else row.preWarn = pw;
+      });
+    }
+  };
+
+  // Project mode only: drop a single pre-warning override so it inherits global.
+  const inheritPreWarn = (step: ProcessStep, key: PreWarnKey) =>
+    setProjectRow(step, (row) => {
+      if (!row.preWarn) return;
+      const pw = { ...row.preWarn };
+      delete pw[key];
+      if (Object.keys(pw).length === 0) delete row.preWarn;
+      else row.preWarn = pw;
+    });
+
+  // Stalled-days threshold is GLOBAL only (no per-project override).
+  const setStalledDays = (v: string) =>
+    updateSettings((prev) => ({ ...prev, stalledDays: toNum(v) }));
+
+  // Per-activity pre-warning display rows (effective values + override flags).
+  const preWarnRows = useMemo(() => {
+    return PROCESS_SEQUENCE.map((step) => {
+      const globalPw = settings.activities[step]?.preWarn ?? DEFAULT_PRE_WARN;
+      const ovPw = isAll ? undefined : projectOverrides?.[step]?.preWarn;
+      const cells = PRE_WARNS.map(({ key }) => {
+        const inherited = globalPw[key];
+        const overrideVal = ovPw?.[key];
+        const overridden = isAll || overrideVal !== undefined;
+        const effective = overrideVal ?? inherited;
+        return { key, inherited, overrideVal, overridden, effective };
+      });
+      const [p1, p2, p3] = cells.map((c) => c.effective);
+      const inverted = p1 > p2 || p2 > p3;
+      const rowHasOverride = !!ovPw && Object.keys(ovPw).length > 0;
+      return { step, cells, inverted, rowHasOverride };
+    });
+  }, [settings, isAll, projectOverrides]);
+
+  const pwInvertedSteps = preWarnRows.filter((r) => r.inverted).map((r) => r.step);
+
   // Precompute, per activity, the effective (pre-ordering) grace days for each
   // band in the active scope, so we can render cells and flag inverted bands
   // (yellow > orange or orange > red). The status engine still auto-corrects the
@@ -254,17 +325,170 @@ function WarningParametersContent() {
             Warning Parameters
           </h1>
           <p className="text-muted-foreground text-sm mt-1 max-w-3xl">
-            Set the ideal days and Yellow / Orange / Red grace for each activity.
-            A grace cell can be Manual (a pinned day value) or Auto (a percentage
-            of that activity's own ideal days). Ideal days accumulate down the
-            process sequence into a cumulative target; each mark's live ageing is
-            compared to that target and the activity's grace bands to raise a
-            warning. These settings are advisory and never change parsing,
-            quantities, or ageing.
+            Configure proactive pre-warnings (raised before a mark reaches its
+            target) and the reactive grace bands (raised after it overruns).
+            Ideal days accumulate down the process sequence into a cumulative
+            target; each mark's live ageing is compared to that target. These
+            settings are advisory and never change parsing, quantities, or
+            ageing.
           </p>
         </div>
         <LogoutButton />
       </div>
+
+      <Card>
+        <CardHeader className="space-y-4">
+          <div className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+              Pre-warnings (before target)
+            </CardTitle>
+            {saving && (
+              <span className="text-xs text-muted-foreground">Saving...</span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground max-w-3xl">
+            Pre-warnings fire while a mark is still within its cumulative target,
+            based on the percent of the target its ageing has consumed. Three
+            stages escalate Yellow then Orange then Red as the mark approaches the
+            target. Values are percentages (0&ndash;100) and must increase
+            Pre-warn 1 &le; 2 &le; 3.
+            {isAll
+              ? " Editing the global defaults."
+              : " Editing this project's overrides; blank cells inherit the global default."}
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
+                  <th className="py-2 pr-3 font-medium">Activity</th>
+                  <th className="py-2 px-3 font-medium text-right">
+                    Cumulative target
+                  </th>
+                  {PRE_WARNS.map((p) => (
+                    <th
+                      key={p.key}
+                      className="py-2 px-3 font-medium text-right"
+                    >
+                      {p.label} %
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {preWarnRows.map((row) => (
+                  <tr
+                    key={row.step}
+                    className="border-b border-border/50 hover:bg-muted/20 align-top"
+                  >
+                    <td className="py-2 pr-3">
+                      <span className="font-mono font-semibold">{row.step}</span>
+                      <span className="text-muted-foreground ml-2 text-xs">
+                        {PROCESS_STEP_LABELS[row.step]}
+                      </span>
+                      {!isAll && row.rowHasOverride && (
+                        <span className="ml-2 text-[10px] uppercase tracking-wider text-primary font-semibold">
+                          override
+                        </span>
+                      )}
+                      {row.inverted && (
+                        <span className="block text-[10px] text-ageing-red mt-0.5">
+                          stages out of order
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3 text-right tabular-nums font-medium text-muted-foreground">
+                      {cumTargets[row.step]}d
+                    </td>
+                    {row.cells.map((cell) => (
+                      <td key={cell.key} className="py-2 px-3">
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="number"
+                              min={0}
+                              max={100}
+                              value={
+                                isAll
+                                  ? cell.inherited
+                                  : cell.overrideVal ?? ""
+                              }
+                              placeholder={
+                                isAll ? undefined : String(cell.inherited)
+                              }
+                              onChange={(e) =>
+                                setPreWarn(row.step, cell.key, e.target.value)
+                              }
+                              className={`h-7 w-14 tabular-nums text-right ${
+                                cell.overridden
+                                  ? "ring-1 ring-primary/50"
+                                  : "text-muted-foreground"
+                              }`}
+                              aria-label={`${row.step} ${cell.key} percent`}
+                            />
+                            <span className="text-[10px] text-muted-foreground w-3">
+                              %
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 h-3.5 text-[9px] uppercase tracking-wider">
+                            {!isAll && !cell.overridden && (
+                              <span className="text-muted-foreground/70">
+                                inherited
+                              </span>
+                            )}
+                            {!isAll && cell.overridden && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  inheritPreWarn(row.step, cell.key)
+                                }
+                                className="text-muted-foreground hover:text-foreground underline"
+                              >
+                                inherit
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="text-xs text-muted-foreground mt-3 space-y-2">
+            {pwInvertedSteps.length > 0 && (
+              <p className="text-ageing-red">
+                Some activities have pre-warning stages out of order (
+                {pwInvertedSteps.join(", ")}). They are raised to keep Pre-warn 1
+                &le; 2 &le; 3 when classifying.
+              </p>
+            )}
+            <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+              <label
+                htmlFor="stalled-days"
+                className="text-xs text-foreground font-medium"
+              >
+                Stalled after
+              </label>
+              <Input
+                id="stalled-days"
+                type="number"
+                min={0}
+                value={settings.stalledDays ?? DEFAULT_STALLED_DAYS}
+                onChange={(e) => setStalledDays(e.target.value)}
+                className="h-7 w-16 tabular-nums text-right"
+                aria-label="Stalled days threshold"
+              />
+              <span className="text-xs text-muted-foreground">
+                days without any activity or production-date movement (global;
+                flags stalled marks on the Overview).
+              </span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="space-y-4">

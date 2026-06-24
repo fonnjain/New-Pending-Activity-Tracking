@@ -33,6 +33,7 @@ router.get("/settings", async (_req, res): Promise<void> => {
     migrateTurnaroundSettings({
       activities: row.activities,
       perProject: row.perProject,
+      stalledDays: row.stalledDays,
     }),
   );
 });
@@ -51,6 +52,7 @@ router.put("/settings", requireAuth, async (req, res): Promise<void> => {
   const values = {
     activities: normalized.activities,
     perProject: normalized.perProject ?? {},
+    stalledDays: normalized.stalledDays ?? 10,
     updatedAt: new Date(),
   };
 

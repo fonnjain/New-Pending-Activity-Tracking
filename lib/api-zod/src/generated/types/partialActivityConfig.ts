@@ -6,9 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { GraceCell } from './graceCell';
+import type { PartialPreWarnConfig } from './partialPreWarnConfig';
 
 /**
- * Sparse per-project override of any subset of {idealDays, yellow/orange/red cell}. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value (per cell). All fields optional.
+ * Sparse per-project override of any subset of {idealDays, yellow/orange/red cell, preWarn}. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value (per cell). All fields optional.
 
  */
 export interface PartialActivityConfig {
@@ -17,4 +18,5 @@ export interface PartialActivityConfig {
   yellow?: GraceCell;
   orange?: GraceCell;
   red?: GraceCell;
+  preWarn?: PartialPreWarnConfig;
 }

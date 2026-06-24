@@ -104,6 +104,9 @@ Mobile-first web app: each Excel upload = one append-only "import". Imports neve
 - Grace bands have two modes: `absolute` (yellowMax/orangeMax are extra days past target) and `percent` (they are a % of that activity's cumulative target). Per-activity overrides replace the global bands for that code only.
 - **This layer must NEVER touch parsing, Activity values, qty, dedup, or ageing math** — it is recomputed live from settings, exactly like the ordering layer. Settings persist in a singleton `settings` table (GET/PUT `/settings`).
   **How to apply:** `PUT /settings` must reject inverted/negative bands (`yellowMax<=orangeMax`, non-negative, incl. overrides) AND echo back the SAME normalized (rounded) object it persists, or the client cache drifts from stored values.
+- **Proactive pre-warning is an ADDITIVE OVERLAY, never a fork of the breach engine.** `lifecycleStatus` (8-state ladder) calls `alertStatus` first and reuses its bands verbatim for the breach phase; the pre-warn phase only applies when `overrun<=0` and classifies by % of cumulative target consumed (`ageing/target`).
+  **Why:** breach math (bands, cumulative targets, ageing, n/a) is the authoritative reactive layer; the proactive layer must never be able to relabel a breach or invent a green/red — keeping `alertStatus` untouched and layering on top guarantees that.
+  **How to apply:** any new lifecycle consumer derives breach states FROM `alertStatus`, not from a parallel threshold check; stalled detection (cross-import signature unchanged for >= stalledDays) must degrade gracefully (never flag stalled when movement history is absent).
 
 ## Codegen / schema gotchas
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. Do not change `info.title` (controls generated filenames).
