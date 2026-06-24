@@ -127,20 +127,6 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
     [records, settings],
   );
 
-  const totals = useMemo(() => {
-    let breached = 0;
-    let prewarn = 0;
-    let green = 0;
-    let na = 0;
-    for (const { res } of classified) {
-      if (res.status.startsWith("breach")) breached++;
-      else if (res.status.startsWith("prewarn")) prewarn++;
-      else if (res.status === "green") green++;
-      else na++;
-    }
-    return { breached, prewarn, green, na };
-  }, [classified]);
-
   const projects = useMemo(() => {
     const map = new Map<string, Bucket>();
     for (const { r, res } of classified) {
@@ -202,13 +188,6 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <SummaryTile label="Breached" value={totals.breached} cls="bg-ageing-red" />
-        <SummaryTile label="Pre-warning" value={totals.prewarn} cls="bg-amber-500" />
-        <SummaryTile label="On track" value={totals.green} cls="bg-emerald-500" />
-        <SummaryTile label="N/A" value={totals.na} cls="bg-slate-300" />
-      </div>
-
       <div className="flex items-center gap-2">
         {VIEW_OPTIONS.map((o) => (
           <button
@@ -385,20 +364,6 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
         </Card>
       )}
     </div>
-  );
-}
-
-function SummaryTile({ label, value, cls }: { label: string; value: number; cls: string }) {
-  return (
-    <Card className="shadow-sm">
-      <CardContent className="p-4 flex flex-col items-center justify-center text-center">
-        <div className="flex items-center gap-1.5 mb-1">
-          <span className={`w-3 h-3 rounded-sm ${cls}`} />
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
-        </div>
-        <span className="text-2xl font-bold tabular-nums">{value}</span>
-      </CardContent>
-    </Card>
   );
 }
 
