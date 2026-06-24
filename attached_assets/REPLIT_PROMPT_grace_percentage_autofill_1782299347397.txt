@@ -1,0 +1,75 @@
+REPLIT AGENT PROMPT — PERCENTAGE-BASED GRACE AUTO-FILL (per-activity %, per-cell manual override)
+=================================================================================================
+Extend the Warning Parameters page so grace days can be AUTO-FILLED from a per-activity
+percentage of that activity's ideal days, while still allowing the user to manually edit
+any single grace value (which then ignores the percentage for that one cell only).
+ADDITIVE to the existing per-activity / project-wise warning parameters; do not change the
+cumulative-target math, the Green/Yellow/Orange/Red status, Overview results, ageing
+(= today - last_production_date), or n/a handling.
+
+CONCEPT
+Each grace cell (Yellow / Orange / Red, per activity) is in one of two states:
+  - AUTO  : its value is computed from a percentage of THAT activity's Ideal days.
+  - MANUAL: the user typed a value; the percentage no longer affects this cell.
+
+1) PERCENTAGE INPUTS (per activity, per colour)
+  On the Warning Parameters page add percentage fields. The user sets a percentage PER
+  ACTIVITY for each band (individual percentages, not one global %): e.g. for activity NH
+  Yellow% = 50, Orange% = 100, Red% = 150.
+  AUTO grace value for a cell = round( (percent / 100) * Ideal_days(activity) ).
+  - "% of that activity's OWN Ideal days" (NOT cumulative target).
+  - Recompute an AUTO cell whenever its percentage OR that activity's Ideal days changes.
+  - Keep Yellow <= Orange <= Red after auto-fill; if percentages invert the order, warn
+    (the user should set sensible percentages).
+
+2) PER-CELL MANUAL OVERRIDE (detach only that cell)
+  - If the user edits a specific grace day-value directly, that ONE cell becomes MANUAL
+    and is pinned to the typed value; its percentage is ignored from then on. No other
+    cell is affected — every other cell stays AUTO and keeps following its own percentage.
+  - Provide a small per-cell control "use %" / "revert to %" to flip a MANUAL cell back to
+    AUTO (re-deriving from its percentage).
+  - VISUAL: show AUTO cells distinctly (e.g. a faint "%" badge or muted style) vs MANUAL
+    cells (solid + a small "manual" indicator), so the user can see at a glance which
+    grace values are formula-driven and which are pinned.
+
+3) PRECEDENCE / RESOLUTION (engine) — order of truth for a grace value
+  For activity A, colour band b, the effective grace days =
+     if cell(A,b) is MANUAL  -> the manual value
+     else (AUTO)             -> round( percent(A,b)/100 * Ideal_days(A) )
+  This effective grace then feeds the existing status calc unchanged:
+     overrun = ageing - cumulative_target(A);  Green/Yellow/Orange/Red by effective grace.
+  Editing Ideal days updates all AUTO grace cells for that activity automatically; MANUAL
+  cells stay put. Live recompute; no re-import.
+
+4) WORKS WITH PROJECT-WISE OVERRIDES (from the project-wise params change)
+  - Percentages AND the auto/manual state exist at BOTH levels: the global "All Projects"
+    set and each per-project override.
+  - Resolution for a mark in project P, activity A, band b:
+        if project P has a MANUAL grace for (A,b)         -> that value
+        else if project P has a percentage/AUTO for (A,b) -> % * project's Ideal(A)
+        else fall back to the GLOBAL (All Projects) resolution (manual or %-derived)
+    i.e. a project inherits the global cell (manual value or its %) unless the project
+    overrides that cell (with its own manual value or its own %).
+  - Inheritance stays per-cell, consistent with the existing partial-override behaviour.
+
+5) PERSISTENCE / CONTRACT
+  - For each grace cell store: mode ("auto"|"manual"), percent (for auto), value (for
+    manual), at the global level and sparsely per project.
+  - Update openapi.yaml settings schema to carry per-cell {mode, percent, value};
+    regenerate hooks/Zod. Migrate existing settings: existing explicit grace values become
+    MANUAL cells (so current behaviour is preserved); percentages start empty/AUTO-off
+    until the user sets them.
+  - "Reset to defaults" and per-project "Reset to All Projects" still work, now restoring
+    mode+percent+value.
+
+ACCEPTANCE CHECK
+  - Setting NH Yellow% = 50 with NH Ideal = 4 auto-fills NH Yellow grace = 2; changing NH
+    Ideal to 6 updates it to 3 automatically.
+  - Manually typing NH Yellow = 5 pins it to 5 (MANUAL); NH's Orange/Red and all other
+    activities remain AUTO and keep following their percentages.
+  - "Revert to %" on a MANUAL cell re-derives it from its percentage.
+  - AUTO vs MANUAL cells are visually distinguishable.
+  - Project overrides resolve per-cell: project manual > project % > global manual >
+    global %; unset cells inherit global.
+  - Status math, cumulative targets, ageing source, and n/a handling unchanged; live
+    recompute on any change.
