@@ -55,8 +55,8 @@ function TurnaroundContent({ importId }: { importId: number }) {
         </Link>
       </div>
 
-      <TurnaroundWarnings records={records} />
       <TurnaroundBreakdown records={records} />
+      <TurnaroundWarnings records={records} />
       <UrgencyWorklist records={records} />
       <AiTurnaroundReport />
     </div>
