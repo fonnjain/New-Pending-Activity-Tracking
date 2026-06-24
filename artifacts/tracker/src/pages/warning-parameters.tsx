@@ -6,6 +6,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -405,7 +406,7 @@ function WarningParametersContent() {
                       <td key={cell.key} className="py-2 px-3">
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center gap-1">
-                            <Input
+                            <NumberInput
                               type="number"
                               min={0}
                               max={100}
@@ -417,8 +418,8 @@ function WarningParametersContent() {
                               placeholder={
                                 isAll ? undefined : String(cell.inherited)
                               }
-                              onChange={(e) =>
-                                setPreWarn(row.step, cell.key, e.target.value)
+                              onValueChange={(v) =>
+                                setPreWarn(row.step, cell.key, v)
                               }
                               className={`h-7 w-14 tabular-nums text-right ${
                                 cell.overridden
@@ -472,12 +473,12 @@ function WarningParametersContent() {
               >
                 Stalled after
               </label>
-              <Input
+              <NumberInput
                 id="stalled-days"
                 type="number"
                 min={0}
                 value={settings.stalledDays ?? DEFAULT_STALLED_DAYS}
-                onChange={(e) => setStalledDays(e.target.value)}
+                onValueChange={(v) => setStalledDays(v)}
                 className="h-7 w-16 tabular-nums text-right"
                 aria-label="Stalled days threshold"
               />
@@ -602,7 +603,7 @@ function WarningParametersContent() {
                         )}
                       </td>
                       <td className="py-2 px-3 text-right">
-                        <Input
+                        <NumberInput
                           type="number"
                           min={0}
                           value={
@@ -611,7 +612,7 @@ function WarningParametersContent() {
                               : ov?.idealDays ?? ""
                           }
                           placeholder={isAll ? undefined : String(globalIdeal)}
-                          onChange={(e) => setIdeal(step, e.target.value)}
+                          onValueChange={(v) => setIdeal(step, v)}
                           className={`h-7 w-16 ml-auto tabular-nums text-right ${
                             !isAll && !idealOverridden
                               ? "text-muted-foreground"
@@ -740,12 +741,12 @@ function GraceCellEditor({
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-1">
-        <Input
+        <NumberInput
           type="number"
           min={0}
           value={daysValue}
           placeholder={daysPlaceholder}
-          onChange={(e) => onValue(e.target.value)}
+          onValueChange={(v) => onValue(v)}
           className={`h-7 w-14 tabular-nums text-right ${
             isManual ? "ring-1 ring-primary/50" : "text-muted-foreground"
           }`}
@@ -755,12 +756,12 @@ function GraceCellEditor({
         <span className="text-[10px] text-muted-foreground w-3">d</span>
       </div>
       <div className="flex items-center gap-1">
-        <Input
+        <NumberInput
           type="number"
           min={0}
           value={pctValue}
           placeholder={pctPlaceholder}
-          onChange={(e) => onPercent(e.target.value)}
+          onValueChange={(v) => onPercent(v)}
           className={`h-7 w-14 tabular-nums text-right ${
             isAuto ? "ring-1 ring-primary/50" : "text-muted-foreground"
           }`}
