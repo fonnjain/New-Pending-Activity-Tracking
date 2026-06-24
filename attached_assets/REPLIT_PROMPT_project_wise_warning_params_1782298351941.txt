@@ -1,0 +1,71 @@
+REPLIT AGENT PROMPT — PROJECT-WISE WARNING PARAMETERS (All Projects default + overrides)
+========================================================================================
+Extend the Warning Parameters page so the turnaround parameters can be set PER PROJECT,
+with "All Projects" as the global default and per-project overrides that fall back to the
+global values for any activity not overridden. ADDITIVE change to the existing warning
+system; do not change the cumulative-target math, the Green/Yellow/Orange/Red status, the
+Overview results, ageing (= today - last_production_date), or n/a handling. Keep
+PROCESS_SEQUENCE = ["C","RFI","NH","B","HAB","HG","W","Q","TS","G","GB","Y"].
+
+1) PROJECT SELECTOR ON THE WARNING PARAMETERS PAGE
+  - Add a dropdown at the top of the Warning Parameters page:
+        [ All Projects ]  (default)  + every distinct Job/Project in the data.
+  - "All Projects" selected -> the table edits the GLOBAL/DEFAULT parameters (Ideal,
+    Yellow, Orange, Red per activity). These apply to any project without its own value.
+  - A specific project selected (e.g. 921) -> the table edits that PROJECT'S OVERRIDES.
+
+2) PARTIAL OVERRIDE WITH INHERITANCE (key behaviour)
+  - When a specific project is selected, each activity row may be either OVERRIDDEN (the
+    project has its own value) or INHERITED (falls back to All Projects).
+  - The user can fill in ONLY SOME activities/values for a project; everything not set
+    for that project INHERITS the All Projects value. Do NOT require all 12 activities to
+    be set for a project.
+  - Inheritance is per-FIELD where practical (Ideal / Yellow / Orange / Red); at minimum
+    per-activity-row. If only some cells are entered for a row, the empty cells inherit
+    the global value for that activity.
+  - VISUAL: show inherited rows/cells distinctly (e.g. greyed value + "inherited" tag) vs
+    overridden ones (solid + an "override" indicator). Provide per-row "Clear override
+    (use global)" and a page-level "Reset this project to All Projects".
+
+3) RESOLUTION ORDER (engine) — when computing a mark's alert status
+  For a mark in project P at activity A, resolve each parameter as:
+        project_override(P, A, field)  if set
+        else global(A, field)          (All Projects)
+  Then compute exactly as today:
+        cumulative_target(P, A) = sum over steps s (first..A) of resolved Ideal(P, s)
+            (NOTE: cumulative target uses the RESOLVED ideal-days for THAT project, so a
+             project with overridden ideal-days gets its own accumulated target.)
+        overrun = ageing_days - cumulative_target(P, A)
+        Green/Yellow/Orange/Red using resolved Yellow/Orange/Red for (P, A).
+  - Marks whose project has no overrides behave exactly as before (global values).
+  - n/a handling unchanged (no-ageing marks, out-of-sequence activities -> grey).
+  - Live recompute on any parameter change; no re-import.
+
+4) OVERVIEW / DASHBOARDS
+  - Overview stays results-only. Because the app already filters by Job/Project, the
+    alert colours shown automatically use each mark's RESOLVED (project-or-global)
+    parameters. When the Overview is filtered to one project, its breakdown reflects that
+    project's resolved parameters.
+  - Optional: in the per-activity breakdown header, indicate when the currently-viewed
+    project is using overrides vs global (small "custom params" badge).
+
+5) PERSISTENCE / CONTRACT
+  - Store: a global parameter set (project = "ALL") plus a sparse table of per-project
+    overrides keyed by (project, activity) holding any of Ideal/Yellow/Orange/Red that are
+    set. Sparse = only overridden values stored; missing => inherit.
+  - Update openapi.yaml settings schema to: global params + perProject overrides; add
+    project param to the GET/PUT; regenerate hooks/Zod.
+  - Migrate existing single global settings into the "ALL" (global) set unchanged; no
+    project overrides initially, so current behaviour is preserved.
+
+ACCEPTANCE CHECK
+  - Warning Parameters page has a project dropdown defaulting to "All Projects"; editing
+    there sets global defaults.
+  - Selecting a project and entering values for only some activities overrides just those;
+    all other activities/cells show as inherited and use the global value.
+  - A mark's status uses project override where present, else global; cumulative target
+    uses the project's resolved ideal-days.
+  - "Clear override" / "Reset this project to All Projects" restore inheritance.
+  - Projects with no overrides behave exactly as before migration.
+  - Cumulative-target math, ageing source, status bands, and n/a handling otherwise
+    unchanged; recompute is live.

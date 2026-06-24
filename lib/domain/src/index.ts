@@ -104,9 +104,23 @@ export interface ActivityGrace {
   redGrace: number;
 }
 
+// A sparse per-project override. Any field present REPLACES the global value for
+// that (project, activity); any field absent INHERITS the global value. Whole
+// rows/projects may be omitted entirely.
+export interface PartialActivityGrace {
+  idealDays?: number;
+  yellowGrace?: number;
+  orangeGrace?: number;
+  redGrace?: number;
+}
+
 export interface TurnaroundSettings {
-  // Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
+  // GLOBAL ("All Projects") per-activity config keyed by canonical activity code
+  // (PROCESS_SEQUENCE). Applies to any project without its own override.
   activities: Record<string, ActivityGrace>;
+  // Sparse per-project overrides: project -> activity code -> partial grace.
+  // Only overridden fields are stored; everything else inherits `activities`.
+  perProject?: Record<string, Record<string, PartialActivityGrace>>;
 }
 
 // green: at/under target. yellow/orange/red: increasing overrun. na: no defined
