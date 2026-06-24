@@ -16,9 +16,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   Table,
-  TableHeader,
   TableRow,
-  TableHead,
   TableBody,
   TableCell,
 } from "@/components/ui/table";
@@ -295,19 +293,6 @@ function ReportBuilder() {
 
         <div className="overflow-x-auto border border-border rounded-lg">
           <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Activity</TableHead>
-                <TableHead>Section</TableHead>
-                <TableHead>Mark No.</TableHead>
-                <TableHead className="text-right">Length</TableHead>
-                <TableHead className="text-right">Width</TableHead>
-                <TableHead className="text-right">Balance Qty</TableHead>
-                <TableHead className="text-right">Balance Wt</TableHead>
-                <TableHead>Contractor</TableHead>
-                <TableHead className="text-right">Ageing</TableHead>
-              </TableRow>
-            </TableHeader>
             <TableBody>
               {subtotalRows.length > 0 && (
                 <>
@@ -339,6 +324,10 @@ function ReportBuilder() {
                       </TableCell>
                     </TableRow>
                   ))}
+                </>
+              )}
+              {rows.length > 0 && (
+                <>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
                       colSpan={9}
@@ -346,6 +335,17 @@ function ReportBuilder() {
                     >
                       Itemwise Data
                     </TableCell>
+                  </TableRow>
+                  <TableRow className="bg-muted/30 hover:bg-muted/30">
+                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Activity</TableCell>
+                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Section</TableCell>
+                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Mark No.</TableCell>
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Length</TableCell>
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Width</TableCell>
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Balance Qty</TableCell>
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Balance Wt</TableCell>
+                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Contractor</TableCell>
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Ageing</TableCell>
                   </TableRow>
                 </>
               )}
