@@ -336,6 +336,51 @@ export interface AiStatus {
   available: boolean;
 }
 
+/**
+ * Grace bands BEYOND the cumulative target (days, or percent of target when graceMode is percent).
+ */
+export interface TurnaroundThreshold {
+  yellowMax: number;
+  orangeMax: number;
+}
+
+/**
+ * Ideal days for each single activity, keyed by canonical activity code.
+ */
+export type TurnaroundSettingsIdealDays = {[key: string]: number};
+
+/**
+ * Interpret yellowMax/orangeMax as absolute days (default) or percent of the cumulative target.
+ */
+export type TurnaroundSettingsGraceMode = typeof TurnaroundSettingsGraceMode[keyof typeof TurnaroundSettingsGraceMode];
+
+
+export const TurnaroundSettingsGraceMode = {
+  absolute: 'absolute',
+  percent: 'percent',
+} as const;
+
+/**
+ * Optional per-activity overrides of the global grace bands, keyed by canonical activity code.
+ */
+export type TurnaroundSettingsOverrides = {[key: string]: TurnaroundThreshold};
+
+/**
+ * App-level turnaround-warning configuration. Singleton; applies to whatever import is being viewed.
+ */
+export interface TurnaroundSettings {
+  /** Ideal days for each single activity, keyed by canonical activity code. */
+  idealDays: TurnaroundSettingsIdealDays;
+  /** Global upper bound (inclusive) of the Yellow band overrun. */
+  yellowMax: number;
+  /** Global upper bound (inclusive) of the Orange band overrun; beyond this is Red. */
+  orangeMax: number;
+  /** Interpret yellowMax/orangeMax as absolute days (default) or percent of the cumulative target. */
+  graceMode: TurnaroundSettingsGraceMode;
+  /** Optional per-activity overrides of the global grace bands, keyed by canonical activity code. */
+  overrides: TurnaroundSettingsOverrides;
+}
+
 export interface ReviewRequest {
   /** The import to review. */
   importId: number;

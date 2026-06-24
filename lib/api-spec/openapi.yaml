@@ -16,7 +16,49 @@ tags:
     description: Import, merge, and change-log operations
   - name: ai
     description: Optional, advisory-only AI assists (sanitize suggestions and consistency review)
+  - name: settings
+    description: App-level turnaround-warning configuration (ideal days, grace bands)
 paths:
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get turnaround settings
+      description: >
+        Returns the singleton turnaround-warning configuration (ideal days per
+        activity, global grace bands, grace mode, and per-activity overrides).
+        When nothing has been saved yet, returns the built-in defaults.
+      responses:
+        "200":
+          description: Current turnaround settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnaroundSettings"
+    put:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update turnaround settings
+      description: Upserts the singleton turnaround-warning configuration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TurnaroundSettings"
+      responses:
+        "200":
+          description: Saved turnaround settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnaroundSettings"
+        "400":
+          description: Invalid settings payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /healthz:
     get:
       operationId: healthCheck
@@ -1107,6 +1149,47 @@ components:
           description: True when an Anthropic API key is configured server-side. The key is never returned.
       required:
         - available
+    TurnaroundThreshold:
+      type: object
+      description: Grace bands BEYOND the cumulative target (days, or percent of target when graceMode is percent).
+      properties:
+        yellowMax:
+          type: number
+        orangeMax:
+          type: number
+      required:
+        - yellowMax
+        - orangeMax
+    TurnaroundSettings:
+      type: object
+      description: App-level turnaround-warning configuration. Singleton; applies to whatever import is being viewed.
+      properties:
+        idealDays:
+          type: object
+          additionalProperties:
+            type: number
+          description: Ideal days for each single activity, keyed by canonical activity code.
+        yellowMax:
+          type: number
+          description: Global upper bound (inclusive) of the Yellow band overrun.
+        orangeMax:
+          type: number
+          description: Global upper bound (inclusive) of the Orange band overrun; beyond this is Red.
+        graceMode:
+          type: string
+          enum: [absolute, percent]
+          description: Interpret yellowMax/orangeMax as absolute days (default) or percent of the cumulative target.
+        overrides:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/TurnaroundThreshold"
+          description: Optional per-activity overrides of the global grace bands, keyed by canonical activity code.
+      required:
+        - idealDays
+        - yellowMax
+        - orangeMax
+        - graceMode
+        - overrides
     ReviewRequest:
       type: object
       properties:

@@ -11,6 +11,7 @@ import { sortRecords, type RecordSortKey } from "@/lib/sort";
 import { Search, ChevronLeft } from "lucide-react";
 import { compareActivity } from "@workspace/domain";
 import { ageingCell, isCutting } from "@/lib/ageing";
+import { StatusDot } from "@/components/status-dot";
 
 const ROW_CAP = 200;
 
@@ -276,7 +277,7 @@ function AgeingContent() {
                   <TableRow key={r.id}>
                     <TableCell className="font-mono font-medium">{r.markId}</TableCell>
                     <TableCell className="text-xs truncate max-w-[150px]">{r.section}</TableCell>
-                    <TableCell className="text-xs font-semibold">{r.activity}</TableCell>
+                    <TableCell className="text-xs font-semibold"><span className="inline-flex items-center gap-1.5"><StatusDot activity={r.activity} ageingDays={r.ageingDays} />{r.activity}</span></TableCell>
                     <TableCell className="text-xs">{r.contractor}</TableCell>
                     <TableCell className="text-right">{r.balanceQty}</TableCell>
                     <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
@@ -371,7 +372,7 @@ function AgeingDetail({ title, subtitle, records, onBack }: { title: string, sub
                     <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
                     <TableCell className="whitespace-nowrap">{r.structure || '-'}</TableCell>
                     <TableCell className="text-xs truncate max-w-[150px]">{r.section}</TableCell>
-                    <TableCell className="text-xs font-semibold">{r.activity}</TableCell>
+                    <TableCell className="text-xs font-semibold"><span className="inline-flex items-center gap-1.5"><StatusDot activity={r.activity} ageingDays={r.ageingDays} />{r.activity}</span></TableCell>
                     <TableCell className="text-xs">{r.contractor}</TableCell>
                     <TableCell className="text-right">{r.balanceQty}</TableCell>
                     <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>

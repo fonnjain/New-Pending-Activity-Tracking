@@ -1,0 +1,60 @@
+REPLIT AGENT PROMPT — MODIFY EXISTING WARNING SYSTEM (separate page + per-activity grace)
+=========================================================================================
+The turnaround-time warning system already exists, but with (a) its inputs ON the Overview
+page and (b) FLAT global thresholds (Yellow +7 / Orange +21). Make TWO changes only. Do NOT
+rebuild the parts that already work (cumulative target math, the Green/Yellow/Orange/Red
+status, the Overview results, the "n/a" handling for no-ageing / out-of-sequence). Keep
+PROCESS_SEQUENCE = ["C","RFI","NH","B","HAB","HG","W","Q","TS","G","GB","Y"] as the single
+source of truth and keep ageing = today - last_production_date.
+
+CHANGE 1 — MOVE ALL INPUTS OFF OVERVIEW INTO A NEW "Warning Parameters" PAGE
+  - Add a new nav page "Warning Parameters". MOVE the existing configuration inputs
+    (ideal days per activity, and the alert thresholds) from the Overview top section to
+    this page. Remove the editable inputs from Overview entirely.
+  - Overview keeps RESULTS ONLY: the Green/Yellow/Orange/Red summary strip, the
+    per-activity breakdown, and the Orange/Red drill list (all unchanged). Add a small
+    link on Overview: "Configure in Warning Parameters" -> the new page. No inputs on
+    Overview.
+
+CHANGE 2 — REPLACE FLAT THRESHOLDS WITH PER-ACTIVITY GRACE DAYS
+  - The current model uses ONE global Yellow/Orange break (e.g. +7 / +21) for all
+    activities. Replace it with PER-ACTIVITY grace, entered as plain day-values, one row
+    per activity in PROCESS_SEQUENCE order. The Warning Parameters table columns:
+        Activity | Ideal days | Yellow grace (days) | Orange grace (days) | Red grace (days)
+    - Each activity has its OWN Yellow/Orange/Red grace days (no multipliers, no single
+      global rule). Red grace = upper edge of Orange; overrun beyond it = Red.
+    - Show the running CUMULATIVE TARGET next to each activity row (read-only) as the user
+      edits (target(activity) = sum of Ideal days from first step through that activity).
+    - Validate Yellow <= Orange <= Red per row (warn or auto-correct if inverted).
+    - Migrate existing data: keep the current ideal-days values; seed every activity's
+      Yellow/Orange/Red grace from the old global values (Yellow=old +7 break, Orange=old
+      +21 break, Red = Orange) so behaviour is unchanged until the user edits per-activity.
+    - "Reset to defaults" available.
+
+  - UPDATE THE STATUS CALC to use each activity's own grace (instead of the global one):
+        overrun = ageing_days - cumulative_target(currentActivity)
+        using that activity's grace (yellowA, orangeA):
+           overrun <= 0        -> GREEN
+           overrun <= yellowA  -> YELLOW
+           overrun <= orangeA  -> ORANGE
+           overrun >  orangeA  -> RED
+    Keep existing n/a handling: no-ageing marks (blank last_production_date) and
+    out-of-sequence activities (BL, NTF, NTFSW, ...) stay grey "n/a". Recompute LIVE on
+    parameter change, no re-import.
+
+PERSISTENCE / CONTRACT
+  - Persist per-activity grace (Ideal, Yellow, Orange, Red per activity) in the settings
+    store; update the openapi.yaml settings schema from a single global threshold to the
+    per-activity structure and regenerate hooks/Zod. One-time migration as above so the
+    saved settings don't break.
+
+ACCEPTANCE CHECK
+  - Overview has NO inputs — results only — plus a link to Warning Parameters.
+  - Warning Parameters page: one row per activity with editable Ideal/Yellow/Orange/Red
+    day-values, running cumulative target shown, Yellow<=Orange<=Red validated, persists
+    across reload, "Reset to defaults" works.
+  - Status now uses each activity's OWN grace: e.g. NH (target 6) with Yellow=3/Orange=7 ->
+    ageing 8=Yellow (overrun 2), 12=Orange (overrun 6), 20=Red (overrun 14); a different
+    activity with different grace numbers behaves to ITS own values.
+  - After migration (before any edit), colours match the previous flat +7/+21 behaviour.
+  - Cumulative target math, ageing source, and n/a handling unchanged.

@@ -1,0 +1,94 @@
+REPLIT AGENT PROMPT — TURNAROUND-TIME WARNING SYSTEM (cumulative targets + alert bands)
+=======================================================================================
+Add a turnaround-time warning system to the home page (Overview). The user sets ideal
+days per activity; targets accumulate down the process sequence; each mark's ageing is
+compared to the cumulative target for its current activity and shown as a Green/Yellow/
+Orange/Red alert. Deterministic engine + UI; do not change parsing, Activity values,
+dedup, or how ageing itself is computed (ageing already = today - last_production_date).
+
+USES THE CANONICAL SEQUENCE
+  PROCESS_SEQUENCE = ["C","RFI","NH","B","HAB","HG","W","Q","TS","G","GB","Y"]
+All target accumulation and ordering use this constant (single source of truth).
+
+1) USER INPUTS — top section of the Overview/home page
+  a) IDEAL DAYS PER ACTIVITY: an editable row of inputs, one per activity in
+     PROCESS_SEQUENCE order (C, RFI, NH, ... , Y). Each holds the ideal number of days
+     that single activity should take. Provide sensible defaults (e.g. all editable;
+     start them at a small number the user can overwrite). Persist these settings.
+  b) ALERT GRACE THRESHOLDS (days BEYOND the cumulative target), editable, with these
+     DEFAULTS (contiguous bands, no gaps):
+        Green  : overrun <= 0           (at or under target)
+        Yellow : 1  .. 7 days over
+        Orange : 8  .. 21 days over
+        Red    : more than 21 days over
+     The two editable break points are YELLOW_MAX (default 7) and ORANGE_MAX (default 21);
+     Red = beyond ORANGE_MAX. Let the user edit these.
+  c) PER-ACTIVITY OVERRIDE: allow the grace thresholds to be set GLOBALLY (default) and
+     optionally OVERRIDDEN per activity (e.g. tighter grace for Q/Quality). UI: a global
+     set of thresholds, plus an optional per-activity override table. If no override for
+     an activity, it uses the global thresholds.
+  d) GRACE MODE TOGGLE: "Absolute days" (default) vs "% of cumulative target". In %
+     mode, YELLOW_MAX / ORANGE_MAX are interpreted as percentages of that activity's
+     cumulative target instead of fixed days. Default = Absolute days.
+  Persist ALL of the above (settings table / store), so they survive reload and apply
+  across the app. Provide a "Reset to defaults" button.
+
+2) CUMULATIVE TARGET (the core calc)
+  For each activity, cumulative_target(activity) = sum of ideal-days for every activity
+  from the FIRST step up to and INCLUDING that activity, in PROCESS_SEQUENCE order.
+  Example: C=2, RFI=1, NH=3, B=2 ->
+     target(C)=2, target(RFI)=3, target(NH)=6, target(B)=8, ...
+  A mark currently at NH is "on target" if its ageing <= 6 (cumulative), not just <= 3.
+  Activities OUTSIDE PROCESS_SEQUENCE (BL, NTF, NTFSW, etc.): no defined target -> alert
+  status = "n/a" (grey), not colored; still listed. Do not invent a target for them.
+
+3) ALERT STATUS PER MARK
+  Given a mark with current activity A and numeric ageing_days:
+     overrun = ageing_days - cumulative_target(A)
+     thresholds = per-activity override for A, else global; interpreted per grace mode.
+     overrun <= 0                      -> GREEN
+     0  < overrun <= YELLOW_MAX        -> YELLOW
+     YELLOW_MAX < overrun <= ORANGE_MAX-> ORANGE
+     overrun > ORANGE_MAX              -> RED
+  Rows with NO ageing (blank last_production_date -> "Not started" / "No production date")
+  get status "n/a" (grey) — they have no ageing to compare. Future-dated (clamped to
+  today, ageing 0) -> normally GREEN.
+  Compute this live (targets/thresholds can change without re-import).
+
+4) HOME PAGE WARNING SECTION (top of Overview)
+  - The settings inputs (1a-1d) at the very top, collapsible after first set.
+  - A SUMMARY strip: counts (and % / weight) of marks in Green / Yellow / Orange / Red /
+    n/a, as colored chips or a stacked bar.
+  - A breakdown by ACTIVITY (PROCESS_SEQUENCE order): for each activity show its
+    cumulative target and how many of its marks are Green/Yellow/Orange/Red — so the user
+    sees which stage is breaching turnaround. Highlight Red/Orange-heavy activities.
+  - A drill list / link to the marks in Orange + Red (mark, activity, ageing, target,
+    overrun, contractor) for action. Respect the global Job->Structure->Mark / contractor
+    filters.
+
+5) APPLY THE COLOR ELSEWHERE (reuse the same status)
+  - In the Ageing dashboard table and Activity drill tables, the ageing cell can use this
+    target-based status color (in addition to / instead of the existing fixed 0-30/31-60/
+    60+ scale — keep both available, but the turnaround status is the meaningful one now).
+  - Reports/Excel export: add columns cumulative_target, overrun, alert_status so the
+    warning is exportable.
+
+6) PERSISTENCE / CONTRACT
+  - Store settings (ideal days per activity, global thresholds, per-activity overrides,
+    grace mode) in a settings table; expose GET/PUT via openapi.yaml; regenerate hooks.
+  - Settings are user/config-level, not per-import; they apply to whatever import is being
+    viewed.
+
+ACCEPTANCE CHECK
+  - User can enter ideal days per activity; targets accumulate down PROCESS_SEQUENCE
+    (target(NH) = C+RFI+NH, etc.).
+  - A mark at NH with ageing 6 (target 6) = Green; ageing 10 = Yellow (overrun 4);
+    ageing 20 = Orange (overrun 14); ageing 40 = Red (overrun 34) under defaults
+    (Yellow<=7, Orange<=21).
+  - Editing YELLOW_MAX/ORANGE_MAX or a per-activity override changes colors live, no
+    re-import.
+  - Grace mode toggle switches between absolute-days and %-of-target.
+  - Marks with no ageing (blank production date) and out-of-sequence activities show
+    "n/a" (grey), not a false Green/Red.
+  - Home page shows Green/Yellow/Orange/Red summary + per-activity breakdown + Orange/Red
+    drill list; settings persist across reload; "Reset to defaults" works.

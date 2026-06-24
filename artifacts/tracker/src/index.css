@@ -164,6 +164,8 @@
 .bg-ageing-green { background-color: hsl(142 71% 45%); }
 .ageing-amber { color: hsl(38 92% 50%); }
 .bg-ageing-amber { background-color: hsl(38 92% 50%); }
+.ageing-orange { color: hsl(24 95% 53%); }
+.bg-ageing-orange { background-color: hsl(24 95% 53%); }
 .ageing-red { color: hsl(0 84% 60%); }
 .bg-ageing-red { background-color: hsl(0 84% 60%); }
 .ageing-neutral { color: hsl(var(--muted-foreground)); }

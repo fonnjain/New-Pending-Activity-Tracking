@@ -2,6 +2,7 @@ import { useTracker, useFilteredRecords } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
+import { StatusDot } from "@/components/status-dot";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -116,7 +117,7 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
                     <TableRow key={r.id}>
                       <TableCell className="font-medium whitespace-nowrap">{r.job || '-'}</TableCell>
                       <TableCell className="whitespace-nowrap">{r.structure || '-'}</TableCell>
-                      <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
+                      <TableCell className="font-mono font-medium whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><StatusDot activity={r.activity} ageingDays={r.ageingDays} />{r.markId}</span></TableCell>
                       <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || '-'}</TableCell>
                       <TableCell className="text-right">{r.balanceQty}</TableCell>
                       <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>

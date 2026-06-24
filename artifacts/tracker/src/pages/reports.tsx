@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
-import { compareActivity } from "@workspace/domain";
+import { compareActivity, alertStatus } from "@workspace/domain";
+import { useSettings } from "@/lib/settings";
+import { ALERT_LABELS, statusTextColor } from "@/lib/turnaround";
 import {
   useAiReport,
   useAiStatus,
@@ -95,6 +97,9 @@ const REPORT_COLUMNS: XlsxColumn[] = [
   { label: "Balance Wt (kg)", field: "balanceWt", numeric: true, decimals: 2, total: true },
   { label: "Contractor", field: "contractor" },
   { label: "Ageing (days)", field: "ageingDays", numeric: true, decimals: 0 },
+  { label: "Cumulative Target (days)", field: "cumulativeTarget", numeric: true, decimals: 0 },
+  { label: "Overrun (days)", field: "overrun", numeric: true, decimals: 0 },
+  { label: "Alert Status", field: "alertStatus" },
 ];
 
 const TABLE_CAP = 500;
@@ -106,6 +111,7 @@ function num(v: number | null | undefined): string {
 
 function ReportBuilder() {
   const { selectedImportId, filters } = useTracker();
+  const { settings } = useSettings();
   const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
     query: {
       enabled: selectedImportId != null,
@@ -141,6 +147,27 @@ function ReportBuilder() {
     }
     return arr;
   }, [unsorted, sortBy]);
+
+  // Enrich each row with the turnaround classification (cumulative target,
+  // overrun, alert status) for the table + export. Advisory/display only — does
+  // not touch ageing, activity, or any computed engine field.
+  const enrichedRows = useMemo(
+    () =>
+      rows.map((r) => {
+        const res = alertStatus(
+          { activity: r.activity, ageingDays: r.ageingDays },
+          settings,
+        );
+        return {
+          ...r,
+          cumulativeTarget: res.target,
+          overrun: res.overrun,
+          alertStatus: ALERT_LABELS[res.status],
+          alertStatusRaw: res.status,
+        };
+      }),
+    [rows, settings],
+  );
 
   const totalQty = rows.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
   const totalWt = rows.reduce((s, r) => s + (r.balanceWt ?? 0), 0);
@@ -218,8 +245,8 @@ function ReportBuilder() {
     );
     // First sheet: the full report with activity-wise subtotals + grand total.
     // Then one worksheet per activity (process-ordered) with its own TOTAL row.
-    const byActivity = new Map<string, typeof rows>();
-    for (const r of rows) {
+    const byActivity = new Map<string, typeof enrichedRows>();
+    for (const r of enrichedRows) {
       const key = r.activity || "Unknown";
       if (!byActivity.has(key)) byActivity.set(key, []);
       byActivity.get(key)!.push(r);
@@ -229,7 +256,7 @@ function ReportBuilder() {
       .map((act) => ({ name: act, columns: REPORT_COLUMNS, rows: byActivity.get(act)! }));
     const date = new Date().toISOString().slice(0, 10);
     exportToXlsxSheets(`report_${tag}_${date}.xlsx`, [
-      { name: "Summary", columns: REPORT_COLUMNS, rows, summaryRows: activitySubtotals },
+      { name: "Summary", columns: REPORT_COLUMNS, rows: enrichedRows, summaryRows: activitySubtotals },
       ...activitySheets,
     ]);
   };
@@ -244,7 +271,7 @@ function ReportBuilder() {
     );
   }
 
-  const visible = rows.slice(0, TABLE_CAP);
+  const visible = enrichedRows.slice(0, TABLE_CAP);
 
   return (
     <Card className="border-border">
@@ -298,7 +325,7 @@ function ReportBuilder() {
                 <>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
-                      colSpan={9}
+                      colSpan={12}
                       className="font-semibold text-xs uppercase tracking-wider text-muted-foreground"
                     >
                       Activity-wise Subtotal
@@ -322,6 +349,9 @@ function ReportBuilder() {
                       <TableCell className={`text-right tabular-nums ${getAgeingColor(s.avgAge)}`}>
                         {s.avgAge !== null ? `${s.avgAge}d` : "-"}
                       </TableCell>
+                      <TableCell></TableCell>
+                      <TableCell></TableCell>
+                      <TableCell></TableCell>
                     </TableRow>
                   ))}
                 </>
@@ -330,7 +360,7 @@ function ReportBuilder() {
                 <>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
-                      colSpan={9}
+                      colSpan={12}
                       className="font-semibold text-xs uppercase tracking-wider text-muted-foreground"
                     >
                       Itemwise Data
@@ -346,6 +376,9 @@ function ReportBuilder() {
                     <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Balance Wt</TableCell>
                     <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Contractor</TableCell>
                     <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Ageing</TableCell>
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Target</TableCell>
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Overrun</TableCell>
+                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Alert</TableCell>
                   </TableRow>
                 </>
               )}
@@ -362,11 +395,20 @@ function ReportBuilder() {
                   <TableCell className={`text-right font-bold ${getAgeingColor(r.ageingDays)}`}>
                     {ageingCell(r)}
                   </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {r.cumulativeTarget !== null ? `${r.cumulativeTarget}d` : "-"}
+                  </TableCell>
+                  <TableCell className={`text-right tabular-nums font-bold ${statusTextColor(r.alertStatusRaw)}`}>
+                    {r.overrun !== null && r.overrun > 0 ? `+${r.overrun}d` : r.overrun !== null ? `${r.overrun}d` : "-"}
+                  </TableCell>
+                  <TableCell className={`text-xs font-semibold ${statusTextColor(r.alertStatusRaw)}`}>
+                    {r.alertStatus}
+                  </TableCell>
                 </TableRow>
               ))}
               {rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-sm text-muted-foreground py-8">
+                  <TableCell colSpan={12} className="text-center text-sm text-muted-foreground py-8">
                     No rows match the current filters.
                   </TableCell>
                 </TableRow>

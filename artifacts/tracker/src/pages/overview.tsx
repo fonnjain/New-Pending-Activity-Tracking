@@ -7,6 +7,8 @@ import { formatWeight } from "@/lib/utils";
 import { useMemo } from "react";
 import { ChangesPanel } from "@/components/changes-panel";
 import { ageingCell, isCutting } from "@/lib/ageing";
+import { TurnaroundSettings } from "@/components/turnaround-settings";
+import { TurnaroundWarnings } from "@/components/turnaround-warnings";
 
 export default function Overview() {
   const { selectedImportId } = useTracker();
@@ -83,6 +85,9 @@ function OverviewContent() {
   return (
     <div className="space-y-6">
       {selectedImportId && <ChangesPanel importId={selectedImportId} />}
+
+      <TurnaroundSettings />
+      <TurnaroundWarnings records={records} />
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiTile title="Pending Marks" value={totalMarks} />

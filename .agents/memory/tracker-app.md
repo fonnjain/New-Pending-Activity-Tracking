@@ -97,6 +97,14 @@ Mobile-first web app: each Excel upload = one append-only "import". Imports neve
 - **Activity display order has exactly ONE source: `@workspace/domain` (`lib/domain`).** `PROCESS_SEQUENCE` order is C,RFI,NH,B,HAB,HG,W,Q,TS,G,GB,Y (intentional: Q before TS; HG at pos 6 though seldom populated). Use `compareActivity`/`sortActivities` (case-insensitive; unknown codes sort after knowns, alphabetical, never dropped).
   **Why:** three divergent local arrays had previously drifted (wrong TS-before-Q, missing HG); a single shared constant is the only way to keep dropdowns/cards/ageing-table/reports/AI-signals consistent. **How to apply:** never add a local order array or alphabetical `.sort()` for activities; this is display-only and must never touch parsing/Activity values/qty/ageing/dedup. A new pure-constant shared lib just needs composite tsconfig + root + per-artifact `references` + `workspace:*` dep; `customConditions:["workspace"]` resolves it straight from TS source for both vite and esbuild.
 
+## Turnaround-warning layer (advisory, display-only)
+- Per-activity ideal-days accumulate down `PROCESS_SEQUENCE` into a CUMULATIVE target; a mark's live ageing minus its activity's cumulative target = overrun, banded green/yellow/orange/red (grace bands beyond target) or `na`.
+  **Why:** the engine sums earlier steps' allowances, so target(step) is the budget to REACH that step, not just to do it; comparing raw ageing to a single-step ideal would mislabel normal progress as late.
+- `na` whenever target is null (activity outside PROCESS_SEQUENCE) OR `ageingDays` is null (blank production date) — never a false green/red. Engine lives in `@workspace/domain` (`alertStatus`/`cumulativeTarget`); it reuses the SAME `isKnownActivity`/`normalizeActivity` as ordering.
+- Grace bands have two modes: `absolute` (yellowMax/orangeMax are extra days past target) and `percent` (they are a % of that activity's cumulative target). Per-activity overrides replace the global bands for that code only.
+- **This layer must NEVER touch parsing, Activity values, qty, dedup, or ageing math** — it is recomputed live from settings, exactly like the ordering layer. Settings persist in a singleton `settings` table (GET/PUT `/settings`).
+  **How to apply:** `PUT /settings` must reject inverted/negative bands (`yellowMax<=orangeMax`, non-negative, incl. overrides) AND echo back the SAME normalized (rounded) object it persists, or the client cache drifts from stored values.
+
 ## Codegen / schema gotchas
 - After editing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen`. Do not change `info.title` (controls generated filenames).
 - `drizzle-kit push` needs a TTY to confirm table renames; for non-interactive renames, drop the old tables via SQL first, then push.

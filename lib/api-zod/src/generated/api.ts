@@ -9,6 +9,50 @@ import * as zod from 'zod';
 
 
 /**
+ * Returns the singleton turnaround-warning configuration (ideal days per activity, global grace bands, grace mode, and per-activity overrides). When nothing has been saved yet, returns the built-in defaults.
+
+ * @summary Get turnaround settings
+ */
+export const GetSettingsResponse = zod.object({
+  "idealDays": zod.record(zod.string(), zod.number()).describe('Ideal days for each single activity, keyed by canonical activity code.'),
+  "yellowMax": zod.number().describe('Global upper bound (inclusive) of the Yellow band overrun.'),
+  "orangeMax": zod.number().describe('Global upper bound (inclusive) of the Orange band overrun; beyond this is Red.'),
+  "graceMode": zod.enum(['absolute', 'percent']).describe('Interpret yellowMax\/orangeMax as absolute days (default) or percent of the cumulative target.'),
+  "overrides": zod.record(zod.string(), zod.object({
+  "yellowMax": zod.number(),
+  "orangeMax": zod.number()
+}).describe('Grace bands BEYOND the cumulative target (days, or percent of target when graceMode is percent).')).describe('Optional per-activity overrides of the global grace bands, keyed by canonical activity code.')
+}).describe('App-level turnaround-warning configuration. Singleton; applies to whatever import is being viewed.')
+
+
+/**
+ * Upserts the singleton turnaround-warning configuration.
+ * @summary Update turnaround settings
+ */
+export const UpdateSettingsBody = zod.object({
+  "idealDays": zod.record(zod.string(), zod.number()).describe('Ideal days for each single activity, keyed by canonical activity code.'),
+  "yellowMax": zod.number().describe('Global upper bound (inclusive) of the Yellow band overrun.'),
+  "orangeMax": zod.number().describe('Global upper bound (inclusive) of the Orange band overrun; beyond this is Red.'),
+  "graceMode": zod.enum(['absolute', 'percent']).describe('Interpret yellowMax\/orangeMax as absolute days (default) or percent of the cumulative target.'),
+  "overrides": zod.record(zod.string(), zod.object({
+  "yellowMax": zod.number(),
+  "orangeMax": zod.number()
+}).describe('Grace bands BEYOND the cumulative target (days, or percent of target when graceMode is percent).')).describe('Optional per-activity overrides of the global grace bands, keyed by canonical activity code.')
+}).describe('App-level turnaround-warning configuration. Singleton; applies to whatever import is being viewed.')
+
+export const UpdateSettingsResponse = zod.object({
+  "idealDays": zod.record(zod.string(), zod.number()).describe('Ideal days for each single activity, keyed by canonical activity code.'),
+  "yellowMax": zod.number().describe('Global upper bound (inclusive) of the Yellow band overrun.'),
+  "orangeMax": zod.number().describe('Global upper bound (inclusive) of the Orange band overrun; beyond this is Red.'),
+  "graceMode": zod.enum(['absolute', 'percent']).describe('Interpret yellowMax\/orangeMax as absolute days (default) or percent of the cumulative target.'),
+  "overrides": zod.record(zod.string(), zod.object({
+  "yellowMax": zod.number(),
+  "orangeMax": zod.number()
+}).describe('Grace bands BEYOND the cumulative target (days, or percent of target when graceMode is percent).')).describe('Optional per-activity overrides of the global grace bands, keyed by canonical activity code.')
+}).describe('App-level turnaround-warning configuration. Singleton; applies to whatever import is being viewed.')
+
+
+/**
  * Returns server health status
  * @summary Health check
  */
