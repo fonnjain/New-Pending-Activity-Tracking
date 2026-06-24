@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTracker, useFilteredRecords } from "@/lib/store";
 import {
   useGetImportRecords,
@@ -13,6 +13,7 @@ import { useSettings } from "@/lib/settings";
 import {
   lifecycleStatus,
   migrateTurnaroundSettings,
+  compareActivity,
   type LifecycleResult,
 } from "@workspace/domain";
 import { LIFECYCLE_LABELS, lifecycleBgColor, lifecycleTextColor } from "@/lib/turnaround";
@@ -55,105 +56,415 @@ function TurnaroundContent({ importId }: { importId: number }) {
       </div>
 
       <TurnaroundWarnings records={records} />
-      <ContractorOverrun records={records} />
+      <TurnaroundBreakdown records={records} />
       <UrgencyWorklist records={records} />
       <AiTurnaroundReport />
     </div>
   );
 }
 
-// Average overrun (and breach counts) grouped by contractor, worst first.
-function ContractorOverrun({ records }: { records: ApiRecord[] }) {
+// Per-record lifecycle classification rolled up by project / contractor / stage,
+// mirroring the Stuck Projects breakdown but driven by turnaround (overrun)
+// metrics instead of velocity. Advisory only — never changes ageing/thresholds.
+type Bucket = {
+  markCount: number;
+  breached: number;
+  prewarn: number;
+  overrunSum: number;
+  overrunCount: number;
+};
+
+function newBucket(): Bucket {
+  return { markCount: 0, breached: 0, prewarn: 0, overrunSum: 0, overrunCount: 0 };
+}
+
+function tally(b: Bucket, res: LifecycleResult) {
+  b.markCount++;
+  if (res.status.startsWith("breach")) b.breached++;
+  else if (res.status.startsWith("prewarn")) b.prewarn++;
+  if (res.overrun !== null && res.overrun > 0) {
+    b.overrunSum += res.overrun;
+    b.overrunCount++;
+  }
+}
+
+function avgOverrun(b: Bucket): number | null {
+  return b.overrunCount ? Math.round(b.overrunSum / b.overrunCount) : null;
+}
+
+function breachScore(b: Bucket): number {
+  return b.markCount ? (b.breached + 0.5 * b.prewarn) / b.markCount : 0;
+}
+
+type View = "projects" | "contractors" | "stages";
+
+const VIEW_OPTIONS: { id: View; name: string }[] = [
+  { id: "projects", name: "Projects" },
+  { id: "contractors", name: "Contractors" },
+  { id: "stages", name: "Stages" },
+];
+
+function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
   const { settings: rawSettings } = useSettings();
   const settings = useMemo(
     () => migrateTurnaroundSettings(rawSettings),
     [rawSettings],
   );
+  const [view, setView] = useState<View>("projects");
+  const [openProject, setOpenProject] = useState<string | null>(null);
 
-  const rows = useMemo(() => {
-    const map = new Map<
-      string,
-      { total: number; breached: number; overrunSum: number; overrunCount: number }
-    >();
-    for (const r of records) {
-      const res = lifecycleStatus(
-        { activity: r.activity, ageingDays: r.ageingDays, project: r.job },
-        settings,
-      );
-      const key = r.contractor || "Unassigned";
-      const g = map.get(key) ?? { total: 0, breached: 0, overrunSum: 0, overrunCount: 0 };
-      g.total++;
-      if (res.status.startsWith("breach")) g.breached++;
-      if (res.overrun !== null && res.overrun > 0) {
-        g.overrunSum += res.overrun;
-        g.overrunCount++;
-      }
-      map.set(key, g);
+  // Classify every visible record once, then derive each rollup from it so the
+  // tabs always honour the active header filters.
+  const classified = useMemo(
+    () =>
+      records.map((r) => ({
+        r,
+        res: lifecycleStatus(
+          { activity: r.activity, ageingDays: r.ageingDays, project: r.job },
+          settings,
+        ),
+      })),
+    [records, settings],
+  );
+
+  const totals = useMemo(() => {
+    let breached = 0;
+    let prewarn = 0;
+    let green = 0;
+    let na = 0;
+    for (const { res } of classified) {
+      if (res.status.startsWith("breach")) breached++;
+      else if (res.status.startsWith("prewarn")) prewarn++;
+      else if (res.status === "green") green++;
+      else na++;
+    }
+    return { breached, prewarn, green, na };
+  }, [classified]);
+
+  const projects = useMemo(() => {
+    const map = new Map<string, Bucket>();
+    for (const { r, res } of classified) {
+      const key = r.job || "(Unassigned)";
+      const b = map.get(key) ?? newBucket();
+      tally(b, res);
+      map.set(key, b);
     }
     return [...map.entries()]
-      .map(([contractor, g]) => ({
-        contractor,
-        total: g.total,
-        breached: g.breached,
-        avgOverrun: g.overrunCount ? Math.round(g.overrunSum / g.overrunCount) : null,
+      .map(([project, b]) => ({
+        project,
+        markCount: b.markCount,
+        breached: b.breached,
+        prewarn: b.prewarn,
+        avgOverrun: avgOverrun(b),
+        score: breachScore(b),
       }))
-      .sort(
-        (a, b) =>
-          (b.avgOverrun ?? -1) - (a.avgOverrun ?? -1) || b.breached - a.breached,
-      );
-  }, [records, settings]);
+      .sort((a, b) => b.score - a.score || b.breached - a.breached);
+  }, [classified]);
+
+  const contractors = useMemo(() => {
+    const map = new Map<string, Bucket>();
+    for (const { r, res } of classified) {
+      const key = r.contractor || "Unassigned";
+      const b = map.get(key) ?? newBucket();
+      tally(b, res);
+      map.set(key, b);
+    }
+    return [...map.entries()]
+      .map(([contractor, b]) => ({
+        contractor,
+        markCount: b.markCount,
+        breached: b.breached,
+        prewarn: b.prewarn,
+        avgOverrun: avgOverrun(b),
+        score: breachScore(b),
+      }))
+      .sort((a, b) => b.score - a.score || b.breached - a.breached);
+  }, [classified]);
+
+  const stages = useMemo(() => {
+    const map = new Map<string, Bucket>();
+    for (const { r, res } of classified) {
+      const key = r.activity || "—";
+      const b = map.get(key) ?? newBucket();
+      tally(b, res);
+      map.set(key, b);
+    }
+    return [...map.entries()]
+      .map(([activity, b]) => ({
+        activity,
+        markCount: b.markCount,
+        breached: b.breached,
+        prewarn: b.prewarn,
+        avgOverrun: avgOverrun(b),
+      }))
+      .sort((a, b) => compareActivity(a.activity, b.activity));
+  }, [classified]);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
-          Overrun by Contractor
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {rows.length === 0 ? (
-          <div className="text-sm text-muted-foreground">
-            No records for the selected filters.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
-                  <th className="py-1.5 pr-3 font-medium">Contractor</th>
-                  <th className="py-1.5 pr-3 font-medium text-right">Marks</th>
-                  <th className="py-1.5 pr-3 font-medium text-right">Breached</th>
-                  <th className="py-1.5 font-medium text-right">Avg Overrun</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.slice(0, 50).map((g) => (
-                  <tr key={g.contractor} className="border-b border-border/50 hover:bg-muted/30">
-                    <td className="py-1.5 pr-3">{g.contractor}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums">{g.total}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums">
-                      {g.breached > 0 ? (
-                        <span className="font-semibold text-ageing-red">{g.breached}</span>
-                      ) : (
-                        <span className="text-muted-foreground">0</span>
-                      )}
-                    </td>
-                    <td className="py-1.5 text-right tabular-nums font-semibold">
-                      {g.avgOverrun !== null ? `+${g.avgOverrun}d` : "-"}
-                    </td>
-                  </tr>
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <SummaryTile label="Breached" value={totals.breached} cls="bg-ageing-red" />
+        <SummaryTile label="Pre-warning" value={totals.prewarn} cls="bg-amber-500" />
+        <SummaryTile label="On track" value={totals.green} cls="bg-emerald-500" />
+        <SummaryTile label="N/A" value={totals.na} cls="bg-slate-300" />
+      </div>
+
+      <div className="flex items-center gap-2">
+        {VIEW_OPTIONS.map((o) => (
+          <button
+            key={o.id}
+            onClick={() => setView(o.id)}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              view === o.id
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-muted/70"
+            }`}
+          >
+            {o.name}
+          </button>
+        ))}
+      </div>
+
+      {view === "projects" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+              Project Leaderboard
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {projects.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                No records for the selected filters.
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {projects.map((p) => (
+                  <div key={p.project} className="rounded-md border border-border">
+                    <button
+                      className="w-full flex items-center gap-3 p-2 text-left hover:bg-muted/30"
+                      onClick={() =>
+                        setOpenProject(openProject === p.project ? null : p.project)
+                      }
+                    >
+                      <span className="font-mono font-medium w-24 shrink-0 truncate">{p.project}</span>
+                      <div className="flex h-3 flex-1 rounded-sm overflow-hidden min-w-[80px] bg-muted">
+                        <div
+                          className="bg-ageing-red"
+                          style={{ width: `${(p.breached / p.markCount) * 100}%` }}
+                          title={`Breached: ${p.breached}`}
+                        />
+                        <div
+                          className="bg-amber-500"
+                          style={{ width: `${(p.prewarn / p.markCount) * 100}%` }}
+                          title={`Pre-warning: ${p.prewarn}`}
+                        />
+                      </div>
+                      <span className="text-xs tabular-nums w-36 text-right shrink-0 text-muted-foreground">
+                        {p.breached} breached · {p.prewarn} pre-warn
+                      </span>
+                      <span className="text-sm font-bold tabular-nums w-14 text-right shrink-0">
+                        {Math.round(p.score * 100)}%
+                      </span>
+                    </button>
+                    {openProject === p.project && (
+                      <MarkDrill
+                        items={classified.filter(({ r }) => (r.job || "(Unassigned)") === p.project)}
+                      />
+                    )}
+                  </div>
                 ))}
-              </tbody>
-            </table>
-            {rows.length > 50 && (
-              <div className="text-xs text-muted-foreground mt-2">
-                Showing top 50 of {rows.length}.
               </div>
             )}
-          </div>
-        )}
+          </CardContent>
+        </Card>
+      )}
+
+      {view === "contractors" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+              Overrun by Contractor
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {contractors.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                No records for the selected filters.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
+                      <th className="py-1.5 pr-3 font-medium">Contractor</th>
+                      <th className="py-1.5 pr-3 font-medium text-right">Marks</th>
+                      <th className="py-1.5 pr-3 font-medium text-right">Breached</th>
+                      <th className="py-1.5 pr-3 font-medium text-right">Pre-warn</th>
+                      <th className="py-1.5 pr-3 font-medium text-right">Avg Overrun</th>
+                      <th className="py-1.5 font-medium text-right">Breach</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {contractors.slice(0, 50).map((c) => (
+                      <tr key={c.contractor} className="border-b border-border/50 hover:bg-muted/30">
+                        <td className="py-1.5 pr-3">{c.contractor}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{c.markCount}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums text-ageing-red font-semibold">
+                          {c.breached || ""}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums text-amber-600 font-semibold">
+                          {c.prewarn || ""}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">
+                          {c.avgOverrun !== null ? `+${c.avgOverrun}d` : "-"}
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums font-bold">
+                          {Math.round(c.score * 100)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {contractors.length > 50 && (
+                  <div className="text-xs text-muted-foreground mt-2">
+                    Showing top 50 of {contractors.length}.
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {view === "stages" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+              Overrun by Stage
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {stages.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                No records for the selected filters.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
+                      <th className="py-1.5 pr-3 font-medium">Stage</th>
+                      <th className="py-1.5 pr-3 font-medium text-right">Marks</th>
+                      <th className="py-1.5 pr-3 font-medium text-right">Breached</th>
+                      <th className="py-1.5 pr-3 font-medium text-right">Pre-warn</th>
+                      <th className="py-1.5 font-medium text-right">Avg Overrun</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stages.map((s) => (
+                      <tr key={s.activity} className="border-b border-border/50 hover:bg-muted/30">
+                        <td className="py-1.5 pr-3 font-mono">{s.activity}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{s.markCount}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums text-ageing-red font-semibold">
+                          {s.breached || ""}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums text-amber-600 font-semibold">
+                          {s.prewarn || ""}
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums">
+                          {s.avgOverrun !== null ? `+${s.avgOverrun}d` : "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function SummaryTile({ label, value, cls }: { label: string; value: number; cls: string }) {
+  return (
+    <Card className="shadow-sm">
+      <CardContent className="p-4 flex flex-col items-center justify-center text-center">
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className={`w-3 h-3 rounded-sm ${cls}`} />
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+        </div>
+        <span className="text-2xl font-bold tabular-nums">{value}</span>
       </CardContent>
     </Card>
+  );
+}
+
+// Drill into one project's marks, worst lifecycle state first.
+function MarkDrill({
+  items,
+}: {
+  items: Array<{ r: ApiRecord; res: LifecycleResult }>;
+}) {
+  const sorted = useMemo(() => {
+    const rank = (s: string) =>
+      s.startsWith("breach") ? 0 : s.startsWith("prewarn") ? 1 : s === "green" ? 2 : 3;
+    return [...items].sort(
+      (a, b) =>
+        rank(a.res.status) - rank(b.res.status) ||
+        (b.res.overrun ?? -Infinity) - (a.res.overrun ?? -Infinity),
+    );
+  }, [items]);
+
+  return (
+    <div className="border-t border-border overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/30">
+            <th className="py-1.5 px-3 font-medium">Mark</th>
+            <th className="py-1.5 pr-3 font-medium">Activity</th>
+            <th className="py-1.5 pr-3 font-medium">Status</th>
+            <th className="py-1.5 pr-3 font-medium text-right">Ageing</th>
+            <th className="py-1.5 pr-3 font-medium text-right">Target</th>
+            <th className="py-1.5 pr-3 font-medium text-right">Overrun</th>
+            <th className="py-1.5 pr-3 font-medium">Contractor</th>
+            <th className="py-1.5 pr-3 font-medium text-right">Wt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.slice(0, 100).map(({ r, res }) => (
+            <tr key={r.id} className="border-b border-border/50">
+              <td className="py-1.5 px-3 font-mono">{r.markId}</td>
+              <td className="py-1.5 pr-3 font-mono">{r.activity}</td>
+              <td className="py-1.5 pr-3">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full ${lifecycleBgColor(res.status)}`} />
+                  <span className={`text-xs font-semibold ${lifecycleTextColor(res.status)}`}>
+                    {LIFECYCLE_LABELS[res.status]}
+                  </span>
+                </span>
+              </td>
+              <td className="py-1.5 pr-3 text-right tabular-nums">
+                {r.ageingDays !== null ? `${r.ageingDays}d` : "-"}
+              </td>
+              <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
+                {res.target !== null ? `${res.target}d` : "-"}
+              </td>
+              <td className="py-1.5 pr-3 text-right tabular-nums font-semibold">
+                {res.overrun !== null && res.overrun > 0 ? `+${res.overrun}d` : "-"}
+              </td>
+              <td className="py-1.5 pr-3">{r.contractor || "Unassigned"}</td>
+              <td className="py-1.5 pr-3 text-right tabular-nums">{formatWeight(r.balanceWt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {sorted.length > 100 && (
+        <div className="text-xs text-muted-foreground p-2">Showing top 100 of {sorted.length}.</div>
+      )}
+    </div>
   );
 }
 
