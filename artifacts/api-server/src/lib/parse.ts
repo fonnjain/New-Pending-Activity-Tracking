@@ -582,15 +582,23 @@ export function parseWorkbook(
   const missingContractor = rows.filter((r) => r.contractor == null).length;
   const missingDate = rows.filter((r) => r.assignDate == null).length;
 
-  // Last Production Entry Date (col S) sanity counts.
+  // Ageing-date sanity counts (resolved per activity: Assign Date for C, else
+  // Last Production Entry Date). C rows now age from Assign Date, so they are
+  // only "Not started" when even the Assign Date is blank; the non-C blank
+  // production-date rows remain flagged as a data gap.
   let notStarted = 0;
   let noProductionDate = 0;
   let futureProductionDate = 0;
   for (const r of rows) {
-    if (r.lastProductionDate == null) {
+    const date = resolveAgeingDate(
+      r.activity ?? null,
+      r.assignDate ?? null,
+      r.lastProductionDate ?? null,
+    );
+    if (date == null) {
       if (isCuttingActivity(r.activity ?? null)) notStarted++;
       else noProductionDate++;
-    } else if (isFutureDate(r.lastProductionDate)) {
+    } else if (isFutureDate(date)) {
       futureProductionDate++;
     }
   }
@@ -632,13 +640,33 @@ export function isFutureDate(date: string | null): boolean {
   return d.getTime() > todayUtcMs();
 }
 
-// Ageing = today - lastProductionDate (whole days, UTC), recomputed live and
+// The date a mark's ageing is measured from: for activity "C" (Cutting),
+// production has not begun so there is NO Last Production Entry Date — age from
+// the Assign Date instead (how long the mark has waited to be cut since it was
+// assigned). Every other activity ages from Last Production Entry Date. A blank
+// chosen date yields null (the caller labels it). NOTE: do NOT fall back to
+// assignDate for non-C rows — a started mark with a blank production date is a
+// genuine data gap to surface ("No production date"), not to paper over.
+export function resolveAgeingDate(
+  activity: string | null,
+  assignDate: string | null,
+  lastProductionDate: string | null,
+): string | null {
+  return isCuttingActivity(activity) ? assignDate : lastProductionDate;
+}
+
+// Ageing = today - resolveAgeingDate (whole days, UTC), recomputed live and
 // never cached. Blank/unparseable dates yield null (the caller labels them
-// "Not started" at activity C, else "No production date"). A future production
-// date is clamped to today, so ageing is 0 (never negative).
-export function computeAgeing(lastProductionDate: string | null): number | null {
-  if (!lastProductionDate) return null;
-  const d = new Date(`${lastProductionDate}T00:00:00Z`);
+// "Not started" at activity C with no assign date, else "No production date").
+// A future chosen date is clamped to today, so ageing is 0 (never negative).
+export function computeAgeing(
+  activity: string | null,
+  assignDate: string | null,
+  lastProductionDate: string | null,
+): number | null {
+  const date = resolveAgeingDate(activity, assignDate, lastProductionDate);
+  if (!date) return null;
+  const d = new Date(`${date}T00:00:00Z`);
   if (isNaN(d.getTime())) return null;
   const diff = todayUtcMs() - d.getTime();
   if (diff <= 0) return 0;

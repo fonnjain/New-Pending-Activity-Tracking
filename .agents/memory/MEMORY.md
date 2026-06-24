@@ -1,2 +1,2 @@
 - [Balance & Activity Tracker](tracker-app.md) — xlsx-driven append-only import/records app; live ageing, jsonb summary, cross-upload hash dedup, parse rules.
-- [Tracker ageing source](tracker-ageing.md) — ageing = today − col S Last Production Entry Date; future→0, blank→null (Not started at C / No production date); col S in hash.
+- [Tracker ageing source](tracker-ageing.md) — ageing date is per-activity: C (cutting) ages from Assign Date, all others from col S Last Production Entry Date; future→0, blank→null; no assign-date fallback for non-C.

@@ -242,7 +242,7 @@ function serializeRecord(r: RecordPoolRow, importId: number, id: number) {
     contractor: r.contractor,
     orderNature: r.orderNature,
     refJobCardNo: r.refJobCardNo,
-    ageingDays: computeAgeing(r.lastProductionDate),
+    ageingDays: computeAgeing(r.activity, r.assignDate, r.lastProductionDate),
     routeSteps,
     currentStepIndex,
   };
@@ -1081,6 +1081,7 @@ interface VelocityState {
   contractor: string;
   activity: string;
   stageIndex: number;
+  assignDate: string | null;
   lastProductionDate: string | null;
   routeRemaining: number | null;
 }
@@ -1096,6 +1097,7 @@ async function loadVelocityStates(
       contractor: recordPoolTable.contractor,
       activity: recordPoolTable.activity,
       operation: recordPoolTable.operation,
+      assignDate: recordPoolTable.assignDate,
       lastProductionDate: recordPoolTable.lastProductionDate,
     })
     .from(importRowsTable)
@@ -1125,6 +1127,7 @@ async function loadVelocityStates(
       contractor: r.contractor ?? "",
       activity,
       stageIndex: rank,
+      assignDate: r.assignDate,
       lastProductionDate: r.lastProductionDate,
       routeRemaining,
     });
@@ -1243,7 +1246,7 @@ router.get("/imports/:id/velocity", async (req, res): Promise<void> => {
   }
 
   const items = Array.from(current.entries()).map(([key, st]) => {
-    const ageingDays = computeAgeing(st.lastProductionDate);
+    const ageingDays = computeAgeing(st.activity, st.assignDate, st.lastProductionDate);
     const v = velocityForMark(
       {
         series: series.get(key) ?? [],

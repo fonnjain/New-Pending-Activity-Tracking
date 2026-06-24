@@ -1,16 +1,19 @@
 ---
 name: Tracker ageing source
-description: How ageing is computed in the Balance & Activity Tracker and the rules around blank/future production dates.
+description: How ageing is computed in the Balance & Activity Tracker and the rules around blank/future dates and the activity-C special case.
 ---
 
-# Ageing source: Last Production Entry Date (col S)
+# Ageing source: per-activity date basis
 
-Ageing = today − **Last Production Entry Date** (col S, the 19th source column), NOT assign date.
+Ageing = today − a **resolved** date (whole UTC days), recomputed live, never cached.
 
-- **Rule:** future production dates clamp to today (ageing 0); blank/unparseable → `ageingDays = null`.
-- Null-ageing rows are excluded from all numeric buckets and averages, but shown as their own "No ageing date" segment everywhere.
-- Null-ageing rows are labelled activity-aware: **"Not started"** when activity == `C` (cutting), else **"No production date"** (progressed past cutting but date missing — data-quality flag). Helper: `artifacts/tracker/src/lib/ageing.ts`.
+- **Activity "C" (Cutting) ages from Assign Date.** A C mark has not begun production, so it has NO Last Production Entry Date — age from Assign Date (how long it has waited to be cut since assignment). C rows therefore get a real ageing number and participate normally in buckets, averages, pre-warning/breach status, and velocity.
+- **Every other activity ages from Last Production Entry Date** (col S, the 19th source column).
+- **Resolution helper:** `resolveAgeingDate(activity, assignDate, lastProductionDate)` then `computeAgeing(activity, assignDate, lastProductionDate)` (both in `parse.ts`). All ageing call sites pass these three args.
+- **Future chosen date → clamps to today (ageing 0); blank → null.**
 
-**Why:** the shop wanted ageing to reflect actual production stall time, not paperwork assign date; and to distinguish "not begun" from "missing data".
+**Critical non-rule:** do NOT extend the Assign-Date fallback to non-C rows with a blank production date (a small set at NTF/G/NTFSW/TS/BL). They stay `ageingDays = null`, labelled **"No production date"**, excluded from numeric averages/buckets, and flagged. A started mark with no production date is a genuine data gap to surface, not to paper over. Null-ageing C rows (only when Assign Date is also blank) are labelled **"Not started"**.
 
-**How to apply:** ageing math stays server-side (`computeAgeing` in parse.ts). `lastProductionDate` is part of the row hash, so the first upload after this change shows a one-time re-identification churn (completed + new) vs older imports — not data loss. AI/parse-summary data-quality counts (notStarted/noProductionDate/futureProductionDate) must be weighted by `copies` to match the expanded-row parse summary.
+**Why:** the shop wanted ageing to reflect real waiting/stall time and to distinguish "not begun" from "missing data". C marks have 100% Assign-Date coverage but no production date, so before this they showed "Not started" with no number — Assign-Date ageing surfaces how long they have queued for cutting.
+
+**How to apply:** ageing math stays server-side. The frontend derives `notStarted`/`noProductionDate` from `ageingDays === null` + `isCutting`, so it adapts automatically once the server populates C ageing. `lastProductionDate` is part of the row hash; Assign Date is also stored/displayed and is the date-range filter key. AI/parse-summary data-quality counts (notStarted/noProductionDate/futureProductionDate) use the resolved date and are weighted by `copies`.

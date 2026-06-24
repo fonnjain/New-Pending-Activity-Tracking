@@ -17,6 +17,7 @@ import {
   isTruncatingCleanup,
   isCuttingActivity,
   isFutureDate,
+  resolveAgeingDate,
 } from "../lib/parse";
 import { buildAnalyticsPack } from "../lib/report";
 import {
@@ -255,7 +256,12 @@ function computeSignals(membership: MembershipRow[], changeSet: ChangeSet): Revi
     distinctHashes.add(row.hash);
     if (row.contractor == null) nullContractor++;
     if (row.assignDate == null) nullDate++;
-    if (row.lastProductionDate == null) {
+    const ageingDate = resolveAgeingDate(
+      row.activity,
+      row.assignDate,
+      row.lastProductionDate,
+    );
+    if (ageingDate == null) {
       if (isCuttingActivity(row.activity)) {
         notStarted += copies;
       } else {
@@ -263,10 +269,10 @@ function computeSignals(membership: MembershipRow[], changeSet: ChangeSet): Revi
         const key = row.activity ?? "(none)";
         noProdByActivity.set(key, (noProdByActivity.get(key) ?? 0) + copies);
       }
-    } else if (isFutureDate(row.lastProductionDate)) {
+    } else if (isFutureDate(ageingDate)) {
       futureProductionDate += copies;
     }
-    const ag = computeAgeing(row.lastProductionDate);
+    const ag = computeAgeing(row.activity, row.assignDate, row.lastProductionDate);
     if (ag !== null) {
       agSum += ag * copies;
       agCount += copies;
