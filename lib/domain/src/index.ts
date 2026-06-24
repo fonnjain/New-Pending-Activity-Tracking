@@ -91,24 +91,22 @@ export function sortActivities<T extends string | null | undefined>(codes: T[]):
 // display/classification layer that can be recomputed live as settings change,
 // without re-importing.
 
-export type GraceMode = "absolute" | "percent";
-
-// Grace bands BEYOND the cumulative target. In "absolute" mode these are days;
-// in "percent" mode they are a percentage of that activity's cumulative target.
-export interface ActivityThreshold {
-  yellowMax: number;
-  orangeMax: number;
+// Per-activity turnaround configuration. `idealDays` feeds the cumulative
+// target; `yellowGrace`/`orangeGrace`/`redGrace` are the day-overruns BEYOND
+// that activity's cumulative target at which the alert escalates. Each activity
+// carries its OWN grace (no global rule, no multipliers). `redGrace` is the
+// upper edge of orange (validated yellowGrace <= orangeGrace <= redGrace);
+// anything past orange is red.
+export interface ActivityGrace {
+  idealDays: number;
+  yellowGrace: number;
+  orangeGrace: number;
+  redGrace: number;
 }
 
 export interface TurnaroundSettings {
-  // Ideal days for each single activity, keyed by canonical activity code.
-  idealDays: Record<string, number>;
-  // Global grace bands (used unless an activity has an override).
-  yellowMax: number;
-  orangeMax: number;
-  graceMode: GraceMode;
-  // Optional per-activity overrides of the global grace bands.
-  overrides: Record<string, ActivityThreshold>;
+  // Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
+  activities: Record<string, ActivityGrace>;
 }
 
 // green: at/under target. yellow/orange/red: increasing overrun. na: no defined
@@ -123,15 +121,21 @@ export interface AlertResult {
 }
 
 const DEFAULT_IDEAL_DAY = 3;
+const DEFAULT_YELLOW_GRACE = 7;
+const DEFAULT_ORANGE_GRACE = 21;
+const DEFAULT_RED_GRACE = 21;
+
+export const DEFAULT_ACTIVITY_GRACE: ActivityGrace = {
+  idealDays: DEFAULT_IDEAL_DAY,
+  yellowGrace: DEFAULT_YELLOW_GRACE,
+  orangeGrace: DEFAULT_ORANGE_GRACE,
+  redGrace: DEFAULT_RED_GRACE,
+};
 
 export const DEFAULT_TURNAROUND_SETTINGS: TurnaroundSettings = {
-  idealDays: Object.fromEntries(
-    PROCESS_SEQUENCE.map((step) => [step, DEFAULT_IDEAL_DAY]),
+  activities: Object.fromEntries(
+    PROCESS_SEQUENCE.map((step) => [step, { ...DEFAULT_ACTIVITY_GRACE }]),
   ),
-  yellowMax: 7,
-  orangeMax: 21,
-  graceMode: "absolute",
-  overrides: {},
 };
 
 function safeDays(value: number | undefined): number {
@@ -140,16 +144,77 @@ function safeDays(value: number | undefined): number {
     : 0;
 }
 
+function num(v: unknown, fallback: number): number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : fallback;
+}
+
+// Clamp a grace row to non-negative integers and enforce the ordering invariant
+// yellowGrace <= orangeGrace <= redGrace by raising later bands as needed
+// (deterministic auto-correct, so a transient inverted edit can never persist).
+export function normalizeGrace(g: ActivityGrace): ActivityGrace {
+  const idealDays = Math.max(0, Math.round(g.idealDays));
+  const yellowGrace = Math.max(0, Math.round(g.yellowGrace));
+  const orangeGrace = Math.max(yellowGrace, Math.round(g.orangeGrace));
+  const redGrace = Math.max(orangeGrace, Math.round(g.redGrace));
+  return { idealDays, yellowGrace, orangeGrace, redGrace };
+}
+
+// Normalize any stored/legacy settings object into the current per-activity
+// shape. Accepts the new `{activities}` shape OR the legacy
+// `{idealDays, yellowMax, orangeMax, overrides}` shape (global bands +
+// per-activity overrides). For legacy data it keeps the ideal days and seeds
+// each activity's yellow/orange grace from the global value (or its override)
+// and red = orange, so behaviour is unchanged until the user edits per-activity.
+export function migrateTurnaroundSettings(raw: unknown): TurnaroundSettings {
+  const obj = (raw ?? {}) as Record<string, unknown>;
+  const provided = obj.activities as
+    | Record<string, Partial<ActivityGrace>>
+    | undefined;
+  const legacyIdeal = obj.idealDays as Record<string, number> | undefined;
+  const legacyYellow =
+    typeof obj.yellowMax === "number" ? obj.yellowMax : undefined;
+  const legacyOrange =
+    typeof obj.orangeMax === "number" ? obj.orangeMax : undefined;
+  const legacyOverrides = (obj.overrides ?? {}) as Record<
+    string,
+    { yellowMax?: number; orangeMax?: number }
+  >;
+
+  const activities: Record<string, ActivityGrace> = {};
+  for (const step of PROCESS_SEQUENCE) {
+    const p = provided?.[step];
+    if (p && typeof p === "object") {
+      const orange = num(p.orangeGrace, DEFAULT_ORANGE_GRACE);
+      activities[step] = normalizeGrace({
+        idealDays: num(p.idealDays, DEFAULT_IDEAL_DAY),
+        yellowGrace: num(p.yellowGrace, DEFAULT_YELLOW_GRACE),
+        orangeGrace: orange,
+        redGrace: num(p.redGrace, orange),
+      });
+    } else {
+      const ov = legacyOverrides[step];
+      const orange = num(ov?.orangeMax ?? legacyOrange, DEFAULT_ORANGE_GRACE);
+      activities[step] = normalizeGrace({
+        idealDays: num(legacyIdeal?.[step], DEFAULT_IDEAL_DAY),
+        yellowGrace: num(ov?.yellowMax ?? legacyYellow, DEFAULT_YELLOW_GRACE),
+        orangeGrace: orange,
+        redGrace: orange,
+      });
+    }
+  }
+  return { activities };
+}
+
 // Cumulative target per canonical step: sum of ideal-days from the FIRST step up
 // to and INCLUDING that step, in PROCESS_SEQUENCE order.
 // e.g. C=2, RFI=1, NH=3 -> target(C)=2, target(RFI)=3, target(NH)=6.
 export function cumulativeTargets(
-  idealDays: Record<string, number>,
+  settings: TurnaroundSettings,
 ): Record<ProcessStep, number> {
   const out = {} as Record<ProcessStep, number>;
   let acc = 0;
   for (const step of PROCESS_SEQUENCE) {
-    acc += safeDays(idealDays[step]);
+    acc += safeDays(settings.activities[step]?.idealDays);
     out[step] = acc;
   }
   return out;
@@ -159,40 +224,39 @@ export function cumulativeTargets(
 // activities outside PROCESS_SEQUENCE — they have no defined target.
 export function cumulativeTarget(
   activity: string | null | undefined,
-  idealDays: Record<string, number>,
+  settings: TurnaroundSettings,
 ): number | null {
   if (!isKnownActivity(activity)) return null;
   const norm = normalizeActivity(activity) as ProcessStep;
-  return cumulativeTargets(idealDays)[norm];
+  return cumulativeTargets(settings)[norm];
 }
 
-// Classify a mark's ageing against its cumulative target under the given
-// settings. Rows with no target (out-of-sequence activity) or no ageing (blank
+// Classify a mark's ageing against its cumulative target using THAT activity's
+// own grace. Rows with no target (out-of-sequence activity) or no ageing (blank
 // production date -> ageingDays null) are "na". Future-dated rows are clamped to
 // ageing 0 upstream and therefore land in green.
+//   overrun = ageingDays - cumulativeTarget(activity)
+//   overrun <= 0            -> green
+//   overrun <= yellowGrace  -> yellow
+//   overrun <= orangeGrace  -> orange
+//   overrun >  orangeGrace  -> red
 export function alertStatus(
   input: { activity: string | null | undefined; ageingDays: number | null },
   settings: TurnaroundSettings,
 ): AlertResult {
-  const target = cumulativeTarget(input.activity, settings.idealDays);
+  const target = cumulativeTarget(input.activity, settings);
   if (target === null || input.ageingDays === null) {
     return { status: "na", target, overrun: null };
   }
 
   const overrun = input.ageingDays - target;
   const norm = normalizeActivity(input.activity);
-  const override = settings.overrides[norm];
-  let yMax = override ? override.yellowMax : settings.yellowMax;
-  let oMax = override ? override.orangeMax : settings.orangeMax;
-  if (settings.graceMode === "percent") {
-    yMax = (yMax / 100) * target;
-    oMax = (oMax / 100) * target;
-  }
+  const grace = settings.activities[norm] ?? DEFAULT_ACTIVITY_GRACE;
 
   let status: AlertStatus;
   if (overrun <= 0) status = "green";
-  else if (overrun <= yMax) status = "yellow";
-  else if (overrun <= oMax) status = "orange";
+  else if (overrun <= grace.yellowGrace) status = "yellow";
+  else if (overrun <= grace.orangeGrace) status = "orange";
   else status = "red";
 
   return { status, target, overrun };

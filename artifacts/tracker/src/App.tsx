@@ -14,6 +14,7 @@ import AgeingView from "@/pages/ageing";
 import ContractorView from "@/pages/contractor";
 import DataView from "@/pages/data";
 import ReportsView from "@/pages/reports";
+import WarningParameters from "@/pages/warning-parameters";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,6 +39,7 @@ function Router() {
         <Route path="/contractor" component={ContractorView} />
         <Route path="/data" component={DataView} />
         <Route path="/reports" component={ReportsView} />
+        <Route path="/warning-parameters" component={WarningParameters} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

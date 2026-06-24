@@ -16,28 +16,17 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   DEFAULT_TURNAROUND_SETTINGS,
-  PROCESS_SEQUENCE,
+  migrateTurnaroundSettings,
 } from "@workspace/domain";
 
-// Ensure every canonical activity has an ideal-days value so the editor always
-// renders a full row, and fill any missing top-level field from the defaults.
-// Unknown extra keys are dropped (only PROCESS_SEQUENCE steps have a target).
-function withDefaults(s: Partial<TurnaroundSettings> | undefined): TurnaroundSettings {
-  const idealDays: Record<string, number> = {};
-  for (const step of PROCESS_SEQUENCE) {
-    const v = s?.idealDays?.[step];
-    idealDays[step] =
-      typeof v === "number" && Number.isFinite(v)
-        ? v
-        : DEFAULT_TURNAROUND_SETTINGS.idealDays[step];
-  }
-  return {
-    idealDays,
-    yellowMax: s?.yellowMax ?? DEFAULT_TURNAROUND_SETTINGS.yellowMax,
-    orangeMax: s?.orangeMax ?? DEFAULT_TURNAROUND_SETTINGS.orangeMax,
-    graceMode: s?.graceMode ?? DEFAULT_TURNAROUND_SETTINGS.graceMode,
-    overrides: s?.overrides ?? {},
-  };
+// Ensure every canonical activity has a full per-activity row so the editor
+// always renders the complete grid, normalizing/migrating any partial or legacy
+// shape. Unknown extra keys are dropped (only PROCESS_SEQUENCE steps have a target).
+function withDefaults(
+  s: Partial<TurnaroundSettings> | undefined,
+): TurnaroundSettings {
+  if (!s) return DEFAULT_TURNAROUND_SETTINGS;
+  return migrateTurnaroundSettings(s);
 }
 
 interface SettingsContextType {
@@ -81,11 +70,19 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     (next: TurnaroundSettings) => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
+        // Mark that this save has been dispatched; if the user keeps typing,
+        // updateSettings schedules a new timer, so saveTimer.current becomes
+        // non-null again and we skip reconciling stale (in-flight) values.
+        saveTimer.current = null;
         update.mutate(
           { data: next },
           {
             onSuccess: (saved) => {
               queryClient.setQueryData(getGetSettingsQueryKey(), saved);
+              // Reconcile local draft to the server's normalized (validated,
+              // band-ordered) values, but only if no newer edit is pending —
+              // otherwise we'd clobber what the user is currently typing.
+              if (!saveTimer.current) setSettings(withDefaults(saved));
             },
           },
         );

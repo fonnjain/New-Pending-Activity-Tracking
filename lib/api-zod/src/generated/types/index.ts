@@ -7,6 +7,7 @@
  */
 
 export * from './acceptedSuggestion';
+export * from './activityGrace';
 export * from './aiStatus';
 export * from './authCredentials';
 export * from './authStatus';
@@ -50,10 +51,7 @@ export * from './stagedSanitizeSuggestion';
 export * from './stageResult';
 export * from './structuralRead';
 export * from './turnaroundSettings';
-export * from './turnaroundSettingsGraceMode';
-export * from './turnaroundSettingsIdealDays';
-export * from './turnaroundSettingsOverrides';
-export * from './turnaroundThreshold';
+export * from './turnaroundSettingsActivities';
 export * from './uploadResult';
 export * from './validateRequest';
 export * from './validationResult';

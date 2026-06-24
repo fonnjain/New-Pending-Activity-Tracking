@@ -14,15 +14,13 @@ import * as zod from 'zod';
  * @summary Get turnaround settings
  */
 export const GetSettingsResponse = zod.object({
-  "idealDays": zod.record(zod.string(), zod.number()).describe('Ideal days for each single activity, keyed by canonical activity code.'),
-  "yellowMax": zod.number().describe('Global upper bound (inclusive) of the Yellow band overrun.'),
-  "orangeMax": zod.number().describe('Global upper bound (inclusive) of the Orange band overrun; beyond this is Red.'),
-  "graceMode": zod.enum(['absolute', 'percent']).describe('Interpret yellowMax\/orangeMax as absolute days (default) or percent of the cumulative target.'),
-  "overrides": zod.record(zod.string(), zod.object({
-  "yellowMax": zod.number(),
-  "orangeMax": zod.number()
-}).describe('Grace bands BEYOND the cumulative target (days, or percent of target when graceMode is percent).')).describe('Optional per-activity overrides of the global grace bands, keyed by canonical activity code.')
-}).describe('App-level turnaround-warning configuration. Singleton; applies to whatever import is being viewed.')
+  "activities": zod.record(zod.string(), zod.object({
+  "idealDays": zod.number().describe('Ideal days for this single activity (feeds the cumulative target).'),
+  "yellowGrace": zod.number().describe('Overrun (days beyond the cumulative target) up to which the alert stays Yellow.'),
+  "orangeGrace": zod.number().describe('Overrun up to which the alert is Orange; beyond this is Red.'),
+  "redGrace": zod.number().describe('Upper edge of Orange (yellowGrace <= orangeGrace <= redGrace); overrun past Orange is Red.')
+}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace\/orangeGrace\/redGrace are the day-overruns BEYOND that activity\'s cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.\n')).describe('Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).')
+}).describe('App-level turnaround-warning configuration. Singleton; per-activity ideal days and grace bands keyed by canonical activity code.')
 
 
 /**
@@ -30,26 +28,22 @@ export const GetSettingsResponse = zod.object({
  * @summary Update turnaround settings
  */
 export const UpdateSettingsBody = zod.object({
-  "idealDays": zod.record(zod.string(), zod.number()).describe('Ideal days for each single activity, keyed by canonical activity code.'),
-  "yellowMax": zod.number().describe('Global upper bound (inclusive) of the Yellow band overrun.'),
-  "orangeMax": zod.number().describe('Global upper bound (inclusive) of the Orange band overrun; beyond this is Red.'),
-  "graceMode": zod.enum(['absolute', 'percent']).describe('Interpret yellowMax\/orangeMax as absolute days (default) or percent of the cumulative target.'),
-  "overrides": zod.record(zod.string(), zod.object({
-  "yellowMax": zod.number(),
-  "orangeMax": zod.number()
-}).describe('Grace bands BEYOND the cumulative target (days, or percent of target when graceMode is percent).')).describe('Optional per-activity overrides of the global grace bands, keyed by canonical activity code.')
-}).describe('App-level turnaround-warning configuration. Singleton; applies to whatever import is being viewed.')
+  "activities": zod.record(zod.string(), zod.object({
+  "idealDays": zod.number().describe('Ideal days for this single activity (feeds the cumulative target).'),
+  "yellowGrace": zod.number().describe('Overrun (days beyond the cumulative target) up to which the alert stays Yellow.'),
+  "orangeGrace": zod.number().describe('Overrun up to which the alert is Orange; beyond this is Red.'),
+  "redGrace": zod.number().describe('Upper edge of Orange (yellowGrace <= orangeGrace <= redGrace); overrun past Orange is Red.')
+}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace\/orangeGrace\/redGrace are the day-overruns BEYOND that activity\'s cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.\n')).describe('Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).')
+}).describe('App-level turnaround-warning configuration. Singleton; per-activity ideal days and grace bands keyed by canonical activity code.')
 
 export const UpdateSettingsResponse = zod.object({
-  "idealDays": zod.record(zod.string(), zod.number()).describe('Ideal days for each single activity, keyed by canonical activity code.'),
-  "yellowMax": zod.number().describe('Global upper bound (inclusive) of the Yellow band overrun.'),
-  "orangeMax": zod.number().describe('Global upper bound (inclusive) of the Orange band overrun; beyond this is Red.'),
-  "graceMode": zod.enum(['absolute', 'percent']).describe('Interpret yellowMax\/orangeMax as absolute days (default) or percent of the cumulative target.'),
-  "overrides": zod.record(zod.string(), zod.object({
-  "yellowMax": zod.number(),
-  "orangeMax": zod.number()
-}).describe('Grace bands BEYOND the cumulative target (days, or percent of target when graceMode is percent).')).describe('Optional per-activity overrides of the global grace bands, keyed by canonical activity code.')
-}).describe('App-level turnaround-warning configuration. Singleton; applies to whatever import is being viewed.')
+  "activities": zod.record(zod.string(), zod.object({
+  "idealDays": zod.number().describe('Ideal days for this single activity (feeds the cumulative target).'),
+  "yellowGrace": zod.number().describe('Overrun (days beyond the cumulative target) up to which the alert stays Yellow.'),
+  "orangeGrace": zod.number().describe('Overrun up to which the alert is Orange; beyond this is Red.'),
+  "redGrace": zod.number().describe('Upper edge of Orange (yellowGrace <= orangeGrace <= redGrace); overrun past Orange is Red.')
+}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace\/orangeGrace\/redGrace are the day-overruns BEYOND that activity\'s cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.\n')).describe('Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).')
+}).describe('App-level turnaround-warning configuration. Singleton; per-activity ideal days and grace bands keyed by canonical activity code.')
 
 
 /**

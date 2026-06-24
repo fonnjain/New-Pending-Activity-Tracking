@@ -337,48 +337,31 @@ export interface AiStatus {
 }
 
 /**
- * Grace bands BEYOND the cumulative target (days, or percent of target when graceMode is percent).
+ * Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace/orangeGrace/redGrace are the day-overruns BEYOND that activity's cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.
+
  */
-export interface TurnaroundThreshold {
-  yellowMax: number;
-  orangeMax: number;
+export interface ActivityGrace {
+  /** Ideal days for this single activity (feeds the cumulative target). */
+  idealDays: number;
+  /** Overrun (days beyond the cumulative target) up to which the alert stays Yellow. */
+  yellowGrace: number;
+  /** Overrun up to which the alert is Orange; beyond this is Red. */
+  orangeGrace: number;
+  /** Upper edge of Orange (yellowGrace <= orangeGrace <= redGrace); overrun past Orange is Red. */
+  redGrace: number;
 }
 
 /**
- * Ideal days for each single activity, keyed by canonical activity code.
+ * Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
  */
-export type TurnaroundSettingsIdealDays = {[key: string]: number};
+export type TurnaroundSettingsActivities = {[key: string]: ActivityGrace};
 
 /**
- * Interpret yellowMax/orangeMax as absolute days (default) or percent of the cumulative target.
- */
-export type TurnaroundSettingsGraceMode = typeof TurnaroundSettingsGraceMode[keyof typeof TurnaroundSettingsGraceMode];
-
-
-export const TurnaroundSettingsGraceMode = {
-  absolute: 'absolute',
-  percent: 'percent',
-} as const;
-
-/**
- * Optional per-activity overrides of the global grace bands, keyed by canonical activity code.
- */
-export type TurnaroundSettingsOverrides = {[key: string]: TurnaroundThreshold};
-
-/**
- * App-level turnaround-warning configuration. Singleton; applies to whatever import is being viewed.
+ * App-level turnaround-warning configuration. Singleton; per-activity ideal days and grace bands keyed by canonical activity code.
  */
 export interface TurnaroundSettings {
-  /** Ideal days for each single activity, keyed by canonical activity code. */
-  idealDays: TurnaroundSettingsIdealDays;
-  /** Global upper bound (inclusive) of the Yellow band overrun. */
-  yellowMax: number;
-  /** Global upper bound (inclusive) of the Orange band overrun; beyond this is Red. */
-  orangeMax: number;
-  /** Interpret yellowMax/orangeMax as absolute days (default) or percent of the cumulative target. */
-  graceMode: TurnaroundSettingsGraceMode;
-  /** Optional per-activity overrides of the global grace bands, keyed by canonical activity code. */
-  overrides: TurnaroundSettingsOverrides;
+  /** Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). */
+  activities: TurnaroundSettingsActivities;
 }
 
 export interface ReviewRequest {

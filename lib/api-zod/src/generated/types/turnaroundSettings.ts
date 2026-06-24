@@ -5,22 +5,12 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { TurnaroundSettingsGraceMode } from './turnaroundSettingsGraceMode';
-import type { TurnaroundSettingsIdealDays } from './turnaroundSettingsIdealDays';
-import type { TurnaroundSettingsOverrides } from './turnaroundSettingsOverrides';
+import type { TurnaroundSettingsActivities } from './turnaroundSettingsActivities';
 
 /**
- * App-level turnaround-warning configuration. Singleton; applies to whatever import is being viewed.
+ * App-level turnaround-warning configuration. Singleton; per-activity ideal days and grace bands keyed by canonical activity code.
  */
 export interface TurnaroundSettings {
-  /** Ideal days for each single activity, keyed by canonical activity code. */
-  idealDays: TurnaroundSettingsIdealDays;
-  /** Global upper bound (inclusive) of the Yellow band overrun. */
-  yellowMax: number;
-  /** Global upper bound (inclusive) of the Orange band overrun; beyond this is Red. */
-  orangeMax: number;
-  /** Interpret yellowMax/orangeMax as absolute days (default) or percent of the cumulative target. */
-  graceMode: TurnaroundSettingsGraceMode;
-  /** Optional per-activity overrides of the global grace bands, keyed by canonical activity code. */
-  overrides: TurnaroundSettingsOverrides;
+  /** Per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). */
+  activities: TurnaroundSettingsActivities;
 }

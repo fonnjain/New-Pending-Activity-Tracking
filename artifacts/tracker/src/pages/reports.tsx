@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { compareActivity, alertStatus } from "@workspace/domain";
+import { compareActivity, alertStatus, migrateTurnaroundSettings } from "@workspace/domain";
 import { useSettings } from "@/lib/settings";
 import { ALERT_LABELS, statusTextColor } from "@/lib/turnaround";
 import {
@@ -111,7 +111,12 @@ function num(v: number | null | undefined): string {
 
 function ReportBuilder() {
   const { selectedImportId, filters } = useTracker();
-  const { settings } = useSettings();
+  const { settings: rawSettings } = useSettings();
+  // Defensive: classify/export on normalized (validated, band-ordered) settings.
+  const settings = useMemo(
+    () => migrateTurnaroundSettings(rawSettings),
+    [rawSettings],
+  );
   const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
     query: {
       enabled: selectedImportId != null,

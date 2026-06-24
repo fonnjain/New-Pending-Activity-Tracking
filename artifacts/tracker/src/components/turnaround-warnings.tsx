@@ -9,7 +9,7 @@ import { formatWeight } from "@/lib/utils";
 import { useSettings } from "@/lib/settings";
 import {
   alertStatus,
-  cumulativeTargets,
+  migrateTurnaroundSettings,
   normalizeActivity,
   sortActivities,
   type AlertStatus,
@@ -29,10 +29,15 @@ function emptyCounts(): globalThis.Record<AlertStatus, number> {
 }
 
 export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
-  const { settings } = useSettings();
+  const { settings: rawSettings } = useSettings();
+  // Defensive: classify on normalized (validated, band-ordered) settings so a
+  // transient in-flight draft with inverted bands can never mislabel a mark.
+  const settings = useMemo(
+    () => migrateTurnaroundSettings(rawSettings),
+    [rawSettings],
+  );
 
   const { counts, byActivity, drill } = useMemo(() => {
-    const cumTargets = cumulativeTargets(settings.idealDays);
     const counts = emptyCounts();
     const actMap = new Map<
       string,

@@ -73,7 +73,7 @@ function LoginForm() {
             Restricted Area
           </CardTitle>
           <p className="text-muted-foreground text-sm mt-1">
-            The Data view is protected. Please sign in to upload reports and manage data.
+            This area is protected. Please sign in to manage data and settings.
           </p>
         </CardHeader>
         <CardContent>
