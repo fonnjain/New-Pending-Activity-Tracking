@@ -19,19 +19,21 @@ export const ALERT_LABELS: Record<AlertStatus, string> = {
   na: "N/A",
 };
 
-// Text-color utility class (defined in index.css).
+// Text-color utility class (defined in index.css). Status palette:
+// green stays green, yellow renders light blue, orange grey, red black,
+// na a faded slate. Independent of the fixed ageing scale.
 export function statusTextColor(status: AlertStatus): string {
   switch (status) {
     case "green":
-      return "ageing-green";
+      return "status-green";
     case "yellow":
-      return "ageing-amber";
+      return "status-yellow";
     case "orange":
-      return "ageing-orange";
+      return "status-orange";
     case "red":
-      return "ageing-red";
+      return "status-red";
     default:
-      return "ageing-neutral";
+      return "status-na";
   }
 }
 
@@ -39,14 +41,14 @@ export function statusTextColor(status: AlertStatus): string {
 export function statusBgColor(status: AlertStatus): string {
   switch (status) {
     case "green":
-      return "bg-ageing-green";
+      return "bg-status-green";
     case "yellow":
-      return "bg-ageing-amber";
+      return "bg-status-yellow";
     case "orange":
-      return "bg-ageing-orange";
+      return "bg-status-orange";
     case "red":
-      return "bg-ageing-red";
+      return "bg-status-red";
     default:
-      return "bg-ageing-neutral";
+      return "bg-status-na";
   }
 }

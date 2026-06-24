@@ -170,3 +170,27 @@
 .bg-ageing-red { background-color: hsl(0 84% 60%); }
 .ageing-neutral { color: hsl(var(--muted-foreground)); }
 .bg-ageing-neutral { background-color: hsl(var(--muted)); }
+
+/* Turnaround alert-status colors (display only; independent of the fixed
+   ageing scale above). Mapping: green=on target, yellow=light blue,
+   orange=grey, red=black, na=faded slate (distinct "no data" look). */
+.status-green { color: hsl(142 71% 38%); }
+.bg-status-green { background-color: hsl(142 71% 45%); }
+.status-yellow { color: hsl(204 80% 42%); }
+.bg-status-yellow { background-color: hsl(200 90% 60%); }
+.status-orange { color: hsl(0 0% 36%); }
+.bg-status-orange { background-color: hsl(0 0% 50%); }
+.status-red { color: hsl(0 0% 8%); }
+.bg-status-red { background-color: hsl(0 0% 0%); color: hsl(0 0% 100%); }
+.status-na { color: hsl(215 16% 58%); }
+.bg-status-na {
+  background-color: hsl(215 25% 90%);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 3px,
+    hsl(215 18% 76%) 3px,
+    hsl(215 18% 76%) 6px
+  );
+  opacity: 0.85;
+}

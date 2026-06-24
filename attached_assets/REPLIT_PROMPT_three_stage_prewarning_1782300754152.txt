@@ -1,0 +1,99 @@
+REPLIT AGENT PROMPT — THREE-STAGE PRE-WARNING SYSTEM (proactive, before breach)
+===============================================================================
+Add a PROACTIVE pre-warning system on top of the existing (reactive) breach alerts, so
+corrective action can happen BEFORE a mark exceeds its activity's target. Pre-warning has
+three escalating stages while the mark is STILL WITHIN target, then the existing breach
+bands take over once target is exceeded. Plus stalled-mark detection and an Overview
+worklist. Do not change the breach logic, cumulative targets, ageing
+(= today - last_production_date), or n/a handling — this ADDS pre-warning states.
+
+USES EXISTING FOUNDATION
+  - PROCESS_SEQUENCE, cumulative_target(project, activity) (project-resolved), and
+    ageing_days are already computed. Reuse them.
+  - overrun = ageing - cumulative_target. Pre-warning applies when overrun <= 0 (within
+    target); breach applies when overrun > 0 (existing bands).
+
+1) THREE-STAGE PRE-WARNING (strictly % of cumulative target; per-activity thresholds)
+  Define, PER ACTIVITY, three percentage thresholds (of the cumulative target consumed):
+       consumed = ageing / cumulative_target(activity)        (only when target > 0)
+  Stages (defaults, all editable per activity):
+       consumed < PW1            -> GREEN (healthy)
+       PW1 <= consumed < PW2     -> PRE-WARNING 1   (colour YELLOW)
+       PW2 <= consumed < PW3     -> PRE-WARNING 2   (colour ORANGE)
+       PW3 <= consumed <= 100%   -> PRE-WARNING 3   (colour RED)
+       consumed > 100% (overrun>0) -> existing BREACH bands (Light Blue / Grey / Black)
+  Default thresholds: PW1 = 70%, PW2 = 85%, PW3 = 95%  (user-editable per activity).
+  - Strictly percentage-based (no absolute-days mode for pre-warning).
+  - Validate PW1 <= PW2 <= PW3 (<=100). Warn/auto-correct if inverted.
+  - Pre-warning percentages are configurable PER ACTIVITY, and follow the SAME project-wise
+    inheritance already built (global "All Projects" defaults; per-project per-activity
+    overrides; unset -> inherit global). Add them to the Warning Parameters page next to
+    the grace settings.
+
+2) COLOUR LADDER (full lifecycle, healthiest -> worst)
+  Keep the two phases visually distinct (pre-warning = warm ramp; breach = cool/dark ramp):
+       Green               (healthy)
+       Yellow              Pre-warning 1   (approaching)
+       Orange              Pre-warning 2   (act soon)
+       Red                 Pre-warning 3   (imminent, about to breach)
+       Light Blue          Breach 1        (over by <= yellow grace)
+       Grey                Breach 2        (over by <= orange grace)
+       Black               Breach 3        (over beyond orange grace)
+       faded neutral       n/a             (no ageing / out-of-sequence)
+  Define this single status->colour ladder in ONE theme/constants module. Legend must list
+  all states with their meaning so Yellow/Orange/Red (pre, within target) are clearly
+  labelled as PRE-WARNING and distinct from the Light Blue/Grey/Black BREACH states.
+  n/a stays the faded neutral (distinct from Orange/Grey).
+
+3) STALLED / NO-MOVEMENT DETECTION (independent of % consumed)
+  Using the upload-to-upload change history (the change-log / diff already tracks activity
+  moves and last_production_date changes between imports), flag a mark as STALLED if it has
+  NOT advanced activity AND its last_production_date has not changed for >= N days
+  (configurable, default e.g. 10 days). A stalled mark is a pre-warning even if its
+  consumed% is low — stuck-but-young marks are the ones that silently become breaches.
+  - Show a "stalled" indicator (e.g. an icon/badge) on top of the colour status; it does
+    not replace the colour, it augments it.
+  - If multiple snapshots aren't yet available, degrade gracefully (no stalled flags) and
+    enable it once history exists.
+
+4) PROJECTED BREACH / DAYS-TO-TARGET
+  For each within-target mark, compute days_to_target = cumulative_target - ageing
+  (>= 0). Show it so the user sees how long until breach. For stalled marks, also show
+  days_since_last_movement. Sort worklists by urgency (smallest days_to_target first,
+  stalled first).
+
+5) OVERVIEW — PRE-WARNING WORKLIST (results only; Overview stays input-free)
+  Add a panel "Needs attention" / "Pre-warning worklist":
+   - Marks in Pre-warning 1/2/3 and/or stalled, sorted by urgency (days_to_target asc;
+     stalled and Pre-warning 3 at top).
+   - Columns: Mark | Project | Structure | Activity | Ageing | Target | % consumed |
+     Days to target | Stalled? | Contractor.
+   - Summary chips: counts in Pre-warning 1/2/3, Stalled, and (existing) breach counts.
+   - Respect the global Job->Structure->Mark / contractor filters.
+   - Configuration stays on the Warning Parameters page (this is display only).
+
+6) APPLY EVERYWHERE THE STATUS SHOWS
+  The full 8-state ladder (incl. the three pre-warning colours) is used in the Overview
+  summary, per-activity breakdown, Ageing/Activity tables, charts/legends, and exports
+  (add columns: status, consumed_pct, days_to_target, stalled). Recompute LIVE on any
+  threshold change; no re-import.
+
+PERSISTENCE / CONTRACT
+  - Store per-activity pre-warning thresholds (PW1/PW2/PW3) at global + sparse per-project
+    level (same shape as grace settings); add the stalled-days setting. Update
+    openapi.yaml; regenerate hooks/Zod. Migration: seed defaults (70/85/95, stalled=10);
+    existing breach behaviour unchanged.
+
+ACCEPTANCE CHECK
+  - A mark at NH (target 6) with defaults: ageing 4 (67%) = Green; ageing 5 (83%) =
+    Pre-warning 1 (Yellow); ageing 5.2-5.6 (~87-95%) = Pre-warning 2 (Orange); ageing
+    ~5.8 (97%) = Pre-warning 3 (Red); ageing 7 (overrun 1) = Breach (Light Blue per grace).
+  - Pre-warning thresholds editable PER ACTIVITY and inherited project-wise (global ->
+    project override per cell).
+  - A mark not advancing for >= stalled-days is flagged stalled regardless of % consumed.
+  - Overview shows a pre-warning worklist sorted by urgency with days-to-target; no inputs
+    on Overview.
+  - Full colour ladder Green -> Yellow -> Orange -> Red -> Light Blue -> Grey -> Black
+    (+ faded n/a) applied everywhere; legend labels pre-warning vs breach clearly.
+  - Breach bands, cumulative targets, ageing source, and n/a handling unchanged; live
+    recompute.
