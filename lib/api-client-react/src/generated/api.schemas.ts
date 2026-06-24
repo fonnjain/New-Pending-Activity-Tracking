@@ -337,53 +337,71 @@ export interface AiStatus {
 }
 
 /**
- * Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace/orangeGrace/redGrace are the day-overruns BEYOND that activity's cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.
+ * auto = derive from percent of ideal days; manual = pinned value.
+ */
+export type GraceCellMode = typeof GraceCellMode[keyof typeof GraceCellMode];
+
+
+export const GraceCellMode = {
+  auto: 'auto',
+  manual: 'manual',
+} as const;
+
+/**
+ * One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity's own ideal days (effective = round(percent/100 * idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage/value.
 
  */
-export interface ActivityGrace {
-  /** Ideal days for this single activity (feeds the cumulative target). */
-  idealDays: number;
-  /** Overrun (days beyond the cumulative target) up to which the alert stays Yellow. */
-  yellowGrace: number;
-  /** Overrun up to which the alert is Orange; beyond this is Red. */
-  orangeGrace: number;
-  /** Upper edge of Orange (yellowGrace <= orangeGrace <= redGrace); overrun past Orange is Red. */
-  redGrace: number;
+export interface GraceCell {
+  /** auto = derive from percent of ideal days; manual = pinned value. */
+  mode: GraceCellMode;
+  /** AUTO only — percent of this activity's ideal days. */
+  percent?: number;
+  /** MANUAL only — pinned grace days (overrun beyond the cumulative target). */
+  value?: number;
 }
 
 /**
- * Sparse per-project override of any subset of grace fields. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value. All fields optional.
+ * Per-activity turnaround configuration. idealDays feeds the cumulative target; yellow/orange/red are grace-band CELLS (auto/manual). Resolved effective grace is validated non-negative with yellow <= orange <= red.
 
  */
-export interface PartialActivityGrace {
+export interface ActivityConfig {
+  /** Ideal days for this single activity (feeds the cumulative target). */
+  idealDays: number;
+  yellow: GraceCell;
+  orange: GraceCell;
+  red: GraceCell;
+}
+
+/**
+ * Sparse per-project override of any subset of {idealDays, yellow/orange/red cell}. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value (per cell). All fields optional.
+
+ */
+export interface PartialActivityConfig {
   /** Override ideal days for this activity (feeds the cumulative target). */
   idealDays?: number;
-  /** Override yellow grace (overrun days beyond the cumulative target). */
-  yellowGrace?: number;
-  /** Override orange grace; beyond this is Red. */
-  orangeGrace?: number;
-  /** Override upper edge of Orange. */
-  redGrace?: number;
+  yellow?: GraceCell;
+  orange?: GraceCell;
+  red?: GraceCell;
 }
 
 /**
  * Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
  */
-export type TurnaroundSettingsActivities = {[key: string]: ActivityGrace};
+export type TurnaroundSettingsActivities = {[key: string]: ActivityConfig};
 
 /**
- * Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden fields are stored; everything else inherits `activities`.
+ * Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden cells/fields are stored; everything else inherits `activities`.
 
  */
-export type TurnaroundSettingsPerProject = {[key: string]: {[key: string]: PartialActivityGrace}};
+export type TurnaroundSettingsPerProject = {[key: string]: {[key: string]: PartialActivityConfig}};
 
 /**
- * App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace bands keyed by canonical activity code, plus optional sparse per-project overrides.
+ * App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace cells keyed by canonical activity code, plus optional sparse per-project overrides.
  */
 export interface TurnaroundSettings {
   /** Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). */
   activities: TurnaroundSettingsActivities;
-  /** Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden fields are stored; everything else inherits `activities`.
+  /** Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden cells/fields are stored; everything else inherits `activities`.
    */
   perProject?: TurnaroundSettingsPerProject;
 }

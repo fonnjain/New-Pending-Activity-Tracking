@@ -1154,69 +1154,84 @@ components:
           description: True when an Anthropic API key is configured server-side. The key is never returned.
       required:
         - available
-    ActivityGrace:
+    GraceCell:
+      type: object
+      description: >
+        One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the
+        grace from `percent` of THIS activity's own ideal days
+        (effective = round(percent/100 * idealDays)). `mode` decides which is
+        effective; both fields may be present so toggling auto<->manual remembers
+        the last percentage/value.
+      properties:
+        mode:
+          type: string
+          enum: [auto, manual]
+          description: auto = derive from percent of ideal days; manual = pinned value.
+        percent:
+          type: number
+          description: AUTO only — percent of this activity's ideal days.
+        value:
+          type: number
+          description: MANUAL only — pinned grace days (overrun beyond the cumulative target).
+      required:
+        - mode
+    ActivityConfig:
       type: object
       description: >
         Per-activity turnaround configuration. idealDays feeds the cumulative
-        target; yellowGrace/orangeGrace/redGrace are the day-overruns BEYOND that
-        activity's cumulative target at which the alert escalates. Validated
-        non-negative with yellowGrace <= orangeGrace <= redGrace.
+        target; yellow/orange/red are grace-band CELLS (auto/manual). Resolved
+        effective grace is validated non-negative with yellow <= orange <= red.
       properties:
         idealDays:
           type: number
           description: Ideal days for this single activity (feeds the cumulative target).
-        yellowGrace:
-          type: number
-          description: Overrun (days beyond the cumulative target) up to which the alert stays Yellow.
-        orangeGrace:
-          type: number
-          description: Overrun up to which the alert is Orange; beyond this is Red.
-        redGrace:
-          type: number
-          description: Upper edge of Orange (yellowGrace <= orangeGrace <= redGrace); overrun past Orange is Red.
+        yellow:
+          $ref: "#/components/schemas/GraceCell"
+        orange:
+          $ref: "#/components/schemas/GraceCell"
+        red:
+          $ref: "#/components/schemas/GraceCell"
       required:
         - idealDays
-        - yellowGrace
-        - orangeGrace
-        - redGrace
-    PartialActivityGrace:
+        - yellow
+        - orange
+        - red
+    PartialActivityConfig:
       type: object
       description: >
-        Sparse per-project override of any subset of grace fields. Any field
-        present REPLACES the global value for that (project, activity); any field
-        absent INHERITS the global value. All fields optional.
+        Sparse per-project override of any subset of {idealDays, yellow/orange/red
+        cell}. Any field present REPLACES the global value for that
+        (project, activity); any field absent INHERITS the global value (per cell).
+        All fields optional.
       properties:
         idealDays:
           type: number
           description: Override ideal days for this activity (feeds the cumulative target).
-        yellowGrace:
-          type: number
-          description: Override yellow grace (overrun days beyond the cumulative target).
-        orangeGrace:
-          type: number
-          description: Override orange grace; beyond this is Red.
-        redGrace:
-          type: number
-          description: Override upper edge of Orange.
+        yellow:
+          $ref: "#/components/schemas/GraceCell"
+        orange:
+          $ref: "#/components/schemas/GraceCell"
+        red:
+          $ref: "#/components/schemas/GraceCell"
     TurnaroundSettings:
       type: object
-      description: App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace bands keyed by canonical activity code, plus optional sparse per-project overrides.
+      description: App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace cells keyed by canonical activity code, plus optional sparse per-project overrides.
       properties:
         activities:
           type: object
           additionalProperties:
-            $ref: "#/components/schemas/ActivityGrace"
+            $ref: "#/components/schemas/ActivityConfig"
           description: Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
         perProject:
           type: object
           additionalProperties:
             type: object
             additionalProperties:
-              $ref: "#/components/schemas/PartialActivityGrace"
+              $ref: "#/components/schemas/PartialActivityConfig"
           description: >
             Sparse per-project overrides keyed by project (Job) then canonical
-            activity code. Only overridden fields are stored; everything else
-            inherits `activities`.
+            activity code. Only overridden cells/fields are stored; everything
+            else inherits `activities`.
       required:
         - activities
     ReviewRequest:

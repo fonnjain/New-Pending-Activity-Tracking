@@ -7,7 +7,7 @@
  */
 
 export * from './acceptedSuggestion';
-export * from './activityGrace';
+export * from './activityConfig';
 export * from './aiStatus';
 export * from './authCredentials';
 export * from './authStatus';
@@ -19,11 +19,13 @@ export * from './commitRequest';
 export * from './compareImportsParams';
 export * from './deleteAllResult';
 export * from './errorResponse';
+export * from './graceCell';
+export * from './graceCellMode';
 export * from './healthStatus';
 export * from './import';
 export * from './importUpload';
 export * from './parseSummary';
-export * from './partialActivityGrace';
+export * from './partialActivityConfig';
 export * from './record';
 export * from './reportAction';
 export * from './reportActionEffort';

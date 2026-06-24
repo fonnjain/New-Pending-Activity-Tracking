@@ -16,17 +16,41 @@ import * as zod from 'zod';
 export const GetSettingsResponse = zod.object({
   "activities": zod.record(zod.string(), zod.object({
   "idealDays": zod.number().describe('Ideal days for this single activity (feeds the cumulative target).'),
-  "yellowGrace": zod.number().describe('Overrun (days beyond the cumulative target) up to which the alert stays Yellow.'),
-  "orangeGrace": zod.number().describe('Overrun up to which the alert is Orange; beyond this is Red.'),
-  "redGrace": zod.number().describe('Upper edge of Orange (yellowGrace <= orangeGrace <= redGrace); overrun past Orange is Red.')
-}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace\/orangeGrace\/redGrace are the day-overruns BEYOND that activity\'s cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.\n')).describe('Global (\"All Projects\") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).'),
+  "yellow": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n'),
+  "orange": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n'),
+  "red": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n')
+}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellow\/orange\/red are grace-band CELLS (auto\/manual). Resolved effective grace is validated non-negative with yellow <= orange <= red.\n')).describe('Global (\"All Projects\") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).'),
   "perProject": zod.record(zod.string(), zod.record(zod.string(), zod.object({
   "idealDays": zod.number().optional().describe('Override ideal days for this activity (feeds the cumulative target).'),
-  "yellowGrace": zod.number().optional().describe('Override yellow grace (overrun days beyond the cumulative target).'),
-  "orangeGrace": zod.number().optional().describe('Override orange grace; beyond this is Red.'),
-  "redGrace": zod.number().optional().describe('Override upper edge of Orange.')
-}).describe('Sparse per-project override of any subset of grace fields. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value. All fields optional.\n'))).optional().describe('Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden fields are stored; everything else inherits `activities`.\n')
-}).describe('App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace bands keyed by canonical activity code, plus optional sparse per-project overrides.')
+  "yellow": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).optional().describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n'),
+  "orange": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).optional().describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n'),
+  "red": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).optional().describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n')
+}).describe('Sparse per-project override of any subset of {idealDays, yellow\/orange\/red cell}. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value (per cell). All fields optional.\n'))).optional().describe('Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden cells\/fields are stored; everything else inherits `activities`.\n')
+}).describe('App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace cells keyed by canonical activity code, plus optional sparse per-project overrides.')
 
 
 /**
@@ -37,32 +61,80 @@ export const GetSettingsResponse = zod.object({
 export const UpdateSettingsBody = zod.object({
   "activities": zod.record(zod.string(), zod.object({
   "idealDays": zod.number().describe('Ideal days for this single activity (feeds the cumulative target).'),
-  "yellowGrace": zod.number().describe('Overrun (days beyond the cumulative target) up to which the alert stays Yellow.'),
-  "orangeGrace": zod.number().describe('Overrun up to which the alert is Orange; beyond this is Red.'),
-  "redGrace": zod.number().describe('Upper edge of Orange (yellowGrace <= orangeGrace <= redGrace); overrun past Orange is Red.')
-}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace\/orangeGrace\/redGrace are the day-overruns BEYOND that activity\'s cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.\n')).describe('Global (\"All Projects\") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).'),
+  "yellow": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n'),
+  "orange": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n'),
+  "red": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n')
+}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellow\/orange\/red are grace-band CELLS (auto\/manual). Resolved effective grace is validated non-negative with yellow <= orange <= red.\n')).describe('Global (\"All Projects\") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).'),
   "perProject": zod.record(zod.string(), zod.record(zod.string(), zod.object({
   "idealDays": zod.number().optional().describe('Override ideal days for this activity (feeds the cumulative target).'),
-  "yellowGrace": zod.number().optional().describe('Override yellow grace (overrun days beyond the cumulative target).'),
-  "orangeGrace": zod.number().optional().describe('Override orange grace; beyond this is Red.'),
-  "redGrace": zod.number().optional().describe('Override upper edge of Orange.')
-}).describe('Sparse per-project override of any subset of grace fields. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value. All fields optional.\n'))).optional().describe('Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden fields are stored; everything else inherits `activities`.\n')
-}).describe('App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace bands keyed by canonical activity code, plus optional sparse per-project overrides.')
+  "yellow": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).optional().describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n'),
+  "orange": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).optional().describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n'),
+  "red": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).optional().describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n')
+}).describe('Sparse per-project override of any subset of {idealDays, yellow\/orange\/red cell}. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value (per cell). All fields optional.\n'))).optional().describe('Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden cells\/fields are stored; everything else inherits `activities`.\n')
+}).describe('App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace cells keyed by canonical activity code, plus optional sparse per-project overrides.')
 
 export const UpdateSettingsResponse = zod.object({
   "activities": zod.record(zod.string(), zod.object({
   "idealDays": zod.number().describe('Ideal days for this single activity (feeds the cumulative target).'),
-  "yellowGrace": zod.number().describe('Overrun (days beyond the cumulative target) up to which the alert stays Yellow.'),
-  "orangeGrace": zod.number().describe('Overrun up to which the alert is Orange; beyond this is Red.'),
-  "redGrace": zod.number().describe('Upper edge of Orange (yellowGrace <= orangeGrace <= redGrace); overrun past Orange is Red.')
-}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellowGrace\/orangeGrace\/redGrace are the day-overruns BEYOND that activity\'s cumulative target at which the alert escalates. Validated non-negative with yellowGrace <= orangeGrace <= redGrace.\n')).describe('Global (\"All Projects\") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).'),
+  "yellow": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n'),
+  "orange": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n'),
+  "red": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n')
+}).describe('Per-activity turnaround configuration. idealDays feeds the cumulative target; yellow\/orange\/red are grace-band CELLS (auto\/manual). Resolved effective grace is validated non-negative with yellow <= orange <= red.\n')).describe('Global (\"All Projects\") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).'),
   "perProject": zod.record(zod.string(), zod.record(zod.string(), zod.object({
   "idealDays": zod.number().optional().describe('Override ideal days for this activity (feeds the cumulative target).'),
-  "yellowGrace": zod.number().optional().describe('Override yellow grace (overrun days beyond the cumulative target).'),
-  "orangeGrace": zod.number().optional().describe('Override orange grace; beyond this is Red.'),
-  "redGrace": zod.number().optional().describe('Override upper edge of Orange.')
-}).describe('Sparse per-project override of any subset of grace fields. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value. All fields optional.\n'))).optional().describe('Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden fields are stored; everything else inherits `activities`.\n')
-}).describe('App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace bands keyed by canonical activity code, plus optional sparse per-project overrides.')
+  "yellow": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).optional().describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n'),
+  "orange": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).optional().describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n'),
+  "red": zod.object({
+  "mode": zod.enum(['auto', 'manual']).describe('auto = derive from percent of ideal days; manual = pinned value.'),
+  "percent": zod.number().optional().describe('AUTO only — percent of this activity\'s ideal days.'),
+  "value": zod.number().optional().describe('MANUAL only — pinned grace days (overrun beyond the cumulative target).')
+}).optional().describe('One grace band cell. MANUAL pins a typed `value` (days); AUTO derives the grace from `percent` of THIS activity\'s own ideal days (effective = round(percent\/100 \* idealDays)). `mode` decides which is effective; both fields may be present so toggling auto<->manual remembers the last percentage\/value.\n')
+}).describe('Sparse per-project override of any subset of {idealDays, yellow\/orange\/red cell}. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value (per cell). All fields optional.\n'))).optional().describe('Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden cells\/fields are stored; everything else inherits `activities`.\n')
+}).describe('App-level turnaround-warning configuration. Singleton; global per-activity ideal days and grace cells keyed by canonical activity code, plus optional sparse per-project overrides.')
 
 
 /**

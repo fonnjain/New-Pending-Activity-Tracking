@@ -92,11 +92,45 @@ export function sortActivities<T extends string | null | undefined>(codes: T[]):
 // without re-importing.
 
 // Per-activity turnaround configuration. `idealDays` feeds the cumulative
-// target; `yellowGrace`/`orangeGrace`/`redGrace` are the day-overruns BEYOND
-// that activity's cumulative target at which the alert escalates. Each activity
-// carries its OWN grace (no global rule, no multipliers). `redGrace` is the
-// upper edge of orange (validated yellowGrace <= orangeGrace <= redGrace);
-// anything past orange is red.
+// target. Each grace band (yellow/orange/red) is a CELL that is either MANUAL
+// (a pinned day value) or AUTO (derived as a percentage of THIS activity's own
+// ideal days). The resolved/effective grace days are computed at read time
+// (resolveActivityGrace); ordering (yellow <= orange <= red) is enforced on the
+// resolved row, never on the stored cells (an auto cell depends on idealDays).
+export type GraceMode = "auto" | "manual";
+
+// One grace band cell. `mode` decides which field is effective; both are kept so
+// toggling auto<->manual remembers the last percentage/value.
+export interface GraceCell {
+  mode: GraceMode;
+  // AUTO: percent of this activity's ideal days. effective = round(percent/100 * idealDays).
+  percent?: number;
+  // MANUAL: pinned grace days (overrun beyond the cumulative target).
+  value?: number;
+}
+
+// Full per-activity config: ideal days plus the three band cells.
+export interface ActivityConfig {
+  idealDays: number;
+  yellow: GraceCell;
+  orange: GraceCell;
+  red: GraceCell;
+}
+
+// A sparse per-project override. Any field present REPLACES the global value for
+// that (project, activity); any field absent INHERITS the global cell/ideal.
+// Whole rows/projects may be omitted entirely. Inheritance is PER CELL.
+export interface PartialActivityConfig {
+  idealDays?: number;
+  yellow?: GraceCell;
+  orange?: GraceCell;
+  red?: GraceCell;
+}
+
+// The RESOLVED, effective numeric grace for one (project, activity): plain day
+// values consumed by the cumulative-target + status math. This is the shape the
+// rest of the engine and the consumers work with; the stored cells above are an
+// editor/persistence detail resolved into this by resolveActivityGrace.
 export interface ActivityGrace {
   idealDays: number;
   yellowGrace: number;
@@ -104,23 +138,13 @@ export interface ActivityGrace {
   redGrace: number;
 }
 
-// A sparse per-project override. Any field present REPLACES the global value for
-// that (project, activity); any field absent INHERITS the global value. Whole
-// rows/projects may be omitted entirely.
-export interface PartialActivityGrace {
-  idealDays?: number;
-  yellowGrace?: number;
-  orangeGrace?: number;
-  redGrace?: number;
-}
-
 export interface TurnaroundSettings {
   // GLOBAL ("All Projects") per-activity config keyed by canonical activity code
   // (PROCESS_SEQUENCE). Applies to any project without its own override.
-  activities: Record<string, ActivityGrace>;
-  // Sparse per-project overrides: project -> activity code -> partial grace.
-  // Only overridden fields are stored; everything else inherits `activities`.
-  perProject?: Record<string, Record<string, PartialActivityGrace>>;
+  activities: Record<string, ActivityConfig>;
+  // Sparse per-project overrides: project -> activity code -> partial config.
+  // Only overridden cells/fields are stored; everything else inherits `activities`.
+  perProject?: Record<string, Record<string, PartialActivityConfig>>;
 }
 
 // green: at/under target. yellow/orange/red: increasing overrun. na: no defined
@@ -139,16 +163,18 @@ const DEFAULT_YELLOW_GRACE = 7;
 const DEFAULT_ORANGE_GRACE = 21;
 const DEFAULT_RED_GRACE = 21;
 
-export const DEFAULT_ACTIVITY_GRACE: ActivityGrace = {
+// Defaults preserve the prior behaviour: MANUAL grace cells at 7/21/21 days
+// (percentages start unset / auto-off until the user opts a cell into a %).
+export const DEFAULT_ACTIVITY_CONFIG: ActivityConfig = {
   idealDays: DEFAULT_IDEAL_DAY,
-  yellowGrace: DEFAULT_YELLOW_GRACE,
-  orangeGrace: DEFAULT_ORANGE_GRACE,
-  redGrace: DEFAULT_RED_GRACE,
+  yellow: { mode: "manual", value: DEFAULT_YELLOW_GRACE },
+  orange: { mode: "manual", value: DEFAULT_ORANGE_GRACE },
+  red: { mode: "manual", value: DEFAULT_RED_GRACE },
 };
 
 export const DEFAULT_TURNAROUND_SETTINGS: TurnaroundSettings = {
   activities: Object.fromEntries(
-    PROCESS_SEQUENCE.map((step) => [step, { ...DEFAULT_ACTIVITY_GRACE }]),
+    PROCESS_SEQUENCE.map((step) => [step, cloneConfig(DEFAULT_ACTIVITY_CONFIG)]),
   ),
 };
 
@@ -162,9 +188,58 @@ function num(v: unknown, fallback: number): number {
   return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : fallback;
 }
 
-// Clamp a grace row to non-negative integers and enforce the ordering invariant
-// yellowGrace <= orangeGrace <= redGrace by raising later bands as needed
-// (deterministic auto-correct, so a transient inverted edit can never persist).
+function pInt(v: unknown, fallback: number): number {
+  const n = typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : fallback;
+  return Math.max(0, Math.round(n));
+}
+
+function optInt(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0
+    ? Math.max(0, Math.round(v))
+    : undefined;
+}
+
+function cloneCell(c: GraceCell): GraceCell {
+  return { ...c };
+}
+
+function cloneConfig(c: ActivityConfig): ActivityConfig {
+  return {
+    idealDays: c.idealDays,
+    yellow: cloneCell(c.yellow),
+    orange: cloneCell(c.orange),
+    red: cloneCell(c.red),
+  };
+}
+
+// Resolve ONE grace band cell to effective overrun-days for a given ideal-days.
+// MANUAL -> the pinned value; AUTO -> round(percent/100 * idealDays). Missing
+// percent/value are treated as 0 (never NaN).
+export function resolveCell(
+  cell: GraceCell | undefined,
+  idealDays: number,
+): number {
+  if (!cell) return 0;
+  if (cell.mode === "auto") {
+    const pct =
+      typeof cell.percent === "number" &&
+      Number.isFinite(cell.percent) &&
+      cell.percent >= 0
+        ? cell.percent
+        : 0;
+    return Math.max(0, Math.round((pct / 100) * Math.max(0, idealDays)));
+  }
+  return typeof cell.value === "number" &&
+    Number.isFinite(cell.value) &&
+    cell.value >= 0
+    ? Math.round(cell.value)
+    : 0;
+}
+
+// Clamp a RESOLVED numeric grace row to non-negative integers and enforce the
+// ordering invariant yellowGrace <= orangeGrace <= redGrace by raising later
+// bands as needed (deterministic auto-correct, so an inverted auto-fill or edit
+// can never mislabel).
 export function normalizeGrace(g: ActivityGrace): ActivityGrace {
   const idealDays = Math.max(0, Math.round(g.idealDays));
   const yellowGrace = Math.max(0, Math.round(g.yellowGrace));
@@ -173,26 +248,70 @@ export function normalizeGrace(g: ActivityGrace): ActivityGrace {
   return { idealDays, yellowGrace, orangeGrace, redGrace };
 }
 
-const GRACE_FIELDS = [
-  "idealDays",
-  "yellowGrace",
-  "orangeGrace",
-  "redGrace",
-] as const;
+// Sanitize a raw stored cell. Accepts the new {mode,percent,value} shape OR a
+// bare number (previous numeric grace -> MANUAL with that value). Keeps both
+// percent and value when present so auto<->manual toggles remember each other.
+function migrateCell(raw: unknown, fallbackValue: number): GraceCell {
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    const percent = optInt(o.percent);
+    const value = optInt(o.value);
+    if (o.mode === "auto") {
+      const cell: GraceCell = { mode: "auto", percent: percent ?? 0 };
+      if (value !== undefined) cell.value = value;
+      return cell;
+    }
+    const cell: GraceCell = { mode: "manual", value: value ?? fallbackValue };
+    if (percent !== undefined) cell.percent = percent;
+    return cell;
+  }
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return { mode: "manual", value: Math.max(0, Math.round(raw)) };
+  }
+  return { mode: "manual", value: fallbackValue };
+}
 
-// Clamp a SPARSE override to non-negative integers, keeping ONLY the fields that
-// are actually present. The ordering invariant (yellow <= orange <= red) is NOT
-// enforced here because the row is partial — it is enforced after merging with
-// the global row in `resolveActivityGrace`.
-export function normalizePartialGrace(
-  raw: unknown,
-): PartialActivityGrace {
-  const obj = (raw ?? {}) as Record<string, unknown>;
-  const out: PartialActivityGrace = {};
-  for (const f of GRACE_FIELDS) {
-    const v = obj[f];
-    if (typeof v === "number" && Number.isFinite(v)) {
-      out[f] = Math.max(0, Math.round(v));
+// Pick a band cell from a raw per-activity object: prefer the new cell object
+// (`yellow`), else the previous numeric field (`yellowGrace`), else fallback.
+function cellFor(
+  p: Record<string, unknown> | undefined,
+  cellKey: string,
+  numKey: string,
+  fallback: number,
+): GraceCell {
+  const rawCell = p?.[cellKey];
+  if (rawCell && typeof rawCell === "object")
+    return migrateCell(rawCell, fallback);
+  const n = p?.[numKey];
+  if (typeof n === "number" && Number.isFinite(n)) {
+    return { mode: "manual", value: Math.max(0, Math.round(n)) };
+  }
+  return { mode: "manual", value: fallback };
+}
+
+// Sanitize a SPARSE per-project override row, keeping ONLY present fields. Each
+// band, if present, is a full cell (new shape) or a number (previous shape ->
+// MANUAL). Ordering is NOT enforced here (the row is partial + cells are
+// mode-dependent); it is enforced after resolution in resolveActivityGrace.
+function normalizePartialConfig(raw: unknown): PartialActivityConfig {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const out: PartialActivityConfig = {};
+  const ideal = optInt(o.idealDays);
+  if (ideal !== undefined) out.idealDays = ideal;
+  const bands = [
+    ["yellow", "yellowGrace"],
+    ["orange", "orangeGrace"],
+    ["red", "redGrace"],
+  ] as const;
+  for (const [cellKey, numKey] of bands) {
+    const rawCell = o[cellKey];
+    if (rawCell && typeof rawCell === "object") {
+      out[cellKey] = migrateCell(rawCell, 0);
+    } else if (typeof o[numKey] === "number" && Number.isFinite(o[numKey])) {
+      out[cellKey] = {
+        mode: "manual",
+        value: Math.max(0, Math.round(o[numKey] as number)),
+      };
     }
   }
   return out;
@@ -202,16 +321,16 @@ export function normalizePartialGrace(
 // present fields, and drop empty rows/projects so the stored shape stays minimal.
 function migratePerProject(
   raw: unknown,
-): Record<string, Record<string, PartialActivityGrace>> {
+): Record<string, Record<string, PartialActivityConfig>> {
   const obj = (raw ?? {}) as Record<string, unknown>;
-  const out: Record<string, Record<string, PartialActivityGrace>> = {};
+  const out: Record<string, Record<string, PartialActivityConfig>> = {};
   for (const [project, acts] of Object.entries(obj)) {
     if (!project || !acts || typeof acts !== "object") continue;
-    const cleanedActs: Record<string, PartialActivityGrace> = {};
+    const cleanedActs: Record<string, PartialActivityConfig> = {};
     for (const step of PROCESS_SEQUENCE) {
       const cell = (acts as Record<string, unknown>)[step];
       if (!cell || typeof cell !== "object") continue;
-      const cleaned = normalizePartialGrace(cell);
+      const cleaned = normalizePartialConfig(cell);
       if (Object.keys(cleaned).length > 0) cleanedActs[step] = cleaned;
     }
     if (Object.keys(cleanedActs).length > 0) out[project] = cleanedActs;
@@ -219,37 +338,46 @@ function migratePerProject(
   return out;
 }
 
-// Resolve the EFFECTIVE grace for one (project, activity): start from the global
-// row, replace any field the project overrides, then enforce the ordering
-// invariant on the merged row. With no project (or no override) this is just the
-// global row. This is the single resolution point used by targets + status.
+// Resolve the EFFECTIVE numeric grace for one (project, activity). Per-cell
+// inheritance: a band the project overrides resolves against the project's
+// effective ideal days; an inherited (global) band resolves against the global
+// ideal days. AUTO cells derive from their percentage; MANUAL cells use their
+// pinned value. The merged row is then ordering-normalized (yellow<=orange<=red).
+// With no project (or no override) this is just the global row resolved.
 export function resolveActivityGrace(
   settings: TurnaroundSettings,
   project: string | null | undefined,
   step: ProcessStep,
 ): ActivityGrace {
-  const base = settings.activities[step] ?? DEFAULT_ACTIVITY_GRACE;
+  const base = settings.activities[step] ?? DEFAULT_ACTIVITY_CONFIG;
   const ov = project ? settings.perProject?.[project]?.[step] : undefined;
-  if (!ov) return base;
+  const globalIdeal = base.idealDays;
+  const effIdeal = ov?.idealDays ?? globalIdeal;
+
+  const band = (key: "yellow" | "orange" | "red"): number => {
+    const oc = ov?.[key];
+    if (oc) return resolveCell(oc, effIdeal);
+    return resolveCell(base[key], globalIdeal);
+  };
+
   return normalizeGrace({
-    idealDays: ov.idealDays ?? base.idealDays,
-    yellowGrace: ov.yellowGrace ?? base.yellowGrace,
-    orangeGrace: ov.orangeGrace ?? base.orangeGrace,
-    redGrace: ov.redGrace ?? base.redGrace,
+    idealDays: effIdeal,
+    yellowGrace: band("yellow"),
+    orangeGrace: band("orange"),
+    redGrace: band("red"),
   });
 }
 
 // Normalize any stored/legacy settings object into the current per-activity
-// shape. Accepts the new `{activities}` shape OR the legacy
-// `{idealDays, yellowMax, orangeMax, overrides}` shape (global bands +
-// per-activity overrides). For legacy data it keeps the ideal days and seeds
-// each activity's yellow/orange grace from the global value (or its override)
-// and red = orange, so behaviour is unchanged until the user edits per-activity.
+// shape. Accepts the NEW cell shape (`activities[step].{yellow,orange,red}` =
+// {mode,percent,value}), the PREVIOUS numeric shape (`yellowGrace`/`orangeGrace`/
+// `redGrace` numbers -> MANUAL cells), and the oldest flat shape
+// (`{idealDays, yellowMax, orangeMax, overrides}` -> MANUAL cells seeded from the
+// global bands, red = orange). Existing explicit grace values therefore become
+// MANUAL cells, preserving behaviour until the user opts a cell into a percentage.
 export function migrateTurnaroundSettings(raw: unknown): TurnaroundSettings {
   const obj = (raw ?? {}) as Record<string, unknown>;
-  const provided = obj.activities as
-    | Record<string, Partial<ActivityGrace>>
-    | undefined;
+  const provided = obj.activities as Record<string, unknown> | undefined;
   const legacyIdeal = obj.idealDays as Record<string, number> | undefined;
   const legacyYellow =
     typeof obj.yellowMax === "number" ? obj.yellowMax : undefined;
@@ -260,27 +388,22 @@ export function migrateTurnaroundSettings(raw: unknown): TurnaroundSettings {
     { yellowMax?: number; orangeMax?: number }
   >;
 
-  const activities: Record<string, ActivityGrace> = {};
+  const activities: Record<string, ActivityConfig> = {};
   for (const step of PROCESS_SEQUENCE) {
-    const p = provided?.[step];
-    if (p && typeof p === "object") {
-      const orange = num(p.orangeGrace, DEFAULT_ORANGE_GRACE);
-      activities[step] = normalizeGrace({
-        idealDays: num(p.idealDays, DEFAULT_IDEAL_DAY),
-        yellowGrace: num(p.yellowGrace, DEFAULT_YELLOW_GRACE),
-        orangeGrace: orange,
-        redGrace: num(p.redGrace, orange),
-      });
-    } else {
-      const ov = legacyOverrides[step];
-      const orange = num(ov?.orangeMax ?? legacyOrange, DEFAULT_ORANGE_GRACE);
-      activities[step] = normalizeGrace({
-        idealDays: num(legacyIdeal?.[step], DEFAULT_IDEAL_DAY),
-        yellowGrace: num(ov?.yellowMax ?? legacyYellow, DEFAULT_YELLOW_GRACE),
-        orangeGrace: orange,
-        redGrace: orange,
-      });
-    }
+    const rawP = provided?.[step];
+    const p =
+      rawP && typeof rawP === "object"
+        ? (rawP as Record<string, unknown>)
+        : undefined;
+    const ov = legacyOverrides[step];
+    const orange = num(ov?.orangeMax ?? legacyOrange, DEFAULT_ORANGE_GRACE);
+    const yellow = num(ov?.yellowMax ?? legacyYellow, DEFAULT_YELLOW_GRACE);
+    activities[step] = {
+      idealDays: pInt(p?.idealDays, num(legacyIdeal?.[step], DEFAULT_IDEAL_DAY)),
+      yellow: cellFor(p, "yellow", "yellowGrace", yellow),
+      orange: cellFor(p, "orange", "orangeGrace", orange),
+      red: cellFor(p, "red", "redGrace", orange),
+    };
   }
   return { activities, perProject: migratePerProject(obj.perProject) };
 }

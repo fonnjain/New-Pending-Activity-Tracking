@@ -9,28 +9,36 @@ import { pgTable, text, jsonb, timestamp } from "drizzle-orm/pg-core";
 // computed record field.
 export const SETTINGS_SINGLETON_ID = "default";
 
-export type ActivityGrace = {
-  idealDays: number;
-  yellowGrace: number;
-  orangeGrace: number;
-  redGrace: number;
+// One grace band cell: MANUAL (pinned `value`) or AUTO (percent of this
+// activity's ideal days). Resolved to effective days by the domain engine.
+export type GraceCell = {
+  mode: "auto" | "manual";
+  percent?: number;
+  value?: number;
 };
 
-// Sparse per-project override of any subset of grace fields. Absent fields
-// inherit the global `activities` value.
-export type PartialActivityGrace = Partial<ActivityGrace>;
+export type ActivityConfig = {
+  idealDays: number;
+  yellow: GraceCell;
+  orange: GraceCell;
+  red: GraceCell;
+};
+
+// Sparse per-project override of any subset of {idealDays, yellow/orange/red
+// cell}. Absent fields inherit the global `activities` value (per cell).
+export type PartialActivityConfig = Partial<ActivityConfig>;
 
 export const settingsTable = pgTable("settings", {
   id: text("id").primaryKey(),
   // GLOBAL ("All Projects") per-activity config keyed by canonical activity code
-  // (PROCESS_SEQUENCE): ideal days + yellow/orange/red grace days.
+  // (PROCESS_SEQUENCE): ideal days + yellow/orange/red grace cells.
   activities: jsonb("activities")
-    .$type<Record<string, ActivityGrace>>()
+    .$type<Record<string, ActivityConfig>>()
     .notNull(),
-  // Sparse per-project overrides: project -> activity code -> partial grace.
-  // Only overridden fields are stored; everything else inherits `activities`.
+  // Sparse per-project overrides: project -> activity code -> partial config.
+  // Only overridden cells/fields are stored; everything else inherits `activities`.
   perProject: jsonb("per_project")
-    .$type<Record<string, Record<string, PartialActivityGrace>>>()
+    .$type<Record<string, Record<string, PartialActivityConfig>>>()
     .notNull()
     .default({}),
   updatedAt: timestamp("updated_at", { withTimezone: true })

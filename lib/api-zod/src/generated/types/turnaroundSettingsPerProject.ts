@@ -5,10 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { PartialActivityGrace } from './partialActivityGrace';
+import type { PartialActivityConfig } from './partialActivityConfig';
 
 /**
- * Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden fields are stored; everything else inherits `activities`.
+ * Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden cells/fields are stored; everything else inherits `activities`.
 
  */
-export type TurnaroundSettingsPerProject = {[key: string]: {[key: string]: PartialActivityGrace}};
+export type TurnaroundSettingsPerProject = {[key: string]: {[key: string]: PartialActivityConfig}};

@@ -1,0 +1,48 @@
+REPLIT AGENT PROMPT — REMAP ALERT COLOURS (Yellow->Light Blue, Orange->Grey, Red->Black)
+=========================================================================================
+Change the alert colour palette of the turnaround warning system. Colour/display only —
+do NOT change any threshold logic, the overrun/status bands, cumulative targets, ageing,
+or which marks fall into which status. Only the colours used to render each status change.
+
+NEW COLOUR MAPPING (keep the STATUS NAMES/logic the same; change only the rendered colour)
+  - GREEN  status  -> stays GREEN (unchanged).
+  - YELLOW status  -> render as LIGHT BLUE.
+  - ORANGE status  -> render as GREY.
+  - RED    status  -> render as BLACK.
+Apply consistently EVERYWHERE the status colour appears: the Overview summary strip/chips,
+the per-activity breakdown, the Orange+Red drill list, the Ageing dashboard table cells,
+Activity drill tables, any charts/legends/stacked bars keyed by status, and any status
+badges. Update the legend labels' swatch colours to match.
+
+DISAMBIGUATE n/a (important — Orange is now grey, and n/a was also grey)
+  - The "n/a" status (no-ageing marks: blank last_production_date "Not started"/"No
+    production date", and out-of-sequence activities like BL/NTF/NTFSW) must NOT look like
+    the new ORANGE=grey. Give n/a a DISTINCT neutral that reads as "no data", clearly
+    different from the solid grey used for Orange. Use a faded/desaturated treatment, e.g.
+    a light slate / hatched or striped fill / outline-only style with reduced opacity, and
+    label it "n/a" / "No ageing" in the legend. The key requirement: a user can instantly
+    tell an ORANGE breach (solid grey) apart from a no-data n/a cell.
+
+CONTRAST / READABILITY
+  - BLACK (Red status): ensure text/labels on black cells are light/white so values stay
+    readable; in legends and chips use a black swatch with a clear "Red / Critical" label
+    so the meaning is obvious despite the black colour.
+  - LIGHT BLUE (Yellow status): pick a light blue distinct from any existing blue used in
+    the app (e.g. selection/links) so it isn't confused with non-alert UI.
+  - GREY (Orange status): a solid mid-grey, clearly different from the faded n/a neutral.
+  - Keep colours colour-blind-reasonable where possible, but follow this mapping as given.
+
+OPTIONAL (nice to have, not required)
+  - Centralize the status->colour mapping in ONE place (a constants/theme module) so the
+    four colours + n/a neutral are defined once and reused, making future changes trivial.
+
+ACCEPTANCE CHECK
+  - Yellow-status items render light blue; Orange-status grey; Red-status black; Green
+    unchanged — everywhere status colour is shown (Overview, tables, charts, legends,
+    badges, exports' colour cues if any).
+  - n/a items render in a distinct faded neutral, clearly different from the Orange grey;
+    legend distinguishes "Orange" (solid grey) from "n/a / No ageing" (faded).
+  - Black (Red) cells keep readable (light) text; legends label each colour with its
+    status meaning.
+  - No change to thresholds, status bands, cumulative targets, ageing, or which marks are
+    in which status — colour mapping only.

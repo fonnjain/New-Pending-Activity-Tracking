@@ -5,9 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { ActivityGrace } from './activityGrace';
+import type { ActivityConfig } from './activityConfig';
 
 /**
  * Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
  */
-export type TurnaroundSettingsActivities = {[key: string]: ActivityGrace};
+export type TurnaroundSettingsActivities = {[key: string]: ActivityConfig};
