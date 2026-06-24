@@ -454,6 +454,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /imports/{id}/velocity:
+    get:
+      operationId: getImportVelocity
+      tags: [imports]
+      summary: Get per-mark velocity (pace / ETA / trend) for an import
+      description: >
+        For each mark identity in the given import, walks the preceding imports to
+        build a snapshot series (import date + activity stage + last production
+        date) and computes a deterministic VELOCITY: observed pace (days per
+        advanced stage), a pace-based ETA, the gap vs the budget target, a trend,
+        and a movement status (moving / slow / stalled / insufficient). Purely
+        additive and advisory — it never changes parsing, activity values, dedup,
+        ageing, or the alert/threshold/lifecycle math. Rolled-up project /
+        contractor / stage aggregates are included. Velocity is null per-field when
+        there is not enough history (cold start), so it degrades gracefully.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Per-identity velocity info with aggregates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VelocityResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /imports/{id}/changes:
     get:
       operationId: getImportChanges
@@ -1344,6 +1378,181 @@ components:
         - importId
         - hasHistory
         - items
+    VelocityItem:
+      type: object
+      description: Deterministic velocity for one mark identity.
+      properties:
+        markId:
+          type: string
+        jobCardNo:
+          type: ["string", "null"]
+        job:
+          type: string
+          description: Project key (record's job field).
+        contractor:
+          type: string
+        activity:
+          type: string
+          description: Current activity code at this import.
+        ageingDays:
+          type: ["integer", "null"]
+        status:
+          type: string
+          enum: [moving, slow, stalled, insufficient]
+        trend:
+          type: string
+          enum: [accelerating, steady, decelerating, stalled, unknown]
+        daysPerStage:
+          type: ["number", "null"]
+          description: Observed days per advanced stage; null when no measurable advance.
+        expectedDaysPerStage:
+          type: ["number", "null"]
+        stagesRemaining:
+          type: ["integer", "null"]
+        etaDays:
+          type: ["number", "null"]
+          description: Projected days from today to completion at the observed pace.
+        etaGap:
+          type: ["number", "null"]
+          description: etaDays minus budget days-to-target; > 0 => projected late.
+        observedWindowDays:
+          type: ["number", "null"]
+        snapshotsUsed:
+          type: integer
+        daysSinceLastMovement:
+          type: ["integer", "null"]
+        insufficientHistory:
+          type: boolean
+      required:
+        - markId
+        - jobCardNo
+        - job
+        - contractor
+        - activity
+        - ageingDays
+        - status
+        - trend
+        - daysPerStage
+        - expectedDaysPerStage
+        - stagesRemaining
+        - etaDays
+        - etaGap
+        - observedWindowDays
+        - snapshotsUsed
+        - daysSinceLastMovement
+        - insufficientHistory
+    VelocityProjectAgg:
+      type: object
+      description: Velocity roll-up for one project (job).
+      properties:
+        project:
+          type: string
+        markCount:
+          type: integer
+        stalledCount:
+          type: integer
+        slowCount:
+          type: integer
+        movingCount:
+          type: integer
+        insufficientCount:
+          type: integer
+        avgDaysPerStage:
+          type: ["number", "null"]
+        avgEtaGap:
+          type: ["number", "null"]
+        stuckScore:
+          type: number
+          description: Weighted share of stalled + slow marks (0..1) — higher = more stuck.
+      required:
+        - project
+        - markCount
+        - stalledCount
+        - slowCount
+        - movingCount
+        - insufficientCount
+        - avgDaysPerStage
+        - avgEtaGap
+        - stuckScore
+    VelocityContractorAgg:
+      type: object
+      description: Velocity roll-up for one contractor.
+      properties:
+        contractor:
+          type: string
+        markCount:
+          type: integer
+        stalledCount:
+          type: integer
+        slowCount:
+          type: integer
+        avgDaysPerStage:
+          type: ["number", "null"]
+        avgEtaGap:
+          type: ["number", "null"]
+      required:
+        - contractor
+        - markCount
+        - stalledCount
+        - slowCount
+        - avgDaysPerStage
+        - avgEtaGap
+    VelocityStageAgg:
+      type: object
+      description: Velocity roll-up for one process stage (activity).
+      properties:
+        activity:
+          type: string
+        markCount:
+          type: integer
+        stalledCount:
+          type: integer
+        slowCount:
+          type: integer
+        avgDaysPerStage:
+          type: ["number", "null"]
+      required:
+        - activity
+        - markCount
+        - stalledCount
+        - slowCount
+        - avgDaysPerStage
+    VelocityResponse:
+      type: object
+      description: Per-identity velocity info with project / contractor / stage aggregates.
+      properties:
+        importId:
+          type: integer
+        hasHistory:
+          type: boolean
+          description: True when at least one earlier import exists to compare against.
+        windowReports:
+          type: integer
+          description: Number of imports walked to build the snapshot series.
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/VelocityItem"
+        projects:
+          type: array
+          items:
+            $ref: "#/components/schemas/VelocityProjectAgg"
+        contractors:
+          type: array
+          items:
+            $ref: "#/components/schemas/VelocityContractorAgg"
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/VelocityStageAgg"
+      required:
+        - importId
+        - hasHistory
+        - windowReports
+        - items
+        - projects
+        - contractors
+        - stages
     ReviewRequest:
       type: object
       properties:

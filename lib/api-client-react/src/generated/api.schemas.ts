@@ -459,6 +459,129 @@ export interface MovementResponse {
   items: MovementItem[];
 }
 
+export type VelocityItemStatus = typeof VelocityItemStatus[keyof typeof VelocityItemStatus];
+
+
+export const VelocityItemStatus = {
+  moving: 'moving',
+  slow: 'slow',
+  stalled: 'stalled',
+  insufficient: 'insufficient',
+} as const;
+
+export type VelocityItemTrend = typeof VelocityItemTrend[keyof typeof VelocityItemTrend];
+
+
+export const VelocityItemTrend = {
+  accelerating: 'accelerating',
+  steady: 'steady',
+  decelerating: 'decelerating',
+  stalled: 'stalled',
+  unknown: 'unknown',
+} as const;
+
+/**
+ * Deterministic velocity for one mark identity.
+ */
+export interface VelocityItem {
+  markId: string;
+  /** @nullable */
+  jobCardNo: string | null;
+  /** Project key (record's job field). */
+  job: string;
+  contractor: string;
+  /** Current activity code at this import. */
+  activity: string;
+  /** @nullable */
+  ageingDays: number | null;
+  status: VelocityItemStatus;
+  trend: VelocityItemTrend;
+  /**
+     * Observed days per advanced stage; null when no measurable advance.
+     * @nullable
+     */
+  daysPerStage: number | null;
+  /** @nullable */
+  expectedDaysPerStage: number | null;
+  /** @nullable */
+  stagesRemaining: number | null;
+  /**
+     * Projected days from today to completion at the observed pace.
+     * @nullable
+     */
+  etaDays: number | null;
+  /**
+     * etaDays minus budget days-to-target; > 0 => projected late.
+     * @nullable
+     */
+  etaGap: number | null;
+  /** @nullable */
+  observedWindowDays: number | null;
+  snapshotsUsed: number;
+  /** @nullable */
+  daysSinceLastMovement: number | null;
+  insufficientHistory: boolean;
+}
+
+/**
+ * Velocity roll-up for one project (job).
+ */
+export interface VelocityProjectAgg {
+  project: string;
+  markCount: number;
+  stalledCount: number;
+  slowCount: number;
+  movingCount: number;
+  insufficientCount: number;
+  /** @nullable */
+  avgDaysPerStage: number | null;
+  /** @nullable */
+  avgEtaGap: number | null;
+  /** Weighted share of stalled + slow marks (0..1) — higher = more stuck. */
+  stuckScore: number;
+}
+
+/**
+ * Velocity roll-up for one contractor.
+ */
+export interface VelocityContractorAgg {
+  contractor: string;
+  markCount: number;
+  stalledCount: number;
+  slowCount: number;
+  /** @nullable */
+  avgDaysPerStage: number | null;
+  /** @nullable */
+  avgEtaGap: number | null;
+}
+
+/**
+ * Velocity roll-up for one process stage (activity).
+ */
+export interface VelocityStageAgg {
+  activity: string;
+  markCount: number;
+  stalledCount: number;
+  slowCount: number;
+  /** @nullable */
+  avgDaysPerStage: number | null;
+}
+
+/**
+ * Per-identity velocity info with project / contractor / stage aggregates.
+ */
+export interface VelocityResponse {
+  importId: number;
+  /** True when at least one earlier import exists to compare against. */
+  hasHistory: boolean;
+  /** Number of imports walked to build the snapshot series. */
+  windowReports: number;
+  items: VelocityItem[];
+  projects: VelocityProjectAgg[];
+  contractors: VelocityContractorAgg[];
+  stages: VelocityStageAgg[];
+}
+
 export interface ReviewRequest {
   /** The import to review. */
   importId: number;

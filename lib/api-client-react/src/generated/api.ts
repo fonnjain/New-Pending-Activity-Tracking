@@ -43,7 +43,8 @@ import type {
   TurnaroundSettings,
   UploadResult,
   ValidateRequest,
-  ValidationResult
+  ValidationResult,
+  VelocityResponse
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1422,6 +1423,85 @@ export function useGetImportMovement<TData = Awaited<ReturnType<typeof getImport
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetImportMovementQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetImportVelocityUrl = (id: number,) => {
+
+
+
+
+  return `/api/imports/${id}/velocity`
+}
+
+/**
+ * For each mark identity in the given import, walks the preceding imports to build a snapshot series (import date + activity stage + last production date) and computes a deterministic VELOCITY: observed pace (days per advanced stage), a pace-based ETA, the gap vs the budget target, a trend, and a movement status (moving / slow / stalled / insufficient). Purely additive and advisory — it never changes parsing, activity values, dedup, ageing, or the alert/threshold/lifecycle math. Rolled-up project / contractor / stage aggregates are included. Velocity is null per-field when there is not enough history (cold start), so it degrades gracefully.
+
+ * @summary Get per-mark velocity (pace / ETA / trend) for an import
+ */
+export const getImportVelocity = async (id: number, options?: RequestInit): Promise<VelocityResponse> => {
+
+  return customFetch<VelocityResponse>(getGetImportVelocityUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetImportVelocityQueryKey = (id: number,) => {
+    return [
+    `/api/imports/${id}/velocity`
+    ] as const;
+    }
+
+
+export const getGetImportVelocityQueryOptions = <TData = Awaited<ReturnType<typeof getImportVelocity>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportVelocity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImportVelocityQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImportVelocity>>> = ({ signal }) => getImportVelocity(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImportVelocity>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetImportVelocityQueryResult = NonNullable<Awaited<ReturnType<typeof getImportVelocity>>>
+export type GetImportVelocityQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get per-mark velocity (pace / ETA / trend) for an import
+ */
+
+export function useGetImportVelocity<TData = Awaited<ReturnType<typeof getImportVelocity>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportVelocity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetImportVelocityQueryOptions(id,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

@@ -9,6 +9,8 @@ import {
   recordPoolTable,
   importRowsTable,
   uploadStagingTable,
+  settingsTable,
+  SETTINGS_SINGLETON_ID,
   type InsertRecordPool,
   type ChangeSummary,
   type RecordPoolRow,
@@ -18,9 +20,18 @@ import {
   GetImportRecordsParams,
   GetImportChangesParams,
   GetImportMovementParams,
+  GetImportVelocityParams,
   DeleteImportParams,
   CompareImportsQueryParams,
 } from "@workspace/api-zod";
+import {
+  activityRank,
+  isKnownActivity,
+  migrateTurnaroundSettings,
+  velocityForMark,
+  type VelocitySnapshot,
+  type TurnaroundSettings,
+} from "@workspace/domain";
 import {
   parseWorkbook,
   readStructural,
@@ -1055,6 +1066,303 @@ router.get("/imports/:id/movement", async (req, res): Promise<void> => {
     importId: target.id,
     hasHistory: priorImports.length > 0,
     items,
+  });
+});
+
+// Per-identity velocity projection for ONE import (no full record expansion).
+// For each mark identity it keeps a single REPRESENTATIVE row = the furthest-
+// progressed activity (max activityRank). That row's stage index, last-production
+// date, project, contractor and route remaining seed the snapshot series + the
+// current-state inputs to the velocity engine.
+interface VelocityState {
+  markId: string;
+  jobCardNo: string | null;
+  job: string;
+  contractor: string;
+  activity: string;
+  stageIndex: number;
+  lastProductionDate: string | null;
+  routeRemaining: number | null;
+}
+
+async function loadVelocityStates(
+  importId: number,
+): Promise<Map<string, VelocityState>> {
+  const rows = await db
+    .select({
+      markId: recordPoolTable.markId,
+      jobCardNo: recordPoolTable.jobCardNo,
+      job: recordPoolTable.job,
+      contractor: recordPoolTable.contractor,
+      activity: recordPoolTable.activity,
+      operation: recordPoolTable.operation,
+      lastProductionDate: recordPoolTable.lastProductionDate,
+    })
+    .from(importRowsTable)
+    .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+    .where(eq(importRowsTable.importId, importId));
+
+  const out = new Map<string, VelocityState>();
+  for (const r of rows) {
+    const key = movementIdentityKey(r.markId, r.jobCardNo);
+    const activity = (r.activity ?? "").trim();
+    const rank = activityRank(activity);
+    const existing = out.get(key);
+    // Keep the furthest-progressed row as the representative for the identity.
+    if (existing && rank <= existing.stageIndex) continue;
+    const { routeSteps, currentStepIndex } = computeRoute(
+      r.operation,
+      r.activity,
+    );
+    const routeRemaining =
+      routeSteps.length > 0 && currentStepIndex !== null
+        ? Math.max(0, routeSteps.length - 1 - currentStepIndex)
+        : null;
+    out.set(key, {
+      markId: r.markId,
+      jobCardNo: r.jobCardNo,
+      job: r.job,
+      contractor: r.contractor ?? "",
+      activity,
+      stageIndex: rank,
+      lastProductionDate: r.lastProductionDate,
+      routeRemaining,
+    });
+  }
+  return out;
+}
+
+// Epoch ms for an import's pace time-axis: report date when present, else upload
+// time (createdAt). Report date is a plain YYYY-MM-DD (treated as UTC midnight).
+function importDateMs(reportDate: string | null, createdAt: Date | string): number {
+  if (reportDate && /^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
+    const t = Date.parse(`${reportDate}T00:00:00Z`);
+    if (Number.isFinite(t)) return t;
+  }
+  return createdAt instanceof Date
+    ? createdAt.getTime()
+    : new Date(createdAt).getTime();
+}
+
+function mean(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+// Per-identity velocity (pace / ETA / trend) with project / contractor / stage
+// roll-ups. Walks prior imports once to build each mark's snapshot series, then
+// classifies via the deterministic @workspace/domain engine. Purely advisory —
+// never mutates parsing / activity / dedup / ageing / threshold math.
+router.get("/imports/:id/velocity", async (req, res): Promise<void> => {
+  const params = GetImportVelocityParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const [target] = await db
+    .select()
+    .from(importsTable)
+    .where(eq(importsTable.id, params.data.id));
+  if (!target) {
+    res.status(404).json({ error: "Import not found" });
+    return;
+  }
+
+  const [settingsRow] = await db
+    .select()
+    .from(settingsTable)
+    .where(eq(settingsTable.id, SETTINGS_SINGLETON_ID))
+    .limit(1);
+  const settings: TurnaroundSettings = migrateTurnaroundSettings(
+    settingsRow
+      ? {
+          activities: settingsRow.activities,
+          perProject: settingsRow.perProject,
+          stalledDays: settingsRow.stalledDays,
+        }
+      : {},
+  );
+
+  const current = await loadVelocityStates(target.id);
+  const currentMs = importDateMs(target.reportDate, target.createdAt);
+
+  const priorImports = await db
+    .select({
+      id: importsTable.id,
+      createdAt: importsTable.createdAt,
+      reportDate: importsTable.reportDate,
+    })
+    .from(importsTable)
+    .where(lt(importsTable.id, target.id))
+    .orderBy(desc(importsTable.id));
+
+  // Build per-identity snapshot series: seed with the current import, then layer
+  // prior imports (only while the mark still appears) for the time axis.
+  const series = new Map<string, VelocitySnapshot[]>();
+  const movementSig = new Map<string, string>();
+  const daysSinceMovement = new Map<string, number | null>();
+  const currentSigs = await loadIdentityStates(target.id);
+  for (const [key, st] of current) {
+    series.set(key, [
+      {
+        importDate: currentMs,
+        stageIndex: st.stageIndex,
+        lastProductionDate: st.lastProductionDate,
+      },
+    ]);
+    movementSig.set(key, currentSigs.get(key)?.sig ?? "");
+    daysSinceMovement.set(key, null);
+  }
+
+  const stillMatching = new Set(current.keys());
+  for (const imp of priorImports) {
+    const priorVel = await loadVelocityStates(imp.id);
+    const priorSigs = await loadIdentityStates(imp.id);
+    const ms = importDateMs(imp.reportDate, imp.createdAt);
+    const age = daysSince(imp.createdAt);
+    for (const key of current.keys()) {
+      const prior = priorVel.get(key);
+      if (prior) {
+        series.get(key)!.push({
+          importDate: ms,
+          stageIndex: prior.stageIndex,
+          lastProductionDate: prior.lastProductionDate,
+        });
+      }
+      // Stalled clock: consecutive prior imports carrying the same signature.
+      if (stillMatching.has(key)) {
+        const ps = priorSigs.get(key);
+        if (ps && ps.sig === movementSig.get(key)) {
+          daysSinceMovement.set(key, age);
+        } else {
+          stillMatching.delete(key);
+        }
+      }
+    }
+  }
+
+  const items = Array.from(current.entries()).map(([key, st]) => {
+    const ageingDays = computeAgeing(st.lastProductionDate);
+    const v = velocityForMark(
+      {
+        series: series.get(key) ?? [],
+        activity: st.activity,
+        ageingDays,
+        daysSinceLastMovement: daysSinceMovement.get(key) ?? null,
+        routeRemaining: st.routeRemaining,
+        project: st.job,
+      },
+      settings,
+    );
+    return {
+      markId: st.markId,
+      jobCardNo: st.jobCardNo,
+      job: st.job,
+      contractor: st.contractor,
+      activity: st.activity,
+      ageingDays,
+      status: v.status,
+      trend: v.trend,
+      daysPerStage: v.daysPerStage,
+      expectedDaysPerStage: v.expectedDaysPerStage,
+      stagesRemaining: v.stagesRemaining,
+      etaDays: v.etaDays,
+      etaGap: v.etaGap,
+      observedWindowDays: v.observedWindowDays,
+      snapshotsUsed: v.snapshotsUsed,
+      daysSinceLastMovement: v.daysSinceLastMovement,
+      insufficientHistory: v.insufficientHistory,
+    };
+  });
+
+  // Roll-ups. stuckScore = (stalled + 0.5*slow) / markCount (0..1).
+  type Acc = {
+    paces: number[];
+    gaps: number[];
+    stalled: number;
+    slow: number;
+    moving: number;
+    insufficient: number;
+    count: number;
+  };
+  const newAcc = (): Acc => ({
+    paces: [],
+    gaps: [],
+    stalled: 0,
+    slow: 0,
+    moving: 0,
+    insufficient: 0,
+    count: 0,
+  });
+  const projAcc = new Map<string, Acc>();
+  const contractorAcc = new Map<string, Acc>();
+  const stageAcc = new Map<string, Acc>();
+  const bump = (acc: Acc, it: (typeof items)[number]) => {
+    acc.count++;
+    if (it.daysPerStage != null) acc.paces.push(it.daysPerStage);
+    if (it.etaGap != null) acc.gaps.push(it.etaGap);
+    if (it.status === "stalled") acc.stalled++;
+    else if (it.status === "slow") acc.slow++;
+    else if (it.status === "moving") acc.moving++;
+    else acc.insufficient++;
+  };
+  for (const it of items) {
+    const p = projAcc.get(it.job) ?? newAcc();
+    bump(p, it);
+    projAcc.set(it.job, p);
+    const c = contractorAcc.get(it.contractor) ?? newAcc();
+    bump(c, it);
+    contractorAcc.set(it.contractor, c);
+    const sKey = (it.activity || "").trim().toUpperCase();
+    const s = stageAcc.get(sKey) ?? newAcc();
+    bump(s, it);
+    stageAcc.set(sKey, s);
+  }
+
+  const projects = Array.from(projAcc.entries())
+    .map(([project, a]) => ({
+      project,
+      markCount: a.count,
+      stalledCount: a.stalled,
+      slowCount: a.slow,
+      movingCount: a.moving,
+      insufficientCount: a.insufficient,
+      avgDaysPerStage: mean(a.paces),
+      avgEtaGap: mean(a.gaps),
+      stuckScore: a.count > 0 ? (a.stalled + 0.5 * a.slow) / a.count : 0,
+    }))
+    .sort((x, y) => y.stuckScore - x.stuckScore || y.stalledCount - x.stalledCount);
+
+  const contractors = Array.from(contractorAcc.entries())
+    .map(([contractor, a]) => ({
+      contractor,
+      markCount: a.count,
+      stalledCount: a.stalled,
+      slowCount: a.slow,
+      avgDaysPerStage: mean(a.paces),
+      avgEtaGap: mean(a.gaps),
+    }))
+    .sort((x, y) => y.stalledCount - x.stalledCount || y.slowCount - x.slowCount);
+
+  const stages = Array.from(stageAcc.entries())
+    .map(([activity, a]) => ({
+      activity,
+      markCount: a.count,
+      stalledCount: a.stalled,
+      slowCount: a.slow,
+      avgDaysPerStage: mean(a.paces),
+    }))
+    .sort((x, y) => activityRank(x.activity) - activityRank(y.activity));
+
+  res.json({
+    importId: target.id,
+    hasHistory: priorImports.length > 0,
+    windowReports: priorImports.length + 1,
+    items,
+    projects,
+    contractors,
+    stages,
   });
 });
 

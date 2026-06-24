@@ -6,13 +6,11 @@ import { Button } from "@/components/ui/button";
 import { formatWeight } from "@/lib/utils";
 import { useMemo } from "react";
 import { ChangesPanel } from "@/components/changes-panel";
-import { ageingCell, isCutting } from "@/lib/ageing";
-import { TurnaroundWarnings } from "@/components/turnaround-warnings";
+import { isCutting } from "@/lib/ageing";
 import { useSettings } from "@/lib/settings";
-import { lifecycleStatus, migrateTurnaroundSettings, LIFECYCLE_ORDER, type LifecycleResult, type LifecycleStatus } from "@workspace/domain";
-import { LIFECYCLE_LABELS, lifecycleBgColor, lifecycleTextColor } from "@/lib/turnaround";
-import { useStalledInfo } from "@/lib/movement";
-import { SlidersHorizontal, AlertTriangle } from "lucide-react";
+import { lifecycleStatus, migrateTurnaroundSettings } from "@workspace/domain";
+import { useVelocityInfo, velocityKey } from "@/lib/velocity";
+import { Clock, AlertTriangle, ChevronRight } from "lucide-react";
 
 export default function Overview() {
   const { selectedImportId } = useTracker();
@@ -90,16 +88,7 @@ function OverviewContent() {
     <div className="space-y-6">
       {selectedImportId && <ChangesPanel importId={selectedImportId} />}
 
-      <div className="flex justify-end">
-        <Link href="/warning-parameters">
-          <Button variant="outline" size="sm" className="h-8 gap-2">
-            <SlidersHorizontal className="h-4 w-4" />
-            Configure in Warning Parameters
-          </Button>
-        </Link>
-      </div>
-      <NeedsAttention records={records} importId={selectedImportId as number} />
-      <TurnaroundWarnings records={records} />
+      <SnapshotCards records={records} importId={selectedImportId as number} />
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiTile title="Pending Marks" value={totalMarks} />
@@ -177,24 +166,10 @@ function OverviewContent() {
   );
 }
 
-// Priority for the worklist: most-severe breach first, then advanced
-// pre-warnings. Stalled is an orthogonal flag layered on top.
-const ATTENTION_RANK: globalThis.Record<LifecycleStatus, number> = {
-  breach3: 0,
-  breach2: 1,
-  breach1: 2,
-  prewarn3: 3,
-  prewarn2: 4,
-  prewarn1: 5,
-  green: 6,
-  na: 7,
-};
-
-// Overview "Needs attention" worklist: marks that are breached, in the final
-// pre-warning stage, or stalled (no movement for >= the stalled threshold).
-// Respects the active header filters and degrades gracefully when there is no
-// movement history to compare against.
-function NeedsAttention({
+// Overview snapshot hub: two compact cards summarising the Turnaround and
+// Velocity/Stuck pages, each linking through for the full deep-dive. Respects
+// the active header filters and degrades gracefully without movement history.
+function SnapshotCards({
   records,
   importId,
 }: {
@@ -206,143 +181,102 @@ function NeedsAttention({
     () => migrateTurnaroundSettings(rawSettings),
     [rawSettings],
   );
-  const stalled = useStalledInfo(importId);
+  const velocity = useVelocityInfo(importId);
 
-  const items = useMemo(() => {
-    const out: Array<{
-      r: ApiRecord;
-      res: LifecycleResult;
-      isStalled: boolean;
-      stalledDays: number | null;
-    }> = [];
+  const turnaround = useMemo(() => {
+    let green = 0;
+    let prewarn = 0;
+    let breach = 0;
+    let na = 0;
     for (const r of records) {
       const res = lifecycleStatus(
         { activity: r.activity, ageingDays: r.ageingDays, project: r.job },
         settings,
       );
-      const isStalled = stalled.isStalled(r.markId, r.jobCardNo);
-      const breached = res.status.startsWith("breach");
-      const finalPreWarn = res.status === "prewarn3";
-      if (breached || finalPreWarn || isStalled) {
-        out.push({
-          r,
-          res,
-          isStalled,
-          stalledDays: stalled.daysFor(r.markId, r.jobCardNo),
-        });
-      }
+      if (res.status === "na") na++;
+      else if (res.status === "green") green++;
+      else if (res.status.startsWith("breach")) breach++;
+      else prewarn++;
     }
-    out.sort((a, b) => {
-      const ra = ATTENTION_RANK[a.res.status];
-      const rb = ATTENTION_RANK[b.res.status];
-      if (ra !== rb) return ra - rb;
-      return (b.res.overrun ?? -1) - (a.res.overrun ?? -1);
-    });
-    return out;
-  }, [records, settings, stalled]);
+    return { green, prewarn, breach, na };
+  }, [records, settings]);
 
-  const breachCount = items.filter((i) => i.res.status.startsWith("breach")).length;
-  const preWarnCount = items.filter((i) => i.res.status === "prewarn3").length;
-  const stalledCount = items.filter((i) => i.isStalled).length;
+  // Count stalled + slow on the SAME identity basis as the /stuck page so the
+  // snapshot totals never disagree with the deep-dive. Filter velocity items to
+  // the identities visible under the active header filters.
+  const velocityCounts = useMemo(() => {
+    let stalledCount = 0;
+    let slow = 0;
+    const visible = new Set(records.map((r) => velocityKey(r.markId, r.jobCardNo)));
+    for (const v of velocity.items) {
+      if (!visible.has(velocityKey(v.markId, v.jobCardNo))) continue;
+      if (v.status === "stalled") stalledCount++;
+      else if (v.status === "slow") slow++;
+    }
+    return { stalledCount, slow };
+  }, [records, velocity.items]);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-ageing-red" />
-          Needs Attention ({items.length})
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground mb-3">
-          <span>{breachCount} breached</span>
-          <span>{preWarnCount} final pre-warning</span>
-          <span>
-            {stalled.hasHistory
-              ? `${stalledCount} stalled (>= ${stalled.stalledDays}d no movement)`
-              : "stalled detection needs a prior import"}
-          </span>
-        </div>
-        {items.length === 0 ? (
-          <div className="text-sm text-muted-foreground">
-            Nothing needs attention for the current filters. All marks are on
-            track.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
-                  <th className="py-1.5 pr-3 font-medium">Mark</th>
-                  <th className="py-1.5 pr-3 font-medium">Activity</th>
-                  <th className="py-1.5 pr-3 font-medium">Status</th>
-                  <th className="py-1.5 pr-3 font-medium text-right">Ageing</th>
-                  <th className="py-1.5 pr-3 font-medium text-right">Target</th>
-                  <th className="py-1.5 pr-3 font-medium text-right">Consumed</th>
-                  <th className="py-1.5 pr-3 font-medium text-right">To Target</th>
-                  <th className="py-1.5 pr-3 font-medium">Stalled</th>
-                  <th className="py-1.5 pr-3 font-medium">Contractor</th>
-                  <th className="py-1.5 font-medium text-right">Wt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.slice(0, 100).map(({ r, res, isStalled, stalledDays }) => (
-                  <tr
-                    key={r.id}
-                    className="border-b border-border/50 hover:bg-muted/30"
-                  >
-                    <td className="py-1.5 pr-3 font-mono">{r.markId}</td>
-                    <td className="py-1.5 pr-3 font-mono">{r.activity}</td>
-                    <td className="py-1.5 pr-3">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span
-                          className={`w-2 h-2 rounded-full ${lifecycleBgColor(res.status)}`}
-                        />
-                        <span
-                          className={`text-xs font-semibold ${lifecycleTextColor(res.status)}`}
-                        >
-                          {LIFECYCLE_LABELS[res.status]}
-                        </span>
-                      </span>
-                    </td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums">
-                      {r.ageingDays !== null ? `${r.ageingDays}d` : "-"}
-                    </td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
-                      {res.target !== null ? `${res.target}d` : "-"}
-                    </td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
-                      {res.consumedPct !== null ? `${res.consumedPct}%` : "-"}
-                    </td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
-                      {res.daysToTarget !== null ? `${res.daysToTarget}d` : "-"}
-                    </td>
-                    <td className="py-1.5 pr-3">
-                      {isStalled ? (
-                        <span className="text-xs font-semibold text-ageing-red">
-                          {stalledDays !== null ? `${stalledDays}d` : "yes"}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">-</span>
-                      )}
-                    </td>
-                    <td className="py-1.5 pr-3">{r.contractor || "Unassigned"}</td>
-                    <td className="py-1.5 text-right tabular-nums">
-                      {formatWeight(r.balanceWt)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {items.length > 100 && (
-              <div className="text-xs text-muted-foreground mt-2">
-                Showing top 100 of {items.length}.
-              </div>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+    <div className="grid md:grid-cols-2 gap-4">
+      <Link href="/turnaround">
+        <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-primary" /> Turnaround
+              </span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-4 gap-2 text-center">
+              <SnapStat label="On track" value={turnaround.green} cls="bg-lc-green" />
+              <SnapStat label="Pre-warn" value={turnaround.prewarn} cls="bg-lc-prewarn2" />
+              <SnapStat label="Breached" value={turnaround.breach} cls="bg-lc-breach3" />
+              <SnapStat label="n/a" value={turnaround.na} cls="bg-lc-na" />
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">
+              Open the deep-dive for the 8-state lifecycle, per-activity bars,
+              overrun by contractor and the AI report.
+            </p>
+          </CardContent>
+        </Card>
+      </Link>
+
+      <Link href="/stuck">
+        <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-ageing-red" /> Stuck Projects
+              </span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-2 text-center">
+              <SnapStat label="Stalled" value={velocityCounts.stalledCount} cls="bg-red-500" />
+              <SnapStat label="Slow" value={velocityCounts.slow} cls="bg-amber-500" />
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">
+              {velocity.hasHistory
+                ? "Open for pace, projected ETA, ETA gap and the stuck-project leaderboard."
+                : "Upload another report to unlock pace, ETA and trend across snapshots."}
+            </p>
+          </CardContent>
+        </Card>
+      </Link>
+    </div>
+  );
+}
+
+function SnapStat({ label, value, cls }: { label: string; value: number; cls: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-md border border-border p-2">
+      <span className={`w-3 h-3 rounded-sm ${cls} mb-1`} />
+      <span className="text-xl font-bold tabular-nums">{value}</span>
+      <span className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</span>
+    </div>
   );
 }
 

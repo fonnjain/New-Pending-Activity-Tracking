@@ -1,0 +1,51 @@
+REPLIT AGENT PROMPT — AGEING FOR ACTIVITY "C" USES ASSIGN DATE
+==============================================================
+Refine the ageing calculation: for marks at activity "C" (Cutting), compute ageing from
+Assign Date instead of Last Production Entry Date. All other activities are unchanged.
+Engine/display refinement only; do not change parsing, Activity values, dedup, targets,
+or the warning thresholds.
+
+WHY
+Marks at "C" have NOT started production yet, so they have NO Last Production Entry Date
+and currently show "Not started" with no ageing number. But they DO all have an Assign
+Date (100% coverage in the data). Ageing from Assign Date = how long the mark has been
+waiting to be cut since it was assigned — the meaningful ageing for not-yet-started work.
+
+THE RULE (apply everywhere ageing is computed)
+  ageing_days =
+     if Activity == "C":
+         today - Assign Date            (whole days)
+     else if Last Production Entry Date is present:
+         today - Last Production Entry Date
+     else:
+         null   -> label "No production date" (unchanged; see "leave alone" below)
+  - Recompute live; never cache.
+  - Future-date clamp still applies: if the chosen date (Assign Date for C, else Last
+    Production Entry Date) is after today, bring it to today so ageing = 0; flag for review.
+  - For C rows, they are NO LONGER "Not started"/null — they now have a real ageing number
+    and participate normally in ageing buckets, averages, pre-warning/breach status, and
+    velocity/turnaround views like any other activity.
+
+LEAVE ALONE (do NOT extend the Assign-Date fallback to these)
+  - Non-C rows that have a blank Last Production Entry Date (a small set at NTF, G, NTFSW,
+    TS, BL) stay as "No production date" with null ageing, excluded from averages, flagged.
+    Do NOT age these from Assign Date — a started mark with no production date is a genuine
+    data gap to surface, not to paper over. Keep current behaviour for them.
+
+DOWNSTREAM
+  - Buckets / averages: C rows now count with their Assign-Date ageing; the 73-ish "No
+    production date" non-C rows remain excluded.
+  - Turnaround status for C: overrun = ageing - cumulative_target("C"); C now gets a real
+    Green/pre-warning/breach status instead of n/a.
+  - Pre-warning %, velocity, exports: all use the resolved ageing (Assign Date for C).
+  - Sanity/AI review: note in the summary that C ageing is Assign-Date-based; keep flagging
+    the non-C "No production date" rows.
+
+ACCEPTANCE CHECK
+  - A mark at C with Assign Date 30 days ago shows ageing 30 (not "Not started"), and gets
+    a normal alert status vs the C cumulative target.
+  - Non-C marks with a Last Production Entry Date are unchanged (age from that date).
+  - Non-C marks with a blank production date (NTF/G/NTFSW/TS/BL) remain "No production
+    date", null ageing, excluded from averages — unchanged.
+  - Future-dated chosen dates clamp to today (ageing 0), flagged.
+  - No change to parsing, Activity values, dedup, targets, or thresholds.

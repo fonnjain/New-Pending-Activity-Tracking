@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
-import { BarChart3, Briefcase, Activity, Clock, Users, Database, FileText, SlidersHorizontal, Filter, X } from "lucide-react";
+import { BarChart3, Briefcase, Activity, Clock, Users, Database, FileText, SlidersHorizontal, Filter, X, Timer, Gauge } from "lucide-react";
 import { useTracker, dateRangeWindow } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -11,13 +11,15 @@ import { sortActivities } from "@workspace/domain";
 
 const navItems = [
   { href: "/", icon: BarChart3, label: "Overview" },
+  { href: "/turnaround", icon: Timer, label: "Turnaround" },
+  { href: "/stuck", icon: Gauge, label: "Stuck Projects" },
   { href: "/activity", icon: Activity, label: "Activity" },
   { href: "/jobs", icon: Briefcase, label: "Job-wise" },
   { href: "/contractor", icon: Users, label: "Contractor" },
   { href: "/ageing", icon: Clock, label: "Ageing" },
   { href: "/reports", icon: FileText, label: "Reports" },
-  { href: "/warning-parameters", icon: SlidersHorizontal, label: "Warning Params" },
   { href: "/data", icon: Database, label: "Data" },
+  { href: "/warning-parameters", icon: SlidersHorizontal, label: "Warning Params" },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {

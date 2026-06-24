@@ -534,6 +534,67 @@ export const GetImportMovementResponse = zod.object({
 
 
 /**
+ * For each mark identity in the given import, walks the preceding imports to build a snapshot series (import date + activity stage + last production date) and computes a deterministic VELOCITY: observed pace (days per advanced stage), a pace-based ETA, the gap vs the budget target, a trend, and a movement status (moving / slow / stalled / insufficient). Purely additive and advisory — it never changes parsing, activity values, dedup, ageing, or the alert/threshold/lifecycle math. Rolled-up project / contractor / stage aggregates are included. Velocity is null per-field when there is not enough history (cold start), so it degrades gracefully.
+
+ * @summary Get per-mark velocity (pace / ETA / trend) for an import
+ */
+export const GetImportVelocityParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetImportVelocityResponse = zod.object({
+  "importId": zod.number(),
+  "hasHistory": zod.boolean().describe('True when at least one earlier import exists to compare against.'),
+  "windowReports": zod.number().describe('Number of imports walked to build the snapshot series.'),
+  "items": zod.array(zod.object({
+  "markId": zod.string(),
+  "jobCardNo": zod.string().nullable(),
+  "job": zod.string().describe('Project key (record\'s job field).'),
+  "contractor": zod.string(),
+  "activity": zod.string().describe('Current activity code at this import.'),
+  "ageingDays": zod.number().nullable(),
+  "status": zod.enum(['moving', 'slow', 'stalled', 'insufficient']),
+  "trend": zod.enum(['accelerating', 'steady', 'decelerating', 'stalled', 'unknown']),
+  "daysPerStage": zod.number().nullable().describe('Observed days per advanced stage; null when no measurable advance.'),
+  "expectedDaysPerStage": zod.number().nullable(),
+  "stagesRemaining": zod.number().nullable(),
+  "etaDays": zod.number().nullable().describe('Projected days from today to completion at the observed pace.'),
+  "etaGap": zod.number().nullable().describe('etaDays minus budget days-to-target; > 0 => projected late.'),
+  "observedWindowDays": zod.number().nullable(),
+  "snapshotsUsed": zod.number(),
+  "daysSinceLastMovement": zod.number().nullable(),
+  "insufficientHistory": zod.boolean()
+}).describe('Deterministic velocity for one mark identity.')),
+  "projects": zod.array(zod.object({
+  "project": zod.string(),
+  "markCount": zod.number(),
+  "stalledCount": zod.number(),
+  "slowCount": zod.number(),
+  "movingCount": zod.number(),
+  "insufficientCount": zod.number(),
+  "avgDaysPerStage": zod.number().nullable(),
+  "avgEtaGap": zod.number().nullable(),
+  "stuckScore": zod.number().describe('Weighted share of stalled + slow marks (0..1) — higher = more stuck.')
+}).describe('Velocity roll-up for one project (job).')),
+  "contractors": zod.array(zod.object({
+  "contractor": zod.string(),
+  "markCount": zod.number(),
+  "stalledCount": zod.number(),
+  "slowCount": zod.number(),
+  "avgDaysPerStage": zod.number().nullable(),
+  "avgEtaGap": zod.number().nullable()
+}).describe('Velocity roll-up for one contractor.')),
+  "stages": zod.array(zod.object({
+  "activity": zod.string(),
+  "markCount": zod.number(),
+  "stalledCount": zod.number(),
+  "slowCount": zod.number(),
+  "avgDaysPerStage": zod.number().nullable()
+}).describe('Velocity roll-up for one process stage (activity).'))
+}).describe('Per-identity velocity info with project \/ contractor \/ stage aggregates.')
+
+
+/**
  * Returns the full field-level change set for an import versus the immediately preceding import. For the first import, all marks are reported as new.
 
  * @summary Get the change set for an import
