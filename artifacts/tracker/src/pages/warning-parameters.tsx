@@ -51,9 +51,9 @@ const PRE_WARNS: ReadonlyArray<{ key: PreWarnKey; label: string }> = [
 ];
 
 const BANDS: ReadonlyArray<{ key: BandKey; label: string }> = [
-  { key: "yellow", label: "Yellow" },
-  { key: "orange", label: "Orange" },
-  { key: "red", label: "Red" },
+  { key: "yellow", label: "Blue" },
+  { key: "orange", label: "Grey" },
+  { key: "red", label: "Black" },
 ];
 
 function toNum(v: string): number {
@@ -384,9 +384,9 @@ function WarningParametersContent() {
       { label: "Description", field: "description" },
       { label: "Ideal Days", field: "idealDays", numeric: true, decimals: 0 },
       { label: "Cumulative Target (d)", field: "cumulativeTarget", numeric: true, decimals: 0 },
-      { label: "Yellow Grace (d)", field: "yellowGrace", numeric: true, decimals: 0 },
-      { label: "Orange Grace (d)", field: "orangeGrace", numeric: true, decimals: 0 },
-      { label: "Red Grace (d)", field: "redGrace", numeric: true, decimals: 0 },
+      { label: "Blue Grace (d)", field: "yellowGrace", numeric: true, decimals: 0 },
+      { label: "Grey Grace (d)", field: "orangeGrace", numeric: true, decimals: 0 },
+      { label: "Black Grace (d)", field: "redGrace", numeric: true, decimals: 0 },
     ];
     const out = rows.map((row) => {
       const byBand: Record<string, number> = {};
@@ -457,9 +457,9 @@ function WarningParametersContent() {
         parsed.push({
           step: code as ProcessStep,
           ideal: parseDays(pickField(nr, ["ideal"])),
-          yellow: parseDays(pickField(nr, ["yellow"])),
-          orange: parseDays(pickField(nr, ["orange"])),
-          red: parseDays(pickField(nr, ["red"])),
+          yellow: parseDays(pickField(nr, ["blue", "yellow"])),
+          orange: parseDays(pickField(nr, ["grey", "gray", "orange"])),
+          red: parseDays(pickField(nr, ["black", "red"])),
         });
       }
       if (parsed.length === 0) {
@@ -821,14 +821,14 @@ function WarningParametersContent() {
               before escalating. Type a day value to pin a cell (Manual); type a
               percent to auto-fill it from that activity's ideal days (Auto). Auto
               cells recompute when ideal days change; "use %" reverts a manual
-              cell to its percentage. Yellow &le; Orange &le; Red is enforced when
-              classifying; anything past Orange is Red.
+              cell to its percentage. Blue &le; Grey &le; Black is enforced when
+              classifying; anything past Grey is Black.
             </p>
             {invertedSteps.length > 0 && (
               <p className="text-ageing-red">
                 Some activities have grace bands out of order (
                 {invertedSteps.join(", ")}). The warning engine raises later bands
-                to keep Yellow &le; Orange &le; Red, but consider setting sensible
+                to keep Blue &le; Grey &le; Black, but consider setting sensible
                 percentages.
               </p>
             )}
@@ -880,7 +880,7 @@ function WarningParametersContent() {
           <p className="text-xs text-muted-foreground max-w-3xl">
             Pre-warnings fire while a mark is still within its cumulative target,
             based on the percent of the target its ageing has consumed. Three
-            stages escalate Yellow then Orange then Red as the mark approaches the
+            stages escalate Blue then Grey then Black as the mark approaches the
             target. Values are percentages (0&ndash;100) and must increase
             Pre-warn 1 &le; 2 &le; 3.
             {isAll
