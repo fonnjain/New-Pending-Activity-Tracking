@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useTracker, useFilteredRecords } from "@/lib/store";
 import {
   useGetImportRecords,
@@ -17,7 +17,7 @@ import {
 } from "@/lib/velocity";
 import { compareActivity } from "@workspace/domain";
 import { EmptyState } from "./overview";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ChevronRight } from "lucide-react";
 
 type View = "projects" | "contractors" | "stages";
 
@@ -41,6 +41,8 @@ function StuckContent({ importId }: { importId: number }) {
   const velocity = useVelocityInfo(importId);
   const [view, setView] = useState<View>("projects");
   const [openProject, setOpenProject] = useState<string | null>(null);
+  const [openContractor, setOpenContractor] = useState<string | null>(null);
+  const [openStage, setOpenStage] = useState<string | null>(null);
 
   // Restrict velocity items to the marks visible under the active header
   // filters so the leaderboard always matches what the rest of the app shows.
@@ -269,24 +271,49 @@ function StuckContent({ importId }: { importId: number }) {
                   </thead>
                   <tbody>
                     {contractors.map((c) => (
-                      <tr key={c.contractor} className="border-b border-border/50 hover:bg-muted/30">
-                        <td className="py-1.5 pr-3">{c.contractor}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">{c.markCount}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums text-red-600 font-semibold">
-                          {c.stalled || ""}
-                        </td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums text-amber-600 font-semibold">
-                          {c.slow || ""}
-                        </td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
-                          {c.avgEtaGap !== null
-                            ? `${c.avgEtaGap > 0 ? "+" : ""}${fmtDays(c.avgEtaGap)}`
-                            : "-"}
-                        </td>
-                        <td className="py-1.5 text-right tabular-nums font-bold">
-                          {Math.round(c.stuckScore * 100)}%
-                        </td>
-                      </tr>
+                      <Fragment key={c.contractor}>
+                        <tr
+                          className="border-b border-border/50 hover:bg-muted/30 cursor-pointer"
+                          onClick={() =>
+                            setOpenContractor(openContractor === c.contractor ? null : c.contractor)
+                          }
+                        >
+                          <td className="py-1.5 pr-3">
+                            <span className="inline-flex items-center gap-1.5">
+                              <ChevronRight
+                                className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${openContractor === c.contractor ? "rotate-90" : ""}`}
+                              />
+                              {c.contractor}
+                            </span>
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{c.markCount}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-red-600 font-semibold">
+                            {c.stalled || ""}
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-amber-600 font-semibold">
+                            {c.slow || ""}
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
+                            {c.avgEtaGap !== null
+                              ? `${c.avgEtaGap > 0 ? "+" : ""}${fmtDays(c.avgEtaGap)}`
+                              : "-"}
+                          </td>
+                          <td className="py-1.5 text-right tabular-nums font-bold">
+                            {Math.round(c.stuckScore * 100)}%
+                          </td>
+                        </tr>
+                        {openContractor === c.contractor && (
+                          <tr>
+                            <td colSpan={6} className="p-0">
+                              <MarkDrill
+                                items={items.filter(
+                                  (v) => (v.contractor || "Unassigned") === c.contractor,
+                                )}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -320,19 +347,42 @@ function StuckContent({ importId }: { importId: number }) {
                   </thead>
                   <tbody>
                     {stages.map((s) => (
-                      <tr key={s.activity} className="border-b border-border/50 hover:bg-muted/30">
-                        <td className="py-1.5 pr-3 font-mono">{s.activity}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">{s.markCount}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums text-red-600 font-semibold">
-                          {s.stalled || ""}
-                        </td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums text-amber-600 font-semibold">
-                          {s.slow || ""}
-                        </td>
-                        <td className="py-1.5 text-right tabular-nums">
-                          {fmtDays(s.avgDaysPerStage)}
-                        </td>
-                      </tr>
+                      <Fragment key={s.activity}>
+                        <tr
+                          className="border-b border-border/50 hover:bg-muted/30 cursor-pointer"
+                          onClick={() =>
+                            setOpenStage(openStage === s.activity ? null : s.activity)
+                          }
+                        >
+                          <td className="py-1.5 pr-3 font-mono">
+                            <span className="inline-flex items-center gap-1.5">
+                              <ChevronRight
+                                className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${openStage === s.activity ? "rotate-90" : ""}`}
+                              />
+                              {s.activity}
+                            </span>
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{s.markCount}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-red-600 font-semibold">
+                            {s.stalled || ""}
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-amber-600 font-semibold">
+                            {s.slow || ""}
+                          </td>
+                          <td className="py-1.5 text-right tabular-nums">
+                            {fmtDays(s.avgDaysPerStage)}
+                          </td>
+                        </tr>
+                        {openStage === s.activity && (
+                          <tr>
+                            <td colSpan={5} className="p-0">
+                              <MarkDrill
+                                items={items.filter((v) => (v.activity || "—") === s.activity)}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>

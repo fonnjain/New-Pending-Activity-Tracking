@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useTracker, useFilteredRecords } from "@/lib/store";
 import {
   useGetImportRecords,
@@ -20,7 +20,7 @@ import { LIFECYCLE_LABELS, lifecycleBgColor, lifecycleTextColor } from "@/lib/tu
 import { TurnaroundWarnings } from "@/components/turnaround-warnings";
 import { AiTurnaroundReport } from "@/components/ai-turnaround-report";
 import { EmptyState } from "./overview";
-import { SlidersHorizontal, Clock } from "lucide-react";
+import { SlidersHorizontal, Clock, ChevronRight } from "lucide-react";
 
 export default function TurnaroundView() {
   const { selectedImportId } = useTracker();
@@ -112,6 +112,8 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
   );
   const [view, setView] = useState<View>("projects");
   const [openProject, setOpenProject] = useState<string | null>(null);
+  const [openContractor, setOpenContractor] = useState<string | null>(null);
+  const [openStage, setOpenStage] = useState<string | null>(null);
 
   // Classify every visible record once, then derive each rollup from it so the
   // tabs always honour the active header filters.
@@ -286,22 +288,47 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
                   </thead>
                   <tbody>
                     {contractors.slice(0, 50).map((c) => (
-                      <tr key={c.contractor} className="border-b border-border/50 hover:bg-muted/30">
-                        <td className="py-1.5 pr-3">{c.contractor}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">{c.markCount}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums text-ageing-red font-semibold">
-                          {c.breached || ""}
-                        </td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums text-amber-600 font-semibold">
-                          {c.prewarn || ""}
-                        </td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">
-                          {c.avgOverrun !== null ? `+${c.avgOverrun}d` : "-"}
-                        </td>
-                        <td className="py-1.5 text-right tabular-nums font-bold">
-                          {Math.round(c.score * 100)}%
-                        </td>
-                      </tr>
+                      <Fragment key={c.contractor}>
+                        <tr
+                          className="border-b border-border/50 hover:bg-muted/30 cursor-pointer"
+                          onClick={() =>
+                            setOpenContractor(openContractor === c.contractor ? null : c.contractor)
+                          }
+                        >
+                          <td className="py-1.5 pr-3">
+                            <span className="inline-flex items-center gap-1.5">
+                              <ChevronRight
+                                className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${openContractor === c.contractor ? "rotate-90" : ""}`}
+                              />
+                              {c.contractor}
+                            </span>
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{c.markCount}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-ageing-red font-semibold">
+                            {c.breached || ""}
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-amber-600 font-semibold">
+                            {c.prewarn || ""}
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">
+                            {c.avgOverrun !== null ? `+${c.avgOverrun}d` : "-"}
+                          </td>
+                          <td className="py-1.5 text-right tabular-nums font-bold">
+                            {Math.round(c.score * 100)}%
+                          </td>
+                        </tr>
+                        {openContractor === c.contractor && (
+                          <tr>
+                            <td colSpan={6} className="p-0">
+                              <MarkDrill
+                                items={classified.filter(
+                                  ({ r }) => (r.contractor || "Unassigned") === c.contractor,
+                                )}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -342,19 +369,44 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
                   </thead>
                   <tbody>
                     {stages.map((s) => (
-                      <tr key={s.activity} className="border-b border-border/50 hover:bg-muted/30">
-                        <td className="py-1.5 pr-3 font-mono">{s.activity}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">{s.markCount}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums text-ageing-red font-semibold">
-                          {s.breached || ""}
-                        </td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums text-amber-600 font-semibold">
-                          {s.prewarn || ""}
-                        </td>
-                        <td className="py-1.5 text-right tabular-nums">
-                          {s.avgOverrun !== null ? `+${s.avgOverrun}d` : "-"}
-                        </td>
-                      </tr>
+                      <Fragment key={s.activity}>
+                        <tr
+                          className="border-b border-border/50 hover:bg-muted/30 cursor-pointer"
+                          onClick={() =>
+                            setOpenStage(openStage === s.activity ? null : s.activity)
+                          }
+                        >
+                          <td className="py-1.5 pr-3 font-mono">
+                            <span className="inline-flex items-center gap-1.5">
+                              <ChevronRight
+                                className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${openStage === s.activity ? "rotate-90" : ""}`}
+                              />
+                              {s.activity}
+                            </span>
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{s.markCount}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-ageing-red font-semibold">
+                            {s.breached || ""}
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-amber-600 font-semibold">
+                            {s.prewarn || ""}
+                          </td>
+                          <td className="py-1.5 text-right tabular-nums">
+                            {s.avgOverrun !== null ? `+${s.avgOverrun}d` : "-"}
+                          </td>
+                        </tr>
+                        {openStage === s.activity && (
+                          <tr>
+                            <td colSpan={5} className="p-0">
+                              <MarkDrill
+                                items={classified.filter(
+                                  ({ r }) => (r.activity || "—") === s.activity,
+                                )}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
