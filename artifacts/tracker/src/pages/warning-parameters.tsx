@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Card,
   CardHeader,
@@ -14,10 +14,11 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { Download } from "lucide-react";
+import { Download, Upload } from "lucide-react";
 import { LoginGate, LogoutButton } from "@/components/login-gate";
 import { useSettings } from "@/lib/settings";
 import { useTracker } from "@/lib/store";
+import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx, type XlsxColumn } from "@/lib/export";
 import {
   useGetImportRecords,
@@ -31,6 +32,7 @@ import {
   PROCESS_STEP_LABELS,
   cumulativeTargets,
   resolveCell,
+  isKnownActivity,
   DEFAULT_ACTIVITY_CONFIG,
   DEFAULT_PRE_WARN,
   DEFAULT_STALLED_DAYS,
@@ -75,6 +77,51 @@ function cloneConfig(c: ActivityConfig): ActivityConfig {
   };
 }
 
+// Read the first worksheet of an .xlsx/.xls file into an array of row objects
+// keyed by header label (header row = first row), mirroring the export layout.
+async function readSheetRows(file: File): Promise<Record<string, unknown>[]> {
+  const XLSX = await import("xlsx");
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) return [];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null });
+}
+
+// Normalize a row's header keys (lowercase, strip non-alphanumerics) so the
+// importer tolerates minor header edits / spacing when matching columns.
+function normalizeKeys(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(row)) {
+    out[k.toLowerCase().replace(/[^a-z0-9]/g, "")] = row[k];
+  }
+  return out;
+}
+
+// First value whose normalized header contains any of the given substrings.
+function pickField(
+  nr: Record<string, unknown>,
+  subs: string[],
+): unknown {
+  for (const key of Object.keys(nr)) {
+    if (subs.some((s) => key.includes(s))) return nr[key];
+  }
+  return undefined;
+}
+
+// Parse a non-negative integer day value (blank/non-numeric -> null = skip).
+function parseDays(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
+}
+
+// Parse a 0..100 percentage (blank/non-numeric -> null = skip).
+function parsePct(v: unknown): number | null {
+  const n = parseDays(v);
+  return n == null ? null : Math.min(100, n);
+}
+
 export default function WarningParameters() {
   return (
     <LoginGate>
@@ -86,7 +133,10 @@ export default function WarningParameters() {
 function WarningParametersContent() {
   const { settings, updateSettings, reset, saving } = useSettings();
   const { selectedImportId } = useTracker();
+  const { toast } = useToast();
   const [project, setProject] = useState<string>(ALL);
+  const graceFileRef = useRef<HTMLInputElement>(null);
+  const preWarnFileRef = useRef<HTMLInputElement>(null);
 
   const { data: records } = useGetImportRecords(selectedImportId as number, {
     query: {
@@ -384,6 +434,170 @@ function WarningParametersContent() {
     });
   };
 
+  // Import a targets & grace .xlsx (as produced by the export) and apply ideal
+  // days + grace bands (as MANUAL day cells) to the active scope. Unknown
+  // activities and blank cells are skipped; "Cumulative target" is derived and
+  // ignored on import.
+  const importGraceXlsx = async (file: File) => {
+    try {
+      const raw = await readSheetRows(file);
+      const parsed: {
+        step: ProcessStep;
+        ideal: number | null;
+        yellow: number | null;
+        orange: number | null;
+        red: number | null;
+      }[] = [];
+      for (const row of raw) {
+        const nr = normalizeKeys(row);
+        const code = String(pickField(nr, ["activity"]) ?? "")
+          .trim()
+          .toUpperCase();
+        if (!code || !isKnownActivity(code)) continue;
+        parsed.push({
+          step: code as ProcessStep,
+          ideal: parseDays(pickField(nr, ["ideal"])),
+          yellow: parseDays(pickField(nr, ["yellow"])),
+          orange: parseDays(pickField(nr, ["orange"])),
+          red: parseDays(pickField(nr, ["red"])),
+        });
+      }
+      if (parsed.length === 0) {
+        toast({
+          variant: "destructive",
+          title: "Nothing imported",
+          description: "No recognised activity rows found in the file.",
+        });
+        return;
+      }
+      updateSettings((prev) => {
+        if (isAll) {
+          const activities = { ...prev.activities };
+          for (const p of parsed) {
+            const next = cloneConfig(
+              activities[p.step] ?? DEFAULT_ACTIVITY_CONFIG,
+            );
+            if (p.ideal != null) next.idealDays = p.ideal;
+            if (p.yellow != null) next.yellow = { mode: "manual", value: p.yellow };
+            if (p.orange != null) next.orange = { mode: "manual", value: p.orange };
+            if (p.red != null) next.red = { mode: "manual", value: p.red };
+            activities[p.step] = next;
+          }
+          return { ...prev, activities };
+        }
+        const perProject = { ...(prev.perProject ?? {}) };
+        const proj = { ...(perProject[project] ?? {}) };
+        for (const p of parsed) {
+          const cur: PartialActivityConfig = { ...(proj[p.step] ?? {}) };
+          if (p.ideal != null) cur.idealDays = p.ideal;
+          if (p.yellow != null) cur.yellow = { mode: "manual", value: p.yellow };
+          if (p.orange != null) cur.orange = { mode: "manual", value: p.orange };
+          if (p.red != null) cur.red = { mode: "manual", value: p.red };
+          if (Object.keys(cur).length === 0) delete proj[p.step];
+          else proj[p.step] = cur;
+        }
+        if (Object.keys(proj).length === 0) delete perProject[project];
+        else perProject[project] = proj;
+        return { ...prev, perProject };
+      });
+      toast({
+        title: "Targets & grace imported",
+        description: `Applied ${parsed.length} ${
+          parsed.length === 1 ? "activity" : "activities"
+        } to ${isAll ? "All Projects" : project}.`,
+      });
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Import failed",
+        description:
+          err instanceof Error ? err.message : "Could not read the Excel file.",
+      });
+    }
+  };
+
+  // Import a pre-warnings .xlsx (as produced by the export) and apply the three
+  // percentage thresholds per activity to the active scope. Unknown activities
+  // and blank cells are skipped; "Cumulative target" is derived and ignored.
+  const importPreWarnXlsx = async (file: File) => {
+    try {
+      const raw = await readSheetRows(file);
+      const parsed: {
+        step: ProcessStep;
+        pw1: number | null;
+        pw2: number | null;
+        pw3: number | null;
+      }[] = [];
+      for (const row of raw) {
+        const nr = normalizeKeys(row);
+        const code = String(pickField(nr, ["activity"]) ?? "")
+          .trim()
+          .toUpperCase();
+        if (!code || !isKnownActivity(code)) continue;
+        parsed.push({
+          step: code as ProcessStep,
+          pw1: parsePct(pickField(nr, ["prewarn1", "pw1"])),
+          pw2: parsePct(pickField(nr, ["prewarn2", "pw2"])),
+          pw3: parsePct(pickField(nr, ["prewarn3", "pw3"])),
+        });
+      }
+      if (parsed.length === 0) {
+        toast({
+          variant: "destructive",
+          title: "Nothing imported",
+          description: "No recognised activity rows found in the file.",
+        });
+        return;
+      }
+      updateSettings((prev) => {
+        if (isAll) {
+          const activities = { ...prev.activities };
+          for (const p of parsed) {
+            const next = cloneConfig(
+              activities[p.step] ?? DEFAULT_ACTIVITY_CONFIG,
+            );
+            const pw = { ...next.preWarn };
+            if (p.pw1 != null) pw.pw1 = p.pw1;
+            if (p.pw2 != null) pw.pw2 = p.pw2;
+            if (p.pw3 != null) pw.pw3 = p.pw3;
+            next.preWarn = pw;
+            activities[p.step] = next;
+          }
+          return { ...prev, activities };
+        }
+        const perProject = { ...(prev.perProject ?? {}) };
+        const proj = { ...(perProject[project] ?? {}) };
+        for (const p of parsed) {
+          const cur: PartialActivityConfig = { ...(proj[p.step] ?? {}) };
+          const pw = { ...(cur.preWarn ?? {}) };
+          if (p.pw1 != null) pw.pw1 = p.pw1;
+          if (p.pw2 != null) pw.pw2 = p.pw2;
+          if (p.pw3 != null) pw.pw3 = p.pw3;
+          if (Object.keys(pw).length === 0) delete cur.preWarn;
+          else cur.preWarn = pw;
+          if (Object.keys(cur).length === 0) delete proj[p.step];
+          else proj[p.step] = cur;
+        }
+        if (Object.keys(proj).length === 0) delete perProject[project];
+        else perProject[project] = proj;
+        return { ...prev, perProject };
+      });
+      toast({
+        title: "Pre-warnings imported",
+        description: `Applied ${parsed.length} ${
+          parsed.length === 1 ? "activity" : "activities"
+        } to ${isAll ? "All Projects" : project}.`,
+      });
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Import failed",
+        description:
+          err instanceof Error ? err.message : "Could not read the Excel file.",
+      });
+    }
+  };
+
   return (
     <div className="space-y-4 max-w-6xl mx-auto">
       <div className="flex items-start justify-between gap-4">
@@ -412,6 +626,26 @@ function WarningParametersContent() {
               {saving && (
                 <span className="text-xs text-muted-foreground">Saving...</span>
               )}
+              <input
+                ref={graceFileRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void importGraceXlsx(f);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => graceFileRef.current?.click()}
+                className="h-8"
+              >
+                <Upload className="h-3.5 w-3.5 mr-1.5" />
+                Import
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -612,6 +846,26 @@ function WarningParametersContent() {
               {saving && (
                 <span className="text-xs text-muted-foreground">Saving...</span>
               )}
+              <input
+                ref={preWarnFileRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void importPreWarnXlsx(f);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => preWarnFileRef.current?.click()}
+                className="h-8"
+              >
+                <Upload className="h-3.5 w-3.5 mr-1.5" />
+                Import
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
