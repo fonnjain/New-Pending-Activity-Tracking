@@ -273,10 +273,19 @@ function StuckContent({ importId }: { importId: number }) {
                     {contractors.map((c) => (
                       <Fragment key={c.contractor}>
                         <tr
-                          className="border-b border-border/50 hover:bg-muted/30 cursor-pointer"
+                          className="border-b border-border/50 hover:bg-muted/30 cursor-pointer focus:outline-none focus-visible:bg-muted/50"
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={openContractor === c.contractor}
                           onClick={() =>
                             setOpenContractor(openContractor === c.contractor ? null : c.contractor)
                           }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setOpenContractor(openContractor === c.contractor ? null : c.contractor);
+                            }
+                          }}
                         >
                           <td className="py-1.5 pr-3">
                             <span className="inline-flex items-center gap-1.5">
@@ -349,10 +358,19 @@ function StuckContent({ importId }: { importId: number }) {
                     {stages.map((s) => (
                       <Fragment key={s.activity}>
                         <tr
-                          className="border-b border-border/50 hover:bg-muted/30 cursor-pointer"
+                          className="border-b border-border/50 hover:bg-muted/30 cursor-pointer focus:outline-none focus-visible:bg-muted/50"
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={openStage === s.activity}
                           onClick={() =>
                             setOpenStage(openStage === s.activity ? null : s.activity)
                           }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setOpenStage(openStage === s.activity ? null : s.activity);
+                            }
+                          }}
                         >
                           <td className="py-1.5 pr-3 font-mono">
                             <span className="inline-flex items-center gap-1.5">
