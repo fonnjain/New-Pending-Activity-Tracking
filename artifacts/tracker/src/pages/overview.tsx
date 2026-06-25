@@ -86,8 +86,6 @@ function OverviewContent() {
 
   return (
     <div className="space-y-6">
-      {selectedImportId && <ChangesPanel importId={selectedImportId} />}
-
       <SnapshotCards records={records} importId={selectedImportId as number} />
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -162,6 +160,8 @@ function OverviewContent() {
           </CardContent>
         </Card>
       </div>
+
+      {selectedImportId && <ChangesPanel importId={selectedImportId} />}
     </div>
   );
 }
