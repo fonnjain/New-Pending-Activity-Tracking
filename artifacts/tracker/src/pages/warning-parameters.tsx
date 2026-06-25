@@ -5,7 +5,6 @@ import {
   CardTitle,
   CardContent,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,9 +14,11 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import { Download } from "lucide-react";
 import { LoginGate, LogoutButton } from "@/components/login-gate";
 import { useSettings } from "@/lib/settings";
 import { useTracker } from "@/lib/store";
+import { exportToXlsx, type XlsxColumn } from "@/lib/export";
 import {
   useGetImportRecords,
   getGetImportRecordsQueryKey,
@@ -312,40 +313,315 @@ function WarningParametersContent() {
       const [y, o, r] = bands.map((b) => b.effectiveDays);
       const inverted = y > o || o > r;
       const rowHasOverride = !!ov && Object.keys(ov).length > 0;
-      return { step, ov, globalCfg, globalIdeal, bands, inverted, rowHasOverride };
+      return { step, ov, globalCfg, globalIdeal, effIdeal, bands, inverted, rowHasOverride };
     });
   }, [settings, isAll, project, projectOverrides]);
 
   const invertedSteps = rows.filter((r) => r.inverted).map((r) => r.step);
 
+  // Filename-safe slug for the active scope, used by both Excel exports.
+  const scopeSlug =
+    (isAll ? "all-projects" : project)
+      .replace(/[^a-z0-9]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase() || "project";
+
+  // Export the per-activity targets & grace table (effective resolved days for
+  // the active scope) as its own .xlsx.
+  const exportGraceXlsx = () => {
+    const cols: XlsxColumn[] = [
+      { label: "Activity", field: "activity" },
+      { label: "Description", field: "description" },
+      { label: "Ideal Days", field: "idealDays", numeric: true, decimals: 0 },
+      { label: "Cumulative Target (d)", field: "cumulativeTarget", numeric: true, decimals: 0 },
+      { label: "Yellow Grace (d)", field: "yellowGrace", numeric: true, decimals: 0 },
+      { label: "Orange Grace (d)", field: "orangeGrace", numeric: true, decimals: 0 },
+      { label: "Red Grace (d)", field: "redGrace", numeric: true, decimals: 0 },
+    ];
+    const out = rows.map((row) => {
+      const byBand: Record<string, number> = {};
+      for (const b of row.bands) byBand[b.key] = b.effectiveDays;
+      return {
+        activity: row.step,
+        description: PROCESS_STEP_LABELS[row.step],
+        idealDays: row.effIdeal,
+        cumulativeTarget: cumTargets[row.step],
+        yellowGrace: byBand.yellow,
+        orangeGrace: byBand.orange,
+        redGrace: byBand.red,
+      };
+    });
+    exportToXlsx(`targets-grace_${scopeSlug}.xlsx`, cols, out, {
+      sheetName: "Targets & Grace",
+    });
+  };
+
+  // Export the pre-warning thresholds table (effective percentages for the
+  // active scope) as its own .xlsx.
+  const exportPreWarnXlsx = () => {
+    const cols: XlsxColumn[] = [
+      { label: "Activity", field: "activity" },
+      { label: "Description", field: "description" },
+      { label: "Cumulative Target (d)", field: "cumulativeTarget", numeric: true, decimals: 0 },
+      { label: "Pre-warn 1 %", field: "pw1", numeric: true, decimals: 0 },
+      { label: "Pre-warn 2 %", field: "pw2", numeric: true, decimals: 0 },
+      { label: "Pre-warn 3 %", field: "pw3", numeric: true, decimals: 0 },
+    ];
+    const out = preWarnRows.map((row) => {
+      const byKey: Record<string, number> = {};
+      for (const c of row.cells) byKey[c.key] = c.effective;
+      return {
+        activity: row.step,
+        description: PROCESS_STEP_LABELS[row.step],
+        cumulativeTarget: cumTargets[row.step],
+        pw1: byKey.pw1,
+        pw2: byKey.pw2,
+        pw3: byKey.pw3,
+      };
+    });
+    exportToXlsx(`pre-warnings_${scopeSlug}.xlsx`, cols, out, {
+      sheetName: "Pre-warnings",
+    });
+  };
+
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
+    <div className="space-y-4 max-w-6xl mx-auto">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">
             Warning Parameters
           </h1>
           <p className="text-muted-foreground text-sm mt-1 max-w-3xl">
-            Configure proactive pre-warnings (raised before a mark reaches its
-            target) and the reactive grace bands (raised after it overruns).
-            Ideal days accumulate down the process sequence into a cumulative
-            target; each mark's live ageing is compared to that target. These
-            settings are advisory and never change parsing, quantities, or
-            ageing.
+            Configure the reactive grace bands (raised after a mark overruns) and
+            proactive pre-warnings (raised before it reaches its target). Ideal
+            days accumulate down the process sequence into a cumulative target;
+            each mark's live ageing is compared to that target. These settings are
+            advisory and never change parsing, quantities, or ageing.
           </p>
         </div>
         <LogoutButton />
       </div>
 
       <Card>
-        <CardHeader className="space-y-4">
-          <div className="flex flex-row items-center justify-between space-y-0">
+        <CardHeader className="space-y-3 pb-3">
+          <div className="flex flex-row items-center justify-between space-y-0 gap-3">
+            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+              Per-activity targets &amp; grace
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              {saving && (
+                <span className="text-xs text-muted-foreground">Saving...</span>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportGraceXlsx}
+                className="h-8"
+              >
+                <Download className="h-3.5 w-3.5 mr-1.5" />
+                Excel
+              </Button>
+              {isAll ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={reset}
+                  className="h-8"
+                >
+                  Reset to defaults
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={resetProject}
+                  disabled={!projectOverrides}
+                  className="h-8"
+                >
+                  Reset this project
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs uppercase tracking-wider text-muted-foreground">
+              Project
+            </label>
+            <Select value={project} onValueChange={setProject}>
+              <SelectTrigger className="h-9 w-full sm:w-80">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All Projects (global default)</SelectItem>
+                {projects.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {p}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {isAll
+                ? "Editing the global defaults that apply to every project without its own override."
+                : "Editing overrides for this project. Cells you leave untouched inherit the global default (shown greyed)."}
+              {!isAll && selectedImportId === null && (
+                <span className="block">
+                  Select an import on the Data view to list its projects.
+                </span>
+              )}
+            </p>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
+                  <th className="py-1.5 pr-3 font-medium">Activity</th>
+                  <th className="py-1.5 px-3 font-medium text-right">
+                    Ideal days
+                  </th>
+                  <th className="py-1.5 px-3 font-medium text-right">
+                    Cumulative target
+                  </th>
+                  {BANDS.map((b) => (
+                    <th
+                      key={b.key}
+                      className="py-1.5 px-3 font-medium text-right"
+                    >
+                      {b.label} grace
+                    </th>
+                  ))}
+                  {!isAll && <th className="py-1.5 pl-3 font-medium"></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const { step, ov, globalCfg, globalIdeal, rowHasOverride } =
+                    row;
+                  const idealOverridden = !isAll && ov?.idealDays !== undefined;
+                  return (
+                    <tr
+                      key={step}
+                      className="border-b border-border/50 hover:bg-muted/20 align-top"
+                    >
+                      <td className="py-1.5 pr-3">
+                        <span className="font-mono font-semibold">{step}</span>
+                        <span className="text-muted-foreground ml-2 text-xs">
+                          {PROCESS_STEP_LABELS[step]}
+                        </span>
+                        {!isAll && rowHasOverride && (
+                          <span className="ml-2 text-[10px] uppercase tracking-wider text-primary font-semibold">
+                            override
+                          </span>
+                        )}
+                        {row.inverted && (
+                          <span className="block text-[10px] text-ageing-red mt-0.5">
+                            bands out of order
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-1.5 px-3 text-right">
+                        <NumberInput
+                          type="number"
+                          min={0}
+                          value={
+                            isAll
+                              ? globalCfg.idealDays
+                              : ov?.idealDays ?? ""
+                          }
+                          placeholder={isAll ? undefined : String(globalIdeal)}
+                          onValueChange={(v) => setIdeal(step, v)}
+                          className={`h-7 w-16 ml-auto tabular-nums text-right ${
+                            !isAll && !idealOverridden
+                              ? "text-muted-foreground"
+                              : ""
+                          } ${idealOverridden ? "ring-1 ring-primary/50" : ""}`}
+                          aria-label={`${step} ideal days`}
+                        />
+                      </td>
+                      <td className="py-1.5 px-3 text-right tabular-nums font-medium text-muted-foreground">
+                        {cumTargets[step]}d
+                      </td>
+                      {row.bands.map((b) => (
+                        <td key={b.key} className="py-1.5 px-3">
+                          <GraceCellEditor
+                            step={step}
+                            band={b.key}
+                            effectiveDays={b.effectiveDays}
+                            inheritedDays={b.inheritedDays}
+                            inheritedCell={b.inheritedCell}
+                            activeCell={b.activeCell}
+                            overridden={b.overridden}
+                            isProject={!isAll}
+                            onValue={(v) => editValue(step, b.key, v)}
+                            onPercent={(v) => editPercent(step, b.key, v)}
+                            onUseAuto={() => useAuto(step, b.key)}
+                            onInherit={() => inheritBand(step, b.key)}
+                          />
+                        </td>
+                      ))}
+                      {!isAll && (
+                        <td className="py-1.5 pl-3 text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => clearRowOverride(step)}
+                            disabled={!rowHasOverride}
+                            className="h-7 text-xs"
+                          >
+                            Clear
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="text-xs text-muted-foreground mt-3 space-y-1">
+            <p>
+              Grace is the overrun (days past the cumulative target) allowed
+              before escalating. Type a day value to pin a cell (Manual); type a
+              percent to auto-fill it from that activity's ideal days (Auto). Auto
+              cells recompute when ideal days change; "use %" reverts a manual
+              cell to its percentage. Yellow &le; Orange &le; Red is enforced when
+              classifying; anything past Orange is Red.
+            </p>
+            {invertedSteps.length > 0 && (
+              <p className="text-ageing-red">
+                Some activities have grace bands out of order (
+                {invertedSteps.join(", ")}). The warning engine raises later bands
+                to keep Yellow &le; Orange &le; Red, but consider setting sensible
+                percentages.
+              </p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="space-y-3 pb-3">
+          <div className="flex flex-row items-center justify-between space-y-0 gap-3">
             <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
               Pre-warnings (before target)
             </CardTitle>
-            {saving && (
-              <span className="text-xs text-muted-foreground">Saving...</span>
-            )}
+            <div className="flex items-center gap-2">
+              {saving && (
+                <span className="text-xs text-muted-foreground">Saving...</span>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportPreWarnXlsx}
+                className="h-8"
+              >
+                <Download className="h-3.5 w-3.5 mr-1.5" />
+                Excel
+              </Button>
+            </div>
           </div>
           <p className="text-xs text-muted-foreground max-w-3xl">
             Pre-warnings fire while a mark is still within its cumulative target,
@@ -363,14 +639,14 @@ function WarningParametersContent() {
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
-                  <th className="py-2 pr-3 font-medium">Activity</th>
-                  <th className="py-2 px-3 font-medium text-right">
+                  <th className="py-1.5 pr-3 font-medium">Activity</th>
+                  <th className="py-1.5 px-3 font-medium text-right">
                     Cumulative target
                   </th>
                   {PRE_WARNS.map((p) => (
                     <th
                       key={p.key}
-                      className="py-2 px-3 font-medium text-right"
+                      className="py-1.5 px-3 font-medium text-right"
                     >
                       {p.label} %
                     </th>
@@ -383,7 +659,7 @@ function WarningParametersContent() {
                     key={row.step}
                     className="border-b border-border/50 hover:bg-muted/20 align-top"
                   >
-                    <td className="py-2 pr-3">
+                    <td className="py-1.5 pr-3">
                       <span className="font-mono font-semibold">{row.step}</span>
                       <span className="text-muted-foreground ml-2 text-xs">
                         {PROCESS_STEP_LABELS[row.step]}
@@ -399,11 +675,11 @@ function WarningParametersContent() {
                         </span>
                       )}
                     </td>
-                    <td className="py-2 px-3 text-right tabular-nums font-medium text-muted-foreground">
+                    <td className="py-1.5 px-3 text-right tabular-nums font-medium text-muted-foreground">
                       {cumTargets[row.step]}d
                     </td>
                     {row.cells.map((cell) => (
-                      <td key={cell.key} className="py-2 px-3">
+                      <td key={cell.key} className="py-1.5 px-3">
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center gap-1">
                             <NumberInput
@@ -490,200 +766,6 @@ function WarningParametersContent() {
           </div>
         </CardContent>
       </Card>
-
-      <Card>
-        <CardHeader className="space-y-4">
-          <div className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
-              Per-activity targets &amp; grace
-            </CardTitle>
-            <div className="flex items-center gap-3">
-              {saving && (
-                <span className="text-xs text-muted-foreground">Saving...</span>
-              )}
-              {isAll ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={reset}
-                  className="h-8"
-                >
-                  Reset to defaults
-                </Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={resetProject}
-                  disabled={!projectOverrides}
-                  className="h-8"
-                >
-                  Reset this project
-                </Button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs uppercase tracking-wider text-muted-foreground">
-              Project
-            </label>
-            <Select value={project} onValueChange={setProject}>
-              <SelectTrigger className="h-9 w-full sm:w-80">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All Projects (global default)</SelectItem>
-                {projects.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              {isAll
-                ? "Editing the global defaults that apply to every project without its own override."
-                : "Editing overrides for this project. Cells you leave untouched inherit the global default (shown greyed)."}
-              {!isAll && selectedImportId === null && (
-                <span className="block">
-                  Select an import on the Data view to list its projects.
-                </span>
-              )}
-            </p>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
-                  <th className="py-2 pr-3 font-medium">Activity</th>
-                  <th className="py-2 px-3 font-medium text-right">
-                    Ideal days
-                  </th>
-                  <th className="py-2 px-3 font-medium text-right">
-                    Cumulative target
-                  </th>
-                  {BANDS.map((b) => (
-                    <th
-                      key={b.key}
-                      className="py-2 px-3 font-medium text-right"
-                    >
-                      {b.label} grace
-                    </th>
-                  ))}
-                  {!isAll && <th className="py-2 pl-3 font-medium"></th>}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => {
-                  const { step, ov, globalCfg, globalIdeal, rowHasOverride } =
-                    row;
-                  const idealOverridden = !isAll && ov?.idealDays !== undefined;
-                  return (
-                    <tr
-                      key={step}
-                      className="border-b border-border/50 hover:bg-muted/20 align-top"
-                    >
-                      <td className="py-2 pr-3">
-                        <span className="font-mono font-semibold">{step}</span>
-                        <span className="text-muted-foreground ml-2 text-xs">
-                          {PROCESS_STEP_LABELS[step]}
-                        </span>
-                        {!isAll && rowHasOverride && (
-                          <span className="ml-2 text-[10px] uppercase tracking-wider text-primary font-semibold">
-                            override
-                          </span>
-                        )}
-                        {row.inverted && (
-                          <span className="block text-[10px] text-ageing-red mt-0.5">
-                            bands out of order
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2 px-3 text-right">
-                        <NumberInput
-                          type="number"
-                          min={0}
-                          value={
-                            isAll
-                              ? globalCfg.idealDays
-                              : ov?.idealDays ?? ""
-                          }
-                          placeholder={isAll ? undefined : String(globalIdeal)}
-                          onValueChange={(v) => setIdeal(step, v)}
-                          className={`h-7 w-16 ml-auto tabular-nums text-right ${
-                            !isAll && !idealOverridden
-                              ? "text-muted-foreground"
-                              : ""
-                          } ${idealOverridden ? "ring-1 ring-primary/50" : ""}`}
-                          aria-label={`${step} ideal days`}
-                        />
-                      </td>
-                      <td className="py-2 px-3 text-right tabular-nums font-medium text-muted-foreground">
-                        {cumTargets[step]}d
-                      </td>
-                      {row.bands.map((b) => (
-                        <td key={b.key} className="py-2 px-3">
-                          <GraceCellEditor
-                            step={step}
-                            band={b.key}
-                            effectiveDays={b.effectiveDays}
-                            inheritedDays={b.inheritedDays}
-                            inheritedCell={b.inheritedCell}
-                            activeCell={b.activeCell}
-                            overridden={b.overridden}
-                            isProject={!isAll}
-                            onValue={(v) => editValue(step, b.key, v)}
-                            onPercent={(v) => editPercent(step, b.key, v)}
-                            onUseAuto={() => useAuto(step, b.key)}
-                            onInherit={() => inheritBand(step, b.key)}
-                          />
-                        </td>
-                      ))}
-                      {!isAll && (
-                        <td className="py-2 pl-3 text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => clearRowOverride(step)}
-                            disabled={!rowHasOverride}
-                            className="h-7 text-xs"
-                          >
-                            Clear
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="text-xs text-muted-foreground mt-3 space-y-1">
-            <p>
-              Grace is the overrun (days past the cumulative target) allowed
-              before escalating. Type a day value to pin a cell (Manual); type a
-              percent to auto-fill it from that activity's ideal days (Auto). Auto
-              cells recompute when ideal days change; "use %" reverts a manual
-              cell to its percentage.
-            </p>
-            <p>
-              Yellow &le; Orange &le; Red is enforced when classifying; anything
-              past Orange is Red.
-            </p>
-            {invertedSteps.length > 0 && (
-              <p className="text-ageing-red">
-                Some activities have grace bands out of order (
-                {invertedSteps.join(", ")}). The warning engine raises later bands
-                to keep Yellow &le; Orange &le; Red, but consider setting sensible
-                percentages.
-              </p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }
@@ -739,7 +821,7 @@ function GraceCellEditor({
       : "";
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex flex-col items-end gap-0.5">
       <div className="flex items-center gap-1">
         <NumberInput
           type="number"
@@ -769,7 +851,7 @@ function GraceCellEditor({
         />
         <span className="text-[10px] text-muted-foreground w-3">%</span>
       </div>
-      <div className="flex items-center gap-2 h-3.5 text-[9px] uppercase tracking-wider">
+      <div className="flex items-center gap-2 h-3 text-[9px] uppercase tracking-wider">
         {isAuto && <span className="text-primary font-semibold">auto</span>}
         {isManual && (
           <button
