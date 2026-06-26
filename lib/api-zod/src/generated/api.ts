@@ -595,6 +595,30 @@ export const GetImportVelocityResponse = zod.object({
 
 
 /**
+ * Deterministically recomputes, from the full append-only import history, two PERMANENT per-project turnaround milestones measured from the project's earliest Assign Date: MILESTONE 1 "Ready for Dispatch" (the first import where no mark remains in an earlier activity C..GB — every mark is at Y or gone) and MILESTONE 2 "Dispatched" (the first import where the project is entirely absent). Captured dates are preserved (capture-once) and persisted, so they survive after a project leaves the report. Includes planned (cumulative Y target) vs actual variance. Project-less rows ("(Unassigned)") are excluded. Purely additive — never changes parsing, activity values, dedup, ageing, warning, or velocity.
+
+ * @summary Get permanent per-project turnaround milestones (Ready / Dispatched)
+ */
+export const GetMilestonesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "project": zod.string(),
+  "projectStart": zod.string().nullable().describe('Earliest Assign Date across all marks ever seen (turnaround clock start).'),
+  "readyDate": zod.string().nullable().describe('Date Milestone 1 (all marks at Y or gone) first became true.'),
+  "readyTurnaroundDays": zod.number().nullable(),
+  "dispatchedDate": zod.string().nullable().describe('Date Milestone 2 (project entirely absent) first became true.'),
+  "dispatchedTurnaroundDays": zod.number().nullable(),
+  "dispatchLagDays": zod.number().nullable().describe('dispatchedTurnaroundDays minus readyTurnaroundDays.'),
+  "marksTotal": zod.number().describe('Distinct mark identities ever seen for the project.'),
+  "plannedReadyDays": zod.number().nullable().describe('Cumulative target at Y for the project (resolved ideal-days).'),
+  "varianceReadyDays": zod.number().nullable().describe('readyTurnaroundDays minus plannedReadyDays (+ = slower than planned).'),
+  "limitedHistory": zod.boolean().describe('Captured with no prior in-progress observation.'),
+  "reopened": zod.boolean().describe('A mark returned to an earlier activity after a milestone was captured.')
+}).describe('Permanent turnaround milestones for one project.')),
+  "generatedAt": zod.string()
+}).describe('Permanent per-project turnaround milestones.')
+
+
+/**
  * Returns the full field-level change set for an import versus the immediately preceding import. For the first import, all marks are reported as new.
 
  * @summary Get the change set for an import

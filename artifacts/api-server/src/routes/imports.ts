@@ -32,6 +32,7 @@ import {
   type VelocitySnapshot,
   type TurnaroundSettings,
 } from "@workspace/domain";
+import { recomputeMilestones } from "../lib/milestones";
 import {
   parseWorkbook,
   readStructural,
@@ -457,6 +458,13 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
     req.log,
   );
 
+  // Refresh permanent project milestones (capture-once; best-effort).
+  try {
+    await recomputeMilestones();
+  } catch (err) {
+    req.log.warn({ err }, "Milestone recompute failed after import");
+  }
+
   res.status(201).json(result);
 });
 
@@ -842,6 +850,13 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
       { stagingId, importId: result.import.id },
       "Commit claim not recorded but no distinct winner found; keeping import",
     );
+  }
+
+  // Refresh permanent project milestones (capture-once; best-effort).
+  try {
+    await recomputeMilestones();
+  } catch (err) {
+    req.log.warn({ err }, "Milestone recompute failed after commit");
   }
 
   res.status(201).json(result);
@@ -1367,6 +1382,15 @@ router.get("/imports/:id/velocity", async (req, res): Promise<void> => {
     contractors,
     stages,
   });
+});
+
+// Permanent per-project turnaround milestones (Ready for Dispatch / Dispatched).
+// Recomputed deterministically from the full import history on each read (and on
+// each upload); captured dates are preserved (capture-once) and persisted so
+// they survive after a project leaves the report. Purely additive.
+router.get("/milestones", async (_req, res): Promise<void> => {
+  const items = await recomputeMilestones();
+  res.json({ items, generatedAt: new Date().toISOString() });
 });
 
 export default router;

@@ -1,0 +1,88 @@
+REPLIT AGENT PROMPT — CAPTURE PROJECT TURNAROUND MILESTONES (Ready-for-Dispatch & Dispatched)
+=============================================================================================
+Capture, per PROJECT, two turnaround milestones and store them PERMANENTLY (they must
+survive after the project disappears from the report). Measured from the project's earliest
+Assign Date. Deterministic engine; uses the upload-to-upload history / append-only pool.
+Do not change parsing, activity values, dedup, ageing, or the warning/velocity logic —
+this ADDS a completed-turnaround capture and a view.
+
+DEFINITIONS (per project)
+  - project_start = the EARLIEST Assign Date across ALL marks ever seen for that project
+    (across all uploads, not just the latest). This is the turnaround clock's start.
+  - MILESTONE 1 — "Turnaround time – Everything Finished Ready for Dispatch":
+        the first moment when NONE of the project's marks are still in an earlier activity
+        (C, RFI, NH, B, HAB, HG, W, Q, TS, G, GB). i.e. every mark ever seen for the project
+        is either at Y (Yard) or already gone/dispatched — nothing remains in C…GB.
+        turnaround_ready_days = (date this becomes true) − project_start.
+  - MILESTONE 2 — "Turnaround time – Everything Dispatched":
+        the first moment when ALL of the project's marks have DISAPPEARED from the report
+        (the project has no pending marks left at all).
+        turnaround_dispatched_days = (date this becomes true) − project_start.
+  - dispatch_lag_days = turnaround_dispatched_days − turnaround_ready_days
+        (time between "all in yard" and "all shipped").
+
+HOW TO DETECT (across uploads — this is the key mechanic)
+  On each import, for every project present in history, evaluate its current state using
+  the latest snapshot plus what is known from the pool:
+    a) Build the set of the project's marks ever seen (from the append-only pool /
+       completed records + current import).
+    b) A mark's current state = its activity in the latest import, or "gone" if it was seen
+       before but is absent from the latest import.
+    c) MILESTONE 1 condition: no mark is in C…GB (every mark is at Y or gone).
+       MILESTONE 2 condition: every mark is gone (project absent entirely).
+  CAPTURE-ONCE: the FIRST import at which each condition becomes true is the milestone
+  date. Stamp it then and NEVER overwrite it (even if later a stray mark reappears, keep the
+  first capture; optionally log re-openings as an anomaly).
+  - The milestone date is the report/upload date of that import (use the import's
+    reportDate; fall back to its created_at).
+  - Because finished projects leave the report, these MUST be written to a permanent store
+    at the moment of capture — do not rely on the project still being in the latest file.
+
+PERMANENT STORE
+  - New table e.g. project_milestones:
+        project, project_start, ready_date, ready_turnaround_days,
+        dispatched_date, dispatched_turnaround_days, dispatch_lag_days,
+        marks_total, captured_from_import_id(s), created_at.
+  - One row per project; fill ready_* when Milestone 1 first fires, dispatched_* when
+    Milestone 2 first fires. Append-only in spirit; never recompute a captured date from a
+    later (possibly partial) file.
+  - Survives even after the project is gone from all reports.
+
+PLANNED vs ACTUAL (useful, deterministic)
+  - planned_ready = cumulative_target at Y for the project (from its resolved ideal-days).
+  - variance_ready = ready_turnaround_days − planned_ready  (+ = slower than planned).
+  - Show planned vs actual so targets can be tuned from real completions.
+
+NEW VIEW — "Completed / Turnaround" (add to nav, or a section on Stuck/Reports)
+  - A table of completed projects: Project | Start date | Ready-for-Dispatch date |
+    Turnaround (ready) days | Dispatched date | Turnaround (dispatched) days |
+    Dispatch lag | Planned (Y target) | Variance.
+  - Status chips for projects mid-way: "All in yard, awaiting dispatch" (Milestone 1 hit,
+    Milestone 2 not yet) vs "Fully dispatched" (both hit) vs "In progress" (neither).
+  - Rollups: average actual turnaround (ready and dispatched) across projects; by
+    contractor if useful; trend over time.
+  - Export includes all milestone columns.
+
+EDGE CASES
+  - A project may hit Milestone 1 and Milestone 2 in the SAME import (everything went from
+    in-progress to gone between two uploads) — capture both with that import's date;
+    dispatch_lag may be 0.
+  - If a project is seen fully dispatched on its very first appearance with no prior
+    in-progress history, still capture using available dates but flag "limited history".
+  - Project-less rows (RSJ Pole / Earthing / General, "Unassigned") are NOT a project —
+    exclude them from project milestones (or track the "Unassigned" bucket separately, but
+    do not let it block a real project's milestone).
+  - Re-opening (a mark reappears after a milestone) — keep the original captured date; log
+    the re-open as an anomaly for review.
+
+ACCEPTANCE CHECK
+  - When all of a project's marks are at Y or gone (none in C…GB), Milestone 1 is stamped
+    once with that import's date; turnaround_ready_days = date − earliest assign date.
+  - When the project has no marks left anywhere, Milestone 2 is stamped once; dispatched
+    turnaround and dispatch_lag computed.
+  - Both milestones persist after the project leaves the report; not overwritten by later
+    files.
+  - Completed/Turnaround view lists projects with both turnaround times, planned vs actual,
+    and the in-between status.
+  - Project-less rows excluded; same-import double-capture and re-open handled.
+  - No change to parsing, activity values, dedup, ageing, warning, or velocity logic.

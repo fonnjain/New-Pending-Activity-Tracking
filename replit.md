@@ -9,7 +9,7 @@ A mobile-first web app for steel-fabrication workshops. Upload an Excel (.xlsx o
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks + Zod schemas from the OpenAPI spec (run after any `openapi.yaml` edit)
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev). **Also re-run against prod after deploying schema changes** — `settings` (per_project, stalled_days) and `upload_staging.committed_import_id` were added over time.
+- `pnpm --filter @workspace/db run push` — push DB schema changes (dev). **Also re-run against prod after deploying schema changes** — `settings` (per_project, stalled_days), `upload_staging.committed_import_id`, and the `project_milestones` table were added over time.
 - Required env: `DATABASE_URL` (Postgres). Optional: `ANTHROPIC_API_KEY` (enables the advisory AI layer).
 
 ## Stack
@@ -24,11 +24,11 @@ A mobile-first web app for steel-fabrication workshops. Upload an Excel (.xlsx o
 ## Where things live
 
 - API contract (source of truth): `lib/api-spec/openapi.yaml` — run codegen after edits
-- DB schema (source of truth): `lib/db/src/schema/` (`imports.ts`, `recordPool.ts`, `importRows.ts`, `settings.ts`, `uploadStaging.ts`)
+- DB schema (source of truth): `lib/db/src/schema/` (`imports.ts`, `recordPool.ts`, `importRows.ts`, `settings.ts`, `uploadStaging.ts`, `projectMilestones.ts`)
 - Shared domain engine (source of truth for ordering + all advisory math): `lib/domain/src/index.ts` (`@workspace/domain`)
 - Excel parsing + ageing/route computation: `artifacts/api-server/src/lib/parse.ts`
 - Merge/diff engine: `artifacts/api-server/src/lib/diff.ts`
-- Routes: `artifacts/api-server/src/routes/` (`imports.ts`, `ai.ts`, `settings.ts`); report builder `src/lib/report.ts`; AI helpers `src/lib/ai.ts`
+- Routes: `artifacts/api-server/src/routes/` (`imports.ts`, `ai.ts`, `settings.ts`); report builder `src/lib/report.ts`; AI helpers `src/lib/ai.ts`; turnaround-milestone engine `src/lib/milestones.ts`
 - Frontend pages: `artifacts/tracker/src/pages/`; shared frontend logic: `artifacts/tracker/src/lib/` (`store.tsx` filters, `settings.tsx`, `ageing.ts`, `turnaround.ts`, `movement.ts`, `velocity.ts`)
 - Theme + all color scales: `artifacts/tracker/src/index.css`
 
@@ -60,13 +60,23 @@ All three layers below are recomputed live from settings, exactly like activity 
 - **Persistence + auth.** Singleton `settings` table: `activities` jsonb + `per_project` jsonb + `stalled_days` int. `GET /settings` is **public** (migrates the stored row on read). `PUT /settings` **requires auth**, normalizes via `migrateTurnaroundSettings`, and echoes back exactly what it persists so the client cache never drifts. `migrateTurnaroundSettings` accepts every legacy shape (flat numeric, numeric grace, cell-based) and seeds preWarn/stalledDays, so any stored row keeps behaving the same. Frontend provider `lib/settings.tsx` applies a live local draft, debounced PUT, and reconciles to the server's normalized response on a settled save.
 - **Colors (display-only, independent of the fixed ageing scale).** Status/lifecycle palettes have their own `.status-*`/`.lc-*` classes in `index.css`, single-sourced via helpers in `lib/turnaround.ts` (`statusTextColor`/`statusBgColor`/`lifecycleBgColor`/etc.). Changing these NEVER affects thresholds/targets/ageing. Do NOT reuse the `ageing-*` classes (fixed days-based buckets: green ≤ 30, amber 31–60, red > 60) for status.
 
+## Project turnaround milestones (permanent capture, additive)
+
+A separate **permanent** capture layer (NOT one of the live advisory overlays) recording, per project (`job`, excluding `(Unassigned)`), two turnaround milestones measured from the project's **earliest Assign Date** (across the whole `record_pool`): **MILESTONE 1 "Ready for Dispatch"** = the first import where NO mark is still in an earlier activity (any known step before `Y` per `PROCESS_SEQUENCE`) — every mark is at `Y` or gone; **MILESTONE 2 "Dispatched"** = the first import where the project is entirely absent. Engine: `artifacts/api-server/src/lib/milestones.ts` (`recomputeMilestones`); table: `project_milestones` (pk `project`); endpoint: `GET /milestones`.
+
+- **Deterministic recompute + capture-once persistence.** Recomputed by replaying ALL imports id-ASC on each read AND best-effort after each upload (direct + staged commit). Replaying from the start always finds the EARLIEST qualifying import, so it is idempotent and a later (possibly partial) file can never move a captured date. Results are MERGED capture-once against stored rows (a stored milestone date always wins) and upserted. **Materialization iterates the UNION of replayed projects and stored rows**, so a previously captured project that drops out of current history (import deleted/pruned, partial-history env) is still returned and re-persisted unchanged — this union is what makes "permanent" actually permanent (do not narrow it back to just replayed `states`).
+- **Derived fields.** `readyTurnaroundDays`/`dispatchedTurnaroundDays` = whole days from `projectStart` (clamped ≥ 0); `dispatchLagDays` = dispatched − ready; `plannedReadyDays` = `cumulativeTarget("Y", settings, project)` (per-project inherited, same engine as turnaround); `varianceReadyDays` = ready − planned (+ = slower than planned).
+- **Edge cases.** Same-import double-capture (project goes straight from in-progress/unseen to absent without ever being observed all-at-Y) stamps Ready at the dispatch date (lag 0). `limitedHistory` flags a milestone captured with no prior in-progress observation (e.g. all-Y on first sight). `reopened` flags a mark returning to an earlier activity after a milestone was captured. Milestone date = the import's report date (else `created_at` YMD). Mark identity = `markId|jobCardNo`.
+- **Strictly additive.** Reads only; never writes `record_pool`/`import_rows`/computed fields and never changes parsing, activity values, qty, dedup, ageing, warning, or velocity. The milestone recompute after upload is wrapped in try/catch so it can never fail an import.
+
 ## Pages & nav
 
-Nav order (`layout.tsx` + `App.tsx`): **Overview, Turnaround, Stuck Projects, Activity, Job-wise, Contractor, Ageing, Reports, Data, Warning Params**.
+Nav order (`layout.tsx` + `App.tsx`): **Overview, Turnaround, Stuck Projects, Completed, Activity, Job-wise, Contractor, Ageing, Reports, Data, Warning Params**.
 
 - **Overview** (`overview.tsx`) — snapshot hub: two compact linking cards (Turnaround snapshot, Velocity snapshot) + headline KPIs + ageing breakdown + top aged/busiest contractors, with the Changes panel LAST (at the bottom). Stalled and slow are counted on the same filter-scoped identity basis as the Stuck page.
 - **Turnaround** (`turnaround.tsx`, `/turnaround`) — 8-state deep-dive: a tabbed Projects/Contractors/Stages breakdown FIRST (`TurnaroundBreakdown`, at the very top — mirrors the Stuck Projects tab layout but driven by lifecycle/overrun metrics, not velocity: a project leaderboard by breach score with mark drill, and contractor/stage overrun tables — every row (project, contractor, stage) is clickable to expand the underlying marks; no summary tiles), then the TurnaroundWarnings "Turnaround Lifecycle" card (On track/Pre-warning/Breached + the full 8-state strip + by-activity bars) + urgency worklist (by daysToTarget) + the AI turnaround report (`components/ai-turnaround-report.tsx`).
 - **Stuck Projects** (`stuck-projects.tsx`, `/stuck`) — project leaderboard by stuck score (stalled+slow weight share) with mark drill (pace/ETA/eta_gap/trend/days-since-movement), contractor + stage views. Every row (project, contractor, stage) is clickable to expand the underlying marks.
+- **Completed / Turnaround** (`completed.tsx`, `/completed`) — permanent per-project turnaround milestones table (status chips: In progress / In yard awaiting dispatch / Fully dispatched) + rollup tiles + CSV export. Reads `GET /milestones`; honours only the global Job filter (a milestone is per-project, not per-mark). Limited-history and re-open anomalies show inline warning icons.
 - **Activity / Job-wise / Contractor / Ageing** — process-ordered activity cards; job grouping; workload bars + contractor×ageing matrix; ageing buckets + activity-wise table + full pending table.
 - **Reports** (`reports.tsx`) — a **report-type selector** (Job Wise Report vs AI Report) at the top, then either the `ReportBuilder` (turnaround + velocity export/table columns, joined via `useVelocityInfo`/`useStalledInfo`) or the `AiTurnaroundReport` component. The AI report also lives on the Turnaround page; here it is surfaced as the second report type so it stays accessible from Reports.
 - **Data** — upload, parse summary, import list with change counts, CSV/JSON export, staged-upload panel.

@@ -31,6 +31,7 @@ import type {
   HealthStatus,
   Import,
   ImportUpload,
+  MilestonesResponse,
   MovementResponse,
   Record,
   ReportRequest,
@@ -1502,6 +1503,85 @@ export function useGetImportVelocity<TData = Awaited<ReturnType<typeof getImport
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetImportVelocityQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetMilestonesUrl = () => {
+
+
+
+
+  return `/api/milestones`
+}
+
+/**
+ * Deterministically recomputes, from the full append-only import history, two PERMANENT per-project turnaround milestones measured from the project's earliest Assign Date: MILESTONE 1 "Ready for Dispatch" (the first import where no mark remains in an earlier activity C..GB — every mark is at Y or gone) and MILESTONE 2 "Dispatched" (the first import where the project is entirely absent). Captured dates are preserved (capture-once) and persisted, so they survive after a project leaves the report. Includes planned (cumulative Y target) vs actual variance. Project-less rows ("(Unassigned)") are excluded. Purely additive — never changes parsing, activity values, dedup, ageing, warning, or velocity.
+
+ * @summary Get permanent per-project turnaround milestones (Ready / Dispatched)
+ */
+export const getMilestones = async ( options?: RequestInit): Promise<MilestonesResponse> => {
+
+  return customFetch<MilestonesResponse>(getGetMilestonesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMilestonesQueryKey = () => {
+    return [
+    `/api/milestones`
+    ] as const;
+    }
+
+
+export const getGetMilestonesQueryOptions = <TData = Awaited<ReturnType<typeof getMilestones>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMilestones>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMilestonesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMilestones>>> = ({ signal }) => getMilestones({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMilestones>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMilestonesQueryResult = NonNullable<Awaited<ReturnType<typeof getMilestones>>>
+export type GetMilestonesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get permanent per-project turnaround milestones (Ready / Dispatched)
+ */
+
+export function useGetMilestones<TData = Awaited<ReturnType<typeof getMilestones>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMilestones>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMilestonesQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

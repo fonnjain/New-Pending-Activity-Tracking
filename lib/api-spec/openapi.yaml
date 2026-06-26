@@ -488,6 +488,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /milestones:
+    get:
+      operationId: getMilestones
+      tags: [imports]
+      summary: Get permanent per-project turnaround milestones (Ready / Dispatched)
+      description: >
+        Deterministically recomputes, from the full append-only import history,
+        two PERMANENT per-project turnaround milestones measured from the
+        project's earliest Assign Date: MILESTONE 1 "Ready for Dispatch" (the
+        first import where no mark remains in an earlier activity C..GB — every
+        mark is at Y or gone) and MILESTONE 2 "Dispatched" (the first import where
+        the project is entirely absent). Captured dates are preserved
+        (capture-once) and persisted, so they survive after a project leaves the
+        report. Includes planned (cumulative Y target) vs actual variance.
+        Project-less rows ("(Unassigned)") are excluded. Purely additive — never
+        changes parsing, activity values, dedup, ageing, warning, or velocity.
+      responses:
+        "200":
+          description: Per-project turnaround milestones
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MilestonesResponse"
   /imports/{id}/changes:
     get:
       operationId: getImportChanges
@@ -1553,6 +1576,69 @@ components:
         - projects
         - contractors
         - stages
+    ProjectMilestone:
+      type: object
+      description: Permanent turnaround milestones for one project.
+      properties:
+        project:
+          type: string
+        projectStart:
+          type: ["string", "null"]
+          description: Earliest Assign Date across all marks ever seen (turnaround clock start).
+        readyDate:
+          type: ["string", "null"]
+          description: Date Milestone 1 (all marks at Y or gone) first became true.
+        readyTurnaroundDays:
+          type: ["integer", "null"]
+        dispatchedDate:
+          type: ["string", "null"]
+          description: Date Milestone 2 (project entirely absent) first became true.
+        dispatchedTurnaroundDays:
+          type: ["integer", "null"]
+        dispatchLagDays:
+          type: ["integer", "null"]
+          description: dispatchedTurnaroundDays minus readyTurnaroundDays.
+        marksTotal:
+          type: integer
+          description: Distinct mark identities ever seen for the project.
+        plannedReadyDays:
+          type: ["integer", "null"]
+          description: Cumulative target at Y for the project (resolved ideal-days).
+        varianceReadyDays:
+          type: ["integer", "null"]
+          description: readyTurnaroundDays minus plannedReadyDays (+ = slower than planned).
+        limitedHistory:
+          type: boolean
+          description: Captured with no prior in-progress observation.
+        reopened:
+          type: boolean
+          description: A mark returned to an earlier activity after a milestone was captured.
+      required:
+        - project
+        - projectStart
+        - readyDate
+        - readyTurnaroundDays
+        - dispatchedDate
+        - dispatchedTurnaroundDays
+        - dispatchLagDays
+        - marksTotal
+        - plannedReadyDays
+        - varianceReadyDays
+        - limitedHistory
+        - reopened
+    MilestonesResponse:
+      type: object
+      description: Permanent per-project turnaround milestones.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectMilestone"
+        generatedAt:
+          type: string
+      required:
+        - items
+        - generatedAt
     ReviewRequest:
       type: object
       properties:

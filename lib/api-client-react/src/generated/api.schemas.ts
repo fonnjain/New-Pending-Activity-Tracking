@@ -582,6 +582,61 @@ export interface VelocityResponse {
   stages: VelocityStageAgg[];
 }
 
+/**
+ * Permanent turnaround milestones for one project.
+ */
+export interface ProjectMilestone {
+  project: string;
+  /**
+     * Earliest Assign Date across all marks ever seen (turnaround clock start).
+     * @nullable
+     */
+  projectStart: string | null;
+  /**
+     * Date Milestone 1 (all marks at Y or gone) first became true.
+     * @nullable
+     */
+  readyDate: string | null;
+  /** @nullable */
+  readyTurnaroundDays: number | null;
+  /**
+     * Date Milestone 2 (project entirely absent) first became true.
+     * @nullable
+     */
+  dispatchedDate: string | null;
+  /** @nullable */
+  dispatchedTurnaroundDays: number | null;
+  /**
+     * dispatchedTurnaroundDays minus readyTurnaroundDays.
+     * @nullable
+     */
+  dispatchLagDays: number | null;
+  /** Distinct mark identities ever seen for the project. */
+  marksTotal: number;
+  /**
+     * Cumulative target at Y for the project (resolved ideal-days).
+     * @nullable
+     */
+  plannedReadyDays: number | null;
+  /**
+     * readyTurnaroundDays minus plannedReadyDays (+ = slower than planned).
+     * @nullable
+     */
+  varianceReadyDays: number | null;
+  /** Captured with no prior in-progress observation. */
+  limitedHistory: boolean;
+  /** A mark returned to an earlier activity after a milestone was captured. */
+  reopened: boolean;
+}
+
+/**
+ * Permanent per-project turnaround milestones.
+ */
+export interface MilestonesResponse {
+  items: ProjectMilestone[];
+  generatedAt: string;
+}
+
 export interface ReviewRequest {
   /** The import to review. */
   importId: number;

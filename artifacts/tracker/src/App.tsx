@@ -10,6 +10,7 @@ import NotFound from "@/pages/not-found";
 import Overview from "@/pages/overview";
 import TurnaroundView from "@/pages/turnaround";
 import StuckProjectsView from "@/pages/stuck-projects";
+import CompletedView from "@/pages/completed";
 import JobDashboard from "@/pages/job-dashboard";
 import ActivityView from "@/pages/activity";
 import AgeingView from "@/pages/ageing";
@@ -37,6 +38,7 @@ function Router() {
         <Route path="/" component={Overview} />
         <Route path="/turnaround" component={TurnaroundView} />
         <Route path="/stuck" component={StuckProjectsView} />
+        <Route path="/completed" component={CompletedView} />
         <Route path="/jobs" component={JobDashboard} />
         <Route path="/activity" component={ActivityView} />
         <Route path="/ageing" component={AgeingView} />
