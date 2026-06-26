@@ -7,41 +7,8 @@ import { Button } from "@/components/ui/button";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DateRangeSelect } from "@/components/date-range-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Segmented } from "@/components/ui/segmented";
 import { sortActivities } from "@workspace/domain";
-import { cn } from "@/lib/utils";
-
-function Segmented({
-  value,
-  onChange,
-  options,
-}: {
-  value: string | null;
-  onChange: (v: string | null) => void;
-  options: { value: string | null; label: string }[];
-}) {
-  return (
-    <div className="inline-flex rounded-md border bg-background p-0.5">
-      {options.map((opt) => {
-        const active = value === opt.value;
-        return (
-          <button
-            key={opt.label}
-            type="button"
-            onClick={() => onChange(opt.value)}
-            className={cn(
-              "h-8 rounded-[5px] px-3 text-sm transition-colors",
-              active
-                ? "bg-primary text-primary-foreground font-medium"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
-            )}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 const navItems = [
   { href: "/", icon: BarChart3, label: "Overview" },
@@ -121,40 +88,60 @@ function FilterBar() {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
 
+  const isNtlt = filters.category === "NTLT";
+
+  // Rows in the current Order Type mode drive every option list, so secondary
+  // filters (Contractor/Activity) and the Mark picker only offer mode-relevant
+  // values.
+  const modeRecords = useMemo(
+    () => records.filter(r => r.category === filters.category),
+    [records, filters.category]
+  );
+
+  // TLT primary dimension = Project (job).
   const jobs = useMemo(
-    () => Array.from(new Set(records.map(r => r.job).filter(Boolean))).sort(),
-    [records]
+    () => Array.from(new Set(modeRecords.map(r => r.job).filter(Boolean))).sort(),
+    [modeRecords]
+  );
+
+  // NTLT primary dimension = Section (the cleaned group_key).
+  const sections = useMemo(
+    () => Array.from(new Set(modeRecords.map(r => r.groupKey).filter((k): k is string => Boolean(k)))).sort(),
+    [modeRecords]
   );
 
   const structures = useMemo(
-    () => Array.from(new Set(records
+    () => Array.from(new Set(modeRecords
       .filter(r => !filters.job || r.job === filters.job)
       .map(r => r.structure)
       .filter(Boolean)
     )).sort(),
-    [records, filters.job]
+    [modeRecords, filters.job]
   );
 
   const marks = useMemo(
-    () => Array.from(new Set(records
-      .filter(r => (!filters.job || r.job === filters.job) && (!filters.structure || r.structure === filters.structure))
-      .map(r => r.markId) // Simplified for UI
+    () => Array.from(new Set(modeRecords
+      .filter(r => isNtlt
+        ? (!filters.section || r.groupKey === filters.section) && (!filters.ntltSubtype || r.ntltSubtype === filters.ntltSubtype)
+        : (!filters.job || r.job === filters.job) && (!filters.structure || r.structure === filters.structure))
+      .map(r => r.markId)
       .filter(Boolean)
     )).sort(),
-    [records, filters.job, filters.structure]
+    [modeRecords, isNtlt, filters.section, filters.ntltSubtype, filters.job, filters.structure]
   );
 
   const contractors = useMemo(
-    () => Array.from(new Set(records.map(r => r.contractor).filter((c): c is string => Boolean(c)))).sort(),
-    [records]
+    () => Array.from(new Set(modeRecords.map(r => r.contractor).filter((c): c is string => Boolean(c)))).sort(),
+    [modeRecords]
   );
 
   const activities = useMemo(
-    () => sortActivities(Array.from(new Set(records.map(r => r.activity).filter((a): a is string => Boolean(a))))),
-    [records]
+    () => sortActivities(Array.from(new Set(modeRecords.map(r => r.activity).filter((a): a is string => Boolean(a))))),
+    [modeRecords]
   );
 
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => {
+    if (k === "category") return false; // Order Type is a mode, not a filter
     if (v === null || v === "") return false;
     if (k === "dateRange") return dateRangeWindow(v) !== null;
     return true;
@@ -171,12 +158,11 @@ function FilterBar() {
             value={filters.category}
             onChange={(v) => setFilter("category", v)}
             options={[
-              { value: null, label: "All" },
               { value: "TLT", label: "TLT" },
               { value: "NTLT", label: "NTLT" },
             ]}
           />
-          {filters.category === "NTLT" && (
+          {isNtlt && (
             <Segmented
               value={filters.ntltSubtype}
               onChange={(v) => setFilter("ntltSubtype", v)}
@@ -192,13 +178,23 @@ function FilterBar() {
         <div className="flex items-center justify-between p-3 md:px-6">
           <div className="flex items-center gap-2 flex-1 mr-4 flex-wrap">
             <div className="w-[150px]">
-              <SearchableSelect
-                value={filters.job}
-                onChange={(v) => setFilter("job", v)}
-                options={jobs}
-                allLabel="All Jobs"
-                searchPlaceholder="Search jobs..."
-              />
+              {isNtlt ? (
+                <SearchableSelect
+                  value={filters.section}
+                  onChange={(v) => setFilter("section", v)}
+                  options={sections}
+                  allLabel="All Sections"
+                  searchPlaceholder="Search sections..."
+                />
+              ) : (
+                <SearchableSelect
+                  value={filters.job}
+                  onChange={(v) => setFilter("job", v)}
+                  options={jobs}
+                  allLabel="All Jobs"
+                  searchPlaceholder="Search jobs..."
+                />
+              )}
             </div>
             <div className="w-[150px]">
               <SearchableSelect
@@ -242,17 +238,19 @@ function FilterBar() {
         
         <CollapsibleContent>
           <div className="p-3 md:px-6 pt-0 border-t bg-muted/30 grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">Structure</label>
-              <SearchableSelect
-                value={filters.structure}
-                onChange={(v) => setFilter("structure", v)}
-                options={structures}
-                allLabel="All Structures"
-                searchPlaceholder="Search structures..."
-                disabled={structures.length === 0}
-              />
-            </div>
+            {!isNtlt && (
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Structure</label>
+                <SearchableSelect
+                  value={filters.structure}
+                  onChange={(v) => setFilter("structure", v)}
+                  options={structures}
+                  allLabel="All Structures"
+                  searchPlaceholder="Search structures..."
+                  disabled={structures.length === 0}
+                />
+              </div>
+            )}
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">Mark</label>
               <SearchableSelect

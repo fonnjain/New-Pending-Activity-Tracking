@@ -17,6 +17,7 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { Segmented } from "@/components/ui/segmented";
 import { DateRangeSelect } from "@/components/date-range-select";
 import { SortControl } from "@/components/sort-control";
 import {
@@ -55,7 +56,8 @@ export default function JobDashboard() {
 }
 
 function JobDashboardContent() {
-  const { selectedImportId, filters } = useTracker();
+  const { selectedImportId, filters, setFilter } = useTracker();
+  const isNtlt = filters.category === "NTLT";
   const { data: rawRecords = [] } = useGetImportRecords(selectedImportId as number, {
     query: {
       enabled: !!selectedImportId,
@@ -63,10 +65,23 @@ function JobDashboardContent() {
     },
   });
 
+  // Scope to the current Order Type mode, then apply the date range. The toggle
+  // drives both the primary dimension (Project for TLT, Section for NTLT) and the
+  // grouping below.
   const records = useMemo(
-    () => rawRecords.filter((r) => isWithinDateRange(r.assignDate, filters.dateRange)),
-    [rawRecords, filters.dateRange],
+    () =>
+      rawRecords.filter(
+        (r) => r.category === filters.category && isWithinDateRange(r.assignDate, filters.dateRange),
+      ),
+    [rawRecords, filters.category, filters.dateRange],
   );
+
+  // Resolve a row's primary key (Project in TLT, Section group_key in NTLT) and
+  // its secondary key (Structure in TLT, Sub-category in NTLT).
+  const primaryOf = (r: { job: string | null; groupKey: string | null }) =>
+    (isNtlt ? r.groupKey : r.job) || "Unknown";
+  const secondaryOf = (r: { structure: string | null; ntltSubtype: string | null }) =>
+    isNtlt ? r.ntltSubtype : r.structure;
 
   const [project, setProject] = useState<string | null>(null);
   const [structure, setStructure] = useState<string | null>(null);
@@ -74,10 +89,23 @@ function JobDashboardContent() {
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [projectSort, setProjectSort] = useState<ProjectSortKey>("assignDate");
 
+  const primaryLabel = isNtlt ? "Section" : "Project";
+  const secondaryLabel = isNtlt ? "Sub-category" : "Structure";
+
+  // Switching mode clears any stale cross-mode local selection.
+  const switchMode = (v: string | null) => {
+    if (!v || v === filters.category) return;
+    setProject(null);
+    setStructure(null);
+    setMark(null);
+    setSelectedJob(null);
+    setFilter("category", v);
+  };
+
   // Cascading dropdown options
   const projectOptions = useMemo(
-    () => Array.from(new Set(records.map((r) => r.job).filter(Boolean))).sort(),
-    [records],
+    () => Array.from(new Set(records.map((r) => primaryOf(r)).filter((k) => k !== "Unknown"))).sort(),
+    [records, isNtlt],
   );
 
   const structureOptions = useMemo(
@@ -85,12 +113,12 @@ function JobDashboardContent() {
       Array.from(
         new Set(
           records
-            .filter((r) => !project || r.job === project)
-            .map((r) => r.structure)
-            .filter(Boolean),
+            .filter((r) => !project || primaryOf(r) === project)
+            .map((r) => secondaryOf(r))
+            .filter((s): s is string => Boolean(s)),
         ),
       ).sort(),
-    [records, project],
+    [records, project, isNtlt],
   );
 
   const markOptions = useMemo(
@@ -100,14 +128,14 @@ function JobDashboardContent() {
           records
             .filter(
               (r) =>
-                (!project || r.job === project) &&
-                (!structure || r.structure === structure),
+                (!project || primaryOf(r) === project) &&
+                (!structure || secondaryOf(r) === structure),
             )
             .map((r) => r.markId)
             .filter(Boolean),
         ),
       ).sort(),
-    [records, project, structure],
+    [records, project, structure, isNtlt],
   );
 
   const setProjectCascade = (v: string | null) => {
@@ -123,12 +151,12 @@ function JobDashboardContent() {
   const filtered = useMemo(
     () =>
       records.filter((r) => {
-        if (project && r.job !== project) return false;
-        if (structure && r.structure !== structure) return false;
+        if (project && primaryOf(r) !== project) return false;
+        if (structure && secondaryOf(r) !== structure) return false;
         if (mark && r.markId !== mark) return false;
         return true;
       }),
-    [records, project, structure, mark],
+    [records, project, structure, mark, isNtlt],
   );
 
   const { totalProjects, totalMarks, totalQty, totalWt, avgAgeing, byProject, byActivity } =
@@ -143,14 +171,14 @@ function JobDashboardContent() {
 
       const projGroups = new Map<string, typeof filtered>();
       filtered.forEach((r) => {
-        const key = r.job || "Unknown";
+        const key = primaryOf(r);
         if (!projGroups.has(key)) projGroups.set(key, []);
         projGroups.get(key)!.push(r);
       });
 
       const byProject = Array.from(projGroups.entries()).map(([job, recs]) => ({
         job,
-        structures: new Set(recs.map((r) => r.structure).filter(Boolean)).size,
+        structures: new Set(recs.map((r) => secondaryOf(r)).filter(Boolean)).size,
         marks: recs.length,
         qty: recs.reduce((s, r) => s + r.balanceQty, 0),
         weight: recs.reduce((s, r) => s + r.balanceWt, 0),
@@ -235,7 +263,8 @@ function JobDashboardContent() {
     return (
       <JobDetail
         job={selectedJob}
-        records={records.filter((r) => (r.job || "Unknown") === selectedJob)}
+        label={primaryLabel}
+        records={records.filter((r) => primaryOf(r) === selectedJob)}
         onBack={() => setSelectedJob(null)}
       />
     );
@@ -244,10 +273,23 @@ function JobDashboardContent() {
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-3">
           <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
-            Job Filters
+            {isNtlt ? "Section Filters" : "Job Filters"}
           </CardTitle>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-muted-foreground uppercase">
+              Order Type
+            </span>
+            <Segmented
+              value={filters.category}
+              onChange={switchMode}
+              options={[
+                { value: "TLT", label: "TLT" },
+                { value: "NTLT", label: "NTLT" },
+              ]}
+            />
+          </div>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -259,26 +301,26 @@ function JobDashboardContent() {
             </div>
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">
-                Project
+                {primaryLabel}
               </label>
               <SearchableSelect
                 value={project}
                 onChange={setProjectCascade}
                 options={projectOptions}
-                allLabel="All Projects"
-                searchPlaceholder="Search projects..."
+                allLabel={`All ${primaryLabel}s`}
+                searchPlaceholder={`Search ${primaryLabel.toLowerCase()}s...`}
               />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">
-                Structure
+                {secondaryLabel}
               </label>
               <SearchableSelect
                 value={structure}
                 onChange={setStructureCascade}
                 options={structureOptions}
-                allLabel="All Structures"
-                searchPlaceholder="Search structures..."
+                allLabel={`All ${secondaryLabel === "Sub-category" ? "Sub-categories" : "Structures"}`}
+                searchPlaceholder={`Search ${secondaryLabel.toLowerCase()}...`}
                 disabled={structureOptions.length === 0}
               />
             </div>
@@ -300,7 +342,7 @@ function JobDashboardContent() {
       </Card>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <KpiTile title="Projects" value={totalProjects} />
+        <KpiTile title={`${primaryLabel}s`} value={totalProjects} />
         <KpiTile title="Pending Marks" value={totalMarks} />
         <KpiTile title="Balance Qty" value={totalQty.toLocaleString()} />
         <KpiTile title="Balance Wt" value={formatWeight(totalWt)} />
@@ -310,7 +352,7 @@ function JobDashboardContent() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
           <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
-            By Project
+            By {primaryLabel}
           </CardTitle>
           <div className="flex items-center gap-2">
             <label className="text-xs font-semibold text-muted-foreground uppercase whitespace-nowrap">
@@ -338,8 +380,10 @@ function JobDashboardContent() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Project</TableHead>
-                  <TableHead className="text-right">No. of Structures</TableHead>
+                  <TableHead>{primaryLabel}</TableHead>
+                  <TableHead className="text-right">
+                    {isNtlt ? "No. of Sub-cats" : "No. of Structures"}
+                  </TableHead>
                   <TableHead className="text-right">Marks</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
                   <TableHead className="text-right">Wt</TableHead>
@@ -434,10 +478,12 @@ function JobDashboardContent() {
 
 function JobDetail({
   job,
+  label,
   records,
   onBack,
 }: {
   job: string;
+  label: string;
   records: any[];
   onBack: () => void;
 }) {
@@ -478,9 +524,16 @@ function JobDetail({
 
   const sortedRows = useMemo(() => sortRecords(filtered, sortBy), [filtered, sortBy]);
 
+  const isNtlt = label === "Section";
+  const secondaryNoun = isNtlt ? "sub-categories" : "structures";
   const structureCount = useMemo(
-    () => new Set(filtered.map((r) => r.structure).filter(Boolean)).size,
-    [filtered],
+    () =>
+      new Set(
+        filtered
+          .map((r) => (isNtlt ? r.ntltSubtype : r.structure))
+          .filter(Boolean),
+      ).size,
+    [filtered, isNtlt],
   );
   const totalQty = useMemo(() => filtered.reduce((s, r) => s + r.balanceQty, 0), [filtered]);
   const totalWt = useMemo(() => filtered.reduce((s, r) => s + r.balanceWt, 0), [filtered]);
@@ -499,9 +552,9 @@ function JobDetail({
           Back
         </button>
         <div className="min-w-0">
-          <h2 className="text-xl font-bold tracking-tight truncate">Project {job}</h2>
+          <h2 className="text-xl font-bold tracking-tight truncate">{label} {job}</h2>
           <p className="text-xs text-muted-foreground">
-            {structureCount} structures • {filtered.length.toLocaleString()} marks •{" "}
+            {structureCount} {secondaryNoun} • {filtered.length.toLocaleString()} marks •{" "}
             {totalQty.toLocaleString()} pcs • {formatWeight(totalWt)}
           </p>
         </div>
@@ -586,7 +639,7 @@ function JobDetail({
                 {sortedRows.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">
-                      No marks found for this project.
+                      No marks found for this {label.toLowerCase()}.
                     </TableCell>
                   </TableRow>
                 )}

@@ -1,0 +1,57 @@
+REPLIT AGENT PROMPT — SWITCH PRIMARY FILTER & GROUPING WITH TLT / NTLT TOGGLE
+=============================================================================
+Fix: when the Order Type toggle is set to NTLT, the page still filters by PROJECT (e.g.
+"775") and shows zeros, because NTLT is not grouped by project. The primary filter and the
+grouping must SWITCH with the toggle. Display/grouping fix; do not change classification,
+sequences, ageing, dedup, or the alert math.
+
+THE BUG
+With NTLT selected, the first filter is still a Project dropdown ("775"). NTLT rows have no
+meaningful project grouping (they are section-based), so filtering NTLT by a project matches
+nothing -> Pending Marks / Balance Qty / Balance Wt all show 0.
+
+REQUIRED BEHAVIOUR — the toggle drives both the FILTERS and the GROUPING:
+
+TLT mode:
+  - Primary filter = PROJECT (job). Cascade: Project -> Structure -> Mark (as today).
+  - All KPIs, tables, rollups grouped/keyed by Project (group_type = "project").
+  - "Job-wise" / project rollups as today.
+
+NTLT mode:
+  - Primary filter = SECTION (the cleaned section key, group_key). Cascade:
+        Section -> Sub-category (RSJ / Earthing / General) -> Mark.
+  - REMOVE/replace the Project dropdown in NTLT mode — it is not applicable. Do NOT carry a
+    stale project selection (like "775") into NTLT; reset the primary filter to the
+    Section picker, default "All Sections".
+  - All KPIs, tables, rollups grouped/keyed by Section (group_type = "section"), with the
+    sub-category (RSJ/Earthing/General) chips already present as the secondary scope.
+  - The "Job-wise" page becomes "Section-wise" in NTLT mode (rollup by Section).
+
+SWITCHING RULES
+  - Changing the toggle RESETS the primary filter to the correct dimension for that mode
+    (Project for TLT, Section for NTLT) at its "All" default, and re-runs all aggregations
+    against the correct grouping. No stale cross-mode selection persists.
+  - Secondary filters that apply to both (Contractor, Activity, Date) stay, but their option
+    lists refresh to the rows in the current mode (e.g. Activity list shows NTLT-sequence
+    activities in NTLT mode).
+  - The "All" option in Order Type (if kept) should either show a combined view labelled by
+    group_type, or be defined clearly; if ambiguous, default the Order Type to TLT and make
+    the user pick NTLT explicitly. (Avoid "All" silently mixing project- and section-grouped
+    rows in one rollup.)
+
+WHY ZEROS HAPPEN NOW (fix confirmation)
+  - The current code filters the selected dataset by the project dropdown regardless of
+    mode. In NTLT, the engine must filter by Section (group_key), not Project, so the KPIs
+    reflect the NTLT rows of that section. After the fix, selecting NTLT with "All Sections"
+    must show the real NTLT totals (e.g. ~360 marks across RSJ/Earthing/General), not 0.
+
+ACCEPTANCE CHECK
+  - Toggle = TLT: primary filter is Project; choosing 775 shows 775's TLT marks; grouping by
+    project; cascade Project->Structure->Mark.
+  - Toggle = NTLT: primary filter is Section (not Project); the stale "775" is cleared;
+    default "All Sections" shows the real NTLT totals (non-zero); cascade
+    Section->Sub-category->Mark; rollups keyed by Section.
+  - Switching the toggle resets the primary filter to the right dimension and recomputes all
+    KPIs/tables; no zeros from a cross-mode (project-in-NTLT) filter.
+  - Contractor/Activity/Date filters still work in both modes with mode-appropriate options.
+  - No change to classification, sequences, ageing, dedup, or alert math.

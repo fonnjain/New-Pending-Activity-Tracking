@@ -2,9 +2,10 @@ import React, { createContext, useContext, useState, useEffect, useMemo, ReactNo
 import { useListImports, type Record } from "@workspace/api-client-react";
 
 export interface Filters {
-  category: string | null; // "TLT" | "NTLT" (Order type)
+  category: string; // "TLT" | "NTLT" (Order type) — a MODE, never null
   ntltSubtype: string | null; // "RSJ" | "EARTHING" | "GENERAL" (only within NTLT)
-  job: string | null;
+  job: string | null; // primary dimension in TLT mode
+  section: string | null; // primary dimension in NTLT mode (matches groupKey)
   structure: string | null;
   mark: string | null;
   contractor: string | null;
@@ -22,9 +23,10 @@ interface TrackerContextType {
 }
 
 const defaultFilters: Filters = {
-  category: null,
+  category: "TLT",
   ntltSubtype: null,
   job: null,
+  section: null,
   structure: null,
   mark: null,
   contractor: null,
@@ -58,10 +60,23 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
       const next = { ...prev, [key]: value };
       // Cascading logic
       if (key === "category") {
-        // The NTLT subtype only applies inside NTLT; clear it otherwise.
-        if (value !== "NTLT") next.ntltSubtype = null;
-      } else if (key === "job") {
+        // The toggle drives BOTH filter dimension and grouping. Switching mode
+        // resets every dimension filter to its "All" default so no stale
+        // cross-mode selection (e.g. a TLT project carried into NTLT) persists.
+        next.ntltSubtype = null;
+        next.job = null;
+        next.section = null;
         next.structure = null;
+        next.mark = null;
+      } else if (key === "job") {
+        // TLT primary cascade: Project -> Structure -> Mark
+        next.structure = null;
+        next.mark = null;
+      } else if (key === "section") {
+        // NTLT primary cascade: Section -> Sub-category -> Mark
+        next.ntltSubtype = null;
+        next.mark = null;
+      } else if (key === "ntltSubtype") {
         next.mark = null;
       } else if (key === "structure") {
         next.mark = null;
@@ -70,7 +85,10 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const clearFilters = () => setFilters(defaultFilters);
+  // Clearing preserves the current Order Type mode (it is a mode, not a filter)
+  // and resets every other dimension/secondary filter.
+  const clearFilters = () =>
+    setFilters((prev) => ({ ...defaultFilters, category: prev.category }));
 
   return (
     <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, clearFilters }}>
@@ -174,6 +192,7 @@ export function useFilteredRecords(records: Record[] | undefined) {
       if (filters.category && r.category !== filters.category) return false;
       if (filters.ntltSubtype && r.ntltSubtype !== filters.ntltSubtype) return false;
       if (filters.job && r.job !== filters.job) return false;
+      if (filters.section && r.groupKey !== filters.section) return false;
       if (filters.structure && r.structure !== filters.structure) return false;
       if (filters.mark && r.markId !== filters.mark && r.markTail !== filters.mark) return false;
       if (filters.contractor && r.contractor !== filters.contractor) return false;
