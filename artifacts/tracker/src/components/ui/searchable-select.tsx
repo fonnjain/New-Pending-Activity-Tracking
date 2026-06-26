@@ -77,14 +77,15 @@ export function SearchableSelect({
                     onChange(opt);
                     setOpen(false);
                   }}
+                  className="items-start"
                 >
                   <Check
                     className={cn(
-                      "mr-2 h-4 w-4",
+                      "mr-2 mt-0.5 h-4 w-4 shrink-0",
                       value === opt ? "opacity-100" : "opacity-0",
                     )}
                   />
-                  <span className="truncate">{opt}</span>
+                  <span className="whitespace-normal break-words">{opt}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

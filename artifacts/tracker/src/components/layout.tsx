@@ -186,7 +186,7 @@ function FilterBar() {
         </div>
         <div className="flex items-center justify-between p-3 md:px-6">
           <div className="flex items-center gap-2 flex-1 mr-4 flex-wrap">
-            <div className="w-[150px]">
+            <div className="w-full sm:w-[260px]">
               {isNtlt ? (
                 <SearchableSelect
                   value={filters.section}
