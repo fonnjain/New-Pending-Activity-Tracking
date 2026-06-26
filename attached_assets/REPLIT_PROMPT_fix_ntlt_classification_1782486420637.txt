@@ -1,0 +1,62 @@
+REPLIT AGENT PROMPT — FIX NTLT CLASSIFICATION + SECTION KEY (NTLT shows zeros / no sections)
+============================================================================================
+TLT now works, but NTLT shows all zeros and the Section dropdown lists only "All Sections"
+with no actual sections. The NTLT rows are either not being classified as NTLT, or they have
+no group_key (section), so nothing matches. Fix the classification/backfill so NTLT rows are
+correctly categorized AND given a section key. Deterministic; do not change ageing, dedup,
+or the alert math.
+
+DIAGNOSIS (what's wrong)
+  - The earlier all-zeros fix added a fallback: "treat unclassified rows as TLT". That
+    fallback is now ALSO catching the RSJ POLE / EARTHING / GENERAL rows and defaulting them
+    to TLT — so category=NTLT has ~0 rows, and the NTLT views are empty.
+  - Even where category=NTLT may be set, group_key (the Section key) is not populated, so the
+    Section filter has no options and matches nothing.
+
+FIX 1 — CLASSIFY BY ORDER NATURE FIRST, fallback only for the genuinely blank
+  - Classification must be DERIVED FROM Order Nature, not left to the "unclassified -> TLT"
+    fallback:
+        Order Nature == "Structure"        -> category=TLT,  group_type=project,
+                                              group_key = Project (job)
+        Order Nature == "RSJ POLE"          -> category=NTLT, ntlt_subtype=RSJ,
+                                              group_type=section, group_key = cleaned Section
+        Order Nature == "EARTHING"          -> category=NTLT, ntlt_subtype=EARTHING,
+                                              group_type=section, group_key = cleaned Section
+        Order Nature == "GENERAL"           -> category=NTLT, ntlt_subtype=GENERAL,
+                                              group_type=section, group_key = cleaned Section
+        Order Nature == "FOUNDATION BOLT"   -> excluded/inactive
+  - The "treat unclassified as TLT" fallback must apply ONLY to rows whose Order Nature is
+    Structure (or truly empty/unknown) — it must NOT override RSJ POLE / EARTHING / GENERAL.
+    Order Nature is authoritative; fix the precedence so NTLT order natures are classified
+    NTLT before any TLT fallback runs.
+
+FIX 2 — POPULATE group_key (Section) FOR NTLT
+  - For NTLT rows, group_key = the cleaned Section key:
+        RSJ: leading "RSJ <A>X<B>X<C>" prefix (C may be decimal), dropping trailing junk
+             (" - [37.1]", " - ([37.1)", "(30.44)", " MS", " MTR", stray brackets), collapse
+             spaces. e.g. "RSJ 152X152X11 - ([37.1)" -> "RSJ 152X152X11".
+        EARTHING / GENERAL: trim + collapse internal spaces + uppercase the full Section.
+  - Keep the raw Section stored; group_key is the grouping/matching value.
+  - The Section dropdown in NTLT mode is populated from the DISTINCT group_keys of NTLT rows
+    (optionally grouped by sub-category). After the fix it must list the real sections
+    (e.g. RSJ 152X152X11, RSJ 203X203X16, the Earthing/General sections), not just
+    "All Sections".
+
+FIX 3 — RE-RUN THE BACKFILL on existing rows
+  - The self-healing backfill must RE-CLASSIFY existing rows using the Order-Nature rule
+    above and POPULATE category, ntlt_subtype, group_type, group_key for ALL rows — including
+    the ~360 NTLT rows that were wrongly defaulted to TLT. After backfill:
+        TLT rows  ~42,270 (group_type=project)
+        NTLT rows ~360: RSJ 301, Earthing 44, General 15 (group_type=section, group_key set)
+  - Make the backfill idempotent and safe to re-run; it should correct previously
+    mis-defaulted rows (TLT-by-fallback -> NTLT where Order Nature says so).
+
+ACCEPTANCE CHECK
+  - NTLT mode + "All Sections" shows NON-ZERO totals (~360 marks), split RSJ 301 /
+    Earthing 44 / General 15 across the sub-category chips.
+  - The Section dropdown lists the real distinct sections for NTLT (not just "All Sections").
+  - No RSJ POLE / EARTHING / GENERAL row is classified as TLT; the TLT fallback only affects
+    Structure/blank rows.
+  - TLT totals unchanged (~42,270) and still correct.
+  - group_key populated for every NTLT row; raw Section preserved.
+  - No change to ageing, dedup, or alert math.
