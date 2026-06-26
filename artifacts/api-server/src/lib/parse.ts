@@ -101,9 +101,9 @@ const COL = {
   lastProductionDate: "Last Production Entry Date",
 } as const;
 
-// Derived identity for a Mark No. (col H). See the consolidated Rules A-D below
-// (VTPL Mark-Number parsing). Only IS/SC/S rows (col G) get a `proMno` and a
-// 4-part markNumber; every other row keeps the 3-part form.
+// Derived identity for a Mark No. (col H). See the consolidated Rules 0, A-D
+// below (VTPL Mark-Number parsing). Only IS/SC/S rows (col G) get a `proMno`
+// and a 4-part markNumber; every other row keeps the 3-part form.
 export interface DerivedMark {
   structure: string; // = aliasCorrected (the structure/alias code)
   markTail: string; // = mNo (the mark's own number, kept whole)
@@ -150,9 +150,22 @@ export function deriveMark(
   job: string,
   alias: string,
 ): DerivedMark {
-  const h = markNo.trim();
+  let h = markNo.trim();
   const A = job.trim();
-  const G = alias.trim();
+  let G = alias.trim();
+
+  // RULE 0 — Normalize a stray single leading dash on the alias, in BOTH col G
+  // and col H, before any other rule runs. Some source rows carry a malformed
+  // leading "-" on the alias (e.g. G="-069-2NBE1", H="946 -069-2NBE1-06").
+  // Remove ONLY that one leading dash; dashes inside the value (e.g. the inner
+  // dash of "069-2NBE1") are left untouched so the row then parses normally.
+  // This is read-time derivation only — it does not alter the stored raw col
+  // G/col H values or the row hash/identity.
+  if (G.startsWith("-")) G = G.slice(1);
+  if (A && h.startsWith(`${A} -`)) {
+    h = `${A} ${h.slice(A.length + 2)}`;
+  }
+
   const gUpper = G.toUpperCase();
   const isISSC = gUpper === "IS" || gUpper === "SC" || gUpper === "S";
 
