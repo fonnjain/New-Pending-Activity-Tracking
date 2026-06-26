@@ -1,0 +1,76 @@
+REPLIT AGENT PROMPT #3 — THICKNESS RULES (TLT angle/plate, Earthing, General) + capture
+========================================================================================
+Complete the thickness parameter under Galvanizing. The RSJ lookup table already exists
+(NTLT->RSJ auto-fill). This adds the OTHER derivation rules and a single resolver that sets
+thickness for every relevant row. Thickness is captured in the DB per mark. Depends on the
+TLT/NTLT classification change. Deterministic engine; do not change dedup, ageing, or merge.
+
+CONTEXT
+Thickness (mm) is added under the Galvanizing section, captured on the Galvanizing pages and
+stored in the database. How it is derived depends on category and section type.
+
+FIELDS (already added by the RSJ change; reuse/extend)
+  thickness_mm (number, nullable)
+  thickness_source: "tlt_angle" | "tlt_plate" | "rsj_lookup" | "manual" | "unset"
+
+============================================================
+THE RESOLVER — one function decides thickness per row
+============================================================
+Resolve in this order, by the row's category / sub-type:
+
+1) TLT (Order Nature = Structure) -> derive from the Section text:
+   a) ANGLE section like "150X150X16" (dimensions A X B X C): thickness = the LAST number
+      (C). Example: 150X150X16 -> 16 mm. Handle decimals (e.g. 100X100X7.5 -> 7.5).
+      thickness_source = "tlt_angle".
+   b) PLATE section like "PLATE 6 MM MS": thickness = the numeric value in the plate spec.
+      Example: "PLATE 6 MM MS" -> 6 mm; "PLATE 10 MM MS" -> 10 mm. thickness_source =
+      "tlt_plate".
+   c) If the TLT section matches neither pattern cleanly -> thickness_mm = null,
+      thickness_source = "unset", FLAG for review. Never guess.
+
+2) NTLT -> EARTHING: use the SAME logic as TLT (rule 1 above) — derive from the section
+   (angle -> last number; plate -> the plate number). thickness_source = "tlt_angle"/
+   "tlt_plate" accordingly (or add "earthing_section" if you prefer to distinguish; keep it
+   consistent).
+
+3) NTLT -> RSJ: use the RSJ Types & Thickness lookup table (already built). Match the
+   cleaned leading "RSJ <dims>" prefix; if found -> thickness from table, source
+   "rsj_lookup"; if not in the table -> null, source "unset", flagged "thickness not set"
+   (resolves automatically once the user adds the type). DO NOT derive RSJ thickness from
+   the section dimensions (it is not the last digit).
+
+4) NTLT -> GENERAL: thickness is MANUAL. Provide an input on the Galvanizing page for the
+   user to enter it per mark (or per section group if they prefer applying one value to a
+   section's general items). Default null, source "manual" once entered, "unset" until then.
+
+GENERAL NOTES
+  - Thickness only matters from the Galvanizing stages onward; it is captured/displayed on
+    the Galvanizing pages, but compute and store it for the row regardless of current
+    activity (so it is ready when the mark reaches galvanizing).
+  - Parsing helpers:
+      angle: regex for <int>X<int>X<number> -> take the third number.
+      plate: regex for "PLATE <number> MM" (case-insensitive) -> the number.
+  - Recompute live when the RSJ table changes (for RSJ rows) or when a manual value is
+    entered (General). Editing thickness never alters quantities/activity/ageing.
+
+UI (Galvanizing surfaces / Data)
+  - Show thickness_mm and its source on galvanizing views and mark detail.
+  - For "unset" rows, a clear "thickness not set" indicator; for General, an editable field;
+    a count of unset-thickness rows so the user can complete them.
+  - Manual edits (General) persist; a "source" tag shows auto vs manual.
+
+SCHEMA / CONTRACT
+  - Ensure thickness_mm + thickness_source on record_pool / records, in the API and exports.
+  - Keep thickness OUT of the across-upload row hash (derived/config/manual value).
+  - A manual General thickness is config-level per mark (persist separately keyed by
+    mark_id so it survives re-imports; re-apply on import).
+
+ACCEPTANCE CHECK
+  - TLT angle "150X150X16" -> 16 mm (tlt_angle); "100X100X7.5" -> 7.5.
+  - TLT plate "PLATE 6 MM MS" -> 6 mm (tlt_plate); "PLATE 10 MM MS" -> 10.
+  - NTLT Earthing uses the same section logic as TLT.
+  - NTLT RSJ uses the lookup table (not the last digit); unknown type -> "not set",
+    resolves when added.
+  - NTLT General -> manual entry; persists across re-imports; "unset" until entered.
+  - Unparseable/unknown -> null + flagged, never guessed; count of unset shown.
+  - thickness stored + exported; not in dedup hash; no change to ageing/dedup/merge.

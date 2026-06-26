@@ -1,0 +1,102 @@
+REPLIT AGENT PROMPT — TLT / NTLT CLASSIFICATION + PER-CATEGORY PROCESS SEQUENCES
+================================================================================
+Foundational change. Classify every mark as TLT or NTLT (with its NTLT sub-category) and
+make all sequence-dependent calculations use the CORRECT sequence for that mark's category
+— not a single global 12-step sequence. Everything downstream (targets, pre-warning,
+velocity, milestones, ordering) must look up the row's category sequence. Deterministic
+engine; do not change dedup, ageing source, or the upload/merge model.
+
+============================================================
+1. CLASSIFICATION (add to every parsed record)
+============================================================
+Add fields: category ("TLT" | "NTLT"), ntlt_subtype ("RSJ" | "EARTHING" | "GENERAL" | null),
+group_key, group_type ("project" | "section").
+
+Rules (by Order Nature, with Tower Sub Type "_NTLT" as confirmation):
+  - Order Nature == "Structure"          -> category = TLT.
+  - Order Nature == "RSJ POLE"           -> NTLT, ntlt_subtype = RSJ.
+  - Order Nature == "EARTHING"           -> NTLT, ntlt_subtype = EARTHING.
+  - Order Nature == "GENERAL"            -> NTLT, ntlt_subtype = GENERAL.
+  - Order Nature == "FOUNDATION BOLT"    -> DISCONTINUED: exclude from tracking (keep in raw
+                                            store if present, but mark inactive; do not show
+                                            in dashboards/targets).
+  - Tower Sub Type containing "NTLT" confirms NTLT; if Order Nature and Tower Sub Type ever
+    disagree, treat Order Nature as authoritative and flag the row for review.
+
+GROUPING:
+  - TLT  -> group_type = "project", group_key = Project (job). (Existing Project ->
+            Structure -> Mark hierarchy unchanged for TLT.)
+  - NTLT -> group_type = "section", group_key = Section (the cleaned section string).
+            NTLT is tracked SECTION-WISE, not by project. (Use the leading cleaned section
+            as the key, e.g. the "RSJ 152X152X11" style prefix already used for RSJ
+            thickness; for Earthing/General use the Section value.)
+
+============================================================
+2. PER-CATEGORY PROCESS SEQUENCES (single source of truth)
+============================================================
+Replace the single PROCESS_SEQUENCE with a map keyed by category/subtype. Define ALL of
+these as named constants in ONE place; every sequence-dependent calc imports from here.
+
+  SEQUENCES = {
+    "TLT":            ["C","RFI","NH","B","HAB","HG","W","Q","TS","G","GB","Y"],   # 12
+    "NTLT_RSJ":       ["NTF","NTFSW","NTFW","TS","G","GB","Y"],                    # 7
+    "NTLT_EARTHING":  ["TS","G","GB","Y"],                                         # 4
+    "NTLT_GENERAL":   ["TS","G","GB","Y"],                                         # 4
+  }
+Notes:
+  - RSJ fabrication = NTF -> NTFSW -> NTFW (include NTFW even though it may not yet appear
+    in the data), then galvanizing TS -> G -> GB -> Y.
+  - Earthing and General = galvanizing only: TS -> G -> GB -> Y.
+  - Provide helpers that take a record and return its sequence:
+        sequence_for(record) -> the right list (by category + ntlt_subtype)
+        stage_index(record)  -> position of its Activity in ITS sequence (case-insensitive)
+        final_stage(record)  -> last item of its sequence (always "Y" here)
+  - Any Activity not in the row's own sequence -> rank last / "(other)", still shown,
+    flagged (e.g. a TLT code appearing on an NTLT row). Codes like BL/NTF appearing on the
+    wrong category are anomalies to surface, not to silently place.
+
+============================================================
+3. MAKE EVERY SEQUENCE-DEPENDENT CALC CATEGORY-AWARE
+============================================================
+Anywhere the code currently uses the single global sequence, switch to sequence_for(record):
+  a) CUMULATIVE TARGETS: sum ideal-days along the ROW'S sequence (so an RSJ mark accumulates
+     over NTF..Y, an Earthing mark over TS..Y). Ideal-days settings must exist per sequence
+     (see "Warning Parameters per category" — separate change; for now, targets must read
+     the right sequence and degrade gracefully if a category has no settings yet).
+  b) PRE-WARNING / BREACH: unchanged math, but cumulative target and stage come from the
+     row's sequence.
+  c) VELOCITY: stage_index, stages_remaining (final_stage index - current), ETA all use the
+     row's sequence. An RSJ mark at TS has 3 stages left (TS->G->GB->Y), not 9.
+  d) ACTIVITY ORDERING everywhere (dropdowns, tables, legends, charts): order by the
+     relevant sequence. When a view mixes categories, group/order within each category;
+     for a single-category view use that category's order.
+  e) TURNAROUND MILESTONES: "Everything Finished, Ready for Dispatch" = no mark earlier than
+     the FINAL stage in ITS sequence (i.e. nothing left before Y for that category); for
+     NTLT this is computed PER SECTION (group_key), for TLT PER PROJECT as before.
+     "Everything Dispatched" = all the group's marks gone. (Detailed milestone logic stays
+     as specified; only the "earlier than Y" test becomes sequence-aware and the grouping
+     becomes section-wise for NTLT.)
+
+============================================================
+4. SCHEMA / CONTRACT
+============================================================
+  - Add category, ntlt_subtype, group_type, group_key to record_pool / records (Drizzle
+    migration) and to the API/exports; regenerate hooks/Zod.
+  - Keep these OUT of the across-upload row hash (derived classification, not source
+    columns) so dedup is unchanged.
+  - Foundation Bolt rows flagged inactive/excluded from active tracking.
+
+============================================================
+5. ACCEPTANCE CHECK
+============================================================
+  - Each mark gets category/ntlt_subtype/group_type/group_key: Structure->TLT/project;
+    RSJ POLE->NTLT/RSJ/section; Earthing->NTLT/EARTHING/section; General->NTLT/GENERAL/
+    section; Foundation Bolt-> excluded.
+  - sequence_for returns 12-step for TLT, NTF..Y (7) for RSJ, TS..Y (4) for Earthing/
+    General. NTFW is in the RSJ sequence even if absent from data.
+  - An RSJ mark at "TS" reports stage_index within the RSJ sequence and 3 stages remaining;
+    cumulative target sums the RSJ steps, not TLT steps.
+  - Velocity/pre-warning/ordering for NTLT rows use the NTLT sequence; TLT unchanged.
+  - NTLT is grouped/tracked by Section; TLT by Project. Milestones for NTLT computed per
+    section.
+  - No change to dedup hash, ageing source, or the merge model.

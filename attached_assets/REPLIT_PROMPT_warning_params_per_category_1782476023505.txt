@@ -1,0 +1,81 @@
+REPLIT AGENT PROMPT #4 — WARNING PARAMETERS PER CATEGORY (TLT + NTLT sequences)
+===============================================================================
+Extend the Warning Parameters page so ideal-days, grace, pre-warning %, and the percentage
+auto-fill work for the NTLT sequences too — not just the 12-step TLT sequence. Depends on
+the TLT/NTLT classification + per-category sequences. Deterministic engine; do not change
+dedup, ageing, or the alert math (only WHICH sequence's parameters feed it).
+
+CONTEXT
+The warning system already supports, per TLT activity: ideal-days, grace (yellow/orange/
+red), pre-warning % thresholds, percentage auto-fill, and project-wise overrides. NTLT
+categories use DIFFERENT, shorter sequences, so they need their own parameter rows.
+
+  Sequences (from the classification change):
+    TLT:            C,RFI,NH,B,HAB,HG,W,Q,TS,G,GB,Y            (12)
+    NTLT_RSJ:       NTF,NTFSW,NTFW,TS,G,GB,Y                   (7)
+    NTLT_EARTHING:  TS,G,GB,Y                                  (4)
+    NTLT_GENERAL:   TS,G,GB,Y                                  (4)
+
+============================================================
+1. CATEGORY SELECTOR ON WARNING PARAMETERS
+============================================================
+  - Add a category selector at the top of the Warning Parameters page:
+        [ TLT ]  [ NTLT: RSJ ]  [ NTLT: Earthing ]  [ NTLT: General ]
+  - Selecting one shows the parameter table with THAT sequence's activities as rows
+    (TLT shows 12 rows; RSJ shows 7; Earthing/General show 4 each).
+  - Each category has its OWN ideal-days / grace / pre-warning% / percentage settings.
+    They are independent — Earthing's TS is not TLT's TS.
+
+============================================================
+2. WHAT IS CONFIGURABLE PER CATEGORY (same controls as today, per sequence)
+============================================================
+  For each activity row in the selected category:
+    - Ideal days, Yellow/Orange/Red grace (days), and the three pre-warning % thresholds.
+    - Percentage auto-fill of grace from that activity's ideal days, with per-cell manual
+      override (as already built) — applied within each category.
+    - Running cumulative target shown per row (summed along THAT category's sequence).
+    - Validation: Yellow<=Orange<=Red; PW1<=PW2<=PW3.
+
+============================================================
+3. PROJECT / SECTION OVERRIDES (consistent with existing inheritance)
+============================================================
+  - TLT keeps per-PROJECT overrides (All Projects default + per-project, partial
+    inheritance per cell) exactly as built.
+  - NTLT (section-tracked) gets per-SECTION overrides analogously: an "All Sections"
+    default per NTLT category, plus optional per-section overrides that inherit unset cells
+    from the category default. (Keep the same per-cell inheritance + percentage/manual
+    state model.)
+  - Resolution for a mark: its CATEGORY's defaults, then its project (TLT) or section
+    (NTLT) override per cell, then global default — using the same precedence already
+    implemented, just keyed by category + (project|section).
+
+============================================================
+4. ENGINE WIRING
+============================================================
+  - cumulative_target / pre-warning / breach / velocity for a mark read the parameters for
+    the mark's CATEGORY sequence (and its project/section override). A category with no
+    settings yet -> sensible defaults; flag "parameters not set" rather than breaking.
+  - Seed defaults for all four categories so the system works immediately; users tune later.
+  - Live recompute on any change; no re-import.
+
+============================================================
+5. SCHEMA / CONTRACT
+============================================================
+  - Settings store keyed by (category, scope_type[all|project|section], scope_key,
+    activity, field) holding ideal/grace/pre-warning + mode/percent/value. Update
+    openapi.yaml; regenerate hooks/Zod.
+  - Migrate existing TLT settings into category="TLT" unchanged (current behaviour
+    preserved); add seeded defaults for the three NTLT categories.
+
+============================================================
+6. ACCEPTANCE CHECK
+============================================================
+  - Warning Parameters has a category selector; choosing NTLT: RSJ shows 7 activity rows
+    (NTF..Y), Earthing/General show 4 (TS..Y), TLT shows 12.
+  - Each category's ideal/grace/pre-warning% are independent; cumulative target sums along
+    that category's sequence.
+  - TLT overrides remain per-project; NTLT overrides are per-section, with the same per-cell
+    inheritance and percentage/manual behaviour.
+  - A mark's alert/velocity uses its category's parameters (and project/section override).
+  - Existing TLT settings preserved via migration; NTLT seeded with defaults.
+  - No change to dedup, ageing, or the alert math itself.

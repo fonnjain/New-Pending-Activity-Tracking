@@ -1,0 +1,86 @@
+REPLIT AGENT PROMPT #2 — NTLT SECTION-GROUPED VIEWS (dashboards, stuck, milestones)
+===================================================================================
+Depends on the TLT/NTLT classification change (category, ntlt_subtype, group_type,
+group_key, per-category sequences) already being in place. This makes the views handle
+NTLT, which is grouped/tracked BY SECTION, alongside TLT which stays grouped by Project.
+Deterministic engine; do not change dedup, ageing source, or the merge model.
+
+============================================================
+1. A TLT / NTLT SWITCH (top-level scope)
+============================================================
+  - Add a top-level toggle/segmented control visible on the data-driven pages:
+        [ TLT ]  [ NTLT ]   (default TLT).
+  - It scopes the whole page to that category. TLT shows the existing Project ->
+    Structure -> Mark experience. NTLT shows a SECTION-based experience (below).
+  - Counts in the toggle (e.g. "TLT 42,270 · NTLT 360") so users see both exist.
+  - The global filters adapt: in TLT mode, Job -> Structure -> Mark (unchanged); in NTLT
+    mode, the primary filter is SECTION, with a secondary sub-category filter
+    (RSJ / Earthing / General) and Mark.
+
+============================================================
+2. NTLT GROUPING MODEL
+============================================================
+  - Primary grouping key for NTLT = group_key (the cleaned Section). The "section" is the
+    major indicator (the equivalent of "project" in TLT).
+  - Secondary breakdown = ntlt_subtype (RSJ / Earthing / General).
+  - Each NTLT view aggregates by Section first, then sub-category, then mark.
+  - Activity ordering uses the row's NTLT sequence (RSJ: NTF,NTFSW,NTFW,TS,G,GB,Y;
+    Earthing/General: TS,G,GB,Y) via sequence_for().
+
+============================================================
+3. NTLT DASHBOARDS (mirror the TLT ones, section-keyed)
+============================================================
+When NTLT scope is selected, provide section-based equivalents:
+  - OVERVIEW (NTLT): headline counts (marks, qty, weight) for NTLT; turnaround snapshot and
+    velocity/stuck snapshot computed over NTLT using NTLT sequences; links to NTLT detail.
+  - SECTION-WISE (the NTLT analogue of "Job-wise"): one row per Section -> sub-category
+    rollup: marks, qty, weight, avg ageing, alert buckets, and the activity spread using
+    the NTLT sequence. This replaces "project" with "section" as the rollup key.
+  - ACTIVITY (NTLT): activities listed in NTLT sequence order (NTF..Y for RSJ; TS..Y for
+    Earthing/General), with marks/qty/weight/ageing per activity.
+  - AGEING (NTLT): same ageing logic; cascading filters become Section -> Sub-category ->
+    Mark. Activity-wise ageing uses NTLT sequence order.
+  - CONTRACTOR (NTLT): workload and ageing by contractor within NTLT.
+  - RSJ rows show their thickness (from the RSJ thickness table) where relevant.
+
+============================================================
+4. STUCK STOCK FOR NTLT — "Stuck Sections"
+============================================================
+  - The existing "Stuck Projects" page is project-keyed (TLT). Add an NTLT mode (or a
+    sibling "Stuck Sections" view) that ranks SECTIONS by stuck score:
+        section | sub-category | stuck weight | % weight stalled/slow | avg days_per_stage
+        | throughput | trend.
+  - Drill into a section -> its stalled / slow marks (mark, sub-category, activity, ageing,
+    days since last movement, pace, pace-based ETA, eta_gap, contractor, trend).
+  - Velocity for NTLT marks uses the NTLT sequence (stages_remaining to Y within that
+    sequence). Everything else as in the TLT velocity engine.
+  - The page header reflects scope (TLT = projects, NTLT = sections); if combined, show
+    both groupings clearly labelled.
+
+============================================================
+5. TURNAROUND MILESTONES — PER SECTION FOR NTLT
+============================================================
+  - For NTLT, capture the two milestones PER SECTION (group_key), measured from the
+    section's earliest Assign Date:
+        "Everything Finished, Ready for Dispatch" = no mark in the section is earlier than
+            Y in ITS sequence (RSJ: nothing before Y in NTF..GB..Y; Earthing/General:
+            nothing before Y in TS..GB). i.e. all at Y or gone.
+        "Everything Dispatched" = all the section's marks have left the report.
+  - Store permanently in the same milestone store, keyed by (group_type, group_key) so TLT
+    rows are keyed by project and NTLT rows by section. Capture-once, never overwrite, same
+    as TLT.
+  - planned vs actual uses the NTLT cumulative target (target at Y for that sub-category).
+  - The Completed/Turnaround view lists both TLT (by project) and NTLT (by section) groups,
+    labelled by group_type.
+
+============================================================
+6. ACCEPTANCE CHECK
+============================================================
+  - A TLT/NTLT toggle scopes pages; NTLT mode groups everything by Section with a
+    sub-category (RSJ/Earthing/General) breakdown.
+  - Section-wise rollup replaces project rollup for NTLT; activities ordered by NTLT
+    sequence.
+  - Stuck Sections ranks NTLT sections by stuck score; velocity uses NTLT stages-remaining.
+  - NTLT turnaround milestones are captured per section (not per project) and stored
+    permanently; Completed view shows TLT-by-project and NTLT-by-section together, labelled.
+  - TLT experience is unchanged. No change to dedup, ageing source, or merge model.
