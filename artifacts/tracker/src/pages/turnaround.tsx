@@ -14,6 +14,7 @@ import {
   lifecycleStatus,
   migrateTurnaroundSettings,
   compareActivity,
+  scopeFor,
   sequenceFor,
   type LifecycleResult,
 } from "@workspace/domain";
@@ -123,7 +124,7 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
       records.map((r) => ({
         r,
         res: lifecycleStatus(
-          { activity: r.activity, ageingDays: r.ageingDays, project: r.job, sequence: sequenceFor(r) },
+          { activity: r.activity, ageingDays: r.ageingDays, scope: scopeFor(r), sequence: sequenceFor(r) },
           settings,
         ),
       })),
@@ -518,7 +519,7 @@ function UrgencyWorklist({ records }: { records: ApiRecord[] }) {
     const out: Array<{ r: ApiRecord; res: LifecycleResult }> = [];
     for (const r of records) {
       const res = lifecycleStatus(
-        { activity: r.activity, ageingDays: r.ageingDays, project: r.job, sequence: sequenceFor(r) },
+        { activity: r.activity, ageingDays: r.ageingDays, scope: scopeFor(r), sequence: sequenceFor(r) },
         settings,
       );
       if (res.status === "na" || res.status.startsWith("breach")) continue;

@@ -1,10 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
 import { db, settingsTable, SETTINGS_SINGLETON_ID } from "@workspace/db";
-import {
-  DEFAULT_TURNAROUND_SETTINGS,
-  migrateTurnaroundSettings,
-} from "@workspace/domain";
+import { migrateTurnaroundSettings } from "@workspace/domain";
 import { UpdateSettingsBody } from "@workspace/api-zod";
 import { requireAuth } from "./auth";
 
@@ -22,7 +19,10 @@ router.get("/settings", async (_req, res): Promise<void> => {
     .limit(1);
 
   if (!row) {
-    res.json(DEFAULT_TURNAROUND_SETTINGS);
+    // No stored row yet: return the fully-migrated defaults (seeds perProject,
+    // stalledDays, and the three NTLT categories) so the shape matches a saved
+    // row and the client never sees a partial settings object.
+    res.json(migrateTurnaroundSettings({}));
     return;
   }
 
@@ -34,6 +34,7 @@ router.get("/settings", async (_req, res): Promise<void> => {
       activities: row.activities,
       perProject: row.perProject,
       stalledDays: row.stalledDays,
+      ntlt: row.ntlt,
     }),
   );
 });
@@ -52,6 +53,7 @@ router.put("/settings", requireAuth, async (req, res): Promise<void> => {
   const values = {
     activities: normalized.activities,
     perProject: normalized.perProject ?? {},
+    ntlt: normalized.ntlt ?? {},
     stalledDays: normalized.stalledDays ?? 10,
     updatedAt: new Date(),
   };

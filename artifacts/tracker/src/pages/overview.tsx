@@ -8,7 +8,7 @@ import { useMemo } from "react";
 import { ChangesPanel } from "@/components/changes-panel";
 import { isCutting } from "@/lib/ageing";
 import { useSettings } from "@/lib/settings";
-import { lifecycleStatus, migrateTurnaroundSettings, sequenceFor } from "@workspace/domain";
+import { lifecycleStatus, migrateTurnaroundSettings, scopeFor, sequenceFor } from "@workspace/domain";
 import { useVelocityInfo, velocityKey } from "@/lib/velocity";
 import { Clock, AlertTriangle, ChevronRight } from "lucide-react";
 
@@ -190,7 +190,7 @@ function SnapshotCards({
     let na = 0;
     for (const r of records) {
       const res = lifecycleStatus(
-        { activity: r.activity, ageingDays: r.ageingDays, project: r.job, sequence: sequenceFor(r) },
+        { activity: r.activity, ageingDays: r.ageingDays, scope: scopeFor(r), sequence: sequenceFor(r) },
         settings,
       );
       if (res.status === "na") na++;

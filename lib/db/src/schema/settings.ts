@@ -39,19 +39,34 @@ export type PartialActivityConfig = Partial<
   Omit<ActivityConfig, "preWarn">
 > & { preWarn?: Partial<PreWarnConfig> };
 
+// One NTLT category's config: a global ("All Sections") per-activity map plus
+// sparse per-SECTION overrides (the NTLT analogue of activities + perProject).
+export type CategorySettings = {
+  activities: Record<string, ActivityConfig>;
+  perSection?: Record<string, Record<string, PartialActivityConfig>>;
+};
+
+// The three NTLT subtypes' configs (TLT stays in the top-level columns).
+export type NtltSettings = Partial<
+  Record<"RSJ" | "EARTHING" | "GENERAL", CategorySettings>
+>;
+
 export const settingsTable = pgTable("settings", {
   id: text("id").primaryKey(),
   // GLOBAL ("All Projects") per-activity config keyed by canonical activity code
-  // (PROCESS_SEQUENCE): ideal days + yellow/orange/red grace cells.
+  // (PROCESS_SEQUENCE): ideal days + yellow/orange/red grace cells. (TLT category.)
   activities: jsonb("activities")
     .$type<Record<string, ActivityConfig>>()
     .notNull(),
-  // Sparse per-project overrides: project -> activity code -> partial config.
+  // Sparse per-project overrides (TLT): project -> activity code -> partial config.
   // Only overridden cells/fields are stored; everything else inherits `activities`.
   perProject: jsonb("per_project")
     .$type<Record<string, Record<string, PartialActivityConfig>>>()
     .notNull()
     .default({}),
+  // The three NTLT categories' configs (RSJ/Earthing/General). TLT stays above.
+  // Seeded with defaults by migrateTurnaroundSettings on read.
+  ntlt: jsonb("ntlt").$type<NtltSettings>().notNull().default({}),
   // App-level stalled-mark threshold (days). A mark whose activity/last-production
   // signature has not changed for >= this many days is flagged stalled.
   stalledDays: integer("stalled_days").notNull().default(10),

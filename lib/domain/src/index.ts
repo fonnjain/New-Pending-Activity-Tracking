@@ -154,6 +154,35 @@ export function sequenceFor(record: CategorizedRecord): ActivitySequence {
   return sequenceForCategory(record.category, record.ntltSubtype);
 }
 
+// The warning-settings category for a record's category/subtype. NTLT rows map
+// to NTLT_<subtype> (defaulting GENERAL); everything else is TLT.
+export function settingsCategoryFor(
+  category: string | null | undefined,
+  ntltSubtype?: string | null | undefined,
+): SettingsCategory {
+  const key = sequenceKeyFor(category, ntltSubtype);
+  return key as SettingsCategory;
+}
+
+// The resolution scope for a record: which category's parameters to read and the
+// override key (project for TLT, section/group_key for NTLT). Used so a mark's
+// alert/lifecycle/velocity reads ITS category's settings and the right override.
+export function scopeFor(
+  record: CategorizedRecord & {
+    job?: string | null;
+    groupKey?: string | null;
+  },
+): ScopeRef {
+  const category = settingsCategoryFor(record.category, record.ntltSubtype);
+  if (category === "TLT") {
+    return { category: "TLT", key: record.job ?? null };
+  }
+  const ntltSubtype = (record.ntltSubtype ?? "GENERAL")
+    .toString()
+    .toUpperCase() as NtltSubtype;
+  return { category, ntltSubtype, key: record.groupKey ?? null };
+}
+
 // The final stage of a sequence (always "Y"/Yard for the canonical sequences).
 export function finalStage(sequence: ActivitySequence): string {
   return sequence[sequence.length - 1] ?? "Y";
@@ -261,18 +290,60 @@ export interface ActivityGrace {
   redGrace: number;
 }
 
+// One NTLT category's warning configuration. The NTLT analogue of the top-level
+// TLT (`activities`/`perProject`) pair: a global ("All Sections") per-activity
+// config plus sparse per-SECTION overrides (keyed by group_key/section). Same
+// per-cell inheritance + auto/manual model as TLT, only scoped by section.
+export interface CategorySettings {
+  // GLOBAL ("All Sections") per-activity config keyed by the activity codes of
+  // THIS category's sequence (e.g. NTF..Y for RSJ; TS..Y for Earthing/General).
+  activities: Record<string, ActivityConfig>;
+  // Sparse per-section overrides: section -> activity code -> partial config.
+  perSection?: Record<string, Record<string, PartialActivityConfig>>;
+}
+
+// The four configurable warning categories. TLT is the original 12-step route;
+// the three NTLT categories follow their shorter sequences (see SEQUENCES).
+export type SettingsCategory =
+  | "TLT"
+  | "NTLT_RSJ"
+  | "NTLT_EARTHING"
+  | "NTLT_GENERAL";
+
 export interface TurnaroundSettings {
   // GLOBAL ("All Projects") per-activity config keyed by canonical activity code
-  // (PROCESS_SEQUENCE). Applies to any project without its own override.
+  // (PROCESS_SEQUENCE). This is the TLT category. Applies to any TLT project
+  // without its own override.
   activities: Record<string, ActivityConfig>;
-  // Sparse per-project overrides: project -> activity code -> partial config.
+  // Sparse per-project overrides (TLT): project -> activity code -> partial config.
   // Only overridden cells/fields are stored; everything else inherits `activities`.
   perProject?: Record<string, Record<string, PartialActivityConfig>>;
   // Stalled-mark threshold (days). A mark whose activity/last-production signature
   // has not changed for >= this many days is flagged stalled. App-level (not
   // per-activity). Defaults to DEFAULT_STALLED_DAYS when unset.
   stalledDays?: number;
+  // The three NTLT categories' configs (each global + per-section). Seeded with
+  // defaults by migrateTurnaroundSettings so the engine always has values. TLT
+  // stays at the top level above (byte-for-byte back-compat).
+  ntlt?: Partial<Record<NtltSubtype, CategorySettings>>;
 }
+
+// A resolution scope for the warning engine: which category's parameters to read
+// and which override key (project for TLT, section for NTLT) to apply. Passing a
+// bare string (or null/undefined) means the TLT category with that project key,
+// so every existing TLT call site is unchanged.
+export interface ScopeRef {
+  category?: SettingsCategory | null;
+  // For NTLT, the subtype (RSJ/EARTHING/GENERAL). Ignored for TLT.
+  ntltSubtype?: NtltSubtype | null;
+  // Override key: project (TLT) or section/group_key (NTLT). Omit for the global
+  // ("All Projects"/"All Sections") default.
+  key?: string | null;
+}
+
+// Either a legacy TLT project string (or null/undefined for global) or a full
+// ScopeRef. Lets every existing `project`-string caller stay unchanged.
+export type ScopeArg = string | null | undefined | ScopeRef;
 
 // green: at/under target. yellow/orange/red: increasing overrun. na: no defined
 // target (activity outside PROCESS_SEQUENCE) or no ageing (blank production
@@ -501,23 +572,60 @@ function normalizePartialConfig(raw: unknown): PartialActivityConfig {
 
 // Sanitize the sparse per-project override map: keep only known activities, only
 // present fields, and drop empty rows/projects so the stored shape stays minimal.
-function migratePerProject(
+// Sanitize a sparse per-scope (project or section) override map against a given
+// sequence: keep only that sequence's activities, only present fields, and drop
+// empty rows/scopes so the stored shape stays minimal.
+function migratePerScope(
   raw: unknown,
+  sequence: ActivitySequence,
 ): Record<string, Record<string, PartialActivityConfig>> {
   const obj = (raw ?? {}) as Record<string, unknown>;
   const out: Record<string, Record<string, PartialActivityConfig>> = {};
-  for (const [project, acts] of Object.entries(obj)) {
-    if (!project || !acts || typeof acts !== "object") continue;
+  for (const [scopeKey, acts] of Object.entries(obj)) {
+    if (!scopeKey || !acts || typeof acts !== "object") continue;
     const cleanedActs: Record<string, PartialActivityConfig> = {};
-    for (const step of PROCESS_SEQUENCE) {
+    for (const step of sequence) {
       const cell = (acts as Record<string, unknown>)[step];
       if (!cell || typeof cell !== "object") continue;
       const cleaned = normalizePartialConfig(cell);
       if (Object.keys(cleaned).length > 0) cleanedActs[step] = cleaned;
     }
-    if (Object.keys(cleanedActs).length > 0) out[project] = cleanedActs;
+    if (Object.keys(cleanedActs).length > 0) out[scopeKey] = cleanedActs;
   }
   return out;
+}
+
+function migratePerProject(
+  raw: unknown,
+): Record<string, Record<string, PartialActivityConfig>> {
+  return migratePerScope(raw, PROCESS_SEQUENCE);
+}
+
+// Migrate (or seed defaults for) ONE NTLT category's settings against its own
+// sequence. Empty/missing raw yields a fully default config for that sequence,
+// so the engine always has values for every NTLT category.
+function migrateCategorySettings(
+  raw: unknown,
+  sequence: ActivitySequence,
+): CategorySettings {
+  const obj = (raw ?? {}) as Record<string, unknown>;
+  const provided = obj.activities as Record<string, unknown> | undefined;
+  const activities: Record<string, ActivityConfig> = {};
+  for (const step of sequence) {
+    const rawP = provided?.[step];
+    const p =
+      rawP && typeof rawP === "object"
+        ? (rawP as Record<string, unknown>)
+        : undefined;
+    activities[step] = {
+      idealDays: pInt(p?.idealDays, DEFAULT_IDEAL_DAY),
+      yellow: cellFor(p, "yellow", "yellowGrace", DEFAULT_YELLOW_GRACE),
+      orange: cellFor(p, "orange", "orangeGrace", DEFAULT_ORANGE_GRACE),
+      red: cellFor(p, "red", "redGrace", DEFAULT_RED_GRACE),
+      preWarn: migratePreWarn(p?.preWarn),
+    };
+  }
+  return { activities, perSection: migratePerScope(obj.perSection, sequence) };
 }
 
 // Resolve the EFFECTIVE numeric grace for one (project, activity). Per-cell
@@ -526,13 +634,57 @@ function migratePerProject(
 // ideal days. AUTO cells derive from their percentage; MANUAL cells use their
 // pinned value. The merged row is then ordering-normalized (yellow<=orange<=red).
 // With no project (or no override) this is just the global row resolved.
+// Resolve a ScopeArg to the concrete (activities, overrides, key) the engine
+// should read. A bare string/null means the TLT category (back-compat); a
+// ScopeRef selects the TLT top-level config or an NTLT category's config. When
+// an NTLT category has no stored config (not seeded yet) it degrades to an empty
+// activities map, so per-step lookups fall back to DEFAULT_ACTIVITY_CONFIG.
+export function resolveScopeSource(
+  settings: TurnaroundSettings,
+  scope: ScopeArg,
+): {
+  activities: Record<string, ActivityConfig>;
+  overrides: Record<string, Record<string, PartialActivityConfig>> | undefined;
+  key: string | null;
+} {
+  if (scope == null || typeof scope === "string") {
+    return {
+      activities: settings.activities,
+      overrides: settings.perProject,
+      key: scope ?? null,
+    };
+  }
+  const category = scope.category ?? "TLT";
+  if (category === "TLT") {
+    return {
+      activities: settings.activities,
+      overrides: settings.perProject,
+      key: scope.key ?? null,
+    };
+  }
+  const sub: NtltSubtype =
+    scope.ntltSubtype ??
+    (category === "NTLT_RSJ"
+      ? "RSJ"
+      : category === "NTLT_EARTHING"
+        ? "EARTHING"
+        : "GENERAL");
+  const cat = settings.ntlt?.[sub];
+  return {
+    activities: cat?.activities ?? {},
+    overrides: cat?.perSection,
+    key: scope.key ?? null,
+  };
+}
+
 export function resolveActivityGrace(
   settings: TurnaroundSettings,
-  project: string | null | undefined,
+  scope: ScopeArg,
   step: string,
 ): ActivityGrace {
-  const base = settings.activities[step] ?? DEFAULT_ACTIVITY_CONFIG;
-  const ov = project ? settings.perProject?.[project]?.[step] : undefined;
+  const src = resolveScopeSource(settings, scope);
+  const base = src.activities[step] ?? DEFAULT_ACTIVITY_CONFIG;
+  const ov = src.key ? src.overrides?.[src.key]?.[step] : undefined;
   const globalIdeal = base.idealDays;
   const effIdeal = ov?.idealDays ?? globalIdeal;
 
@@ -589,10 +741,17 @@ export function migrateTurnaroundSettings(raw: unknown): TurnaroundSettings {
     };
   }
   const stalledDays = pInt(obj.stalledDays, DEFAULT_STALLED_DAYS);
+  const ntltRaw = (obj.ntlt ?? {}) as Record<string, unknown>;
+  const ntlt: Partial<Record<NtltSubtype, CategorySettings>> = {
+    RSJ: migrateCategorySettings(ntltRaw.RSJ, SEQUENCES.NTLT_RSJ),
+    EARTHING: migrateCategorySettings(ntltRaw.EARTHING, SEQUENCES.NTLT_EARTHING),
+    GENERAL: migrateCategorySettings(ntltRaw.GENERAL, SEQUENCES.NTLT_GENERAL),
+  };
   return {
     activities,
     perProject: migratePerProject(obj.perProject),
     stalledDays,
+    ntlt,
   };
 }
 
@@ -602,11 +761,12 @@ export function migrateTurnaroundSettings(raw: unknown): TurnaroundSettings {
 // pw1 <= pw2 <= pw3 (raise later bands), mirroring grace resolution.
 export function resolvePreWarn(
   settings: TurnaroundSettings,
-  project: string | null | undefined,
+  scope: ScopeArg,
   step: string,
 ): PreWarnConfig {
-  const base = settings.activities[step]?.preWarn ?? DEFAULT_PRE_WARN;
-  const ov = project ? settings.perProject?.[project]?.[step]?.preWarn : undefined;
+  const src = resolveScopeSource(settings, scope);
+  const base = src.activities[step]?.preWarn ?? DEFAULT_PRE_WARN;
+  const ov = src.key ? src.overrides?.[src.key]?.[step]?.preWarn : undefined;
   return orderPreWarn({
     pw1: ov?.pw1 ?? base.pw1,
     pw2: ov?.pw2 ?? base.pw2,
@@ -626,13 +786,13 @@ export function resolveStalledDays(settings: TurnaroundSettings): number {
 // null) for the global "All Projects" targets.
 export function cumulativeTargets(
   settings: TurnaroundSettings,
-  project?: string | null,
+  scope?: ScopeArg,
   sequence: ActivitySequence = PROCESS_SEQUENCE,
 ): Record<string, number> {
   const out: Record<string, number> = {};
   let acc = 0;
   for (const step of sequence) {
-    acc += safeDays(resolveActivityGrace(settings, project, step).idealDays);
+    acc += safeDays(resolveActivityGrace(settings, scope, step).idealDays);
     out[step] = acc;
   }
   return out;
@@ -644,12 +804,12 @@ export function cumulativeTargets(
 export function cumulativeTarget(
   activity: string | null | undefined,
   settings: TurnaroundSettings,
-  project?: string | null,
+  scope?: ScopeArg,
   sequence: ActivitySequence = PROCESS_SEQUENCE,
 ): number | null {
   if (!isKnownIn(sequence, activity)) return null;
   const norm = normalizeActivity(activity);
-  return cumulativeTargets(settings, project, sequence)[norm] ?? null;
+  return cumulativeTargets(settings, scope, sequence)[norm] ?? null;
 }
 
 // Classify a mark's ageing against its cumulative target using THAT activity's
@@ -666,6 +826,9 @@ export function alertStatus(
     activity: string | null | undefined;
     ageingDays: number | null;
     project?: string | null;
+    // Full resolution scope (category + override key). When present it takes
+    // precedence over `project`; otherwise `project` is treated as a TLT project.
+    scope?: ScopeRef;
     // The mark's process sequence (per category). Defaults to TLT so existing
     // callers stay unchanged; pass an NTLT sequence for RSJ/Earthing/General rows.
     sequence?: ActivitySequence;
@@ -673,14 +836,15 @@ export function alertStatus(
   settings: TurnaroundSettings,
 ): AlertResult {
   const sequence = input.sequence ?? PROCESS_SEQUENCE;
-  const target = cumulativeTarget(input.activity, settings, input.project, sequence);
+  const scope: ScopeArg = input.scope ?? input.project;
+  const target = cumulativeTarget(input.activity, settings, scope, sequence);
   if (target === null || input.ageingDays === null) {
     return { status: "na", target, overrun: null };
   }
 
   const overrun = input.ageingDays - target;
   const norm = normalizeActivity(input.activity);
-  const grace = resolveActivityGrace(settings, input.project, norm);
+  const grace = resolveActivityGrace(settings, scope, norm);
 
   let status: AlertStatus;
   if (overrun <= 0) status = "green";
@@ -757,6 +921,9 @@ export function lifecycleStatus(
     activity: string | null | undefined;
     ageingDays: number | null;
     project?: string | null;
+    // Full resolution scope (category + override key). Takes precedence over
+    // `project` when present; otherwise `project` is treated as a TLT project.
+    scope?: ScopeRef;
     // The mark's process sequence (per category). Defaults to TLT; pass an NTLT
     // sequence for RSJ/Earthing/General rows.
     sequence?: ActivitySequence;
@@ -789,7 +956,7 @@ export function lifecycleStatus(
   const consumed = (ageing / target) * 100;
   const pw = resolvePreWarn(
     settings,
-    input.project,
+    input.scope ?? input.project,
     normalizeActivity(input.activity),
   );
 
@@ -853,6 +1020,9 @@ export interface VelocityInput {
   routeRemaining?: number | null;
   // Project key for per-project ideal-days / stalled resolution.
   project?: string | null;
+  // Full resolution scope (category + override key). Takes precedence over
+  // `project` when present; otherwise `project` is treated as a TLT project.
+  scope?: ScopeRef;
   // The mark's process sequence (per category). Defaults to TLT; pass an NTLT
   // sequence for RSJ/Earthing/General rows so stages-remaining + expected pace
   // are measured against the correct route. NOTE: snapshot stageIndex values
@@ -899,7 +1069,7 @@ function daysBetween(aMs: number, bMs: number): number {
 // the given sequence.
 function expectedPaceForRange(
   settings: TurnaroundSettings,
-  project: string | null | undefined,
+  scope: ScopeArg,
   fromRank: number,
   toRank: number,
   sequence: ActivitySequence,
@@ -910,7 +1080,7 @@ function expectedPaceForRange(
   const steps: number[] = [];
   for (let i = lo; i <= hi; i++) {
     const step = sequence[i];
-    steps.push(safeDays(resolveActivityGrace(settings, project, step).idealDays));
+    steps.push(safeDays(resolveActivityGrace(settings, scope, step).idealDays));
   }
   if (steps.length === 0) return null;
   const mean = steps.reduce((a, b) => a + b, 0) / steps.length;
@@ -986,10 +1156,11 @@ export function velocityForMark(
     series[0].importDate,
     series[series.length - 1].importDate,
   );
+  const scope: ScopeArg = input.scope ?? input.project;
   const daysPerStage = paceOver(series);
   const expectedDaysPerStage = expectedPaceForRange(
     settings,
-    input.project,
+    scope,
     firstRank,
     currentRank,
     sequence,
@@ -1000,7 +1171,7 @@ export function velocityForMark(
   let etaGap: number | null = null;
   if (daysPerStage != null && stagesRemaining != null) {
     etaDays = daysPerStage * stagesRemaining;
-    const target = cumulativeTarget(input.activity, settings, input.project, sequence);
+    const target = cumulativeTarget(input.activity, settings, scope, sequence);
     if (target != null && input.ageingDays != null) {
       const budgetDaysToTarget = target - input.ageingDays;
       etaGap = etaDays - budgetDaysToTarget;
@@ -1049,4 +1220,106 @@ export function velocityForMark(
     observedWindowDays,
     insufficientHistory: false,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Thickness resolution (Phase 3, additive; display/config only). Thickness (mm)
+// is derived live per row from the row's category/section plus two config
+// lookups -- it is NEVER stored on the pool row and NEVER part of the row hash,
+// exactly like live ageing. Editing thickness never changes qty/activity/ageing.
+// ---------------------------------------------------------------------------
+
+export type ThicknessSource =
+  | "tlt_angle"
+  | "tlt_plate"
+  | "rsj_lookup"
+  | "manual"
+  | "unset";
+
+export interface ThicknessResult {
+  thicknessMm: number | null;
+  thicknessSource: ThicknessSource;
+}
+
+// Angle section "A X B X C" -> C (the last dimension). Tolerates decimals and
+// surrounding text; requires at least the three X-separated numbers.
+export function parseAngleThickness(section: string | null | undefined): number | null {
+  if (!section) return null;
+  const m = section
+    .toUpperCase()
+    .match(/(\d+(?:\.\d+)?)\s*X\s*(\d+(?:\.\d+)?)\s*X\s*(\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  const v = Number(m[3]);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+// Plate spec "PLATE <n> MM" -> n (case-insensitive). Returns null if absent.
+export function parsePlateThickness(section: string | null | undefined): number | null {
+  if (!section) return null;
+  const m = section.toUpperCase().match(/PLATE\s+(\d+(?:\.\d+)?)\s*MM/);
+  if (!m) return null;
+  const v = Number(m[1]);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+// Section-derived thickness shared by TLT and NTLT/Earthing: angle first, then
+// plate. Returns the value + which pattern matched (null/unset if neither).
+function sectionThickness(section: string | null | undefined): ThicknessResult {
+  const angle = parseAngleThickness(section);
+  if (angle != null) return { thicknessMm: angle, thicknessSource: "tlt_angle" };
+  const plate = parsePlateThickness(section);
+  if (plate != null) return { thicknessMm: plate, thicknessSource: "tlt_plate" };
+  return { thicknessMm: null, thicknessSource: "unset" };
+}
+
+export interface ThicknessInput {
+  category: string | null;
+  ntltSubtype: string | null;
+  section: string | null;
+  groupKey: string | null;
+  markId: string;
+}
+
+export interface ThicknessLookups {
+  // Cleaned "RSJ <dims>" groupKey -> thickness (mm).
+  rsjByKey?: Map<string, number>;
+  // mark_id -> manually pinned thickness (mm). Survives re-imports.
+  manualByMarkId?: Map<string, number>;
+}
+
+// The single resolver: decide a row's thickness + source. A manual pin (keyed by
+// mark_id) always wins (explicit user intent). Otherwise resolve by category:
+//   TLT            -> section (angle last-dim / plate number)
+//   NTLT/EARTHING  -> section (same as TLT)
+//   NTLT/RSJ       -> RSJ lookup table (NOT the section dims); unset until added
+//   NTLT/GENERAL   -> manual only; unset until entered
+// Anything else / unparseable -> null + "unset" (never guessed, surfaced as a gap).
+export function resolveThickness(
+  row: ThicknessInput,
+  lookups: ThicknessLookups = {},
+): ThicknessResult {
+  const manual = lookups.manualByMarkId?.get(row.markId);
+  if (manual != null && Number.isFinite(manual) && manual > 0) {
+    return { thicknessMm: manual, thicknessSource: "manual" };
+  }
+
+  const cat = (row.category ?? "").toUpperCase();
+  const sub = (row.ntltSubtype ?? "").toUpperCase();
+
+  if (cat === "TLT") return sectionThickness(row.section);
+
+  if (cat === "NTLT") {
+    if (sub === "EARTHING") return sectionThickness(row.section);
+    if (sub === "RSJ") {
+      const key = row.groupKey ?? "";
+      const v = lookups.rsjByKey?.get(key);
+      return v != null && Number.isFinite(v) && v > 0
+        ? { thicknessMm: v, thicknessSource: "rsj_lookup" }
+        : { thicknessMm: null, thicknessSource: "unset" };
+    }
+    // GENERAL (and any other NTLT subtype) is manual-only -> unset until pinned.
+    return { thicknessMm: null, thicknessSource: "unset" };
+  }
+
+  return { thicknessMm: null, thicknessSource: "unset" };
 }

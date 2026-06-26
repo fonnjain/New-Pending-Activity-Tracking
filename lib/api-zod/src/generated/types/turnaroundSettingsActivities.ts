@@ -8,6 +8,6 @@
 import type { ActivityConfig } from './activityConfig';
 
 /**
- * Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
+ * Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). This is the TLT category.
  */
 export type TurnaroundSettingsActivities = {[key: string]: ActivityConfig};

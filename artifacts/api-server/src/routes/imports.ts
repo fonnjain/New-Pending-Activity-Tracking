@@ -10,6 +10,8 @@ import {
   importRowsTable,
   uploadStagingTable,
   settingsTable,
+  rsjThicknessTable,
+  manualThicknessTable,
   SETTINGS_SINGLETON_ID,
   type InsertRecordPool,
   type ChangeSummary,
@@ -31,9 +33,11 @@ import {
   velocityForMark,
   rankIn,
   sequenceForCategory,
+  resolveThickness,
   type VelocitySnapshot,
   type TurnaroundSettings,
   type ActivitySequence,
+  type ThicknessLookups,
 } from "@workspace/domain";
 import { recomputeMilestones } from "../lib/milestones";
 import {
@@ -213,8 +217,23 @@ function changeSetFromImport(imp: typeof importsTable.$inferSelect) {
   };
 }
 
-function serializeRecord(r: RecordPoolRow, importId: number, id: number) {
+function serializeRecord(
+  r: RecordPoolRow,
+  importId: number,
+  id: number,
+  thicknessLookups: ThicknessLookups = {},
+) {
   const { routeSteps, currentStepIndex } = computeRoute(r.operation, r.activity);
+  const { thicknessMm, thicknessSource } = resolveThickness(
+    {
+      category: r.category,
+      ntltSubtype: r.ntltSubtype,
+      section: r.section,
+      groupKey: r.groupKey,
+      markId: r.markId,
+    },
+    thicknessLookups,
+  );
   return {
     id,
     importId,
@@ -254,6 +273,21 @@ function serializeRecord(r: RecordPoolRow, importId: number, id: number) {
     groupType: r.groupType,
     groupKey: r.groupKey,
     active: r.active,
+    thicknessMm,
+    thicknessSource,
+  };
+}
+
+// Load the two thickness config maps (RSJ lookup by group key + manual pins by
+// mark_id) so records can be resolved live, exactly like ageing. Read-only.
+async function loadThicknessLookups(): Promise<ThicknessLookups> {
+  const [rsjRows, manualRows] = await Promise.all([
+    db.select().from(rsjThicknessTable),
+    db.select().from(manualThicknessTable),
+  ]);
+  return {
+    rsjByKey: new Map(rsjRows.map((r) => [r.groupKey, r.thicknessMm])),
+    manualByMarkId: new Map(manualRows.map((r) => [r.markId, r.thicknessMm])),
   };
 }
 
@@ -988,11 +1022,13 @@ router.get("/imports/:id/records", async (req, res): Promise<void> => {
   const rows = await loadMembership(db, params.data.id);
   rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
 
+  const thicknessLookups = await loadThicknessLookups();
+
   const out: ReturnType<typeof serializeRecord>[] = [];
   let nextId = 1;
   for (const { pool, copies } of rows) {
     for (let c = 0; c < copies; c++) {
-      out.push(serializeRecord(pool, params.data.id, nextId++));
+      out.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups));
     }
   }
 

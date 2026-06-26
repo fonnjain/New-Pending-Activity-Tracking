@@ -277,7 +277,7 @@ function AgeingContent() {
                   <TableRow key={r.id}>
                     <TableCell className="font-mono font-medium">{r.markId}</TableCell>
                     <TableCell className="text-xs truncate max-w-[150px]">{r.section}</TableCell>
-                    <TableCell className="text-xs font-semibold"><span className="inline-flex items-center gap-1.5"><StatusDot activity={r.activity} ageingDays={r.ageingDays} project={r.job} category={r.category} ntltSubtype={r.ntltSubtype} />{r.activity}</span></TableCell>
+                    <TableCell className="text-xs font-semibold"><span className="inline-flex items-center gap-1.5"><StatusDot activity={r.activity} ageingDays={r.ageingDays} project={r.job} category={r.category} ntltSubtype={r.ntltSubtype} groupKey={r.groupKey} />{r.activity}</span></TableCell>
                     <TableCell className="text-xs">{r.contractor}</TableCell>
                     <TableCell className="text-right">{r.balanceQty}</TableCell>
                     <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
@@ -372,7 +372,7 @@ function AgeingDetail({ title, subtitle, records, onBack }: { title: string, sub
                     <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
                     <TableCell className="whitespace-nowrap">{r.structure || '-'}</TableCell>
                     <TableCell className="text-xs truncate max-w-[150px]">{r.section}</TableCell>
-                    <TableCell className="text-xs font-semibold"><span className="inline-flex items-center gap-1.5"><StatusDot activity={r.activity} ageingDays={r.ageingDays} project={r.job} category={r.category} ntltSubtype={r.ntltSubtype} />{r.activity}</span></TableCell>
+                    <TableCell className="text-xs font-semibold"><span className="inline-flex items-center gap-1.5"><StatusDot activity={r.activity} ageingDays={r.ageingDays} project={r.job} category={r.category} ntltSubtype={r.ntltSubtype} groupKey={r.groupKey} />{r.activity}</span></TableCell>
                     <TableCell className="text-xs">{r.contractor}</TableCell>
                     <TableCell className="text-right">{r.balanceQty}</TableCell>
                     <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>

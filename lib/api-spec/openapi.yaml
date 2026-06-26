@@ -64,6 +64,129 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /rsj-thickness:
+    get:
+      operationId: listRsjThickness
+      tags: [thickness]
+      summary: List RSJ thickness lookup entries
+      description: >
+        Returns the RSJ Types & Thickness lookup table (cleaned "RSJ <dims>"
+        group key -> thickness in mm). Used to auto-resolve thickness for NTLT/RSJ
+        marks. Public (read-only).
+      responses:
+        "200":
+          description: RSJ thickness entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RsjThickness"
+    put:
+      operationId: upsertRsjThickness
+      tags: [thickness]
+      summary: Create or update an RSJ thickness entry
+      description: >
+        Upserts one RSJ lookup entry keyed by the cleaned "RSJ <dims>" group key.
+        Requires authentication. RSJ marks with this group key resolve to the new
+        thickness on the next read (live recompute).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RsjThicknessInput"
+      responses:
+        "200":
+          description: Saved entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RsjThickness"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteRsjThickness
+      tags: [thickness]
+      summary: Delete an RSJ thickness entry
+      description: >
+        Removes one RSJ lookup entry. Requires authentication. The group key is
+        passed as a query param (it can contain spaces) to avoid path-segment
+        encoding issues.
+      parameters:
+        - name: groupKey
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+  /manual-thickness:
+    get:
+      operationId: listManualThickness
+      tags: [thickness]
+      summary: List manual thickness pins
+      description: >
+        Returns manual thickness values keyed by mark_id (used for NTLT/GENERAL
+        and any hand-pinned mark). These survive re-imports. Public (read-only).
+      responses:
+        "200":
+          description: Manual thickness entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ManualThickness"
+    put:
+      operationId: upsertManualThickness
+      tags: [thickness]
+      summary: Create or update a manual thickness pin
+      description: >
+        Upserts one manual thickness value keyed by mark_id. Requires
+        authentication. The mark resolves to this value (source "manual") on the
+        next read and the value persists across re-imports.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualThicknessInput"
+      responses:
+        "200":
+          description: Saved entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManualThickness"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteManualThickness
+      tags: [thickness]
+      summary: Delete a manual thickness pin
+      description: >
+        Removes one manual thickness pin (the mark reverts to auto/unset).
+        Requires authentication. The mark id is passed as a query param (it can
+        contain backslashes and spaces) to avoid path-segment encoding issues.
+      parameters:
+        - name: markId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
   /healthz:
     get:
       operationId: healthCheck
@@ -1154,6 +1277,13 @@ components:
         active:
           type: boolean
           description: Whether the mark participates in workflow metrics (false for FOUNDATION BOLT).
+        thicknessMm:
+          type: ["number", "null"]
+          description: Live-resolved galvanizing thickness (mm). Null when unset/unparseable. Never stored on the pool row, never in the hash.
+        thicknessSource:
+          type: string
+          enum: [tlt_angle, tlt_plate, rsj_lookup, manual, unset]
+          description: How thicknessMm was derived (or "unset" when not yet resolved).
       required:
         - id
         - importId
@@ -1360,6 +1490,78 @@ components:
           $ref: "#/components/schemas/GraceCell"
         preWarn:
           $ref: "#/components/schemas/PartialPreWarnConfig"
+    CategorySettings:
+      type: object
+      description: >
+        One NTLT category's turnaround config: a global ("All Sections")
+        per-activity map keyed by THIS category's sequence activity codes, plus
+        optional sparse per-SECTION overrides (the NTLT analogue of activities +
+        perProject). TLT stays at the top level of TurnaroundSettings.
+      properties:
+        activities:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/ActivityConfig"
+          description: Global ("All Sections") per-activity config for this NTLT category.
+        perSection:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              $ref: "#/components/schemas/PartialActivityConfig"
+          description: >
+            Sparse per-section overrides keyed by section (group_key) then
+            activity code. Only overridden cells/fields are stored.
+      required:
+        - activities
+    RsjThickness:
+      type: object
+      properties:
+        groupKey:
+          type: string
+          description: Cleaned "RSJ <dims>" section group key.
+        thicknessMm:
+          type: number
+          description: Thickness in mm for this RSJ type.
+        updatedAt:
+          type: string
+      required:
+        - groupKey
+        - thicknessMm
+    RsjThicknessInput:
+      type: object
+      properties:
+        groupKey:
+          type: string
+        thicknessMm:
+          type: number
+      required:
+        - groupKey
+        - thicknessMm
+    ManualThickness:
+      type: object
+      properties:
+        markId:
+          type: string
+          description: Mark identity (mark_id) the manual thickness is pinned to.
+        thicknessMm:
+          type: number
+          description: Manually entered thickness in mm.
+        updatedAt:
+          type: string
+      required:
+        - markId
+        - thicknessMm
+    ManualThicknessInput:
+      type: object
+      properties:
+        markId:
+          type: string
+        thicknessMm:
+          type: number
+      required:
+        - markId
+        - thicknessMm
     TurnaroundSettings:
       type: object
       description: App-level turnaround-warning configuration. Singleton; global per-activity ideal days, grace cells and pre-warning thresholds keyed by canonical activity code, plus optional sparse per-project overrides and the stalled-mark threshold.
@@ -1368,7 +1570,7 @@ components:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/ActivityConfig"
-          description: Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
+          description: Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). This is the TLT category.
         perProject:
           type: object
           additionalProperties:
@@ -1379,6 +1581,19 @@ components:
             Sparse per-project overrides keyed by project (Job) then canonical
             activity code. Only overridden cells/fields are stored; everything
             else inherits `activities`.
+        ntlt:
+          type: object
+          description: >
+            The three NTLT categories' configs keyed by subtype (RSJ, EARTHING,
+            GENERAL). TLT stays at the top level (activities/perProject). Seeded
+            with defaults on read.
+          properties:
+            RSJ:
+              $ref: "#/components/schemas/CategorySettings"
+            EARTHING:
+              $ref: "#/components/schemas/CategorySettings"
+            GENERAL:
+              $ref: "#/components/schemas/CategorySettings"
         stalledDays:
           type: number
           description: >

@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { RecordThicknessSource } from './recordThicknessSource';
 
 export interface Record {
   id: number;
@@ -91,4 +92,11 @@ export interface Record {
   groupKey: string | null;
   /** Whether the mark participates in workflow metrics (false for FOUNDATION BOLT). */
   active: boolean;
+  /**
+     * Live-resolved galvanizing thickness (mm). Null when unset/unparseable. Never stored on the pool row, never in the hash.
+     * @nullable
+     */
+  thicknessMm?: number | null;
+  /** How thicknessMm was derived (or "unset" when not yet resolved). */
+  thicknessSource?: RecordThicknessSource;
 }

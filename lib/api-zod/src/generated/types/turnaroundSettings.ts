@@ -6,17 +6,21 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { TurnaroundSettingsActivities } from './turnaroundSettingsActivities';
+import type { TurnaroundSettingsNtlt } from './turnaroundSettingsNtlt';
 import type { TurnaroundSettingsPerProject } from './turnaroundSettingsPerProject';
 
 /**
  * App-level turnaround-warning configuration. Singleton; global per-activity ideal days, grace cells and pre-warning thresholds keyed by canonical activity code, plus optional sparse per-project overrides and the stalled-mark threshold.
  */
 export interface TurnaroundSettings {
-  /** Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). */
+  /** Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). This is the TLT category. */
   activities: TurnaroundSettingsActivities;
   /** Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden cells/fields are stored; everything else inherits `activities`.
    */
   perProject?: TurnaroundSettingsPerProject;
+  /** The three NTLT categories' configs keyed by subtype (RSJ, EARTHING, GENERAL). TLT stays at the top level (activities/perProject). Seeded with defaults on read.
+   */
+  ntlt?: TurnaroundSettingsNtlt;
   /** Stalled-mark threshold in days. A mark whose activity/last-production signature has not changed for >= this many days is flagged stalled.
    */
   stalledDays?: number;

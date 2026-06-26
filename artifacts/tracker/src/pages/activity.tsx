@@ -104,6 +104,7 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
                     <TableHead>Structure</TableHead>
                     <TableHead>Mark</TableHead>
                     <TableHead>Section</TableHead>
+                    <TableHead className="text-right">Thick.</TableHead>
                     <TableHead className="text-right">Qty</TableHead>
                     <TableHead className="text-right">Wt</TableHead>
                     <TableHead>Contractor</TableHead>
@@ -117,8 +118,11 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
                     <TableRow key={r.id}>
                       <TableCell className="font-medium whitespace-nowrap">{r.job || '-'}</TableCell>
                       <TableCell className="whitespace-nowrap">{r.structure || '-'}</TableCell>
-                      <TableCell className="font-mono font-medium whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><StatusDot activity={r.activity} ageingDays={r.ageingDays} project={r.job} category={r.category} ntltSubtype={r.ntltSubtype} />{r.markId}</span></TableCell>
+                      <TableCell className="font-mono font-medium whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><StatusDot activity={r.activity} ageingDays={r.ageingDays} project={r.job} category={r.category} ntltSubtype={r.ntltSubtype} groupKey={r.groupKey} />{r.markId}</span></TableCell>
                       <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || '-'}</TableCell>
+                      <TableCell className="text-right tabular-nums whitespace-nowrap" title={r.thicknessSource ?? 'unset'}>
+                        {r.thicknessMm != null ? `${r.thicknessMm} mm` : <span className="text-muted-foreground">-</span>}
+                      </TableCell>
                       <TableCell className="text-right">{r.balanceQty}</TableCell>
                       <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
                       <TableCell className="text-xs whitespace-nowrap">{r.contractor || '-'}</TableCell>

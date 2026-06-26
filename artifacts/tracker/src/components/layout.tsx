@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
-import { BarChart3, Briefcase, Activity, Clock, Users, Database, FileText, SlidersHorizontal, Filter, X, Timer, Gauge, CheckCircle2 } from "lucide-react";
+import { BarChart3, Briefcase, Activity, Clock, Users, Database, FileText, SlidersHorizontal, Filter, X, Timer, Gauge, CheckCircle2, Layers } from "lucide-react";
 import { useTracker, dateRangeWindow } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ const navItems = [
   { href: "/ageing", icon: Clock, label: "Ageing" },
   { href: "/reports", icon: FileText, label: "Reports" },
   { href: "/data", icon: Database, label: "Data" },
+  { href: "/thickness", icon: Layers, label: "Thickness" },
   { href: "/warning-parameters", icon: SlidersHorizontal, label: "Warning Params" },
 ];
 

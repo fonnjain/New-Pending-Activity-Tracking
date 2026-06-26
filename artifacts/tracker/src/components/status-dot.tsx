@@ -1,4 +1,4 @@
-import { lifecycleStatus, sequenceFor } from "@workspace/domain";
+import { lifecycleStatus, scopeFor, sequenceFor } from "@workspace/domain";
 import { useSettings } from "@/lib/settings";
 import { lifecycleBgColor, LIFECYCLE_LABELS } from "@/lib/turnaround";
 
@@ -12,6 +12,7 @@ export function StatusDot({
   project,
   category,
   ntltSubtype,
+  groupKey,
   stalled = false,
 }: {
   activity: string | null;
@@ -19,11 +20,17 @@ export function StatusDot({
   project?: string | null;
   category?: string | null;
   ntltSubtype?: string | null;
+  groupKey?: string | null;
   stalled?: boolean;
 }) {
   const { settings } = useSettings();
   const res = lifecycleStatus(
-    { activity, ageingDays, project, sequence: sequenceFor({ category, ntltSubtype }) },
+    {
+      activity,
+      ageingDays,
+      scope: scopeFor({ category, ntltSubtype, job: project, groupKey }),
+      sequence: sequenceFor({ category, ntltSubtype }),
+    },
     settings,
   );
   if (res.status === "na" && !stalled) return null;

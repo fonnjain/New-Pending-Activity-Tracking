@@ -29,6 +29,7 @@ export default defineConfig({
       baseUrl: "/api",
       clean: true,
       prettier: true,
+      urlEncodeParameters: true,
       override: {
         fetch: {
           includeHttpResponseReturnType: false,

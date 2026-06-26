@@ -229,6 +229,20 @@ export interface CommitRequest {
   acceptedSuggestions?: AcceptedSuggestion[];
 }
 
+/**
+ * How thicknessMm was derived (or "unset" when not yet resolved).
+ */
+export type RecordThicknessSource = typeof RecordThicknessSource[keyof typeof RecordThicknessSource];
+
+
+export const RecordThicknessSource = {
+  tlt_angle: 'tlt_angle',
+  tlt_plate: 'tlt_plate',
+  rsj_lookup: 'rsj_lookup',
+  manual: 'manual',
+  unset: 'unset',
+} as const;
+
 export interface Record {
   id: number;
   importId: number;
@@ -314,6 +328,13 @@ export interface Record {
   groupKey: string | null;
   /** Whether the mark participates in workflow metrics (false for FOUNDATION BOLT). */
   active: boolean;
+  /**
+     * Live-resolved galvanizing thickness (mm). Null when unset/unparseable. Never stored on the pool row, never in the hash.
+     * @nullable
+     */
+  thicknessMm?: number | null;
+  /** How thicknessMm was derived (or "unset" when not yet resolved). */
+  thicknessSource?: RecordThicknessSource;
 }
 
 export interface SanitizeRequest {
@@ -432,7 +453,56 @@ export interface PartialActivityConfig {
 }
 
 /**
- * Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE).
+ * Global ("All Sections") per-activity config for this NTLT category.
+ */
+export type CategorySettingsActivities = {[key: string]: ActivityConfig};
+
+/**
+ * Sparse per-section overrides keyed by section (group_key) then activity code. Only overridden cells/fields are stored.
+
+ */
+export type CategorySettingsPerSection = {[key: string]: {[key: string]: PartialActivityConfig}};
+
+/**
+ * One NTLT category's turnaround config: a global ("All Sections") per-activity map keyed by THIS category's sequence activity codes, plus optional sparse per-SECTION overrides (the NTLT analogue of activities + perProject). TLT stays at the top level of TurnaroundSettings.
+
+ */
+export interface CategorySettings {
+  /** Global ("All Sections") per-activity config for this NTLT category. */
+  activities: CategorySettingsActivities;
+  /** Sparse per-section overrides keyed by section (group_key) then activity code. Only overridden cells/fields are stored.
+   */
+  perSection?: CategorySettingsPerSection;
+}
+
+export interface RsjThickness {
+  /** Cleaned "RSJ <dims>" section group key. */
+  groupKey: string;
+  /** Thickness in mm for this RSJ type. */
+  thicknessMm: number;
+  updatedAt?: string;
+}
+
+export interface RsjThicknessInput {
+  groupKey: string;
+  thicknessMm: number;
+}
+
+export interface ManualThickness {
+  /** Mark identity (mark_id) the manual thickness is pinned to. */
+  markId: string;
+  /** Manually entered thickness in mm. */
+  thicknessMm: number;
+  updatedAt?: string;
+}
+
+export interface ManualThicknessInput {
+  markId: string;
+  thicknessMm: number;
+}
+
+/**
+ * Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). This is the TLT category.
  */
 export type TurnaroundSettingsActivities = {[key: string]: ActivityConfig};
 
@@ -443,14 +513,27 @@ export type TurnaroundSettingsActivities = {[key: string]: ActivityConfig};
 export type TurnaroundSettingsPerProject = {[key: string]: {[key: string]: PartialActivityConfig}};
 
 /**
+ * The three NTLT categories' configs keyed by subtype (RSJ, EARTHING, GENERAL). TLT stays at the top level (activities/perProject). Seeded with defaults on read.
+
+ */
+export type TurnaroundSettingsNtlt = {
+  RSJ?: CategorySettings;
+  EARTHING?: CategorySettings;
+  GENERAL?: CategorySettings;
+};
+
+/**
  * App-level turnaround-warning configuration. Singleton; global per-activity ideal days, grace cells and pre-warning thresholds keyed by canonical activity code, plus optional sparse per-project overrides and the stalled-mark threshold.
  */
 export interface TurnaroundSettings {
-  /** Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). */
+  /** Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). This is the TLT category. */
   activities: TurnaroundSettingsActivities;
   /** Sparse per-project overrides keyed by project (Job) then canonical activity code. Only overridden cells/fields are stored; everything else inherits `activities`.
    */
   perProject?: TurnaroundSettingsPerProject;
+  /** The three NTLT categories' configs keyed by subtype (RSJ, EARTHING, GENERAL). TLT stays at the top level (activities/perProject). Seeded with defaults on read.
+   */
+  ntlt?: TurnaroundSettingsNtlt;
   /** Stalled-mark threshold in days. A mark whose activity/last-production signature has not changed for >= this many days is flagged stalled.
    */
   stalledDays?: number;
@@ -891,6 +974,14 @@ export interface ReportResult {
   actionPlan: ReportAction[];
   detailed: ReportDetailed | null;
 }
+
+export type DeleteRsjThicknessParams = {
+groupKey: string;
+};
+
+export type DeleteManualThicknessParams = {
+markId: string;
+};
 
 export type CompareImportsParams = {
 from: number;

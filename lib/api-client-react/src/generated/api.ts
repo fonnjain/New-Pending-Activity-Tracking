@@ -27,10 +27,14 @@ import type {
   CommitRequest,
   CompareImportsParams,
   DeleteAllResult,
+  DeleteManualThicknessParams,
+  DeleteRsjThicknessParams,
   ErrorResponse,
   HealthStatus,
   Import,
   ImportUpload,
+  ManualThickness,
+  ManualThicknessInput,
   MilestonesResponse,
   MovementResponse,
   Record,
@@ -38,6 +42,8 @@ import type {
   ReportResult,
   ReviewRequest,
   ReviewResult,
+  RsjThickness,
+  RsjThicknessInput,
   SanitizeRequest,
   SanitizeResult,
   StageResult,
@@ -210,6 +216,468 @@ export const useUpdateSettings = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getUpdateSettingsMutationOptions(options));
+    }
+
+export const getListRsjThicknessUrl = () => {
+
+
+
+
+  return `/api/rsj-thickness`
+}
+
+/**
+ * Returns the RSJ Types & Thickness lookup table (cleaned "RSJ <dims>" group key -> thickness in mm). Used to auto-resolve thickness for NTLT/RSJ marks. Public (read-only).
+
+ * @summary List RSJ thickness lookup entries
+ */
+export const listRsjThickness = async ( options?: RequestInit): Promise<RsjThickness[]> => {
+
+  return customFetch<RsjThickness[]>(getListRsjThicknessUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListRsjThicknessQueryKey = () => {
+    return [
+    `/api/rsj-thickness`
+    ] as const;
+    }
+
+
+export const getListRsjThicknessQueryOptions = <TData = Awaited<ReturnType<typeof listRsjThickness>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listRsjThickness>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListRsjThicknessQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRsjThickness>>> = ({ signal }) => listRsjThickness({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listRsjThickness>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListRsjThicknessQueryResult = NonNullable<Awaited<ReturnType<typeof listRsjThickness>>>
+export type ListRsjThicknessQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List RSJ thickness lookup entries
+ */
+
+export function useListRsjThickness<TData = Awaited<ReturnType<typeof listRsjThickness>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listRsjThickness>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListRsjThicknessQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpsertRsjThicknessUrl = () => {
+
+
+
+
+  return `/api/rsj-thickness`
+}
+
+/**
+ * Upserts one RSJ lookup entry keyed by the cleaned "RSJ <dims>" group key. Requires authentication. RSJ marks with this group key resolve to the new thickness on the next read (live recompute).
+
+ * @summary Create or update an RSJ thickness entry
+ */
+export const upsertRsjThickness = async (rsjThicknessInput: RsjThicknessInput, options?: RequestInit): Promise<RsjThickness> => {
+
+  return customFetch<RsjThickness>(getUpsertRsjThicknessUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      rsjThicknessInput,)
+  }
+);}
+
+
+
+
+export const getUpsertRsjThicknessMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertRsjThickness>>, TError,{data: BodyType<RsjThicknessInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof upsertRsjThickness>>, TError,{data: BodyType<RsjThicknessInput>}, TContext> => {
+
+const mutationKey = ['upsertRsjThickness'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertRsjThickness>>, {data: BodyType<RsjThicknessInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  upsertRsjThickness(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpsertRsjThicknessMutationResult = NonNullable<Awaited<ReturnType<typeof upsertRsjThickness>>>
+    export type UpsertRsjThicknessMutationBody = BodyType<RsjThicknessInput>
+    export type UpsertRsjThicknessMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Create or update an RSJ thickness entry
+ */
+export const useUpsertRsjThickness = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertRsjThickness>>, TError,{data: BodyType<RsjThicknessInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof upsertRsjThickness>>,
+        TError,
+        {data: BodyType<RsjThicknessInput>},
+        TContext
+      > => {
+      return useMutation(getUpsertRsjThicknessMutationOptions(options));
+    }
+
+export const getDeleteRsjThicknessUrl = (params: DeleteRsjThicknessParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/rsj-thickness?${stringifiedParams}` : `/api/rsj-thickness`
+}
+
+/**
+ * Removes one RSJ lookup entry. Requires authentication. The group key is passed as a query param (it can contain spaces) to avoid path-segment encoding issues.
+
+ * @summary Delete an RSJ thickness entry
+ */
+export const deleteRsjThickness = async (params: DeleteRsjThicknessParams, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteRsjThicknessUrl(params),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteRsjThicknessMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRsjThickness>>, TError,{params: DeleteRsjThicknessParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteRsjThickness>>, TError,{params: DeleteRsjThicknessParams}, TContext> => {
+
+const mutationKey = ['deleteRsjThickness'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteRsjThickness>>, {params: DeleteRsjThicknessParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  deleteRsjThickness(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteRsjThicknessMutationResult = NonNullable<Awaited<ReturnType<typeof deleteRsjThickness>>>
+
+    export type DeleteRsjThicknessMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete an RSJ thickness entry
+ */
+export const useDeleteRsjThickness = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRsjThickness>>, TError,{params: DeleteRsjThicknessParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteRsjThickness>>,
+        TError,
+        {params: DeleteRsjThicknessParams},
+        TContext
+      > => {
+      return useMutation(getDeleteRsjThicknessMutationOptions(options));
+    }
+
+export const getListManualThicknessUrl = () => {
+
+
+
+
+  return `/api/manual-thickness`
+}
+
+/**
+ * Returns manual thickness values keyed by mark_id (used for NTLT/GENERAL and any hand-pinned mark). These survive re-imports. Public (read-only).
+
+ * @summary List manual thickness pins
+ */
+export const listManualThickness = async ( options?: RequestInit): Promise<ManualThickness[]> => {
+
+  return customFetch<ManualThickness[]>(getListManualThicknessUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListManualThicknessQueryKey = () => {
+    return [
+    `/api/manual-thickness`
+    ] as const;
+    }
+
+
+export const getListManualThicknessQueryOptions = <TData = Awaited<ReturnType<typeof listManualThickness>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listManualThickness>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListManualThicknessQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listManualThickness>>> = ({ signal }) => listManualThickness({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listManualThickness>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListManualThicknessQueryResult = NonNullable<Awaited<ReturnType<typeof listManualThickness>>>
+export type ListManualThicknessQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manual thickness pins
+ */
+
+export function useListManualThickness<TData = Awaited<ReturnType<typeof listManualThickness>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listManualThickness>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListManualThicknessQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpsertManualThicknessUrl = () => {
+
+
+
+
+  return `/api/manual-thickness`
+}
+
+/**
+ * Upserts one manual thickness value keyed by mark_id. Requires authentication. The mark resolves to this value (source "manual") on the next read and the value persists across re-imports.
+
+ * @summary Create or update a manual thickness pin
+ */
+export const upsertManualThickness = async (manualThicknessInput: ManualThicknessInput, options?: RequestInit): Promise<ManualThickness> => {
+
+  return customFetch<ManualThickness>(getUpsertManualThicknessUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      manualThicknessInput,)
+  }
+);}
+
+
+
+
+export const getUpsertManualThicknessMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertManualThickness>>, TError,{data: BodyType<ManualThicknessInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof upsertManualThickness>>, TError,{data: BodyType<ManualThicknessInput>}, TContext> => {
+
+const mutationKey = ['upsertManualThickness'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertManualThickness>>, {data: BodyType<ManualThicknessInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  upsertManualThickness(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpsertManualThicknessMutationResult = NonNullable<Awaited<ReturnType<typeof upsertManualThickness>>>
+    export type UpsertManualThicknessMutationBody = BodyType<ManualThicknessInput>
+    export type UpsertManualThicknessMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Create or update a manual thickness pin
+ */
+export const useUpsertManualThickness = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertManualThickness>>, TError,{data: BodyType<ManualThicknessInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof upsertManualThickness>>,
+        TError,
+        {data: BodyType<ManualThicknessInput>},
+        TContext
+      > => {
+      return useMutation(getUpsertManualThicknessMutationOptions(options));
+    }
+
+export const getDeleteManualThicknessUrl = (params: DeleteManualThicknessParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/manual-thickness?${stringifiedParams}` : `/api/manual-thickness`
+}
+
+/**
+ * Removes one manual thickness pin (the mark reverts to auto/unset). Requires authentication. The mark id is passed as a query param (it can contain backslashes and spaces) to avoid path-segment encoding issues.
+
+ * @summary Delete a manual thickness pin
+ */
+export const deleteManualThickness = async (params: DeleteManualThicknessParams, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteManualThicknessUrl(params),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteManualThicknessMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteManualThickness>>, TError,{params: DeleteManualThicknessParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteManualThickness>>, TError,{params: DeleteManualThicknessParams}, TContext> => {
+
+const mutationKey = ['deleteManualThickness'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteManualThickness>>, {params: DeleteManualThicknessParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  deleteManualThickness(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteManualThicknessMutationResult = NonNullable<Awaited<ReturnType<typeof deleteManualThickness>>>
+
+    export type DeleteManualThicknessMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a manual thickness pin
+ */
+export const useDeleteManualThickness = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteManualThickness>>, TError,{params: DeleteManualThicknessParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteManualThickness>>,
+        TError,
+        {params: DeleteManualThicknessParams},
+        TContext
+      > => {
+      return useMutation(getDeleteManualThicknessMutationOptions(options));
     }
 
 export const getHealthCheckUrl = () => {

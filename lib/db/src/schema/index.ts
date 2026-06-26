@@ -6,3 +6,5 @@ export * from "./importRows";
 export * from "./uploadStaging";
 export * from "./settings";
 export * from "./projectMilestones";
+export * from "./rsjThickness";
+export * from "./manualThickness";

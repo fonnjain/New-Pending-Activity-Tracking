@@ -9,7 +9,7 @@ A mobile-first web app for steel-fabrication workshops. Upload an Excel (.xlsx o
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks + Zod schemas from the OpenAPI spec (run after any `openapi.yaml` edit)
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev). **Also re-run against prod after deploying schema changes** — `settings` (per_project, stalled_days), `upload_staging.committed_import_id`, the `project_milestones` table, and `record_pool` classification columns (`category`, `ntlt_subtype`, `group_type`, `group_key`, `active`) were added over time.
+- `pnpm --filter @workspace/db run push` — push DB schema changes (dev). **Also re-run against prod after deploying schema changes** — `settings` (per_project, stalled_days), `upload_staging.committed_import_id`, the `project_milestones` table, `record_pool` classification columns (`category`, `ntlt_subtype`, `group_type`, `group_key`, `active`), and the `rsj_thickness` + `manual_thickness` tables were added over time.
 - Required env: `DATABASE_URL` (Postgres). Optional: `ANTHROPIC_API_KEY` (enables the advisory AI layer).
 
 ## Stack

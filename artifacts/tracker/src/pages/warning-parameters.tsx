@@ -28,18 +28,59 @@ import {
   type PartialActivityConfig,
 } from "@workspace/api-client-react";
 import {
-  PROCESS_SEQUENCE,
   PROCESS_STEP_LABELS,
+  SEQUENCES,
   cumulativeTargets,
   resolveCell,
-  isKnownActivity,
+  isKnownIn,
   DEFAULT_ACTIVITY_CONFIG,
   DEFAULT_PRE_WARN,
   DEFAULT_STALLED_DAYS,
-  type ProcessStep,
+  type SettingsCategory,
+  type NtltSubtype,
+  type ScopeArg,
 } from "@workspace/domain";
 
 const ALL = "__ALL__";
+
+// The four configurable warning categories shown in the selector. TLT is the
+// original 12-step route (scope = project); the three NTLT categories follow
+// their shorter sequences (scope = section).
+const CATEGORIES: ReadonlyArray<{ key: SettingsCategory; label: string }> = [
+  { key: "TLT", label: "TLT (Structures)" },
+  { key: "NTLT_RSJ", label: "NTLT: RSJ Poles" },
+  { key: "NTLT_EARTHING", label: "NTLT: Earthing" },
+  { key: "NTLT_GENERAL", label: "NTLT: General" },
+];
+
+// The NTLT subtype for a settings category (null for TLT).
+function subtypeForCategory(c: SettingsCategory): NtltSubtype | null {
+  switch (c) {
+    case "NTLT_RSJ":
+      return "RSJ";
+    case "NTLT_EARTHING":
+      return "EARTHING";
+    case "NTLT_GENERAL":
+      return "GENERAL";
+    default:
+      return null;
+  }
+}
+
+// Display label for any activity code (TLT codes have descriptions; NTLT-only
+// codes fall back to a short label, else the code itself).
+const NTLT_STEP_LABELS: Record<string, string> = {
+  NTF: "Fit-up",
+  NTFSW: "Fit-up & Side Weld",
+  NTFW: "Final Weld",
+};
+function stepLabel(code: string): string {
+  return (
+    (PROCESS_STEP_LABELS as Record<string, string>)[code] ??
+    NTLT_STEP_LABELS[code] ??
+    code
+  );
+}
 
 type BandKey = "yellow" | "orange" | "red";
 type PreWarnKey = "pw1" | "pw2" | "pw3";
@@ -134,9 +175,22 @@ function WarningParametersContent() {
   const { settings, updateSettings, reset, saving } = useSettings();
   const { selectedImportId } = useTracker();
   const { toast } = useToast();
+  const [category, setCategory] = useState<SettingsCategory>("TLT");
   const [project, setProject] = useState<string>(ALL);
   const graceFileRef = useRef<HTMLInputElement>(null);
   const preWarnFileRef = useRef<HTMLInputElement>(null);
+
+  // The NTLT subtype for the active category (null = TLT). Drives where in the
+  // settings object we read/write and which sequence we render.
+  const sub = subtypeForCategory(category);
+  // The activity codes for the active category (TLT = 12 steps; NTLT shorter).
+  const seq = SEQUENCES[category] as readonly string[];
+  // Switching category resets the scope selector back to the global default and
+  // is what makes TLT vs NTLT independent.
+  const onCategoryChange = (c: string) => {
+    setCategory(c as SettingsCategory);
+    setProject(ALL);
+  };
 
   const { data: records } = useGetImportRecords(selectedImportId as number, {
     query: {
@@ -145,62 +199,108 @@ function WarningParametersContent() {
     },
   });
 
-  // Distinct projects (Job) present in the selected import, for the dropdown.
-  const projects = useMemo(() => {
+  // Scope-key options for the dropdown: projects (Job) for TLT, sections
+  // (group_key) for the active NTLT subtype, taken from the selected import.
+  const scopeKeys = useMemo(() => {
     const set = new Set<string>();
     for (const r of records ?? []) {
-      if (r.job) set.add(r.job);
+      if (sub === null) {
+        if (r.category === "TLT" && r.job) set.add(r.job);
+      } else if (r.category === "NTLT" && r.ntltSubtype === sub && r.groupKey) {
+        set.add(r.groupKey);
+      }
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [records]);
+  }, [records, sub]);
 
   const isAll = project === ALL;
 
-  // Cumulative targets resolved for the active scope (global when "All Projects").
+  // The full resolution scope for the engine helpers (category + key). A bare
+  // string is the legacy TLT-project form; NTLT needs the explicit ScopeRef.
+  const scope: ScopeArg =
+    sub === null
+      ? isAll
+        ? undefined
+        : project
+      : { category, ntltSubtype: sub, key: isAll ? null : project };
+
+  // Read the GLOBAL per-activity map for the active category.
+  const readGlobal = (s: typeof settings): Record<string, ActivityConfig> =>
+    sub === null ? s.activities : s.ntlt?.[sub]?.activities ?? {};
+
+  // Read the sparse override map for the active category (perProject / perSection).
+  const readOverrides = (
+    s: typeof settings,
+  ): Record<string, Record<string, PartialActivityConfig>> =>
+    sub === null
+      ? s.perProject ?? {}
+      : s.ntlt?.[sub]?.perSection ?? {};
+
+  // Produce next settings with the active category's global map replaced.
+  const writeGlobal = (
+    s: typeof settings,
+    next: Record<string, ActivityConfig>,
+  ): typeof settings => {
+    if (sub === null) return { ...s, activities: next };
+    const ntlt = { ...(s.ntlt ?? {}) };
+    ntlt[sub] = { ...(ntlt[sub] ?? { activities: {} }), activities: next };
+    return { ...s, ntlt };
+  };
+
+  // Produce next settings with the active category's override map replaced.
+  const writeOverrides = (
+    s: typeof settings,
+    next: Record<string, Record<string, PartialActivityConfig>>,
+  ): typeof settings => {
+    if (sub === null) return { ...s, perProject: next };
+    const ntlt = { ...(s.ntlt ?? {}) };
+    ntlt[sub] = { ...(ntlt[sub] ?? { activities: {} }), perSection: next };
+    return { ...s, ntlt };
+  };
+
+  // Cumulative targets resolved for the active scope + category sequence.
   const cumTargets = useMemo(
-    () => cumulativeTargets(settings, isAll ? undefined : project),
-    [settings, isAll, project],
+    () => cumulativeTargets(settings, scope, seq),
+    [settings, scope, seq],
   );
 
-  // The sparse override row for the selected project (undefined in global mode).
+  // The sparse override row for the selected scope key (undefined in global mode).
   const projectOverrides: Record<string, PartialActivityConfig> | undefined =
-    isAll ? undefined : settings.perProject?.[project];
+    isAll ? undefined : readOverrides(settings)[project];
 
-  // Patch the GLOBAL ("All Projects") config row for one activity.
+  // Patch the GLOBAL config row for one activity (active category).
   const setActivity = (
-    step: ProcessStep,
+    step: string,
     updater: (c: ActivityConfig) => ActivityConfig,
   ) =>
     updateSettings((prev) => {
-      const cur = prev.activities[step] ?? cloneConfig(DEFAULT_ACTIVITY_CONFIG);
-      return {
-        ...prev,
-        activities: { ...prev.activities, [step]: updater(cur) },
-      };
+      const g = readGlobal(prev);
+      const cur = g[step] ?? cloneConfig(DEFAULT_ACTIVITY_CONFIG);
+      return writeGlobal(prev, { ...g, [step]: updater(cur) });
     });
 
-  // Patch the SPARSE per-project override row for one activity, pruning empty
-  // rows/projects so storage stays minimal (an empty row = full inheritance).
+  // Patch the SPARSE override row for one activity, pruning empty rows/keys so
+  // storage stays minimal (an empty row = full inheritance).
   const setProjectRow = (
-    step: ProcessStep,
+    step: string,
     mutate: (row: PartialActivityConfig) => void,
   ) =>
     updateSettings((prev) => {
-      const perProject = { ...(prev.perProject ?? {}) };
-      const proj = { ...(perProject[project] ?? {}) };
+      const overrides = { ...readOverrides(prev) };
+      const proj = { ...(overrides[project] ?? {}) };
       const row: PartialActivityConfig = { ...(proj[step] ?? {}) };
       mutate(row);
       if (Object.keys(row).length === 0) delete proj[step];
       else proj[step] = row;
-      if (Object.keys(proj).length === 0) delete perProject[project];
-      else perProject[project] = proj;
-      return { ...prev, perProject };
+      if (Object.keys(proj).length === 0) delete overrides[project];
+      else overrides[project] = proj;
+      return writeOverrides(prev, overrides);
     });
 
   // Apply a band-cell transformation to the active scope (global or project).
   // In project mode this CREATES/REPLACES that cell's override.
   const setBand = (
-    step: ProcessStep,
+    step: string,
     band: BandKey,
     make: (prev: GraceCell | undefined) => GraceCell,
   ) => {
@@ -218,7 +318,7 @@ function WarningParametersContent() {
   };
 
   // Edit the grace DAYS directly -> pin this cell to MANUAL (keep last percent).
-  const editValue = (step: ProcessStep, band: BandKey, v: string) =>
+  const editValue = (step: string, band: BandKey, v: string) =>
     setBand(step, band, (prev) => ({
       mode: "manual",
       value: toNum(v),
@@ -226,7 +326,7 @@ function WarningParametersContent() {
     }));
 
   // Edit the PERCENT -> switch this cell to AUTO (keep last manual value).
-  const editPercent = (step: ProcessStep, band: BandKey, v: string) =>
+  const editPercent = (step: string, band: BandKey, v: string) =>
     setBand(step, band, (prev) => ({
       mode: "auto",
       percent: toNum(v),
@@ -234,7 +334,7 @@ function WarningParametersContent() {
     }));
 
   // Flip a MANUAL cell back to AUTO, re-deriving from its stored percentage.
-  const useAuto = (step: ProcessStep, band: BandKey) =>
+  const useAuto = (step: string, band: BandKey) =>
     setBand(step, band, (prev) => ({
       mode: "auto",
       percent: prev?.percent ?? 0,
@@ -242,13 +342,13 @@ function WarningParametersContent() {
     }));
 
   // Project mode only: drop a single band override so it inherits the global cell.
-  const inheritBand = (step: ProcessStep, band: BandKey) =>
+  const inheritBand = (step: string, band: BandKey) =>
     setProjectRow(step, (row) => {
       delete row[band];
     });
 
   // Edit ideal days. Global = full value; project = sparse override (empty clears).
-  const setIdeal = (step: ProcessStep, v: string) => {
+  const setIdeal = (step: string, v: string) => {
     if (isAll) {
       setActivity(step, (c) => ({ ...cloneConfig(c), idealDays: toNum(v) }));
     } else {
@@ -260,27 +360,45 @@ function WarningParametersContent() {
   };
 
   // Clear all overrides for one activity row (revert to global).
-  const clearRowOverride = (step: ProcessStep) =>
+  const clearRowOverride = (step: string) =>
     updateSettings((prev) => {
-      const perProject = { ...(prev.perProject ?? {}) };
-      const proj = { ...(perProject[project] ?? {}) };
+      const overrides = { ...readOverrides(prev) };
+      const proj = { ...(overrides[project] ?? {}) };
       delete proj[step];
-      if (Object.keys(proj).length === 0) delete perProject[project];
-      else perProject[project] = proj;
-      return { ...prev, perProject };
+      if (Object.keys(proj).length === 0) delete overrides[project];
+      else overrides[project] = proj;
+      return writeOverrides(prev, overrides);
     });
 
-  // Reset the whole selected project back to "All Projects" (drop all overrides).
+  // Reset the whole selected scope back to global (drop all its overrides).
   const resetProject = () =>
     updateSettings((prev) => {
-      const perProject = { ...(prev.perProject ?? {}) };
-      delete perProject[project];
-      return { ...prev, perProject };
+      const overrides = { ...readOverrides(prev) };
+      delete overrides[project];
+      return writeOverrides(prev, overrides);
     });
+
+  // Reset the active category's GLOBAL rows to defaults. TLT in global mode uses
+  // the existing whole-settings reset (byte-for-byte unchanged); NTLT resets just
+  // that category's activities to its sequence defaults, leaving others intact.
+  const resetCategoryGlobal = () => {
+    if (sub === null) {
+      reset();
+      return;
+    }
+    updateSettings((prev) =>
+      writeGlobal(
+        prev,
+        Object.fromEntries(
+          seq.map((s) => [s, cloneConfig(DEFAULT_ACTIVITY_CONFIG)]),
+        ),
+      ),
+    );
+  };
 
   // Edit a pre-warning threshold (percent of cumulative target consumed).
   // Global = full value; project = sparse per-field override (empty clears).
-  const setPreWarn = (step: ProcessStep, key: PreWarnKey, v: string) => {
+  const setPreWarn = (step: string, key: PreWarnKey, v: string) => {
     if (isAll) {
       setActivity(step, (c) => {
         const n = cloneConfig(c);
@@ -299,7 +417,7 @@ function WarningParametersContent() {
   };
 
   // Project mode only: drop a single pre-warning override so it inherits global.
-  const inheritPreWarn = (step: ProcessStep, key: PreWarnKey) =>
+  const inheritPreWarn = (step: string, key: PreWarnKey) =>
     setProjectRow(step, (row) => {
       if (!row.preWarn) return;
       const pw = { ...row.preWarn };
@@ -314,8 +432,9 @@ function WarningParametersContent() {
 
   // Per-activity pre-warning display rows (effective values + override flags).
   const preWarnRows = useMemo(() => {
-    return PROCESS_SEQUENCE.map((step) => {
-      const globalPw = settings.activities[step]?.preWarn ?? DEFAULT_PRE_WARN;
+    const g = readGlobal(settings);
+    return seq.map((step) => {
+      const globalPw = g[step]?.preWarn ?? DEFAULT_PRE_WARN;
       const ovPw = isAll ? undefined : projectOverrides?.[step]?.preWarn;
       const cells = PRE_WARNS.map(({ key }) => {
         const inherited = globalPw[key];
@@ -329,7 +448,7 @@ function WarningParametersContent() {
       const rowHasOverride = !!ovPw && Object.keys(ovPw).length > 0;
       return { step, cells, inverted, rowHasOverride };
     });
-  }, [settings, isAll, projectOverrides]);
+  }, [settings, isAll, projectOverrides, seq, sub]);
 
   const pwInvertedSteps = preWarnRows.filter((r) => r.inverted).map((r) => r.step);
 
@@ -338,8 +457,9 @@ function WarningParametersContent() {
   // (yellow > orange or orange > red). The status engine still auto-corrects the
   // order; this is only an editor hint to set sensible percentages.
   const rows = useMemo(() => {
-    return PROCESS_SEQUENCE.map((step) => {
-      const globalCfg = settings.activities[step] ?? DEFAULT_ACTIVITY_CONFIG;
+    const g = readGlobal(settings);
+    return seq.map((step) => {
+      const globalCfg = g[step] ?? DEFAULT_ACTIVITY_CONFIG;
       const ov = isAll ? undefined : projectOverrides?.[step];
       const globalIdeal = globalCfg.idealDays;
       const effIdeal = isAll ? globalIdeal : ov?.idealDays ?? globalIdeal;
@@ -365,16 +485,20 @@ function WarningParametersContent() {
       const rowHasOverride = !!ov && Object.keys(ov).length > 0;
       return { step, ov, globalCfg, globalIdeal, effIdeal, bands, inverted, rowHasOverride };
     });
-  }, [settings, isAll, project, projectOverrides]);
+  }, [settings, isAll, project, projectOverrides, seq, sub]);
 
   const invertedSteps = rows.filter((r) => r.inverted).map((r) => r.step);
 
+  // The word for the override scope in the active category (project vs section).
+  const scopeNoun = sub === null ? "Project" : "Section";
+  const allLabel = sub === null ? "All Projects" : "All Sections";
+
   // Filename-safe slug for the active scope, used by both Excel exports.
   const scopeSlug =
-    (isAll ? "all-projects" : project)
+    (isAll ? `all-${scopeNoun.toLowerCase()}s` : project)
       .replace(/[^a-z0-9]+/gi, "-")
       .replace(/^-+|-+$/g, "")
-      .toLowerCase() || "project";
+      .toLowerCase() || "scope";
 
   // Export the per-activity targets & grace table (effective resolved days for
   // the active scope) as its own .xlsx.
@@ -393,7 +517,7 @@ function WarningParametersContent() {
       for (const b of row.bands) byBand[b.key] = b.effectiveDays;
       return {
         activity: row.step,
-        description: PROCESS_STEP_LABELS[row.step],
+        description: stepLabel(row.step),
         idealDays: row.effIdeal,
         cumulativeTarget: cumTargets[row.step],
         yellowGrace: byBand.yellow,
@@ -422,7 +546,7 @@ function WarningParametersContent() {
       for (const c of row.cells) byKey[c.key] = c.effective;
       return {
         activity: row.step,
-        description: PROCESS_STEP_LABELS[row.step],
+        description: stepLabel(row.step),
         cumulativeTarget: cumTargets[row.step],
         pw1: byKey.pw1,
         pw2: byKey.pw2,
@@ -442,7 +566,7 @@ function WarningParametersContent() {
     try {
       const raw = await readSheetRows(file);
       const parsed: {
-        step: ProcessStep;
+        step: string;
         ideal: number | null;
         yellow: number | null;
         orange: number | null;
@@ -453,9 +577,9 @@ function WarningParametersContent() {
         const code = String(pickField(nr, ["activity"]) ?? "")
           .trim()
           .toUpperCase();
-        if (!code || !isKnownActivity(code)) continue;
+        if (!code || !isKnownIn(seq, code)) continue;
         parsed.push({
-          step: code as ProcessStep,
+          step: code as string,
           ideal: parseDays(pickField(nr, ["ideal"])),
           yellow: parseDays(pickField(nr, ["blue", "yellow"])),
           orange: parseDays(pickField(nr, ["grey", "gray", "orange"])),
@@ -472,7 +596,7 @@ function WarningParametersContent() {
       }
       updateSettings((prev) => {
         if (isAll) {
-          const activities = { ...prev.activities };
+          const activities = { ...readGlobal(prev) };
           for (const p of parsed) {
             const next = cloneConfig(
               activities[p.step] ?? DEFAULT_ACTIVITY_CONFIG,
@@ -483,10 +607,10 @@ function WarningParametersContent() {
             if (p.red != null) next.red = { mode: "manual", value: p.red };
             activities[p.step] = next;
           }
-          return { ...prev, activities };
+          return writeGlobal(prev, activities);
         }
-        const perProject = { ...(prev.perProject ?? {}) };
-        const proj = { ...(perProject[project] ?? {}) };
+        const overrides = { ...readOverrides(prev) };
+        const proj = { ...(overrides[project] ?? {}) };
         for (const p of parsed) {
           const cur: PartialActivityConfig = { ...(proj[p.step] ?? {}) };
           if (p.ideal != null) cur.idealDays = p.ideal;
@@ -496,15 +620,15 @@ function WarningParametersContent() {
           if (Object.keys(cur).length === 0) delete proj[p.step];
           else proj[p.step] = cur;
         }
-        if (Object.keys(proj).length === 0) delete perProject[project];
-        else perProject[project] = proj;
-        return { ...prev, perProject };
+        if (Object.keys(proj).length === 0) delete overrides[project];
+        else overrides[project] = proj;
+        return writeOverrides(prev, overrides);
       });
       toast({
         title: "Targets & grace imported",
         description: `Applied ${parsed.length} ${
           parsed.length === 1 ? "activity" : "activities"
-        } to ${isAll ? "All Projects" : project}.`,
+        } to ${isAll ? allLabel : project}.`,
       });
     } catch (err) {
       toast({
@@ -523,7 +647,7 @@ function WarningParametersContent() {
     try {
       const raw = await readSheetRows(file);
       const parsed: {
-        step: ProcessStep;
+        step: string;
         pw1: number | null;
         pw2: number | null;
         pw3: number | null;
@@ -533,9 +657,9 @@ function WarningParametersContent() {
         const code = String(pickField(nr, ["activity"]) ?? "")
           .trim()
           .toUpperCase();
-        if (!code || !isKnownActivity(code)) continue;
+        if (!code || !isKnownIn(seq, code)) continue;
         parsed.push({
-          step: code as ProcessStep,
+          step: code as string,
           pw1: parsePct(pickField(nr, ["prewarn1", "pw1"])),
           pw2: parsePct(pickField(nr, ["prewarn2", "pw2"])),
           pw3: parsePct(pickField(nr, ["prewarn3", "pw3"])),
@@ -551,7 +675,7 @@ function WarningParametersContent() {
       }
       updateSettings((prev) => {
         if (isAll) {
-          const activities = { ...prev.activities };
+          const activities = { ...readGlobal(prev) };
           for (const p of parsed) {
             const next = cloneConfig(
               activities[p.step] ?? DEFAULT_ACTIVITY_CONFIG,
@@ -563,10 +687,10 @@ function WarningParametersContent() {
             next.preWarn = pw;
             activities[p.step] = next;
           }
-          return { ...prev, activities };
+          return writeGlobal(prev, activities);
         }
-        const perProject = { ...(prev.perProject ?? {}) };
-        const proj = { ...(perProject[project] ?? {}) };
+        const overrides = { ...readOverrides(prev) };
+        const proj = { ...(overrides[project] ?? {}) };
         for (const p of parsed) {
           const cur: PartialActivityConfig = { ...(proj[p.step] ?? {}) };
           const pw = { ...(cur.preWarn ?? {}) };
@@ -578,15 +702,15 @@ function WarningParametersContent() {
           if (Object.keys(cur).length === 0) delete proj[p.step];
           else proj[p.step] = cur;
         }
-        if (Object.keys(proj).length === 0) delete perProject[project];
-        else perProject[project] = proj;
-        return { ...prev, perProject };
+        if (Object.keys(proj).length === 0) delete overrides[project];
+        else overrides[project] = proj;
+        return writeOverrides(prev, overrides);
       });
       toast({
         title: "Pre-warnings imported",
         description: `Applied ${parsed.length} ${
           parsed.length === 1 ? "activity" : "activities"
-        } to ${isAll ? "All Projects" : project}.`,
+        } to ${isAll ? allLabel : project}.`,
       });
     } catch (err) {
       toast({
@@ -659,7 +783,7 @@ function WarningParametersContent() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={reset}
+                  onClick={resetCategoryGlobal}
                   className="h-8"
                 >
                   Reset to defaults
@@ -672,40 +796,63 @@ function WarningParametersContent() {
                   disabled={!projectOverrides}
                   className="h-8"
                 >
-                  Reset this project
+                  Reset this {scopeNoun.toLowerCase()}
                 </Button>
               )}
             </div>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs uppercase tracking-wider text-muted-foreground">
-              Project
-            </label>
-            <Select value={project} onValueChange={setProject}>
-              <SelectTrigger className="h-9 w-full sm:w-80">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All Projects (global default)</SelectItem>
-                {projects.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs uppercase tracking-wider text-muted-foreground">
+                Category
+              </label>
+              <Select value={category} onValueChange={onCategoryChange}>
+                <SelectTrigger className="h-9 w-full sm:w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORIES.map((c) => (
+                    <SelectItem key={c.key} value={c.key}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs uppercase tracking-wider text-muted-foreground">
+                {scopeNoun}
+              </label>
+              <Select value={project} onValueChange={setProject}>
+                <SelectTrigger className="h-9 w-full sm:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL}>
+                    {allLabel} (global default)
                   </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              {isAll
-                ? "Editing the global defaults that apply to every project without its own override."
-                : "Editing overrides for this project. Cells you leave untouched inherit the global default (shown greyed)."}
-              {!isAll && selectedImportId === null && (
-                <span className="block">
-                  Select an import on the Data view to list its projects.
-                </span>
-              )}
-            </p>
+                  {scopeKeys.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+          <p className="text-xs text-muted-foreground mt-2">
+            {isAll
+              ? `Editing the global ${category === "TLT" ? "TLT" : sub} defaults that apply to every ${scopeNoun.toLowerCase()} without its own override.`
+              : `Editing overrides for this ${scopeNoun.toLowerCase()}. Cells you leave untouched inherit the global default (shown greyed).`}
+            {!isAll && selectedImportId === null && (
+              <span className="block">
+                Select an import on the Data view to list its{" "}
+                {scopeNoun.toLowerCase()}s.
+              </span>
+            )}
+          </p>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -743,7 +890,7 @@ function WarningParametersContent() {
                       <td className="py-1.5 pr-3">
                         <span className="font-mono font-semibold">{step}</span>
                         <span className="text-muted-foreground ml-2 text-xs">
-                          {PROCESS_STEP_LABELS[step]}
+                          {stepLabel(step)}
                         </span>
                         {!isAll && rowHasOverride && (
                           <span className="ml-2 text-[10px] uppercase tracking-wider text-primary font-semibold">
@@ -916,7 +1063,7 @@ function WarningParametersContent() {
                     <td className="py-1.5 pr-3">
                       <span className="font-mono font-semibold">{row.step}</span>
                       <span className="text-muted-foreground ml-2 text-xs">
-                        {PROCESS_STEP_LABELS[row.step]}
+                        {stepLabel(row.step)}
                       </span>
                       {!isAll && row.rowHasOverride && (
                         <span className="ml-2 text-[10px] uppercase tracking-wider text-primary font-semibold">
@@ -1042,7 +1189,7 @@ function GraceCellEditor({
   onUseAuto,
   onInherit,
 }: {
-  step: ProcessStep;
+  step: string;
   band: BandKey;
   effectiveDays: number;
   inheritedDays: number;
