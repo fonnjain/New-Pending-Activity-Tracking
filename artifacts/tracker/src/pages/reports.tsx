@@ -39,9 +39,27 @@ import {
 import { formatWeight } from "@/lib/utils";
 import { ageingCell } from "@/lib/ageing";
 import { getAgeingColor } from "./overview";
-import { FileSpreadsheet } from "lucide-react";
+import { AiTurnaroundReport } from "@/components/ai-turnaround-report";
+import { FileSpreadsheet, Check } from "lucide-react";
 
 type SortKey = "activity" | "ageing" | "contractor";
+
+type ReportType = "jobwise" | "ai";
+
+const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
+  {
+    id: "jobwise",
+    name: "Job Wise Report",
+    description:
+      "Pending work filtered by the header filters, with turnaround and velocity columns, exportable to Excel.",
+  },
+  {
+    id: "ai",
+    name: "AI Report",
+    description:
+      "AI turnaround analysis with red flags, bottlenecks and an action plan, exportable to PDF/JSON.",
+  },
+];
 
 const SORT_OPTIONS: { id: SortKey; name: string }[] = [
   { id: "activity", name: "Activity" },
@@ -480,9 +498,44 @@ function ReportBuilder() {
 }
 
 export default function ReportsView() {
+  const [reportType, setReportType] = useState<ReportType>("jobwise");
   return (
-    <div className="space-y-8">
-      <ReportBuilder />
+    <div className="space-y-6">
+      <Card className="border-border">
+        <CardContent className="py-4">
+          <div className="flex flex-col gap-3">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Report type
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {REPORT_TYPES.map((t) => {
+                const active = t.id === reportType;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setReportType(t.id)}
+                    className={`text-left rounded-lg border p-3 transition-colors ${
+                      active
+                        ? "border-primary bg-primary/5 ring-1 ring-primary"
+                        : "border-border hover:bg-muted/50"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-sm">{t.name}</span>
+                      {active && <Check className="w-4 h-4 text-primary shrink-0" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {t.description}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      {reportType === "jobwise" ? <ReportBuilder /> : <AiTurnaroundReport />}
     </div>
   );
 }
