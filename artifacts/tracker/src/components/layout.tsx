@@ -94,7 +94,7 @@ function FilterBar() {
   // filters (Contractor/Activity) and the Mark picker only offer mode-relevant
   // values.
   const modeRecords = useMemo(
-    () => records.filter(r => r.category === filters.category),
+    () => records.filter(r => (r.category || "TLT") === filters.category),
     [records, filters.category]
   );
 

@@ -205,7 +205,7 @@ function WarningParametersContent() {
     const set = new Set<string>();
     for (const r of records ?? []) {
       if (sub === null) {
-        if (r.category === "TLT" && r.job) set.add(r.job);
+        if ((r.category || "TLT") === "TLT" && r.job) set.add(r.job);
       } else if (r.category === "NTLT" && r.ntltSubtype === sub && r.groupKey) {
         set.add(r.groupKey);
       }

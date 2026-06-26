@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { backfillClassification } from "./lib/backfill";
 
 const rawPort = process.env["PORT"];
 
@@ -22,4 +23,11 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // Best-effort, one-time backfill of classification on legacy pool rows so the
+  // TLT/NTLT views light up on historical data. Fire-and-forget; never blocks or
+  // fails startup (a no-op once there are no unclassified known-nature rows).
+  backfillClassification().catch((err) => {
+    logger.error({ err }, "Classification backfill failed");
+  });
 });

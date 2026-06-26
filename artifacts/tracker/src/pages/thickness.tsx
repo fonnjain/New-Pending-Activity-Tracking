@@ -445,7 +445,7 @@ function UnsetRow({
 }) {
   const [mm, setMm] = useState<number | null>(pinned);
   const typeLabel =
-    row.ntltSubtype ?? (row.category === "TLT" ? "TLT" : "Unknown");
+    row.ntltSubtype ?? ((row.category || "TLT") === "TLT" ? "TLT" : "Unknown");
   return (
     <TableRow>
       <TableCell className="font-mono whitespace-nowrap">{row.markId}</TableCell>

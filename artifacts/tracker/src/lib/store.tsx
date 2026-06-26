@@ -189,7 +189,7 @@ export function useFilteredRecords(records: Record[] | undefined) {
         const d = parseAssignDate(r.assignDate);
         if (!d || d < win.start || d >= win.end) return false;
       }
-      if (filters.category && r.category !== filters.category) return false;
+      if ((r.category || "TLT") !== filters.category) return false;
       if (filters.ntltSubtype && r.ntltSubtype !== filters.ntltSubtype) return false;
       if (filters.job && r.job !== filters.job) return false;
       if (filters.section && r.groupKey !== filters.section) return false;

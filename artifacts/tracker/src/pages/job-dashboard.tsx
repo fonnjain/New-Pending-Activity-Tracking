@@ -71,7 +71,7 @@ function JobDashboardContent() {
   const records = useMemo(
     () =>
       rawRecords.filter(
-        (r) => r.category === filters.category && isWithinDateRange(r.assignDate, filters.dateRange),
+        (r) => (r.category || "TLT") === filters.category && isWithinDateRange(r.assignDate, filters.dateRange),
       ),
     [rawRecords, filters.category, filters.dateRange],
   );
