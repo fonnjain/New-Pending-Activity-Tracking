@@ -1,3 +1,4 @@
 - [Balance & Activity Tracker](tracker-app.md) — xlsx-driven append-only import/records app; live ageing, jsonb summary, cross-upload hash dedup, parse rules.
 - [Tracker ageing source](tracker-ageing.md) — ageing date is per-activity: C (cutting) ages from Assign Date, all others from col S Last Production Entry Date; future→0, blank→null; no assign-date fallback for non-C.
 - [Numeric input pattern](numeric-input-pattern.md) — controlled type=number bound to a parsed number reverses digits (90→09); use the NumberInput raw-draft component for any numeric field.
+- [TLT/NTLT category sequences](tracker-categories.md) — marks follow per-category process sequences (TLT 12-step default, NTLT RSJ/Earthing/General shorter); resolve sequenceFor(record) before any "before Y" test; classification fields not in hash.

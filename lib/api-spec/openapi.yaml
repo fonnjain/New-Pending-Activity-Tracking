@@ -1139,6 +1139,21 @@ components:
             type: string
         currentStepIndex:
           type: ["integer", "null"]
+        category:
+          type: ["string", "null"]
+          description: Mark category — "TLT" | "NTLT" | null. Drives the per-category process sequence.
+        ntltSubtype:
+          type: ["string", "null"]
+          description: NTLT subtype — "RSJ" | "EARTHING" | "GENERAL" | null (null for TLT/unknown).
+        groupType:
+          type: ["string", "null"]
+          description: Grouping dimension — "project" (TLT) | "section" (NTLT) | null.
+        groupKey:
+          type: ["string", "null"]
+          description: Resolved grouping key (TLT = job; NTLT = cleaned section / "RSJ <dims>").
+        active:
+          type: boolean
+          description: Whether the mark participates in workflow metrics (false for FOUNDATION BOLT).
       required:
         - id
         - importId
@@ -1173,6 +1188,11 @@ components:
         - ageingDays
         - routeSteps
         - currentStepIndex
+        - category
+        - ntltSubtype
+        - groupType
+        - groupKey
+        - active
     SanitizeRequest:
       type: object
       properties:

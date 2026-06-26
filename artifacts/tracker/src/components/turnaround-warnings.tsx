@@ -12,6 +12,7 @@ import {
   migrateTurnaroundSettings,
   normalizeActivity,
   sortActivities,
+  sequenceFor,
   LIFECYCLE_ORDER,
   type LifecycleStatus,
   type LifecycleResult,
@@ -66,7 +67,7 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
 
     for (const r of records) {
       const res = lifecycleStatus(
-        { activity: r.activity, ageingDays: r.ageingDays, project: r.job },
+        { activity: r.activity, ageingDays: r.ageingDays, project: r.job, sequence: sequenceFor(r) },
         settings,
       );
       counts[res.status]++;

@@ -292,6 +292,28 @@ export interface Record {
   routeSteps: string[];
   /** @nullable */
   currentStepIndex: number | null;
+  /**
+     * Mark category — "TLT" | "NTLT" | null. Drives the per-category process sequence.
+     * @nullable
+     */
+  category: string | null;
+  /**
+     * NTLT subtype — "RSJ" | "EARTHING" | "GENERAL" | null (null for TLT/unknown).
+     * @nullable
+     */
+  ntltSubtype: string | null;
+  /**
+     * Grouping dimension — "project" (TLT) | "section" (NTLT) | null.
+     * @nullable
+     */
+  groupType: string | null;
+  /**
+     * Resolved grouping key (TLT = job; NTLT = cleaned section / "RSJ <dims>").
+     * @nullable
+     */
+  groupKey: string | null;
+  /** Whether the mark participates in workflow metrics (false for FOUNDATION BOLT). */
+  active: boolean;
 }
 
 export interface SanitizeRequest {

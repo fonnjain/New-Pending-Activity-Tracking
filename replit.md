@@ -9,7 +9,7 @@ A mobile-first web app for steel-fabrication workshops. Upload an Excel (.xlsx o
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks + Zod schemas from the OpenAPI spec (run after any `openapi.yaml` edit)
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev). **Also re-run against prod after deploying schema changes** — `settings` (per_project, stalled_days), `upload_staging.committed_import_id`, and the `project_milestones` table were added over time.
+- `pnpm --filter @workspace/db run push` — push DB schema changes (dev). **Also re-run against prod after deploying schema changes** — `settings` (per_project, stalled_days), `upload_staging.committed_import_id`, the `project_milestones` table, and `record_pool` classification columns (`category`, `ntlt_subtype`, `group_type`, `group_key`, `active`) were added over time.
 - Required env: `DATABASE_URL` (Postgres). Optional: `ANTHROPIC_API_KEY` (enables the advisory AI layer).
 
 ## Stack
@@ -35,6 +35,16 @@ A mobile-first web app for steel-fabrication workshops. Upload an Excel (.xlsx o
 ## Canonical activity order (single source of truth)
 
 `PROCESS_SEQUENCE = ["C","RFI","NH","B","HAB","HG","W","Q","TS","G","GB","Y"]` in `@workspace/domain`, plus `activityRank`/`isKnownActivity`/`compareActivity`/`sortActivities` (case-insensitive; unknown codes sort after known ones, alphabetically, never dropped). Imported by BOTH frontend and api-server. Every dropdown, card, table, report/export, and AI signal list orders by this. **Never re-define a local order array or sort activities alphabetically** — this is display/ordering only and must never change parsing, Activity values, quantities, ageing, or dedup.
+
+### Per-category sequences (TLT vs NTLT)
+
+`PROCESS_SEQUENCE` is the **TLT** route and the default everywhere. NTLT marks follow shorter sequences, all sharing `Y` as the terminal stage:
+
+- `SEQUENCES` map in `@workspace/domain`: `TLT` (= `PROCESS_SEQUENCE`, 12 steps, verbatim — TLT behaviour is byte-for-byte unchanged), `NTLT_RSJ` `["NTF","NTFSW","NTFW","TS","G","GB","Y"]` (7), `NTLT_EARTHING`/`NTLT_GENERAL` `["TS","G","GB","Y"]` (4).
+- Helpers: `sequenceKeyFor(category, ntltSubtype)`, `sequenceForCategory(...)`, `sequenceFor(record)` (takes `{category, ntltSubtype}`), `rankIn(sequence, activity)`, `isKnownIn(sequence, activity)`, `finalStage(sequence)`, `stageIndex(...)`.
+- Sequence-aware engine fns take an **optional** `sequence` (default `PROCESS_SEQUENCE`/TLT, so every existing TLT call site is unchanged): `cumulativeTargets`/`cumulativeTarget`, `alertStatus`, `lifecycleStatus`, `velocityForMark`. `LifecycleInput`/etc. carry an optional `sequence`; callers pass `sequence: sequenceFor(record)`.
+- **Wiring:** server velocity endpoint + `milestones.ts` block-test select `category`/`ntltSubtype` and resolve the per-row sequence (milestone Ready-block uses `blocksReady()` so NTLT-only steps like `NTF` correctly block — they are unknown to TLT and would otherwise rank after `Y`). Frontend per-row `lifecycleStatus` callers (overview/turnaround/turnaround-warnings/reports) and `StatusDot` pass `sequenceFor(record)`. `velocity.ts`/`movement.ts` join by `markId|jobCardNo` on server-computed values (no domain sequence call).
+- NTLT steps missing from `settings` degrade to `DEFAULT_ACTIVITY_CONFIG` (idealDays 3) until Phase 4 adds per-category config.
 
 ## Architecture decisions
 
@@ -89,6 +99,7 @@ The Changes panel shows chips + a tabbed table (Moved activity / Qty-Wt changed 
 - Reads `Sheet1` (falls back to first sheet); reads all 19 columns (col S "Last Production Entry Date" is the 19th).
 - **Header row auto-detected:** scans the first ~10 rows for one containing `Project Code`; data starts on the next row. Falls back to the 3rd row (historical layout) with a problem note.
 - **Conditional `Project Code` forward-fill.** A blank Project Code inherits the last seen project ONLY for rows whose `Order Nature` is `Structure` (case-insensitive). Project-less item types (`RSJ POLE`/`EARTHING`/`GENERAL`) and rows with a blank/unknown Order Nature get `job = "(Unassigned)"` — they must NOT borrow a project. `(Unassigned)` is excluded from `projectsFound`. For these rows the mark-derivation project is empty, so `markId`/`markNumber` stays the bare m_no. Normalizes `"794."`→`794`, `"920.0"`→`920`.
+- **Category classification (additive, NOT in the hash).** `classifyMark()` in parse.ts tags every row with `category` (`TLT`/`NTLT`/null), `ntltSubtype` (`RSJ`/`EARTHING`/`GENERAL`/null), `groupType`, `groupKey`, and `active` (boolean): `Structure`→TLT (groupKey = job); `RSJ POLE`→NTLT/RSJ (groupKey = cleaned `RSJ <dims>` section prefix via `cleanRsjGroupKey`); `EARTHING`/`GENERAL`→NTLT/EARTHING|GENERAL (groupKey = `normalizeSectionKey` of Section); `FOUNDATION BOLT`→`active=false` (excluded from work views); unknown Order Nature→nulls. These five fields drive the per-category sequence; `classificationConflicts` is counted into the parse summary. **They are excluded from `hashRow` (still the 19 source columns only)** so classification never changes identity/dedup.
 - Keeps only rows with a non-empty `Mark No.`.
 - **Mark No. → derived fields (VTPL Rules 0, A–D, in order; see `deriveMark`).** `project` is always col A; `mNo` is always kept whole (never split off variant letters/trailing tokens). Separator in `markNumber` is `" \ "` (space-backslash-space):
   - **Rule 0 — normalize a stray leading dash (runs first, derivation-only).** Some rows carry a malformed single leading `-` on the alias in BOTH col G (`"-069-2NBE1"`→`"069-2NBE1"`) and col H (`"946 -069-2NBE1-06"`→`"946 069-2NBE1-06"`). Strip ONLY that one leading dash (col H only when it follows the `"<A> "` prefix); inner dashes are untouched, so the row then parses by Rules A–D normally (e.g. → Rule C: `946 \ 069-2NBE1 \ 06`). Read-time only — does NOT alter the stored raw col G/H values or the row hash/identity (affects ~54 project-946 rows).

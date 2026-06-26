@@ -9,8 +9,9 @@ import {
   SETTINGS_SINGLETON_ID,
 } from "@workspace/db";
 import {
-  activityRank,
-  isKnownActivity,
+  isKnownIn,
+  rankIn,
+  sequenceForCategory,
   cumulativeTarget,
   migrateTurnaroundSettings,
   type TurnaroundSettings,
@@ -21,8 +22,19 @@ import {
 const UNASSIGNED = "(Unassigned)";
 
 // A mark "blocks" the Ready milestone while it is still in an earlier activity
-// (any known step before Y). Unknown activities rank after Y and never block.
-const Y_RANK = activityRank("Y");
+// (any known step before the FINAL stage of its OWN sequence). Y is the terminal
+// stage in every sequence (TLT + all NTLT), but NTLT-specific steps like NTF are
+// unknown to the TLT route — so the block test must use the mark's own sequence
+// or those marks would be wrongly treated as "past Y" and never block.
+function blocksReady(
+  activity: string | null,
+  category: string | null,
+  ntltSubtype: string | null,
+): boolean {
+  const sequence = sequenceForCategory(category, ntltSubtype);
+  const finalRank = sequence.length - 1;
+  return isKnownIn(sequence, activity) && rankIn(sequence, activity) < finalRank;
+}
 
 export interface ProjectMilestone {
   project: string;
@@ -132,6 +144,8 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
         markId: recordPoolTable.markId,
         jobCardNo: recordPoolTable.jobCardNo,
         activity: recordPoolTable.activity,
+        category: recordPoolTable.category,
+        ntltSubtype: recordPoolTable.ntltSubtype,
       })
       .from(importRowsTable)
       .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
@@ -146,7 +160,7 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
         present.set(r.job, p);
       }
       p.ids.add(identityKey(r.markId, r.jobCardNo));
-      if (isKnownActivity(r.activity) && activityRank(r.activity) < Y_RANK) {
+      if (blocksReady(r.activity, r.category, r.ntltSubtype)) {
         p.anyEarlier = true;
       }
     }

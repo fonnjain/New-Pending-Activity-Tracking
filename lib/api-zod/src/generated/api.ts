@@ -508,7 +508,12 @@ export const GetImportRecordsResponseItem = zod.object({
   "refJobCardNo": zod.string().nullable(),
   "ageingDays": zod.number().nullable().describe('today - lastProductionDate (whole days; future clamped to 0). Null when no production date.'),
   "routeSteps": zod.array(zod.string()),
-  "currentStepIndex": zod.number().nullable()
+  "currentStepIndex": zod.number().nullable(),
+  "category": zod.string().nullable().describe('Mark category — \"TLT\" | \"NTLT\" | null. Drives the per-category process sequence.'),
+  "ntltSubtype": zod.string().nullable().describe('NTLT subtype — \"RSJ\" | \"EARTHING\" | \"GENERAL\" | null (null for TLT\/unknown).'),
+  "groupType": zod.string().nullable().describe('Grouping dimension — \"project\" (TLT) | \"section\" (NTLT) | null.'),
+  "groupKey": zod.string().nullable().describe('Resolved grouping key (TLT = job; NTLT = cleaned section \/ \"RSJ <dims>\").'),
+  "active": zod.boolean().describe('Whether the mark participates in workflow metrics (false for FOUNDATION BOLT).')
 })
 export const GetImportRecordsResponse = zod.array(GetImportRecordsResponseItem)
 

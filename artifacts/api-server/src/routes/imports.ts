@@ -29,8 +29,11 @@ import {
   isKnownActivity,
   migrateTurnaroundSettings,
   velocityForMark,
+  rankIn,
+  sequenceForCategory,
   type VelocitySnapshot,
   type TurnaroundSettings,
+  type ActivitySequence,
 } from "@workspace/domain";
 import { recomputeMilestones } from "../lib/milestones";
 import {
@@ -246,6 +249,11 @@ function serializeRecord(r: RecordPoolRow, importId: number, id: number) {
     ageingDays: computeAgeing(r.activity, r.assignDate, r.lastProductionDate),
     routeSteps,
     currentStepIndex,
+    category: r.category,
+    ntltSubtype: r.ntltSubtype,
+    groupType: r.groupType,
+    groupKey: r.groupKey,
+    active: r.active,
   };
 }
 
@@ -1099,6 +1107,8 @@ interface VelocityState {
   assignDate: string | null;
   lastProductionDate: string | null;
   routeRemaining: number | null;
+  // The mark's process sequence (per category). stageIndex is computed against it.
+  sequence: ActivitySequence;
 }
 
 async function loadVelocityStates(
@@ -1114,6 +1124,8 @@ async function loadVelocityStates(
       operation: recordPoolTable.operation,
       assignDate: recordPoolTable.assignDate,
       lastProductionDate: recordPoolTable.lastProductionDate,
+      category: recordPoolTable.category,
+      ntltSubtype: recordPoolTable.ntltSubtype,
     })
     .from(importRowsTable)
     .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
@@ -1123,7 +1135,10 @@ async function loadVelocityStates(
   for (const r of rows) {
     const key = movementIdentityKey(r.markId, r.jobCardNo);
     const activity = (r.activity ?? "").trim();
-    const rank = activityRank(activity);
+    // stageIndex must be measured against the mark's OWN sequence (per category)
+    // so NTLT marks progress along their route, not the 12-step TLT route.
+    const sequence = sequenceForCategory(r.category, r.ntltSubtype);
+    const rank = rankIn(sequence, activity);
     const existing = out.get(key);
     // Keep the furthest-progressed row as the representative for the identity.
     if (existing && rank <= existing.stageIndex) continue;
@@ -1145,6 +1160,7 @@ async function loadVelocityStates(
       assignDate: r.assignDate,
       lastProductionDate: r.lastProductionDate,
       routeRemaining,
+      sequence,
     });
   }
   return out;
@@ -1270,6 +1286,7 @@ router.get("/imports/:id/velocity", async (req, res): Promise<void> => {
         daysSinceLastMovement: daysSinceMovement.get(key) ?? null,
         routeRemaining: st.routeRemaining,
         project: st.job,
+        sequence: st.sequence,
       },
       settings,
     );

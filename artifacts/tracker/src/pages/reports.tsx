@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { compareActivity, lifecycleStatus, migrateTurnaroundSettings } from "@workspace/domain";
+import { compareActivity, lifecycleStatus, migrateTurnaroundSettings, sequenceFor } from "@workspace/domain";
 import { useSettings } from "@/lib/settings";
 import { LIFECYCLE_LABELS, lifecycleTextColor } from "@/lib/turnaround";
 import { useStalledInfo } from "@/lib/movement";
@@ -154,7 +154,7 @@ function ReportBuilder() {
     () =>
       rows.map((r) => {
         const res = lifecycleStatus(
-          { activity: r.activity, ageingDays: r.ageingDays, project: r.job },
+          { activity: r.activity, ageingDays: r.ageingDays, project: r.job, sequence: sequenceFor(r) },
           settings,
         );
         const isStalled = stalled.isStalled(r.markId, r.jobCardNo);

@@ -24,6 +24,9 @@ export interface ParseSummary {
   notStarted: number;
   noProductionDate: number;
   futureProductionDate: number;
+  // Rows where Tower Sub Type "NTLT" disagreed with the Order-Nature-derived
+  // category (Order Nature is authoritative; the conflict is only counted/flagged).
+  classificationConflicts?: number;
 }
 
 export interface ChangeSummary {

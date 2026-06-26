@@ -24,6 +24,43 @@ export const PROCESS_SEQUENCE = [
 
 export type ProcessStep = (typeof PROCESS_SEQUENCE)[number];
 
+// ---------------------------------------------------------------------------
+// Per-category process sequences (TLT vs NTLT subtypes)
+// ---------------------------------------------------------------------------
+// A mark's category determines WHICH ordered sequence of activities it travels
+// through. TLT (towers/structures) keeps the canonical 12-step PROCESS_SEQUENCE
+// above — it is `SEQUENCES.TLT` verbatim, so all existing TLT behaviour is
+// byte-for-byte unchanged. NTLT items (RSJ poles, earthing, general) skip the
+// tower-specific early stages and follow shorter routes. Every sequence still
+// ends at "Y" (Yard) and shares the common tail TS -> G -> GB -> Y.
+//
+// This is display/ordering + target-accumulation only: it NEVER changes parsing,
+// Activity values read from the file, quantities, ageing, or dedup.
+export const SEQUENCES = {
+  TLT: PROCESS_SEQUENCE,
+  // RSJ poles: three NTLT-specific fit-up/weld steps, then the common tail.
+  NTLT_RSJ: ["NTF", "NTFSW", "NTFW", "TS", "G", "GB", "Y"],
+  // Earthing + General: just the common tail.
+  NTLT_EARTHING: ["TS", "G", "GB", "Y"],
+  NTLT_GENERAL: ["TS", "G", "GB", "Y"],
+} as const;
+
+export type SequenceKey = keyof typeof SEQUENCES;
+// A process sequence is an ordered, read-only list of activity codes.
+export type ActivitySequence = readonly string[];
+
+// A mark's high-level category and (for NTLT) its subtype. Stored on each record
+// by the parser; drives sequence selection. Kept loose (string) at the engine
+// boundary so callers can pass raw DB values without coupling to enums.
+export type MarkCategory = "TLT" | "NTLT";
+export type NtltSubtype = "RSJ" | "EARTHING" | "GENERAL";
+
+// Minimal shape the sequence helpers need from a record.
+export interface CategorizedRecord {
+  category?: string | null;
+  ntltSubtype?: string | null;
+}
+
 // Human-readable labels for tooltips / reference only. NOT used for ordering and
 // NOT a substitute for the Activity value read from the file.
 export const PROCESS_STEP_LABELS: Record<ProcessStep, string> = {
@@ -64,21 +101,92 @@ export function isKnownActivity(code: string | null | undefined): boolean {
   return RANK_BY_CODE.has(normalizeActivity(code));
 }
 
+// Index of a code within an ARBITRARY sequence (case-insensitive). Unknown codes
+// return a rank greater than every step in that sequence, so they sort to the
+// end. This is the sequence-aware generalisation of activityRank.
+export function rankIn(
+  sequence: ActivitySequence,
+  code: string | null | undefined,
+): number {
+  const idx = sequence.indexOf(normalizeActivity(code));
+  return idx === -1 ? sequence.length : idx;
+}
+
+// Whether a code belongs to a given sequence (case-insensitive).
+export function isKnownIn(
+  sequence: ActivitySequence,
+  code: string | null | undefined,
+): boolean {
+  return sequence.indexOf(normalizeActivity(code)) !== -1;
+}
+
+// Map a category (+ NTLT subtype) to its SequenceKey. Anything that is not
+// explicitly NTLT is treated as TLT (the safe default that preserves existing
+// behaviour). NTLT with an unrecognised/blank subtype falls back to the General
+// 4-step route rather than the 12-step TLT route.
+export function sequenceKeyFor(
+  category: string | null | undefined,
+  ntltSubtype?: string | null | undefined,
+): SequenceKey {
+  if (normalizeActivity(category) !== "NTLT") return "TLT";
+  switch (normalizeActivity(ntltSubtype)) {
+    case "RSJ":
+      return "NTLT_RSJ";
+    case "EARTHING":
+      return "NTLT_EARTHING";
+    case "GENERAL":
+      return "NTLT_GENERAL";
+    default:
+      return "NTLT_GENERAL";
+  }
+}
+
+// The process sequence for a category (+ NTLT subtype).
+export function sequenceForCategory(
+  category: string | null | undefined,
+  ntltSubtype?: string | null | undefined,
+): ActivitySequence {
+  return SEQUENCES[sequenceKeyFor(category, ntltSubtype)];
+}
+
+// The process sequence for a record (reads its category/ntltSubtype fields).
+export function sequenceFor(record: CategorizedRecord): ActivitySequence {
+  return sequenceForCategory(record.category, record.ntltSubtype);
+}
+
+// The final stage of a sequence (always "Y"/Yard for the canonical sequences).
+export function finalStage(sequence: ActivitySequence): string {
+  return sequence[sequence.length - 1] ?? "Y";
+}
+
+// Stage index of a record's current activity WITHIN ITS OWN sequence.
+export function stageIndex(
+  record: CategorizedRecord & { activity?: string | null },
+): number {
+  return rankIn(sequenceFor(record), record.activity);
+}
+
 // Comparator: known codes by sequence rank; unknown codes after, ordered
-// alphabetically among themselves. Never drops anything.
+// alphabetically among themselves. Never drops anything. Defaults to the TLT
+// sequence so existing callers are unchanged; pass a sequence to order NTLT rows.
 export function compareActivity(
   a: string | null | undefined,
   b: string | null | undefined,
+  sequence: ActivitySequence = PROCESS_SEQUENCE,
 ): number {
-  const rankDelta = activityRank(a) - activityRank(b);
+  const rankDelta = rankIn(sequence, a) - rankIn(sequence, b);
   if (rankDelta !== 0) return rankDelta;
   // Equal rank => both unknown (or the same code); break ties alphabetically.
   return normalizeActivity(a).localeCompare(normalizeActivity(b));
 }
 
 // Sort a list of activity codes by the canonical order. Returns a new array.
-export function sortActivities<T extends string | null | undefined>(codes: T[]): T[] {
-  return [...codes].sort(compareActivity);
+// Defaults to the TLT sequence; pass a sequence to order an NTLT category's codes.
+export function sortActivities<T extends string | null | undefined>(
+  codes: T[],
+  sequence: ActivitySequence = PROCESS_SEQUENCE,
+): T[] {
+  return [...codes].sort((a, b) => compareActivity(a, b, sequence));
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +529,7 @@ function migratePerProject(
 export function resolveActivityGrace(
   settings: TurnaroundSettings,
   project: string | null | undefined,
-  step: ProcessStep,
+  step: string,
 ): ActivityGrace {
   const base = settings.activities[step] ?? DEFAULT_ACTIVITY_CONFIG;
   const ov = project ? settings.perProject?.[project]?.[step] : undefined;
@@ -495,7 +603,7 @@ export function migrateTurnaroundSettings(raw: unknown): TurnaroundSettings {
 export function resolvePreWarn(
   settings: TurnaroundSettings,
   project: string | null | undefined,
-  step: ProcessStep,
+  step: string,
 ): PreWarnConfig {
   const base = settings.activities[step]?.preWarn ?? DEFAULT_PRE_WARN;
   const ov = project ? settings.perProject?.[project]?.[step]?.preWarn : undefined;
@@ -519,10 +627,11 @@ export function resolveStalledDays(settings: TurnaroundSettings): number {
 export function cumulativeTargets(
   settings: TurnaroundSettings,
   project?: string | null,
-): Record<ProcessStep, number> {
-  const out = {} as Record<ProcessStep, number>;
+  sequence: ActivitySequence = PROCESS_SEQUENCE,
+): Record<string, number> {
+  const out: Record<string, number> = {};
   let acc = 0;
-  for (const step of PROCESS_SEQUENCE) {
+  for (const step of sequence) {
     acc += safeDays(resolveActivityGrace(settings, project, step).idealDays);
     out[step] = acc;
   }
@@ -536,10 +645,11 @@ export function cumulativeTarget(
   activity: string | null | undefined,
   settings: TurnaroundSettings,
   project?: string | null,
+  sequence: ActivitySequence = PROCESS_SEQUENCE,
 ): number | null {
-  if (!isKnownActivity(activity)) return null;
-  const norm = normalizeActivity(activity) as ProcessStep;
-  return cumulativeTargets(settings, project)[norm];
+  if (!isKnownIn(sequence, activity)) return null;
+  const norm = normalizeActivity(activity);
+  return cumulativeTargets(settings, project, sequence)[norm] ?? null;
 }
 
 // Classify a mark's ageing against its cumulative target using THAT activity's
@@ -556,16 +666,20 @@ export function alertStatus(
     activity: string | null | undefined;
     ageingDays: number | null;
     project?: string | null;
+    // The mark's process sequence (per category). Defaults to TLT so existing
+    // callers stay unchanged; pass an NTLT sequence for RSJ/Earthing/General rows.
+    sequence?: ActivitySequence;
   },
   settings: TurnaroundSettings,
 ): AlertResult {
-  const target = cumulativeTarget(input.activity, settings, input.project);
+  const sequence = input.sequence ?? PROCESS_SEQUENCE;
+  const target = cumulativeTarget(input.activity, settings, input.project, sequence);
   if (target === null || input.ageingDays === null) {
     return { status: "na", target, overrun: null };
   }
 
   const overrun = input.ageingDays - target;
-  const norm = normalizeActivity(input.activity) as ProcessStep;
+  const norm = normalizeActivity(input.activity);
   const grace = resolveActivityGrace(settings, input.project, norm);
 
   let status: AlertStatus;
@@ -643,6 +757,9 @@ export function lifecycleStatus(
     activity: string | null | undefined;
     ageingDays: number | null;
     project?: string | null;
+    // The mark's process sequence (per category). Defaults to TLT; pass an NTLT
+    // sequence for RSJ/Earthing/General rows.
+    sequence?: ActivitySequence;
   },
   settings: TurnaroundSettings,
 ): LifecycleResult {
@@ -673,7 +790,7 @@ export function lifecycleStatus(
   const pw = resolvePreWarn(
     settings,
     input.project,
-    normalizeActivity(input.activity) as ProcessStep,
+    normalizeActivity(input.activity),
   );
 
   let status: LifecycleStatus;
@@ -732,10 +849,15 @@ export interface VelocityInput {
   ageingDays: number | null;
   // Days since the mark last moved (from the history walk); null when unknown.
   daysSinceLastMovement: number | null;
-  // Optional route-aware steps remaining (overrides the PROCESS_SEQUENCE default).
+  // Optional route-aware steps remaining (overrides the sequence default).
   routeRemaining?: number | null;
   // Project key for per-project ideal-days / stalled resolution.
   project?: string | null;
+  // The mark's process sequence (per category). Defaults to TLT; pass an NTLT
+  // sequence for RSJ/Earthing/General rows so stages-remaining + expected pace
+  // are measured against the correct route. NOTE: snapshot stageIndex values
+  // MUST be computed against this same sequence by the caller.
+  sequence?: ActivitySequence;
 }
 
 export interface VelocityResult {
@@ -768,24 +890,26 @@ export const DEFAULT_SLOW_FACTOR = 1.25;
 // Recent vs earlier pace within this relative band reads as "steady".
 const TREND_STEADY_BAND = 0.1;
 const MS_PER_DAY = 86_400_000;
-const Y_RANK = PROCESS_SEQUENCE.length - 1;
 
 function daysBetween(aMs: number, bMs: number): number {
   return (bMs - aMs) / MS_PER_DAY;
 }
 
-// Mean resolved ideal-days over the inclusive step range [fromRank, toRank].
+// Mean resolved ideal-days over the inclusive step range [fromRank, toRank] of
+// the given sequence.
 function expectedPaceForRange(
   settings: TurnaroundSettings,
   project: string | null | undefined,
   fromRank: number,
   toRank: number,
+  sequence: ActivitySequence,
 ): number | null {
+  const finalRank = sequence.length - 1;
   const lo = Math.max(0, Math.min(fromRank, toRank));
-  const hi = Math.min(Y_RANK, Math.max(fromRank, toRank));
+  const hi = Math.min(finalRank, Math.max(fromRank, toRank));
   const steps: number[] = [];
   for (let i = lo; i <= hi; i++) {
-    const step = PROCESS_SEQUENCE[i];
+    const step = sequence[i];
     steps.push(safeDays(resolveActivityGrace(settings, project, step).idealDays));
   }
   if (steps.length === 0) return null;
@@ -819,12 +943,14 @@ export function velocityForMark(
     .filter((s) => Number.isFinite(s.importDate))
     .sort((a, b) => a.importDate - b.importDate);
 
-  const currentRank = activityRank(input.activity);
-  const knownActivity = isKnownActivity(input.activity);
+  const sequence = input.sequence ?? PROCESS_SEQUENCE;
+  const finalRank = sequence.length - 1;
+  const currentRank = rankIn(sequence, input.activity);
+  const knownActivity = isKnownIn(sequence, input.activity);
   const stagesRemaining = knownActivity
     ? input.routeRemaining != null && input.routeRemaining >= 0
       ? Math.round(input.routeRemaining)
-      : Math.max(0, Y_RANK - currentRank)
+      : Math.max(0, finalRank - currentRank)
     : null;
 
   const movedRecently =
@@ -866,6 +992,7 @@ export function velocityForMark(
     input.project,
     firstRank,
     currentRank,
+    sequence,
   );
 
   // ETA + gap (only when we have a real pace, a target stage, and ageing).
@@ -873,7 +1000,7 @@ export function velocityForMark(
   let etaGap: number | null = null;
   if (daysPerStage != null && stagesRemaining != null) {
     etaDays = daysPerStage * stagesRemaining;
-    const target = cumulativeTarget(input.activity, settings, input.project);
+    const target = cumulativeTarget(input.activity, settings, input.project, sequence);
     if (target != null && input.ageingDays != null) {
       const budgetDaysToTarget = target - input.ageingDays;
       etaGap = etaDays - budgetDaysToTarget;

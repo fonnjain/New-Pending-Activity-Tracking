@@ -28,6 +28,116 @@ function cellToString(value: Cell): string {
 // selectable group in the UI without borrowing a project from an adjacent row.
 export const UNASSIGNED_JOB = "(Unassigned)";
 
+// --- Phase 1: mark classification (TLT vs NTLT + subtype) ---------------------
+// Order Nature (col B) is authoritative. Tower Sub Type "NTLT" is a confirming
+// signal only — a disagreement is counted/flagged, never overrides Order Nature.
+// Classification is additive and read-time-derived; it is NEVER part of the row
+// hash/identity (hashRow lists the 19 source columns explicitly).
+export interface MarkClassification {
+  category: string | null; // "TLT" | "NTLT" | null
+  ntltSubtype: string | null; // "RSJ" | "EARTHING" | "GENERAL" | null
+  groupType: string | null; // "project" (TLT) | "section" (NTLT) | null
+  groupKey: string | null; // TLT = job; NTLT = cleaned section / "RSJ <dims>"
+  active: boolean; // false for FOUNDATION BOLT (captured but excluded)
+}
+
+// Trim, collapse internal whitespace, uppercase. Used for NTLT section group keys.
+function normalizeSectionKey(value: string | null): string {
+  return (value ?? "").replace(/\s+/g, " ").trim().toUpperCase();
+}
+
+// Clean an RSJ section into a stable "RSJ <dims>" group key. Drops trailing
+// descriptive tokens (e.g. " - [37.1]", "(30.44)", " MS", " MTR") and bracketed
+// remarks, then collapses whitespace and uppercases.
+function cleanRsjGroupKey(section: string | null): string {
+  let s = (section ?? "").trim();
+  if (!s) return "RSJ";
+  // Drop bracketed remarks: "[...]" and "(...)".
+  s = s.replace(/\[[^\]]*\]/g, " ").replace(/\([^)]*\)/g, " ");
+  // Drop trailing unit/material tokens.
+  s = s.replace(/\b(MS|MTR|MTRS|MTR\.|MM|KG|NOS?)\b/gi, " ");
+  // Drop dangling separators left behind (e.g. " - ").
+  s = s.replace(/[-–]+\s*$/g, " ");
+  s = s.replace(/\s+/g, " ").trim().toUpperCase();
+  if (!s) return "RSJ";
+  return s.startsWith("RSJ") ? s : `RSJ ${s}`;
+}
+
+// Classify a row from its Order Nature (authoritative), Tower Sub Type (confirm
+// only), Section, and resolved job. Returns the classification plus whether the
+// Tower Sub Type disagreed with the derived category.
+export function classifyMark(input: {
+  orderNature: string | null;
+  towerSubType: string | null;
+  section: string | null;
+  job: string;
+}): { classification: MarkClassification; conflict: boolean } {
+  const nature = (input.orderNature ?? "").trim().toUpperCase();
+  const subType = (input.towerSubType ?? "").trim().toUpperCase();
+
+  let c: MarkClassification;
+  if (nature === "STRUCTURE") {
+    c = {
+      category: "TLT",
+      ntltSubtype: null,
+      groupType: "project",
+      groupKey: input.job,
+      active: true,
+    };
+  } else if (nature === "RSJ POLE") {
+    c = {
+      category: "NTLT",
+      ntltSubtype: "RSJ",
+      groupType: "section",
+      groupKey: cleanRsjGroupKey(input.section),
+      active: true,
+    };
+  } else if (nature === "EARTHING") {
+    c = {
+      category: "NTLT",
+      ntltSubtype: "EARTHING",
+      groupType: "section",
+      groupKey: normalizeSectionKey(input.section) || "EARTHING",
+      active: true,
+    };
+  } else if (nature === "GENERAL") {
+    c = {
+      category: "NTLT",
+      ntltSubtype: "GENERAL",
+      groupType: "section",
+      groupKey: normalizeSectionKey(input.section) || "GENERAL",
+      active: true,
+    };
+  } else if (nature === "FOUNDATION BOLT") {
+    // Captured for completeness but excluded from workflow metrics.
+    c = {
+      category: "NTLT",
+      ntltSubtype: "GENERAL",
+      groupType: "section",
+      groupKey: normalizeSectionKey(input.section) || "FOUNDATION BOLT",
+      active: false,
+    };
+  } else {
+    // Unknown / blank Order Nature: leave unclassified (no borrowing).
+    c = {
+      category: null,
+      ntltSubtype: null,
+      groupType: null,
+      groupKey: null,
+      active: true,
+    };
+  }
+
+  // Tower Sub Type "NTLT" is a confirming signal only. A conflict is when the
+  // sub type says NTLT but the (authoritative) category came out TLT, or vice
+  // versa. Order Nature always wins; we only flag.
+  let conflict = false;
+  if (subType === "NTLT" && c.category === "TLT") conflict = true;
+  if (subType === "TLT" && c.category === "NTLT") conflict = true;
+
+  return { classification: c, conflict };
+}
+
 function normalizeProject(value: Cell): string {
   let s = cellToString(value);
   if (!s) return "";
@@ -501,6 +611,7 @@ export function parseWorkbook(
 
   let rowsRead = 0;
   let lastProject = "";
+  let classificationConflicts = 0;
   const projects = new Set<string>();
   const rows: ParsedRow[] = [];
 
@@ -544,6 +655,18 @@ export function parseWorkbook(
 
     if (job && job !== UNASSIGNED_JOB) projects.add(job);
 
+    const towerSubType = emptyToNull(row[COL.towerSubType]);
+    const section = emptyToNull(row[COL.section]);
+    // Classify the mark (TLT vs NTLT + subtype). Additive — these fields are NOT
+    // hashed (hashRow lists only the 19 source columns), so identity is unchanged.
+    const { classification, conflict } = classifyMark({
+      orderNature,
+      towerSubType,
+      section,
+      job,
+    });
+    if (conflict) classificationConflicts++;
+
     const base: Omit<InsertRecordPool, "hash"> = {
       job,
       structure,
@@ -558,10 +681,10 @@ export function parseWorkbook(
       contractor: emptyToNull(row[COL.contractor]),
       jobCardNo: emptyToNull(row[COL.jobCard]),
       towerType: emptyToNull(row[COL.towerType]),
-      towerSubType: emptyToNull(row[COL.towerSubType]),
+      towerSubType,
       alias,
       markNo,
-      section: emptyToNull(row[COL.section]),
+      section,
       length: toNumber(row[COL.length]),
       width: toNumber(row[COL.width]),
       wtPcs: toNumber(row[COL.wtPcs]),
@@ -572,6 +695,11 @@ export function parseWorkbook(
       activity: emptyToNull(row[COL.activity]),
       operation: emptyToNull(row[COL.operation]),
       refJobCardNo: emptyToNull(row[COL.refJobCard]),
+      category: classification.category,
+      ntltSubtype: classification.ntltSubtype,
+      groupType: classification.groupType,
+      groupKey: classification.groupKey,
+      active: classification.active,
     };
 
     // Apply accepted descriptive-field cleanups (value remap) BEFORE hashing so
@@ -629,6 +757,7 @@ export function parseWorkbook(
       notStarted,
       noProductionDate,
       futureProductionDate,
+      classificationConflicts,
     },
   };
 }
