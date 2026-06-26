@@ -92,10 +92,22 @@ function FilterBar() {
 
   // Rows in the current Order Type mode drive every option list, so secondary
   // filters (Contractor/Activity) and the Mark picker only offer mode-relevant
-  // values.
+  // values. Inactive marks (FOUNDATION BOLT) are excluded everywhere.
   const modeRecords = useMemo(
-    () => records.filter(r => (r.category || "TLT") === filters.category),
+    () => records.filter(r => (r.category || "TLT") === filters.category && r.active !== false),
     [records, filters.category]
+  );
+
+  // Rows narrowed by the active PRIMARY-dimension selection(s), so the
+  // secondary option lists (Contractor / Activity / Mark) only offer values
+  // that actually exist within the current drill-down.
+  const scopedRecords = useMemo(
+    () => modeRecords.filter(r => isNtlt
+      ? (!filters.ntltSubtype || r.ntltSubtype === filters.ntltSubtype) &&
+        (!filters.section || r.groupKey === filters.section)
+      : (!filters.job || r.job === filters.job) &&
+        (!filters.structure || r.structure === filters.structure)),
+    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.structure]
   );
 
   // TLT primary dimension = Project (job).
@@ -104,10 +116,13 @@ function FilterBar() {
     [modeRecords]
   );
 
-  // NTLT primary dimension = Section (the cleaned group_key).
+  // NTLT primary dimension = Section (the cleaned group_key), narrowed to the
+  // active sub-category so only relevant sections are offered.
   const sections = useMemo(
-    () => Array.from(new Set(modeRecords.map(r => r.groupKey).filter((k): k is string => Boolean(k)))).sort(),
-    [modeRecords]
+    () => Array.from(new Set(modeRecords
+      .filter(r => !filters.ntltSubtype || r.ntltSubtype === filters.ntltSubtype)
+      .map(r => r.groupKey).filter((k): k is string => Boolean(k)))).sort(),
+    [modeRecords, filters.ntltSubtype]
   );
 
   const structures = useMemo(
@@ -120,24 +135,18 @@ function FilterBar() {
   );
 
   const marks = useMemo(
-    () => Array.from(new Set(modeRecords
-      .filter(r => isNtlt
-        ? (!filters.section || r.groupKey === filters.section) && (!filters.ntltSubtype || r.ntltSubtype === filters.ntltSubtype)
-        : (!filters.job || r.job === filters.job) && (!filters.structure || r.structure === filters.structure))
-      .map(r => r.markId)
-      .filter(Boolean)
-    )).sort(),
-    [modeRecords, isNtlt, filters.section, filters.ntltSubtype, filters.job, filters.structure]
+    () => Array.from(new Set(scopedRecords.map(r => r.markId).filter(Boolean))).sort(),
+    [scopedRecords]
   );
 
   const contractors = useMemo(
-    () => Array.from(new Set(modeRecords.map(r => r.contractor).filter((c): c is string => Boolean(c)))).sort(),
-    [modeRecords]
+    () => Array.from(new Set(scopedRecords.map(r => r.contractor).filter((c): c is string => Boolean(c)))).sort(),
+    [scopedRecords]
   );
 
   const activities = useMemo(
-    () => sortActivities(Array.from(new Set(modeRecords.map(r => r.activity).filter((a): a is string => Boolean(a))))),
-    [modeRecords]
+    () => sortActivities(Array.from(new Set(scopedRecords.map(r => r.activity).filter((a): a is string => Boolean(a))))),
+    [scopedRecords]
   );
 
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => {

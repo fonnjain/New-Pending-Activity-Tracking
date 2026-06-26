@@ -77,6 +77,9 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
         next.ntltSubtype = null;
         next.mark = null;
       } else if (key === "ntltSubtype") {
+        // Sub-category narrows the Section list, so a section picked under a
+        // different sub-category must not linger (it would yield empty data).
+        next.section = null;
         next.mark = null;
       } else if (key === "structure") {
         next.mark = null;
@@ -190,6 +193,10 @@ export function useFilteredRecords(records: Record[] | undefined) {
         if (!d || d < win.start || d >= win.end) return false;
       }
       if ((r.category || "TLT") !== filters.category) return false;
+      // Inactive marks (e.g. FOUNDATION BOLT) are captured but excluded from
+      // every workflow metric/view. TLT rows are always active, so this never
+      // changes TLT behaviour.
+      if (r.active === false) return false;
       if (filters.ntltSubtype && r.ntltSubtype !== filters.ntltSubtype) return false;
       if (filters.job && r.job !== filters.job) return false;
       if (filters.section && r.groupKey !== filters.section) return false;

@@ -204,6 +204,7 @@ function WarningParametersContent() {
   const scopeKeys = useMemo(() => {
     const set = new Set<string>();
     for (const r of records ?? []) {
+      if (r.active === false) continue;
       if (sub === null) {
         if ((r.category || "TLT") === "TLT" && r.job) set.add(r.job);
       } else if (r.category === "NTLT" && r.ntltSubtype === sub && r.groupKey) {
