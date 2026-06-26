@@ -8,6 +8,40 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DateRangeSelect } from "@/components/date-range-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { sortActivities } from "@workspace/domain";
+import { cn } from "@/lib/utils";
+
+function Segmented({
+  value,
+  onChange,
+  options,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+  options: { value: string | null; label: string }[];
+}) {
+  return (
+    <div className="inline-flex rounded-md border bg-background p-0.5">
+      {options.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.label}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className={cn(
+              "h-8 rounded-[5px] px-3 text-sm transition-colors",
+              active
+                ? "bg-primary text-primary-foreground font-medium"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 const navItems = [
   { href: "/", icon: BarChart3, label: "Overview" },
@@ -129,6 +163,32 @@ function FilterBar() {
   return (
     <div className="sticky top-0 md:top-14 z-30 bg-card border-b shadow-sm">
       <Collapsible open={isOpen} onOpenChange={setIsOpen} className="w-full">
+        <div className="flex items-center gap-2 p-3 md:px-6 pb-0 flex-wrap">
+          <span className="text-xs font-semibold text-muted-foreground uppercase mr-1">
+            Order Type
+          </span>
+          <Segmented
+            value={filters.category}
+            onChange={(v) => setFilter("category", v)}
+            options={[
+              { value: null, label: "All" },
+              { value: "TLT", label: "TLT" },
+              { value: "NTLT", label: "NTLT" },
+            ]}
+          />
+          {filters.category === "NTLT" && (
+            <Segmented
+              value={filters.ntltSubtype}
+              onChange={(v) => setFilter("ntltSubtype", v)}
+              options={[
+                { value: null, label: "All NTLT" },
+                { value: "RSJ", label: "RSJ" },
+                { value: "EARTHING", label: "Earthing" },
+                { value: "GENERAL", label: "General" },
+              ]}
+            />
+          )}
+        </div>
         <div className="flex items-center justify-between p-3 md:px-6">
           <div className="flex items-center gap-2 flex-1 mr-4 flex-wrap">
             <div className="w-[150px]">

@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useMemo, ReactNo
 import { useListImports, type Record } from "@workspace/api-client-react";
 
 export interface Filters {
+  category: string | null; // "TLT" | "NTLT" (Order type)
+  ntltSubtype: string | null; // "RSJ" | "EARTHING" | "GENERAL" (only within NTLT)
   job: string | null;
   structure: string | null;
   mark: string | null;
@@ -20,6 +22,8 @@ interface TrackerContextType {
 }
 
 const defaultFilters: Filters = {
+  category: null,
+  ntltSubtype: null,
   job: null,
   structure: null,
   mark: null,
@@ -53,7 +57,10 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
     setFilters((prev) => {
       const next = { ...prev, [key]: value };
       // Cascading logic
-      if (key === "job") {
+      if (key === "category") {
+        // The NTLT subtype only applies inside NTLT; clear it otherwise.
+        if (value !== "NTLT") next.ntltSubtype = null;
+      } else if (key === "job") {
         next.structure = null;
         next.mark = null;
       } else if (key === "structure") {
@@ -164,6 +171,8 @@ export function useFilteredRecords(records: Record[] | undefined) {
         const d = parseAssignDate(r.assignDate);
         if (!d || d < win.start || d >= win.end) return false;
       }
+      if (filters.category && r.category !== filters.category) return false;
+      if (filters.ntltSubtype && r.ntltSubtype !== filters.ntltSubtype) return false;
       if (filters.job && r.job !== filters.job) return false;
       if (filters.structure && r.structure !== filters.structure) return false;
       if (filters.mark && r.markId !== filters.mark && r.markTail !== filters.mark) return false;
