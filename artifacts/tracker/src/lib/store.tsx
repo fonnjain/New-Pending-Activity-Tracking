@@ -192,7 +192,8 @@ export function useFilteredRecords(records: Record[] | undefined) {
         const d = parseAssignDate(r.assignDate);
         if (!d || d < win.start || d >= win.end) return false;
       }
-      if ((r.category || "TLT") !== filters.category) return false;
+      // "All" Order Type includes both TLT and NTLT (no category gate).
+      if (filters.category !== "ALL" && (r.category || "TLT") !== filters.category) return false;
       // Inactive marks (e.g. FOUNDATION BOLT) are captured but excluded from
       // every workflow metric/view. TLT rows are always active, so this never
       // changes TLT behaviour.

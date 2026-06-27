@@ -57,6 +57,9 @@ export default function JobDashboard() {
 
 function JobDashboardContent() {
   const { selectedImportId, filters, setFilter } = useTracker();
+  // Project Wise drills down by Project (TLT) or Section (NTLT). "All" Order
+  // Type shows BOTH — every row is resolved by its own category below.
+  const isAll = filters.category === "ALL";
   const isNtlt = filters.category === "NTLT";
   const { data: rawRecords = [] } = useGetImportRecords(selectedImportId as number, {
     query: {
@@ -72,19 +75,24 @@ function JobDashboardContent() {
     () =>
       rawRecords.filter(
         (r) =>
-          (r.category || "TLT") === filters.category &&
+          (isAll || (r.category || "TLT") === filters.category) &&
           r.active !== false &&
           isWithinDateRange(r.assignDate, filters.dateRange),
       ),
-    [rawRecords, filters.category, filters.dateRange],
+    [rawRecords, filters.category, isAll, filters.dateRange],
   );
 
   // Resolve a row's primary key (Project in TLT, Section group_key in NTLT) and
   // its secondary key (Structure in TLT, Sub-category in NTLT).
-  const primaryOf = (r: { job: string | null; groupKey: string | null }) =>
-    (isNtlt ? r.groupKey : r.job) || "Unknown";
-  const secondaryOf = (r: { structure: string | null; ntltSubtype: string | null }) =>
-    isNtlt ? r.ntltSubtype : r.structure;
+  const rowIsNtlt = (r: { category: string | null }) => (r.category || "TLT") === "NTLT";
+  // Per-row resolution lets "All" mix both categories. In All mode keys are
+  // category-prefixed so a TLT project and an NTLT section never merge.
+  const primaryOf = (r: { job: string | null; groupKey: string | null; category: string | null }) => {
+    const base = (rowIsNtlt(r) ? r.groupKey : r.job) || "Unknown";
+    return isAll ? `${rowIsNtlt(r) ? "NTLT" : "TLT"}: ${base}` : base;
+  };
+  const secondaryOf = (r: { structure: string | null; ntltSubtype: string | null; category: string | null }) =>
+    rowIsNtlt(r) ? r.ntltSubtype : r.structure;
 
   const [project, setProject] = useState<string | null>(null);
   const [structure, setStructure] = useState<string | null>(null);
@@ -92,8 +100,8 @@ function JobDashboardContent() {
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [projectSort, setProjectSort] = useState<ProjectSortKey>("assignDate");
 
-  const primaryLabel = isNtlt ? "Section" : "Project";
-  const secondaryLabel = isNtlt ? "Sub-category" : "Structure";
+  const primaryLabel = isAll ? "Group" : isNtlt ? "Section" : "Project";
+  const secondaryLabel = isAll ? "Sub-group" : isNtlt ? "Sub-category" : "Structure";
 
   // Switching mode clears any stale cross-mode local selection.
   const switchMode = (v: string | null) => {
@@ -108,7 +116,7 @@ function JobDashboardContent() {
   // Cascading dropdown options
   const projectOptions = useMemo(
     () => Array.from(new Set(records.map((r) => primaryOf(r)).filter((k) => k !== "Unknown"))).sort(),
-    [records, isNtlt],
+    [records, isNtlt, isAll],
   );
 
   const structureOptions = useMemo(
@@ -121,7 +129,7 @@ function JobDashboardContent() {
             .filter((s): s is string => Boolean(s)),
         ),
       ).sort(),
-    [records, project, isNtlt],
+    [records, project, isNtlt, isAll],
   );
 
   const markOptions = useMemo(
@@ -138,7 +146,7 @@ function JobDashboardContent() {
             .filter(Boolean),
         ),
       ).sort(),
-    [records, project, structure, isNtlt],
+    [records, project, structure, isNtlt, isAll],
   );
 
   const setProjectCascade = (v: string | null) => {
@@ -159,7 +167,7 @@ function JobDashboardContent() {
         if (mark && r.markId !== mark) return false;
         return true;
       }),
-    [records, project, structure, mark, isNtlt],
+    [records, project, structure, mark, isNtlt, isAll],
   );
 
   const { totalProjects, totalMarks, totalQty, totalWt, avgAgeing, byProject, byActivity } =
@@ -278,7 +286,7 @@ function JobDashboardContent() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-3">
           <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
-            {isNtlt ? "Section Filters" : "Job Filters"}
+            {isAll ? "Group Filters" : isNtlt ? "Section Filters" : "Project Filters"}
           </CardTitle>
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-muted-foreground uppercase">
@@ -288,6 +296,7 @@ function JobDashboardContent() {
               value={filters.category}
               onChange={switchMode}
               options={[
+                { value: "ALL", label: "All" },
                 { value: "TLT", label: "TLT" },
                 { value: "NTLT", label: "NTLT" },
               ]}
@@ -385,7 +394,7 @@ function JobDashboardContent() {
                 <TableRow>
                   <TableHead>{primaryLabel}</TableHead>
                   <TableHead className="text-right">
-                    {isNtlt ? "No. of Sub-cats" : "No. of Structures"}
+                    {isAll ? "No. of Sub-groups" : isNtlt ? "No. of Sub-cats" : "No. of Structures"}
                   </TableHead>
                   <TableHead className="text-right">Marks</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
@@ -527,7 +536,7 @@ function JobDetail({
 
   const sortedRows = useMemo(() => sortRecords(filtered, sortBy), [filtered, sortBy]);
 
-  const isNtlt = label === "Section";
+  const isNtlt = records.some((r) => (r.category || "TLT") === "NTLT");
   const secondaryNoun = isNtlt ? "sub-categories" : "structures";
   const structureCount = useMemo(
     () =>

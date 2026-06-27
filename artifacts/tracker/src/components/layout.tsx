@@ -12,14 +12,14 @@ import { sortActivities } from "@workspace/domain";
 
 const navItems = [
   { href: "/", icon: BarChart3, label: "Overview" },
-  { href: "/turnaround", icon: Timer, label: "Turnaround" },
+  { href: "/jobs", icon: Briefcase, label: "Project Wise" },
+  { href: "/activity", icon: Activity, label: "Activity Wise" },
+  { href: "/contractor", icon: Users, label: "Contractor Wise" },
+  { href: "/reports", icon: FileText, label: "Reports" },
+  { href: "/turnaround", icon: Timer, label: "Turn Around Time" },
   { href: "/stuck", icon: Gauge, label: "Stuck Projects" },
   { href: "/completed", icon: CheckCircle2, label: "Completed" },
-  { href: "/activity", icon: Activity, label: "Activity" },
-  { href: "/jobs", icon: Briefcase, label: "Job-wise" },
-  { href: "/contractor", icon: Users, label: "Contractor" },
   { href: "/ageing", icon: Clock, label: "Ageing" },
-  { href: "/reports", icon: FileText, label: "Reports" },
   { href: "/data", icon: Database, label: "Data" },
   { href: "/thickness", icon: Layers, label: "Thickness" },
   { href: "/warning-parameters", icon: SlidersHorizontal, label: "Warning Params" },
@@ -89,13 +89,15 @@ function FilterBar() {
   });
 
   const isNtlt = filters.category === "NTLT";
+  // "All" Order Type includes both TLT and NTLT — no category gate.
+  const isAll = filters.category === "ALL";
 
   // Rows in the current Order Type mode drive every option list, so secondary
   // filters (Contractor/Activity) and the Mark picker only offer mode-relevant
   // values. Inactive marks (FOUNDATION BOLT) are excluded everywhere.
   const modeRecords = useMemo(
-    () => records.filter(r => (r.category || "TLT") === filters.category && r.active !== false),
-    [records, filters.category]
+    () => records.filter(r => (isAll || (r.category || "TLT") === filters.category) && r.active !== false),
+    [records, filters.category, isAll]
   );
 
   // Rows narrowed by the active PRIMARY-dimension selection(s), so the
@@ -167,6 +169,7 @@ function FilterBar() {
             value={filters.category}
             onChange={(v) => setFilter("category", v)}
             options={[
+              { value: "ALL", label: "All" },
               { value: "TLT", label: "TLT" },
               { value: "NTLT", label: "NTLT" },
             ]}
@@ -186,25 +189,27 @@ function FilterBar() {
         </div>
         <div className="flex items-center justify-between p-3 md:px-6">
           <div className="flex items-center gap-2 flex-1 mr-4 flex-wrap">
-            <div className="w-full sm:w-[260px]">
-              {isNtlt ? (
-                <SearchableSelect
-                  value={filters.section}
-                  onChange={(v) => setFilter("section", v)}
-                  options={sections}
-                  allLabel="All Sections"
-                  searchPlaceholder="Search sections..."
-                />
-              ) : (
-                <SearchableSelect
-                  value={filters.job}
-                  onChange={(v) => setFilter("job", v)}
-                  options={jobs}
-                  allLabel="All Jobs"
-                  searchPlaceholder="Search jobs..."
-                />
-              )}
-            </div>
+            {!isAll && (
+              <div className="w-full sm:w-[260px]">
+                {isNtlt ? (
+                  <SearchableSelect
+                    value={filters.section}
+                    onChange={(v) => setFilter("section", v)}
+                    options={sections}
+                    allLabel="All Sections"
+                    searchPlaceholder="Search sections..."
+                  />
+                ) : (
+                  <SearchableSelect
+                    value={filters.job}
+                    onChange={(v) => setFilter("job", v)}
+                    options={jobs}
+                    allLabel="All Jobs"
+                    searchPlaceholder="Search jobs..."
+                  />
+                )}
+              </div>
+            )}
             <div className="w-[150px]">
               <SearchableSelect
                 value={filters.activity}
@@ -247,7 +252,7 @@ function FilterBar() {
         
         <CollapsibleContent>
           <div className="p-3 md:px-6 pt-0 border-t bg-muted/30 grid grid-cols-2 gap-3">
-            {!isNtlt && (
+            {!isNtlt && !isAll && (
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-muted-foreground uppercase">Structure</label>
                 <SearchableSelect
