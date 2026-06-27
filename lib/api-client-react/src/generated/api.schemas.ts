@@ -622,6 +622,95 @@ export interface ContractorCategoryInput {
   outVendorType?: ContractorCategoryInputOutVendorTypeItem[];
 }
 
+export type FabricationPrioritySection = typeof FabricationPrioritySection[keyof typeof FabricationPrioritySection];
+
+
+export const FabricationPrioritySection = {
+  operational: 'operational',
+  inhand: 'inhand',
+} as const;
+
+export type FabricationPriorityColumn = typeof FabricationPriorityColumn[keyof typeof FabricationPriorityColumn];
+
+
+export const FabricationPriorityColumn = {
+  welded: 'welded',
+  bending: 'bending',
+  drilling: 'drilling',
+  platePunch: 'platePunch',
+  plateDrill: 'plateDrill',
+} as const;
+
+export type FabricationPriorityPriority = typeof FabricationPriorityPriority[keyof typeof FabricationPriorityPriority];
+
+
+export const FabricationPriorityPriority = {
+  P1: 'P1',
+  P2: 'P2',
+  P3: 'P3',
+  P4: 'P4',
+  P5: 'P5',
+  P6: 'P6',
+  P7: 'P7',
+  P8: 'P8',
+  P9: 'P9',
+  P10: 'P10',
+} as const;
+
+/**
+ * One row priority for the "Fabrication Load for TLT" report, keyed by (section, column, project). Planning overlay only.
+
+ */
+export interface FabricationPriority {
+  section: FabricationPrioritySection;
+  column: FabricationPriorityColumn;
+  project: string;
+  priority: FabricationPriorityPriority;
+  updatedAt?: string;
+}
+
+export type FabricationPriorityInputSection = typeof FabricationPriorityInputSection[keyof typeof FabricationPriorityInputSection];
+
+
+export const FabricationPriorityInputSection = {
+  operational: 'operational',
+  inhand: 'inhand',
+} as const;
+
+export type FabricationPriorityInputColumn = typeof FabricationPriorityInputColumn[keyof typeof FabricationPriorityInputColumn];
+
+
+export const FabricationPriorityInputColumn = {
+  welded: 'welded',
+  bending: 'bending',
+  drilling: 'drilling',
+  platePunch: 'platePunch',
+  plateDrill: 'plateDrill',
+} as const;
+
+export type FabricationPriorityInputPriority = typeof FabricationPriorityInputPriority[keyof typeof FabricationPriorityInputPriority];
+
+
+export const FabricationPriorityInputPriority = {
+  P1: 'P1',
+  P2: 'P2',
+  P3: 'P3',
+  P4: 'P4',
+  P5: 'P5',
+  P6: 'P6',
+  P7: 'P7',
+  P8: 'P8',
+  P9: 'P9',
+  P10: 'P10',
+} as const;
+
+export interface FabricationPriorityInput {
+  section: FabricationPriorityInputSection;
+  column: FabricationPriorityInputColumn;
+  project: string;
+  priority: FabricationPriorityInputPriority;
+}
+
 /**
  * Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). This is the TLT category.
  */
@@ -1102,6 +1191,12 @@ groupKey: string;
 
 export type DeleteManualThicknessParams = {
 markId: string;
+};
+
+export type DeleteFabricationPriorityParams = {
+section: string;
+column: string;
+project: string;
 };
 
 export type DeleteContractorCategoryParams = {

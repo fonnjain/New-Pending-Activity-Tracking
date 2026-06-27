@@ -30,9 +30,12 @@ import type {
   ContractorCategoryInput,
   DeleteAllResult,
   DeleteContractorCategoryParams,
+  DeleteFabricationPriorityParams,
   DeleteManualThicknessParams,
   DeleteRsjThicknessParams,
   ErrorResponse,
+  FabricationPriority,
+  FabricationPriorityInput,
   HealthStatus,
   Import,
   ImportUpload,
@@ -681,6 +684,237 @@ export const useDeleteManualThickness = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteManualThicknessMutationOptions(options));
+    }
+
+export const getListFabricationPrioritiesUrl = () => {
+
+
+
+
+  return `/api/fabrication-priorities`
+}
+
+/**
+ * Returns the per-row priorities (P1..P10) for the "Fabrication Load for TLT" report, keyed by (section, column, project). Display/planning overlay only; never changes parsing, ageing, dedup, qty, the row hash, classification, or alert math. Public (read-only).
+
+ * @summary List Fabrication-Load priorities
+ */
+export const listFabricationPriorities = async ( options?: RequestInit): Promise<FabricationPriority[]> => {
+
+  return customFetch<FabricationPriority[]>(getListFabricationPrioritiesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFabricationPrioritiesQueryKey = () => {
+    return [
+    `/api/fabrication-priorities`
+    ] as const;
+    }
+
+
+export const getListFabricationPrioritiesQueryOptions = <TData = Awaited<ReturnType<typeof listFabricationPriorities>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFabricationPriorities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFabricationPrioritiesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFabricationPriorities>>> = ({ signal }) => listFabricationPriorities({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFabricationPriorities>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFabricationPrioritiesQueryResult = NonNullable<Awaited<ReturnType<typeof listFabricationPriorities>>>
+export type ListFabricationPrioritiesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List Fabrication-Load priorities
+ */
+
+export function useListFabricationPriorities<TData = Awaited<ReturnType<typeof listFabricationPriorities>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFabricationPriorities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFabricationPrioritiesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpsertFabricationPriorityUrl = () => {
+
+
+
+
+  return `/api/fabrication-priorities`
+}
+
+/**
+ * Upserts one priority keyed by (section, column, project). The report reflects it on the next read. Purely a planning overlay.
+
+ * @summary Set one Fabrication-Load priority
+ */
+export const upsertFabricationPriority = async (fabricationPriorityInput: FabricationPriorityInput, options?: RequestInit): Promise<FabricationPriority> => {
+
+  return customFetch<FabricationPriority>(getUpsertFabricationPriorityUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      fabricationPriorityInput,)
+  }
+);}
+
+
+
+
+export const getUpsertFabricationPriorityMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertFabricationPriority>>, TError,{data: BodyType<FabricationPriorityInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof upsertFabricationPriority>>, TError,{data: BodyType<FabricationPriorityInput>}, TContext> => {
+
+const mutationKey = ['upsertFabricationPriority'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertFabricationPriority>>, {data: BodyType<FabricationPriorityInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  upsertFabricationPriority(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpsertFabricationPriorityMutationResult = NonNullable<Awaited<ReturnType<typeof upsertFabricationPriority>>>
+    export type UpsertFabricationPriorityMutationBody = BodyType<FabricationPriorityInput>
+    export type UpsertFabricationPriorityMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Set one Fabrication-Load priority
+ */
+export const useUpsertFabricationPriority = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertFabricationPriority>>, TError,{data: BodyType<FabricationPriorityInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof upsertFabricationPriority>>,
+        TError,
+        {data: BodyType<FabricationPriorityInput>},
+        TContext
+      > => {
+      return useMutation(getUpsertFabricationPriorityMutationOptions(options));
+    }
+
+export const getDeleteFabricationPriorityUrl = (params: DeleteFabricationPriorityParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/fabrication-priorities?${stringifiedParams}` : `/api/fabrication-priorities`
+}
+
+/**
+ * Removes one priority (the row reverts to unset). The key parts are passed as query params because the project string can contain spaces and punctuation.
+
+ * @summary Clear one Fabrication-Load priority
+ */
+export const deleteFabricationPriority = async (params: DeleteFabricationPriorityParams, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteFabricationPriorityUrl(params),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteFabricationPriorityMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFabricationPriority>>, TError,{params: DeleteFabricationPriorityParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteFabricationPriority>>, TError,{params: DeleteFabricationPriorityParams}, TContext> => {
+
+const mutationKey = ['deleteFabricationPriority'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteFabricationPriority>>, {params: DeleteFabricationPriorityParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  deleteFabricationPriority(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteFabricationPriorityMutationResult = NonNullable<Awaited<ReturnType<typeof deleteFabricationPriority>>>
+
+    export type DeleteFabricationPriorityMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Clear one Fabrication-Load priority
+ */
+export const useDeleteFabricationPriority = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFabricationPriority>>, TError,{params: DeleteFabricationPriorityParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteFabricationPriority>>,
+        TError,
+        {params: DeleteFabricationPriorityParams},
+        TContext
+      > => {
+      return useMutation(getDeleteFabricationPriorityMutationOptions(options));
     }
 
 export const getListContractorCategoriesUrl = () => {

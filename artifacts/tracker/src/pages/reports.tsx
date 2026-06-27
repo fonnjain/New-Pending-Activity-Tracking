@@ -1,5 +1,18 @@
 import { useMemo, useState } from "react";
-import { compareActivity, lifecycleStatus, migrateTurnaroundSettings, scopeFor, sequenceFor } from "@workspace/domain";
+import {
+  activityRank,
+  compareActivity,
+  FAB_LOAD_COLUMNS,
+  FAB_LOAD_SECTIONS,
+  FAB_PRIORITIES,
+  lifecycleStatus,
+  migrateTurnaroundSettings,
+  normalizeActivity,
+  scopeFor,
+  sequenceFor,
+  type FabLoadColumn,
+  type FabLoadSection,
+} from "@workspace/domain";
 import { useSettings } from "@/lib/settings";
 import { LIFECYCLE_LABELS, lifecycleTextColor } from "@/lib/turnaround";
 import { useStalledInfo } from "@/lib/movement";
@@ -14,7 +27,13 @@ import {
 import {
   useGetImportRecords,
   getGetImportRecordsQueryKey,
+  useListFabricationPriorities,
+  useUpsertFabricationPriority,
+  useDeleteFabricationPriority,
+  getListFabricationPrioritiesQueryKey,
+  type Record as ApiRecord,
 } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTracker, useFilteredRecords } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,6 +52,7 @@ import {
 } from "@/components/ui/select";
 import {
   exportToXlsxSheets,
+  exportToCsv,
   type XlsxColumn,
   type XlsxSummaryRow,
 } from "@/lib/export";
@@ -44,7 +64,7 @@ import { FileSpreadsheet, Check } from "lucide-react";
 
 type SortKey = "activity" | "ageing" | "contractor";
 
-type ReportType = "jobwise" | "ai";
+type ReportType = "jobwise" | "fabload" | "ai";
 
 const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
   {
@@ -52,6 +72,12 @@ const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
     name: "Job Wise Report",
     description:
       "Pending work filtered by the header filters, with turnaround and velocity columns, exportable to Excel.",
+  },
+  {
+    id: "fabload",
+    name: "Fabrication Load for TLT",
+    description:
+      "TLT fabrication load by project and weight (tonnes), split into Operational Load (at the operation) and In Hand (before it), with a per-row Priority.",
   },
   {
     id: "ai",
@@ -569,6 +595,373 @@ function ReportBuilder() {
   );
 }
 
+// --- "Fabrication Load for TLT" report ---------------------------------------
+// TLT-only planning view. Two sections (Operational = work AT an operation; In
+// Hand = work BEFORE it) x five load columns, each summing Balance Wt (tonnes)
+// per project, with a per-row Priority (P1..P10) persisted server-side. Pure
+// display/planning overlay — reuses existing record fields (activity,
+// sectionType, holeOperation, balanceWt, job); changes nothing in the engine.
+
+const NONE_PRIORITY = "__none__";
+const W_RANK = activityRank("W");
+const B_RANK = activityRank("B");
+
+// Does a record belong in a given (section, column) cell? Welded/Bending use a
+// POSITIONAL rule in the TLT sequence (at the activity = Operational; before it
+// = In Hand). Drilling/Plate Punch/Plate Drill use a SPECIFIC-ACTIVITY rule
+// (RFI = Operational, C = In Hand) combined with sectionType + holeOperation.
+function fabLoadMatch(
+  section: FabLoadSection,
+  column: FabLoadColumn,
+  r: ApiRecord,
+): boolean {
+  const act = normalizeActivity(r.activity);
+  const rank = activityRank(r.activity);
+  const sec = r.sectionType;
+  const op = r.holeOperation;
+  if (section === "operational") {
+    switch (column) {
+      case "welded":
+        return act === "W";
+      case "bending":
+        return act === "B";
+      case "drilling":
+        return sec === "ANGLE" && act === "RFI" && op === "DRILLING";
+      case "platePunch":
+        return sec === "PLATE" && act === "RFI" && op === "PUNCHING";
+      case "plateDrill":
+        return sec === "PLATE" && act === "RFI" && op === "DRILLING";
+    }
+  }
+  switch (column) {
+    case "welded":
+      return rank < W_RANK; // before W (C,RFI,NH,B,HAB,HG); unknown ranks excluded
+    case "bending":
+      return rank < B_RANK; // before B (C,RFI,NH)
+    case "drilling":
+      return sec === "ANGLE" && act === "C" && op === "DRILLING";
+    case "platePunch":
+      return sec === "PLATE" && act === "C" && op === "PUNCHING";
+    case "plateDrill":
+      return sec === "PLATE" && act === "C" && op === "DRILLING";
+  }
+  return false;
+}
+
+function priKey(section: string, column: string, project: string): string {
+  return `${section}|${column}|${project}`;
+}
+
+const toTonnes = (kg: number): number => Math.round((kg / 1000) * 1000) / 1000;
+const fmtTonnes = (kg: number): string => toTonnes(kg).toFixed(3);
+
+type FabRow = { project: string; weightKg: number };
+type FabColumnData = { rows: FabRow[]; totalKg: number };
+
+function FabricationLoadReport() {
+  const { selectedImportId, filters } = useTracker();
+  const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
+    query: {
+      enabled: selectedImportId != null,
+      queryKey: getGetImportRecordsQueryKey(selectedImportId as number),
+    },
+  });
+  const filtered = useFilteredRecords(allRecords);
+  const queryClient = useQueryClient();
+  const [sortByPriority, setSortByPriority] = useState(false);
+
+  const { data: priorityRows } = useListFabricationPriorities({
+    query: { queryKey: getListFabricationPrioritiesQueryKey() },
+  });
+  const upsert = useUpsertFabricationPriority();
+  const del = useDeleteFabricationPriority();
+
+  const priorityMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of priorityRows ?? [])
+      m.set(priKey(p.section, p.column, p.project), p.priority);
+    return m;
+  }, [priorityRows]);
+
+  // TLT only — the report ignores NTLT marks regardless of the Order Type
+  // toggle. (category defaults to "TLT" when unset on legacy rows.)
+  const tltRecords = useMemo(
+    () => filtered.filter((r) => (r.category || "TLT") === "TLT"),
+    [filtered],
+  );
+
+  // Sum Balance Wt (kg) per project for every (section, column) cell.
+  const data = useMemo(() => {
+    const out = new Map<string, FabColumnData>();
+    for (const s of FAB_LOAD_SECTIONS) {
+      for (const c of FAB_LOAD_COLUMNS) {
+        out.set(`${s.value}|${c.value}`, { rows: [], totalKg: 0 });
+      }
+    }
+    const acc = new Map<string, Map<string, number>>(); // cell -> project -> kg
+    for (const r of tltRecords) {
+      const project = (r.job || "").trim();
+      if (!project || project === "(Unassigned)") continue;
+      const wt = r.balanceWt ?? 0;
+      if (wt <= 0) continue;
+      for (const s of FAB_LOAD_SECTIONS) {
+        for (const c of FAB_LOAD_COLUMNS) {
+          if (!fabLoadMatch(s.value, c.value, r)) continue;
+          const cell = `${s.value}|${c.value}`;
+          let pm = acc.get(cell);
+          if (!pm) {
+            pm = new Map();
+            acc.set(cell, pm);
+          }
+          pm.set(project, (pm.get(project) ?? 0) + wt);
+        }
+      }
+    }
+    for (const [cell, pm] of acc) {
+      let totalKg = 0;
+      const rows: FabRow[] = [];
+      for (const [project, weightKg] of pm) {
+        if (weightKg <= 0) continue;
+        rows.push({ project, weightKg });
+        totalKg += weightKg;
+      }
+      out.set(cell, { rows, totalKg });
+    }
+    return out;
+  }, [tltRecords]);
+
+  const orderedRows = (
+    section: FabLoadSection,
+    column: FabLoadColumn,
+    cell: FabColumnData,
+  ): FabRow[] => {
+    const arr = [...cell.rows];
+    if (sortByPriority) {
+      // Numeric rank of P1..P10 (unset sorts last); ties broken by weight desc.
+      const rankOf = (project: string): number => {
+        const p = priorityMap.get(priKey(section, column, project));
+        if (!p) return Number.MAX_SAFE_INTEGER;
+        const n = Number(p.slice(1));
+        return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+      };
+      arr.sort(
+        (a, b) =>
+          rankOf(a.project) - rankOf(b.project) || b.weightKg - a.weightKg,
+      );
+    } else {
+      arr.sort((a, b) => b.weightKg - a.weightKg);
+    }
+    return arr;
+  };
+
+  const setPriority = (
+    section: FabLoadSection,
+    column: FabLoadColumn,
+    project: string,
+    value: string,
+  ) => {
+    const invalidate = () =>
+      queryClient.invalidateQueries({
+        queryKey: getListFabricationPrioritiesQueryKey(),
+      });
+    if (value === NONE_PRIORITY) {
+      del.mutate(
+        { params: { section, column, project } },
+        { onSuccess: invalidate },
+      );
+    } else {
+      upsert.mutate(
+        { data: { section, column, project, priority: value as never } },
+        { onSuccess: invalidate },
+      );
+    }
+  };
+
+  const buildExportRows = (): Record<string, string | number>[] => {
+    const rows: Record<string, string | number>[] = [];
+    for (const s of FAB_LOAD_SECTIONS) {
+      for (const c of FAB_LOAD_COLUMNS) {
+        const cell = data.get(`${s.value}|${c.value}`)!;
+        for (const r of orderedRows(s.value, c.value, cell)) {
+          rows.push({
+            section: s.label,
+            column: c.label,
+            project: r.project,
+            weightT: toTonnes(r.weightKg),
+            priority: priorityMap.get(priKey(s.value, c.value, r.project)) ?? "",
+          });
+        }
+        rows.push({
+          section: s.label,
+          column: c.label,
+          project: "G. Total",
+          weightT: toTonnes(cell.totalKg),
+          priority: "",
+        });
+      }
+    }
+    return rows;
+  };
+
+  const exportExcel = () => {
+    const date = new Date().toISOString().slice(0, 10);
+    const columns: XlsxColumn[] = [
+      { label: "Section", field: "section" },
+      { label: "Load Column", field: "column" },
+      { label: "Project", field: "project" },
+      { label: "Weight (t)", field: "weightT", numeric: true, decimals: 3 },
+      { label: "Priority", field: "priority" },
+    ];
+    exportToXlsxSheets(`fabrication_load_tlt_${date}.xlsx`, [
+      { name: "Fabrication Load", columns, rows: buildExportRows() },
+    ]);
+  };
+
+  const exportCsv = () => {
+    const date = new Date().toISOString().slice(0, 10);
+    const rows = buildExportRows().map((r) => ({
+      Section: r.section,
+      "Load Column": r.column,
+      Project: r.project,
+      "Weight (t)": typeof r.weightT === "number" ? r.weightT.toFixed(3) : r.weightT,
+      Priority: r.priority,
+    }));
+    exportToCsv(`fabrication_load_tlt_${date}.csv`, rows);
+  };
+
+  if (selectedImportId == null) {
+    return (
+      <Card className="border-border">
+        <CardContent className="py-10 text-center text-sm text-muted-foreground">
+          Upload a report to see the fabrication load.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (filters.category === "NTLT") {
+    return (
+      <Card className="border-border">
+        <CardContent className="py-10 text-center text-sm text-muted-foreground">
+          This report covers TLT only. Switch the Order Type to TLT or All to see
+          it.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          TLT only. Weight is Balance Wt in tonnes. Respects the header filters
+          (contractor, dates, job). Priority is saved automatically.
+        </p>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8"
+            onClick={() => setSortByPriority((v) => !v)}
+          >
+            Sort: {sortByPriority ? "Priority" : "Weight"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-2"
+            onClick={exportCsv}
+          >
+            <FileSpreadsheet className="w-4 h-4" /> Export CSV
+          </Button>
+          <Button size="sm" className="h-8 gap-2" onClick={exportExcel}>
+            <FileSpreadsheet className="w-4 h-4" /> Export Excel
+          </Button>
+        </div>
+      </div>
+
+      {FAB_LOAD_SECTIONS.map((s) => (
+        <div key={s.value} className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            {s.label}
+          </h2>
+          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+            {FAB_LOAD_COLUMNS.map((c) => {
+              const cell = data.get(`${s.value}|${c.value}`)!;
+              const rows = orderedRows(s.value, c.value, cell);
+              return (
+                <Card key={c.value} className="border-border">
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-sm flex items-center justify-between gap-2">
+                      <span>{c.label}</span>
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {rows.length} proj
+                      </span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    {rows.length === 0 ? (
+                      <p className="text-xs text-muted-foreground py-2">
+                        No matching marks.
+                      </p>
+                    ) : (
+                      <Table>
+                        <TableBody>
+                          {rows.map((r) => {
+                            const key = priKey(s.value, c.value, r.project);
+                            const current = priorityMap.get(key) ?? NONE_PRIORITY;
+                            return (
+                              <TableRow key={r.project}>
+                                <TableCell className="font-medium py-1.5">
+                                  {r.project}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums py-1.5">
+                                  {fmtTonnes(r.weightKg)}
+                                </TableCell>
+                                <TableCell className="py-1.5 w-24">
+                                  <Select
+                                    value={current}
+                                    onValueChange={(v) =>
+                                      setPriority(s.value, c.value, r.project, v)
+                                    }
+                                  >
+                                    <SelectTrigger className="h-7 text-xs">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value={NONE_PRIORITY}>—</SelectItem>
+                                      {FAB_PRIORITIES.map((p) => (
+                                        <SelectItem key={p} value={p}>
+                                          {p}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                          <TableRow className="border-t-2 font-semibold">
+                            <TableCell className="py-1.5">G. Total</TableCell>
+                            <TableCell className="text-right tabular-nums py-1.5">
+                              {fmtTonnes(cell.totalKg)}
+                            </TableCell>
+                            <TableCell className="py-1.5" />
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ReportsView() {
   const [reportType, setReportType] = useState<ReportType>("jobwise");
   return (
@@ -607,7 +1000,13 @@ export default function ReportsView() {
           </div>
         </CardContent>
       </Card>
-      {reportType === "jobwise" ? <ReportBuilder /> : <AiTurnaroundReport />}
+      {reportType === "jobwise" ? (
+        <ReportBuilder />
+      ) : reportType === "fabload" ? (
+        <FabricationLoadReport />
+      ) : (
+        <AiTurnaroundReport />
+      )}
     </div>
   );
 }

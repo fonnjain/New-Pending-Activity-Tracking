@@ -187,6 +187,78 @@ paths:
       responses:
         "204":
           description: Deleted
+  /fabrication-priorities:
+    get:
+      operationId: listFabricationPriorities
+      tags: [fabricationPriorities]
+      summary: List Fabrication-Load priorities
+      description: >
+        Returns the per-row priorities (P1..P10) for the "Fabrication Load for
+        TLT" report, keyed by (section, column, project). Display/planning
+        overlay only; never changes parsing, ageing, dedup, qty, the row hash,
+        classification, or alert math. Public (read-only).
+      responses:
+        "200":
+          description: Fabrication-Load priority entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FabricationPriority"
+    put:
+      operationId: upsertFabricationPriority
+      tags: [fabricationPriorities]
+      summary: Set one Fabrication-Load priority
+      description: >
+        Upserts one priority keyed by (section, column, project). The report
+        reflects it on the next read. Purely a planning overlay.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FabricationPriorityInput"
+      responses:
+        "200":
+          description: Saved entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FabricationPriority"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteFabricationPriority
+      tags: [fabricationPriorities]
+      summary: Clear one Fabrication-Load priority
+      description: >
+        Removes one priority (the row reverts to unset). The key parts are passed
+        as query params because the project string can contain spaces and
+        punctuation.
+      parameters:
+        - name: section
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: column
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: project
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
   /contractor-categories:
     get:
       operationId: listContractorCategories
@@ -1678,6 +1750,49 @@ components:
       required:
         - displayName
         - category
+    FabricationPriority:
+      type: object
+      description: >
+        One row priority for the "Fabrication Load for TLT" report, keyed by
+        (section, column, project). Planning overlay only.
+      properties:
+        section:
+          type: string
+          enum: [operational, inhand]
+        column:
+          type: string
+          enum: [welded, bending, drilling, platePunch, plateDrill]
+        project:
+          type: string
+        priority:
+          type: string
+          enum: [P1, P2, P3, P4, P5, P6, P7, P8, P9, P10]
+        updatedAt:
+          type: string
+      required:
+        - section
+        - column
+        - project
+        - priority
+    FabricationPriorityInput:
+      type: object
+      properties:
+        section:
+          type: string
+          enum: [operational, inhand]
+        column:
+          type: string
+          enum: [welded, bending, drilling, platePunch, plateDrill]
+        project:
+          type: string
+        priority:
+          type: string
+          enum: [P1, P2, P3, P4, P5, P6, P7, P8, P9, P10]
+      required:
+        - section
+        - column
+        - project
+        - priority
     TurnaroundSettings:
       type: object
       description: App-level turnaround-warning configuration. Singleton; global per-activity ideal days, grace cells and pre-warning thresholds keyed by canonical activity code, plus optional sparse per-project overrides and the stalled-mark threshold.

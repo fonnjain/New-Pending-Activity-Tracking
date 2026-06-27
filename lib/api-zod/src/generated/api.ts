@@ -689,6 +689,54 @@ export const DeleteManualThicknessQueryParams = zod.object({
 
 
 /**
+ * Returns the per-row priorities (P1..P10) for the "Fabrication Load for TLT" report, keyed by (section, column, project). Display/planning overlay only; never changes parsing, ageing, dedup, qty, the row hash, classification, or alert math. Public (read-only).
+
+ * @summary List Fabrication-Load priorities
+ */
+export const ListFabricationPrioritiesResponseItem = zod.object({
+  "section": zod.enum(['operational', 'inhand']),
+  "column": zod.enum(['welded', 'bending', 'drilling', 'platePunch', 'plateDrill']),
+  "project": zod.string(),
+  "priority": zod.enum(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10']),
+  "updatedAt": zod.string().optional()
+}).describe('One row priority for the \"Fabrication Load for TLT\" report, keyed by (section, column, project). Planning overlay only.\n')
+export const ListFabricationPrioritiesResponse = zod.array(ListFabricationPrioritiesResponseItem)
+
+
+/**
+ * Upserts one priority keyed by (section, column, project). The report reflects it on the next read. Purely a planning overlay.
+
+ * @summary Set one Fabrication-Load priority
+ */
+export const UpsertFabricationPriorityBody = zod.object({
+  "section": zod.enum(['operational', 'inhand']),
+  "column": zod.enum(['welded', 'bending', 'drilling', 'platePunch', 'plateDrill']),
+  "project": zod.string(),
+  "priority": zod.enum(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10'])
+})
+
+export const UpsertFabricationPriorityResponse = zod.object({
+  "section": zod.enum(['operational', 'inhand']),
+  "column": zod.enum(['welded', 'bending', 'drilling', 'platePunch', 'plateDrill']),
+  "project": zod.string(),
+  "priority": zod.enum(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10']),
+  "updatedAt": zod.string().optional()
+}).describe('One row priority for the \"Fabrication Load for TLT\" report, keyed by (section, column, project). Planning overlay only.\n')
+
+
+/**
+ * Removes one priority (the row reverts to unset). The key parts are passed as query params because the project string can contain spaces and punctuation.
+
+ * @summary Clear one Fabrication-Load priority
+ */
+export const DeleteFabricationPriorityQueryParams = zod.object({
+  "section": zod.coerce.string(),
+  "column": zod.coerce.string(),
+  "project": zod.coerce.string()
+})
+
+
+/**
  * Returns the contractor sub-category overlay (normalized name key -> category + FAB/GALVA tags). Joined to records at read time; never changes parsing, ageing, dedup, qty, or the contractor string. Public (read-only).
 
  * @summary List contractor sub-category mappings
