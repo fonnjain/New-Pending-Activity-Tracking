@@ -341,6 +341,190 @@ export async function exportToXlsxSheets(filename: string, sheets: XlsxSheet[]) 
   await downloadWorkbook(wb, filename);
 }
 
+// A block of side-by-side columns sharing one merged title (e.g. one load
+// column rendered as Project | Wt (t) | Priority). `numeric`/`decimals` control
+// per-sub-column formatting; `totals` is an optional bold footer row aligned to
+// the headers.
+export type XlsxGridBlock = {
+  title: string;
+  headers: string[];
+  rows: (string | number | null)[][];
+  numeric?: boolean[];
+  decimals?: number;
+  totals?: (string | number | null)[];
+};
+
+// A worksheet built from block-grids: each block is a bordered set of columns,
+// separated from the next by one blank spacer column.
+export type XlsxGridSheet = {
+  name: string;
+  blocks: XlsxGridBlock[];
+};
+
+// Export a workbook where each sheet lays blocks side by side: a merged title
+// row, a sub-header row, data rows aligned across blocks, and an optional bold
+// totals row. Every block is boxed with a medium outer border and separated by
+// a narrow blank column, with compact auto-sized columns.
+export async function exportToXlsxBlockGrid(
+  filename: string,
+  sheets: XlsxGridSheet[],
+) {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  wb.created = new Date();
+  const used = new Set<string>();
+
+  const thin = { style: "thin" as const, color: { argb: "FFB0B7C3" } };
+  const medium = { style: "medium" as const, color: { argb: "FF111827" } };
+
+  for (const sheet of sheets) {
+    const ws = wb.addWorksheet(uniqueSheetName(sheet.name, used));
+
+    // Lay blocks left to right, leaving one blank spacer column between them.
+    let col = 1;
+    const layout = sheet.blocks.map((b) => {
+      const start = col;
+      const width = b.headers.length;
+      col += width + 1; // +1 spacer
+      return { b, start, width };
+    });
+
+    const maxLen = sheet.blocks.reduce((m, b) => Math.max(m, b.rows.length), 0);
+    const TITLE = 1;
+    const HEADER = 2;
+    const DATA_START = 3;
+    const dataEnd = DATA_START + maxLen - 1; // < DATA_START when there are no rows
+    const hasTotals = sheet.blocks.some((b) => b.totals && b.totals.length);
+    const totalRowNum = hasTotals ? Math.max(dataEnd, HEADER) + 1 : -1;
+
+    // Compact per-column widths from header + data text (clamped 8..22); spacer
+    // columns stay narrow.
+    const spacerCols = new Set<number>();
+    for (let i = 0; i < layout.length - 1; i++) {
+      spacerCols.add(layout[i].start + layout[i].width);
+    }
+    for (let c = 1; c < col; c++) {
+      if (spacerCols.has(c)) {
+        ws.getColumn(c).width = 2.5;
+      }
+    }
+    for (const { b, start, width } of layout) {
+      const decimals = b.decimals ?? 2;
+      for (let j = 0; j < width; j++) {
+        const isNum = b.numeric?.[j] ?? false;
+        let maxText = b.headers[j].length;
+        for (const r of b.rows) {
+          const v = r[j];
+          if (v == null || v === "") continue;
+          const text = isNum
+            ? (toNum(v) ?? "").toLocaleString(undefined, {
+                minimumFractionDigits: decimals,
+                maximumFractionDigits: decimals,
+              })
+            : String(v);
+          if (text.length > maxText) maxText = text.length;
+        }
+        ws.getColumn(start + j).width = Math.min(22, Math.max(8, maxText + 2));
+      }
+    }
+
+    for (const { b, start, width } of layout) {
+      const decimals = b.decimals ?? 2;
+      const end = start + width - 1;
+
+      // Merged title across the block's columns.
+      if (width > 1) ws.mergeCells(TITLE, start, TITLE, end);
+      const titleCell = ws.getCell(TITLE, start);
+      titleCell.value = b.title;
+      titleCell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      titleCell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF1F2937" },
+      };
+      titleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+      // Sub-headers.
+      for (let j = 0; j < width; j++) {
+        const cell = ws.getCell(HEADER, start + j);
+        cell.value = b.headers[j];
+        cell.font = { bold: true };
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFF3F4F6" },
+        };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+      }
+
+      // Data rows.
+      for (let i = 0; i < maxLen; i++) {
+        const r = b.rows[i] ?? [];
+        for (let j = 0; j < width; j++) {
+          const cell = ws.getCell(DATA_START + i, start + j);
+          const isNum = b.numeric?.[j] ?? false;
+          const v = r[j];
+          if (isNum) {
+            const n = toNum(v);
+            cell.value = n;
+            cell.numFmt = numFmt(decimals);
+            cell.alignment = { horizontal: "right" };
+          } else {
+            cell.value = v == null ? "" : v;
+            cell.alignment = { horizontal: "left" };
+          }
+        }
+      }
+
+      // Totals row.
+      if (hasTotals && b.totals) {
+        for (let j = 0; j < width; j++) {
+          const cell = ws.getCell(totalRowNum, start + j);
+          const isNum = b.numeric?.[j] ?? false;
+          const v = b.totals[j];
+          if (isNum) {
+            cell.value = toNum(v);
+            cell.numFmt = numFmt(decimals);
+            cell.alignment = { horizontal: "right" };
+          } else {
+            cell.value = v == null ? "" : v;
+            cell.alignment = { horizontal: "left" };
+          }
+          cell.font = { bold: true };
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFEFF6FF" },
+          };
+        }
+      }
+
+      // Box the block: thin grid inside, medium border on the outer edge, with a
+      // medium rule under the header and above the totals row.
+      const rowEnd = hasTotals ? totalRowNum : Math.max(dataEnd, HEADER);
+      for (let r = TITLE; r <= rowEnd; r++) {
+        for (let c = start; c <= end; c++) {
+          const cell = ws.getCell(r, c);
+          cell.border = {
+            top:
+              r === TITLE || r === totalRowNum
+                ? medium
+                : thin,
+            bottom: r === rowEnd || r === HEADER ? medium : thin,
+            left: c === start ? medium : thin,
+            right: c === end ? medium : thin,
+          };
+        }
+      }
+    }
+
+    ws.getRow(TITLE).height = 20;
+    ws.getRow(HEADER).height = 18;
+  }
+
+  await downloadWorkbook(wb, filename);
+}
+
 // Render the AI report result into a downloadable PDF. Plain text layout with
 // wrapping and automatic page breaks (no styling dependencies).
 export async function exportAiReportPdf(filename: string, result: any) {
