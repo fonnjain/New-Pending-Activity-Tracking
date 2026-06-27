@@ -1282,7 +1282,7 @@ components:
           description: Live-resolved galvanizing thickness (mm). Null when unset/unparseable. Never stored on the pool row, never in the hash.
         thicknessSource:
           type: string
-          enum: [tlt_angle, tlt_plate, rsj_lookup, manual, unset]
+          enum: [tlt_angle, tlt_plate, rsj_exact, rsj_base, rsj_default, manual, unset]
           description: How thicknessMm was derived (or "unset" when not yet resolved).
       required:
         - id

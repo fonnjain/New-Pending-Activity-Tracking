@@ -32,7 +32,9 @@ import { Layers, Trash2, Check } from "lucide-react";
 const SOURCE_LABEL: Record<string, string> = {
   tlt_angle: "Angle (section)",
   tlt_plate: "Plate (section)",
-  rsj_lookup: "RSJ lookup",
+  rsj_exact: "RSJ exact",
+  rsj_base: "RSJ base match",
+  rsj_default: "RSJ default 6.0",
   manual: "Manual",
   unset: "Not set",
 };
@@ -135,21 +137,21 @@ function RsjThicknessCard({
   const [newKey, setNewKey] = useState("");
   const [newMm, setNewMm] = useState<number | null>(null);
 
-  const known = useMemo(
-    () => new Set(rsjRows.map((r) => r.groupKey)),
-    [rsjRows],
-  );
-
-  // RSJ group keys present in the data but not yet configured.
-  const missingKeys = useMemo(() => {
-    const keys = new Set<string>();
+  // How each RSJ group key in the current data resolved (live), so the user can
+  // see which types inherited from a base and which fell back to the 6.0 default.
+  const { baseKeys, defaultKeys } = useMemo(() => {
+    const base = new Set<string>();
+    const def = new Set<string>();
     for (const r of records) {
-      if (r.ntltSubtype === "RSJ" && r.groupKey && !known.has(r.groupKey)) {
-        keys.add(r.groupKey);
-      }
+      if (r.ntltSubtype !== "RSJ" || !r.groupKey) continue;
+      if (r.thicknessSource === "rsj_base") base.add(r.groupKey);
+      else if (r.thicknessSource === "rsj_default") def.add(r.groupKey);
     }
-    return Array.from(keys).sort();
-  }, [records, known]);
+    return {
+      baseKeys: Array.from(base).sort(),
+      defaultKeys: Array.from(def).sort(),
+    };
+  }, [records]);
 
   const save = (groupKey: string, thicknessMm: number) => {
     if (!groupKey.trim() || !(thicknessMm > 0)) return;
@@ -207,15 +209,38 @@ function RsjThicknessCard({
           </Button>
         </div>
 
-        {missingKeys.length > 0 && (
-          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+        {baseKeys.length > 0 && (
+          <div className="rounded-md border border-sky-500/40 bg-sky-500/5 p-3">
             <div className="text-sm font-medium mb-2">
-              {missingKeys.length} RSJ type
-              {missingKeys.length === 1 ? "" : "s"} in the current data have no
-              thickness yet
+              {baseKeys.length} RSJ type{baseKeys.length === 1 ? "" : "s"} in the
+              current data inherited a thickness from a base match (first two
+              dims). Add an exact type below to override.
             </div>
             <div className="flex flex-wrap gap-2">
-              {missingKeys.map((k) => (
+              {baseKeys.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setNewKey(k)}
+                  className="rounded bg-secondary px-2 py-1 text-xs font-mono hover:bg-secondary/70"
+                >
+                  {k}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {defaultKeys.length > 0 && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+            <div className="text-sm font-medium mb-2">
+              {defaultKeys.length} RSJ type{defaultKeys.length === 1 ? "" : "s"}{" "}
+              in the current data fell back to the 6.0 mm default (no exact or
+              base match). Add a precise type or pin a manual value where it
+              matters.
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {defaultKeys.map((k) => (
                 <button
                   key={k}
                   type="button"
@@ -376,9 +401,9 @@ function UnsetWorklistCard({
         <CardTitle className="text-lg">Thickness not set</CardTitle>
         <p className="text-sm text-muted-foreground">
           {counts.total} mark{counts.total === 1 ? "" : "s"} in the current view
-          have no thickness ({counts.rsj} RSJ &middot; {counts.general} General
-          &middot; {counts.other} other). RSJ resolves once its type is added
-          above; General and anything unparseable can be pinned manually here.
+          have no thickness ({counts.general} General &middot; {counts.other}{" "}
+          other). RSJ marks always resolve (exact, base match, or the 6.0
+          default); General and anything unparseable can be pinned manually here.
         </p>
       </CardHeader>
       <CardContent>

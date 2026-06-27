@@ -15,7 +15,9 @@ export type RecordThicknessSource = typeof RecordThicknessSource[keyof typeof Re
 export const RecordThicknessSource = {
   tlt_angle: 'tlt_angle',
   tlt_plate: 'tlt_plate',
-  rsj_lookup: 'rsj_lookup',
+  rsj_exact: 'rsj_exact',
+  rsj_base: 'rsj_base',
+  rsj_default: 'rsj_default',
   manual: 'manual',
   unset: 'unset',
 } as const;

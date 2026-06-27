@@ -1033,7 +1033,7 @@ export const GetImportRecordsResponseItem = zod.object({
   "groupKey": zod.string().nullable().describe('Resolved grouping key (TLT = job; NTLT = cleaned section \/ \"RSJ <dims>\").'),
   "active": zod.boolean().describe('Whether the mark participates in workflow metrics (false for FOUNDATION BOLT).'),
   "thicknessMm": zod.number().nullish().describe('Live-resolved galvanizing thickness (mm). Null when unset\/unparseable. Never stored on the pool row, never in the hash.'),
-  "thicknessSource": zod.enum(['tlt_angle', 'tlt_plate', 'rsj_lookup', 'manual', 'unset']).optional().describe('How thicknessMm was derived (or \"unset\" when not yet resolved).')
+  "thicknessSource": zod.enum(['tlt_angle', 'tlt_plate', 'rsj_exact', 'rsj_base', 'rsj_default', 'manual', 'unset']).optional().describe('How thicknessMm was derived (or \"unset\" when not yet resolved).')
 })
 export const GetImportRecordsResponse = zod.array(GetImportRecordsResponseItem)
 

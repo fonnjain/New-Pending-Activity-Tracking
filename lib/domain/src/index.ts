@@ -1232,9 +1232,15 @@ export function velocityForMark(
 export type ThicknessSource =
   | "tlt_angle"
   | "tlt_plate"
-  | "rsj_lookup"
+  | "rsj_exact"
+  | "rsj_base"
+  | "rsj_default"
   | "manual"
   | "unset";
+
+// Fallback galvanizing thickness (mm) for an NTLT/RSJ row whose cleaned type has
+// neither an exact nor an unambiguous base match in the lookup table.
+export const RSJ_DEFAULT_THICKNESS_MM = 6.0;
 
 export interface ThicknessResult {
   thicknessMm: number | null;
@@ -1285,13 +1291,56 @@ export interface ThicknessLookups {
   rsjByKey?: Map<string, number>;
   // mark_id -> manually pinned thickness (mm). Survives re-imports.
   manualByMarkId?: Map<string, number>;
+  // RSJ base ("RSJ <A>X<B>", first two dims) -> thickness (mm), built from the
+  // exact table so unlisted variations inherit their base's value.
+  rsjBaseByKey?: Map<string, number>;
+  // Bases that map to >1 distinct thickness in the table -- never guessed.
+  ambiguousRsjBases?: Set<string>;
+}
+
+// Base of a cleaned RSJ type = its first two dimensions only ("RSJ <A>X<B>"),
+// dropping the third dim and any trailing junk. Case/space-insensitive. Returns
+// null when the key has no recognizable "<A>X<B>" pair.
+export function rsjBase(key: string | null | undefined): string | null {
+  if (!key) return null;
+  const m = key
+    .toUpperCase()
+    .match(/(\d+(?:\.\d+)?)\s*X\s*(\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  return `RSJ ${m[1]}X${m[2]}`;
+}
+
+// Build the base -> thickness index from the exact RSJ table. A base resolves
+// only when every listed type sharing it agrees on one thickness; bases with
+// conflicting thicknesses are returned as ambiguous (resolver uses the default
+// and flags them for manual entry).
+export function buildRsjBaseIndex(rsjByKey: Map<string, number>): {
+  rsjBaseByKey: Map<string, number>;
+  ambiguousRsjBases: Set<string>;
+} {
+  const byBase = new Map<string, Set<number>>();
+  for (const [key, mm] of rsjByKey) {
+    if (!(Number.isFinite(mm) && mm > 0)) continue;
+    const base = rsjBase(key);
+    if (!base) continue;
+    if (!byBase.has(base)) byBase.set(base, new Set());
+    byBase.get(base)!.add(mm);
+  }
+  const rsjBaseByKey = new Map<string, number>();
+  const ambiguousRsjBases = new Set<string>();
+  for (const [base, vals] of byBase) {
+    if (vals.size === 1) rsjBaseByKey.set(base, vals.values().next().value as number);
+    else ambiguousRsjBases.add(base);
+  }
+  return { rsjBaseByKey, ambiguousRsjBases };
 }
 
 // The single resolver: decide a row's thickness + source. A manual pin (keyed by
 // mark_id) always wins (explicit user intent). Otherwise resolve by category:
 //   TLT            -> section (angle last-dim / plate number)
 //   NTLT/EARTHING  -> section (same as TLT)
-//   NTLT/RSJ       -> RSJ lookup table (NOT the section dims); unset until added
+//   NTLT/RSJ       -> exact table match -> base match (first two dims) -> 6.0
+//                     default (NOT the section dims)
 //   NTLT/GENERAL   -> manual only; unset until entered
 // Anything else / unparseable -> null + "unset" (never guessed, surfaced as a gap).
 export function resolveThickness(
@@ -1312,10 +1361,25 @@ export function resolveThickness(
     if (sub === "EARTHING") return sectionThickness(row.section);
     if (sub === "RSJ") {
       const key = row.groupKey ?? "";
-      const v = lookups.rsjByKey?.get(key);
-      return v != null && Number.isFinite(v) && v > 0
-        ? { thicknessMm: v, thicknessSource: "rsj_lookup" }
-        : { thicknessMm: null, thicknessSource: "unset" };
+      // 1) Exact cleaned-type match in the lookup table.
+      const exact = lookups.rsjByKey?.get(key);
+      if (exact != null && Number.isFinite(exact) && exact > 0) {
+        return { thicknessMm: exact, thicknessSource: "rsj_exact" };
+      }
+      // 2) Base match: inherit from any listed type sharing the first two dims
+      // (skip ambiguous bases that map to >1 thickness).
+      const base = rsjBase(key);
+      if (base && !lookups.ambiguousRsjBases?.has(base)) {
+        const bv = lookups.rsjBaseByKey?.get(base);
+        if (bv != null && Number.isFinite(bv) && bv > 0) {
+          return { thicknessMm: bv, thicknessSource: "rsj_base" };
+        }
+      }
+      // 3) Default.
+      return {
+        thicknessMm: RSJ_DEFAULT_THICKNESS_MM,
+        thicknessSource: "rsj_default",
+      };
     }
     // GENERAL (and any other NTLT subtype) is manual-only -> unset until pinned.
     return { thicknessMm: null, thicknessSource: "unset" };

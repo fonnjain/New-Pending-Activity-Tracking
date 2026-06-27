@@ -34,6 +34,7 @@ import {
   rankIn,
   sequenceForCategory,
   resolveThickness,
+  buildRsjBaseIndex,
   type VelocitySnapshot,
   type TurnaroundSettings,
   type ActivitySequence,
@@ -285,9 +286,13 @@ async function loadThicknessLookups(): Promise<ThicknessLookups> {
     db.select().from(rsjThicknessTable),
     db.select().from(manualThicknessTable),
   ]);
+  const rsjByKey = new Map(rsjRows.map((r) => [r.groupKey, r.thicknessMm]));
+  const { rsjBaseByKey, ambiguousRsjBases } = buildRsjBaseIndex(rsjByKey);
   return {
-    rsjByKey: new Map(rsjRows.map((r) => [r.groupKey, r.thicknessMm])),
+    rsjByKey,
     manualByMarkId: new Map(manualRows.map((r) => [r.markId, r.thicknessMm])),
+    rsjBaseByKey,
+    ambiguousRsjBases,
   };
 }
 
