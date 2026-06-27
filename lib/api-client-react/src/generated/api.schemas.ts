@@ -278,20 +278,6 @@ export const RecordHoleOperation = {
   NOT_SET: 'NOT_SET',
 } as const;
 
-/**
- * How holeOperation was derived (rule_fixed for Channel/Beam/RSJ, rule_thickness for Angle/Plate, not_applicable otherwise, unknown when thickness unparseable).
- * @nullable
- */
-export type RecordHoleOperationSource = typeof RecordHoleOperationSource[keyof typeof RecordHoleOperationSource] | null;
-
-
-export const RecordHoleOperationSource = {
-  rule_thickness: 'rule_thickness',
-  rule_fixed: 'rule_fixed',
-  not_applicable: 'not_applicable',
-  unknown: 'unknown',
-} as const;
-
 export interface Record {
   id: number;
   importId: number;
@@ -301,16 +287,6 @@ export interface Record {
   job: string;
   structure: string;
   markTail: string;
-  /** The mark's own number, parsed from "Mark No." (col H). */
-  mNo: string;
-  /** IS/SC/S rows only — the project-mark token in the 4-part markNumber; "" otherwise. */
-  proMno: string;
-  /** Legacy; superseded by proMno. Always "" under the current parser. */
-  projectSuffix: string;
-  /** Authoritative alias parsed from col H; overrides the Alias column in the backslash case. */
-  aliasCorrected: string;
-  /** Canonical mark key (aligns with markId). */
-  markNumber: string;
   markNo: string;
   /** @nullable */
   alias: string | null;
@@ -366,11 +342,6 @@ export interface Record {
      */
   ntltSubtype: string | null;
   /**
-     * Grouping dimension — "project" (TLT) | "section" (NTLT) | null.
-     * @nullable
-     */
-  groupType: string | null;
-  /**
      * Resolved grouping key (TLT = job; NTLT = cleaned section / "RSJ <dims>").
      * @nullable
      */
@@ -394,11 +365,108 @@ export interface Record {
      * @nullable
      */
   holeOperation?: RecordHoleOperation;
-  /**
-     * How holeOperation was derived (rule_fixed for Channel/Beam/RSJ, rule_thickness for Angle/Plate, not_applicable otherwise, unknown when thickness unparseable).
-     * @nullable
-     */
-  holeOperationSource?: RecordHoleOperationSource;
+}
+
+/**
+ * The active filter slots that determine which records are included. Mirrors the frontend filter state. Empty/null slots impose no constraint.
+
+ */
+export interface SummaryFilters {
+  /** Order-type mode — "ALL" | "TLT" | "NTLT". */
+  category: string;
+  /** @nullable */
+  ntltSubtype?: string | null;
+  /** @nullable */
+  job?: string | null;
+  /** @nullable */
+  section?: string | null;
+  /** @nullable */
+  structure?: string | null;
+  /** @nullable */
+  mark?: string | null;
+  /** @nullable */
+  contractor?: string | null;
+  /** @nullable */
+  contractorCategory?: string | null;
+  /** @nullable */
+  outVendorType?: string | null;
+  /** @nullable */
+  activity?: string | null;
+  /** @nullable */
+  holeOperation?: string | null;
+  search: string;
+}
+
+/**
+ * Resolved date window as calendar day keys (YYYYMMDD integers); start is inclusive, end is exclusive. Day keys are timezone-independent so the server filters identically to the client regardless of its timezone.
+ */
+export interface SummaryDateWindow {
+  start: number;
+  end: number;
+}
+
+export interface SummaryRequest {
+  filters: SummaryFilters;
+  /** Resolved date window (client computes from local today); null = no date filter. */
+  dateWindow?: SummaryDateWindow | null;
+}
+
+export interface SummaryTopAgedMark {
+  /** @nullable */
+  markId: string | null;
+  /** @nullable */
+  contractor: string | null;
+  /** @nullable */
+  ageingDays: number | null;
+}
+
+export interface SummaryBusiestContractor {
+  contractor: string;
+  weight: number;
+  count: number;
+}
+
+export interface SummaryLifecycleCounts {
+  green: number;
+  prewarn: number;
+  breach: number;
+  na: number;
+}
+
+/**
+ * Movement-status tallies over the visible (filtered) marks, intersected with the velocity engine's per-identity results. All zero when there is no usable history (cold start).
+
+ */
+export interface SummaryVelocityCounts {
+  stalled: number;
+  slow: number;
+  moving: number;
+  insufficient: number;
+  hasHistory: boolean;
+}
+
+/**
+ * Server-computed Overview metrics for the filtered import. Byte-identical to what the client would compute locally from the full records payload.
+
+ */
+export interface ImportSummary {
+  importId: number;
+  totalMarks: number;
+  totalQty: number;
+  totalWt: number;
+  avgAgeing: number;
+  contractorsCount: number;
+  structuresCount: number;
+  age0to30: number;
+  age31to60: number;
+  age60Plus: number;
+  notStarted: number;
+  noProductionDate: number;
+  noAgeing: number;
+  topAgedMarks: SummaryTopAgedMark[];
+  busiestContractors: SummaryBusiestContractor[];
+  lifecycle: SummaryLifecycleCounts;
+  velocity: SummaryVelocityCounts;
 }
 
 export interface SanitizeRequest {

@@ -1,0 +1,73 @@
+REPLIT AGENT PROMPT — VERIFY THE SPEED REFACTOR DIDN'T CHANGE ANY NUMBERS
+=========================================================================
+Do NOT add or change features. RUN a parity verification proving the performance work
+(server-side aggregation + payload trim) produces results IDENTICAL to the previous
+client-side computation. Produce a PASS/FAIL report with the numbers. If anything differs,
+the refactor introduced a bug — fix the refactor (not the business rules) until parity holds.
+
+PRINCIPLE
+The speed change is performance-only. Every value a user sees must be the same as before:
+same totals, same classification, same ageing, same alerts, same loads. This check compares
+the new (server-aggregated) outputs against an independent recomputation from the raw rows.
+
+METHOD — independent recompute vs displayed values
+For each metric below, compute it TWO ways and assert they're equal:
+  (A) the value the page/API now returns (server-aggregated), and
+  (B) an independent ground-truth recomputation done directly from the raw record_pool
+      rows in a one-off verification script (do NOT reuse the same aggregation code path —
+      compute it plainly from the rows so a bug in the shared path can't hide).
+Report each as PASS/FAIL with both numbers and the difference.
+
+METRICS TO CHECK (with global filters = All / no filter unless noted)
+1) HEADLINE COUNTS
+   - TLT: total marks (~42,270), balance qty, balance weight (t), distinct projects.
+   - NTLT: total marks (~360), split RSJ 301 / Earthing 44 / General 15, distinct sections.
+   - Every active row has a non-null category (no row dropped by the new path).
+
+2) CLASSIFICATION / GROUPING
+   - TLT grouped by project; NTLT grouped by section. Distinct group counts match B.
+   - Project-less RSJ/Earthing/General not absorbed into a project.
+
+3) AGEING
+   - Avg ageing and the bucket counts (Not started / numeric buckets / No production date)
+     match between A and B. C uses Assign Date; others use Last Production Date.
+
+4) WARNING STATUS (pre-warning + breach)
+   - Counts in each of the 8 states (Green / PW1 / PW2 / PW3 / Breach1 / Breach2 / Breach3 /
+     n/a) match A vs B, using the same parameters.
+
+5) VELOCITY / STUCK
+   - Stalled count and the top stuck projects/sections match (where history exists).
+
+6) FABRICATION LOAD (TLT)
+   - The 10 G. Totals (5 operations x Operational/In-Hand) match A vs B to 3 decimals.
+   - Report page vs dashboard still identical.
+
+7) THICKNESS / PUNCH-DRILL
+   - Counts by hole_operation (Punching / Drilling / Not set) match.
+   - RSJ thickness resolution (exact/base/default/manual) unchanged for a sample of rows.
+
+8) IDEMPOTENCY / DATA INTEGRITY
+   - Re-importing the same file still adds 0 rows / 0 changes (the refactor didn't alter
+     dedup). Row counts in record_pool unchanged by the refactor itself.
+
+SPOT-CHECK ROWS
+   - Pick ~10 specific marks across categories and show their key fields (category,
+     group_key, activity, ageing, status, hole_operation, thickness, fab-load cell) are the
+     same before/after.
+
+PERFORMANCE (report, don't gate on exact numbers)
+   - Show page/endpoint load time before vs after (rough), and payload size before vs after,
+     to confirm the speed goal was met.
+
+OUTPUT
+   - A PASS/FAIL table for checks 1-8 + spot-checks, each with A value, B value, diff.
+   - If any FAIL: state the cause in the new aggregation/payload path, fix THAT (do not
+     change the agreed business rules), and re-run until all PASS.
+   - Confirm explicitly: "No business logic changed; outputs identical to pre-refactor;
+     only performance improved."
+
+ACCEPTANCE
+   - All metrics match between server-aggregated output and independent recompute (A == B).
+   - Idempotent import preserved; no rows dropped; spot-check marks identical.
+   - Load time / payload improved. Numbers unchanged.

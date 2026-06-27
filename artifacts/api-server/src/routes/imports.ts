@@ -10,6 +10,7 @@ import {
   importRowsTable,
   uploadStagingTable,
   settingsTable,
+  contractorCategoriesTable,
   rsjThicknessTable,
   manualThicknessTable,
   SETTINGS_SINGLETON_ID,
@@ -23,6 +24,8 @@ import {
   GetImportChangesParams,
   GetImportMovementParams,
   GetImportVelocityParams,
+  GetImportSummaryParams,
+  GetImportSummaryBody,
   DeleteImportParams,
   CompareImportsQueryParams,
 } from "@workspace/api-zod";
@@ -36,6 +39,11 @@ import {
   resolveThickness,
   buildRsjBaseIndex,
   deriveHoleOperation,
+  filterRecords,
+  summarizeOverview,
+  lifecycleCounts,
+  identityKey,
+  type RecordFilters,
   type VelocitySnapshot,
   type TurnaroundSettings,
   type ActivitySequence,
@@ -247,11 +255,6 @@ function serializeRecord(
     job: r.job,
     structure: r.structure,
     markTail: r.markTail,
-    mNo: r.mNo,
-    proMno: r.proMno,
-    projectSuffix: r.projectSuffix,
-    aliasCorrected: r.aliasCorrected,
-    markNumber: r.markNumber,
     markNo: r.markNo,
     alias: r.alias,
     section: r.section,
@@ -275,14 +278,12 @@ function serializeRecord(
     currentStepIndex,
     category: r.category,
     ntltSubtype: r.ntltSubtype,
-    groupType: r.groupType,
     groupKey: r.groupKey,
     active: r.active,
     thicknessMm,
     thicknessSource,
     sectionType: hole.sectionType,
     holeOperation: hole.holeOperation,
-    holeOperationSource: hole.holeOperationSource,
   };
 }
 
@@ -1055,6 +1056,120 @@ router.get("/imports/:id/records", async (req, res): Promise<void> => {
   res.json(out);
 });
 
+// Server-side Overview summary. Computes every headline metric the Overview page
+// renders from the import's records with the supplied filter set + resolved date
+// window applied, so the client never has to download the full ~40 MB records
+// payload just to render the dashboard. Filtering + aggregation run the SAME
+// shared @workspace/domain code the client uses, so the numbers are identical by
+// construction. Purely additive and read-only.
+router.post("/imports/:id/summary", async (req, res): Promise<void> => {
+  const params = GetImportSummaryParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const body = GetImportSummaryBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: body.error.message });
+    return;
+  }
+
+  const [target] = await db
+    .select()
+    .from(importsTable)
+    .where(eq(importsTable.id, params.data.id));
+  if (!target) {
+    res.status(404).json({ error: "Import not found" });
+    return;
+  }
+
+  // Serialize the full record set EXACTLY as /records does, then apply the same
+  // shared filter + aggregators the client uses (byte-identical by construction).
+  const rows = await loadMembership(db, params.data.id);
+  rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
+  const thicknessLookups = await loadThicknessLookups();
+  const serialized: ReturnType<typeof serializeRecord>[] = [];
+  let nextId = 1;
+  for (const { pool, copies } of rows) {
+    for (let c = 0; c < copies; c++) {
+      serialized.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups));
+    }
+  }
+
+  // Contractor sub-category overlay (normalized name -> category + tags), matching
+  // the client's useContractorCategoryMap. Only consulted when those filters are
+  // active, but always cheap to build.
+  const catRows = await db.select().from(contractorCategoriesTable);
+  const categoryMap = new Map<string, { category: string; outVendorType: string[] }>();
+  for (const row of catRows) {
+    categoryMap.set(row.nameKey, {
+      category: row.category,
+      outVendorType: row.outVendorType ?? [],
+    });
+  }
+
+  const f = body.data.filters;
+  const filters: RecordFilters = {
+    category: f.category,
+    ntltSubtype: f.ntltSubtype ?? null,
+    job: f.job ?? null,
+    section: f.section ?? null,
+    structure: f.structure ?? null,
+    mark: f.mark ?? null,
+    contractor: f.contractor ?? null,
+    contractorCategory: f.contractorCategory ?? null,
+    outVendorType: f.outVendorType ?? null,
+    activity: f.activity ?? null,
+    holeOperation: f.holeOperation ?? null,
+    search: f.search,
+  };
+  const dateWindow = body.data.dateWindow ?? null;
+
+  const filtered = filterRecords(serialized, filters, { dateWindow, categoryMap });
+  const overview = summarizeOverview(filtered);
+
+  const [settingsRow] = await db
+    .select()
+    .from(settingsTable)
+    .where(eq(settingsTable.id, SETTINGS_SINGLETON_ID))
+    .limit(1);
+  const settings: TurnaroundSettings = migrateTurnaroundSettings(
+    settingsRow
+      ? {
+          activities: settingsRow.activities,
+          perProject: settingsRow.perProject,
+          stalledDays: settingsRow.stalledDays,
+        }
+      : {},
+  );
+
+  const lifecycle = lifecycleCounts(filtered, settings);
+
+  // Velocity: intersect the engine's per-identity items with the visible
+  // (filtered) identities, on the SAME identity basis as the /stuck page and the
+  // Overview snapshot card, so totals can never disagree.
+  const { items, hasHistory } = await computeVelocityItems(target, settings);
+  const visible = new Set(filtered.map((r) => identityKey(r.markId, r.jobCardNo)));
+  let stalled = 0;
+  let slow = 0;
+  let moving = 0;
+  let insufficient = 0;
+  for (const v of items) {
+    if (!visible.has(identityKey(v.markId, v.jobCardNo))) continue;
+    if (v.status === "stalled") stalled++;
+    else if (v.status === "slow") slow++;
+    else if (v.status === "moving") moving++;
+    else insufficient++;
+  }
+
+  res.json({
+    importId: target.id,
+    ...overview,
+    lifecycle,
+    velocity: { stalled, slow, moving, insufficient, hasHistory },
+  });
+});
+
 router.get("/imports/:id/changes", async (req, res): Promise<void> => {
   const params = GetImportChangesParams.safeParse(req.params);
   if (!params.success) {
@@ -1239,41 +1354,14 @@ function mean(values: number[]): number | null {
   return values.reduce((a, b) => a + b, 0) / values.length;
 }
 
-// Per-identity velocity (pace / ETA / trend) with project / contractor / stage
-// roll-ups. Walks prior imports once to build each mark's snapshot series, then
-// classifies via the deterministic @workspace/domain engine. Purely advisory —
-// never mutates parsing / activity / dedup / ageing / threshold math.
-router.get("/imports/:id/velocity", async (req, res): Promise<void> => {
-  const params = GetImportVelocityParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-
-  const [target] = await db
-    .select()
-    .from(importsTable)
-    .where(eq(importsTable.id, params.data.id));
-  if (!target) {
-    res.status(404).json({ error: "Import not found" });
-    return;
-  }
-
-  const [settingsRow] = await db
-    .select()
-    .from(settingsTable)
-    .where(eq(settingsTable.id, SETTINGS_SINGLETON_ID))
-    .limit(1);
-  const settings: TurnaroundSettings = migrateTurnaroundSettings(
-    settingsRow
-      ? {
-          activities: settingsRow.activities,
-          perProject: settingsRow.perProject,
-          stalledDays: settingsRow.stalledDays,
-        }
-      : {},
-  );
-
+// Shared per-identity velocity computation: builds each mark's snapshot series
+// from the import history and classifies via the deterministic domain engine.
+// Used by both the /velocity route and the Overview /summary endpoint so their
+// movement-status tallies can never disagree. Purely advisory / read-only.
+async function computeVelocityItems(
+  target: typeof importsTable.$inferSelect,
+  settings: TurnaroundSettings,
+) {
   const current = await loadVelocityStates(target.id);
   const currentMs = importDateMs(target.reportDate, target.createdAt);
 
@@ -1367,6 +1455,46 @@ router.get("/imports/:id/velocity", async (req, res): Promise<void> => {
     };
   });
 
+  return { items, hasHistory: priorImports.length > 0, windowReports: priorImports.length + 1 };
+}
+
+// Per-identity velocity (pace / ETA / trend) with project / contractor / stage
+// roll-ups. Walks prior imports once to build each mark's snapshot series, then
+// classifies via the deterministic @workspace/domain engine. Purely advisory —
+// never mutates parsing / activity / dedup / ageing / threshold math.
+router.get("/imports/:id/velocity", async (req, res): Promise<void> => {
+  const params = GetImportVelocityParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const [target] = await db
+    .select()
+    .from(importsTable)
+    .where(eq(importsTable.id, params.data.id));
+  if (!target) {
+    res.status(404).json({ error: "Import not found" });
+    return;
+  }
+
+  const [settingsRow] = await db
+    .select()
+    .from(settingsTable)
+    .where(eq(settingsTable.id, SETTINGS_SINGLETON_ID))
+    .limit(1);
+  const settings: TurnaroundSettings = migrateTurnaroundSettings(
+    settingsRow
+      ? {
+          activities: settingsRow.activities,
+          perProject: settingsRow.perProject,
+          stalledDays: settingsRow.stalledDays,
+        }
+      : {},
+  );
+
+  const { items, hasHistory, windowReports } = await computeVelocityItems(target, settings);
+
   // Roll-ups. stuckScore = (stalled + 0.5*slow) / markCount (0..1).
   type Acc = {
     paces: number[];
@@ -1448,8 +1576,8 @@ router.get("/imports/:id/velocity", async (req, res): Promise<void> => {
 
   res.json({
     importId: target.id,
-    hasHistory: priorImports.length > 0,
-    windowReports: priorImports.length + 1,
+    hasHistory,
+    windowReports,
     items,
     projects,
     contractors,

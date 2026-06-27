@@ -6,7 +6,6 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { RecordHoleOperation } from './recordHoleOperation';
-import type { RecordHoleOperationSource } from './recordHoleOperationSource';
 import type { RecordSectionType } from './recordSectionType';
 import type { RecordThicknessSource } from './recordThicknessSource';
 
@@ -19,16 +18,6 @@ export interface Record {
   job: string;
   structure: string;
   markTail: string;
-  /** The mark's own number, parsed from "Mark No." (col H). */
-  mNo: string;
-  /** IS/SC/S rows only — the project-mark token in the 4-part markNumber; "" otherwise. */
-  proMno: string;
-  /** Legacy; superseded by proMno. Always "" under the current parser. */
-  projectSuffix: string;
-  /** Authoritative alias parsed from col H; overrides the Alias column in the backslash case. */
-  aliasCorrected: string;
-  /** Canonical mark key (aligns with markId). */
-  markNumber: string;
   markNo: string;
   /** @nullable */
   alias: string | null;
@@ -84,11 +73,6 @@ export interface Record {
      */
   ntltSubtype: string | null;
   /**
-     * Grouping dimension — "project" (TLT) | "section" (NTLT) | null.
-     * @nullable
-     */
-  groupType: string | null;
-  /**
      * Resolved grouping key (TLT = job; NTLT = cleaned section / "RSJ <dims>").
      * @nullable
      */
@@ -112,9 +96,4 @@ export interface Record {
      * @nullable
      */
   holeOperation?: RecordHoleOperation;
-  /**
-     * How holeOperation was derived (rule_fixed for Channel/Beam/RSJ, rule_thickness for Angle/Plate, not_applicable otherwise, unknown when thickness unparseable).
-     * @nullable
-     */
-  holeOperationSource?: RecordHoleOperationSource;
 }

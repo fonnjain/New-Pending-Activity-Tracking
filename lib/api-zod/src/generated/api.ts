@@ -1094,11 +1094,6 @@ export const GetImportRecordsResponseItem = zod.object({
   "job": zod.string(),
   "structure": zod.string(),
   "markTail": zod.string(),
-  "mNo": zod.string().describe('The mark\'s own number, parsed from \"Mark No.\" (col H).'),
-  "proMno": zod.string().describe('IS\/SC\/S rows only — the project-mark token in the 4-part markNumber; \"\" otherwise.'),
-  "projectSuffix": zod.string().describe('Legacy; superseded by proMno. Always \"\" under the current parser.'),
-  "aliasCorrected": zod.string().describe('Authoritative alias parsed from col H; overrides the Alias column in the backslash case.'),
-  "markNumber": zod.string().describe('Canonical mark key (aligns with markId).'),
   "markNo": zod.string(),
   "alias": zod.string().nullable(),
   "section": zod.string().nullable(),
@@ -1122,16 +1117,84 @@ export const GetImportRecordsResponseItem = zod.object({
   "currentStepIndex": zod.number().nullable(),
   "category": zod.string().nullable().describe('Mark category — \"TLT\" | \"NTLT\" | null. Drives the per-category process sequence.'),
   "ntltSubtype": zod.string().nullable().describe('NTLT subtype — \"RSJ\" | \"EARTHING\" | \"GENERAL\" | null (null for TLT\/unknown).'),
-  "groupType": zod.string().nullable().describe('Grouping dimension — \"project\" (TLT) | \"section\" (NTLT) | null.'),
   "groupKey": zod.string().nullable().describe('Resolved grouping key (TLT = job; NTLT = cleaned section \/ \"RSJ <dims>\").'),
   "active": zod.boolean().describe('Whether the mark participates in workflow metrics (false for FOUNDATION BOLT).'),
   "thicknessMm": zod.number().nullish().describe('Live-resolved galvanizing thickness (mm). Null when unset\/unparseable. Never stored on the pool row, never in the hash.'),
   "thicknessSource": zod.enum(['tlt_angle', 'tlt_plate', 'rsj_exact', 'rsj_base', 'rsj_default', 'manual', 'unset']).optional().describe('How thicknessMm was derived (or \"unset\" when not yet resolved).'),
   "sectionType": zod.union([zod.literal('ANGLE'),zod.literal('PLATE'),zod.literal('CHANNEL'),zod.literal('BEAM'),zod.literal('RSJ'),zod.literal('FLAT'),zod.literal('PIPE'),zod.literal('ROUND'),zod.literal('GRATING'),zod.literal('OTHER'),zod.literal(null)]).nullish().describe('Derived section family from the Section string. Null only on legacy rows pending backfill.'),
-  "holeOperation": zod.union([zod.literal('PUNCHING'),zod.literal('DRILLING'),zod.literal('NOT_SET'),zod.literal(null)]).nullish().describe('Derived hole operation. Channel\/Beam\/RSJ always DRILLING; Angle\/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.'),
-  "holeOperationSource": zod.union([zod.literal('rule_thickness'),zod.literal('rule_fixed'),zod.literal('not_applicable'),zod.literal('unknown'),zod.literal(null)]).nullish().describe('How holeOperation was derived (rule_fixed for Channel\/Beam\/RSJ, rule_thickness for Angle\/Plate, not_applicable otherwise, unknown when thickness unparseable).')
+  "holeOperation": zod.union([zod.literal('PUNCHING'),zod.literal('DRILLING'),zod.literal('NOT_SET'),zod.literal(null)]).nullish().describe('Derived hole operation. Channel\/Beam\/RSJ always DRILLING; Angle\/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.')
 })
 export const GetImportRecordsResponse = zod.array(GetImportRecordsResponseItem)
+
+
+/**
+ * Computes the Overview page's headline metrics SERVER-SIDE from the import's records with the supplied filter set and (optional) resolved date window applied, so the client never has to download the full ~40 MB records payload just to render the dashboard. The filtering and aggregation run the exact same shared code the client uses, so the numbers are identical by construction. Purely additive and read-only — never changes parsing, activity values, qty, dedup, or ageing math. The date window is passed as resolved epoch-ms bounds (computed from the client's local "today") so date classification matches the client regardless of server timezone.
+
+ * @summary Get a server-computed Overview summary for a filtered import
+ */
+export const GetImportSummaryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetImportSummaryBody = zod.object({
+  "filters": zod.object({
+  "category": zod.string().describe('Order-type mode — \"ALL\" | \"TLT\" | \"NTLT\".'),
+  "ntltSubtype": zod.string().nullish(),
+  "job": zod.string().nullish(),
+  "section": zod.string().nullish(),
+  "structure": zod.string().nullish(),
+  "mark": zod.string().nullish(),
+  "contractor": zod.string().nullish(),
+  "contractorCategory": zod.string().nullish(),
+  "outVendorType": zod.string().nullish(),
+  "activity": zod.string().nullish(),
+  "holeOperation": zod.string().nullish(),
+  "search": zod.string()
+}).describe('The active filter slots that determine which records are included. Mirrors the frontend filter state. Empty\/null slots impose no constraint.\n'),
+  "dateWindow": zod.union([zod.object({
+  "start": zod.number(),
+  "end": zod.number()
+}).describe('Resolved date window as calendar day keys (YYYYMMDD integers); start is inclusive, end is exclusive. Day keys are timezone-independent so the server filters identically to the client regardless of its timezone.'),zod.null()]).optional().describe('Resolved date window (client computes from local today); null = no date filter.')
+})
+
+export const GetImportSummaryResponse = zod.object({
+  "importId": zod.number(),
+  "totalMarks": zod.number(),
+  "totalQty": zod.number(),
+  "totalWt": zod.number(),
+  "avgAgeing": zod.number(),
+  "contractorsCount": zod.number(),
+  "structuresCount": zod.number(),
+  "age0to30": zod.number(),
+  "age31to60": zod.number(),
+  "age60Plus": zod.number(),
+  "notStarted": zod.number(),
+  "noProductionDate": zod.number(),
+  "noAgeing": zod.number(),
+  "topAgedMarks": zod.array(zod.object({
+  "markId": zod.string().nullable(),
+  "contractor": zod.string().nullable(),
+  "ageingDays": zod.number().nullable()
+})),
+  "busiestContractors": zod.array(zod.object({
+  "contractor": zod.string(),
+  "weight": zod.number(),
+  "count": zod.number()
+})),
+  "lifecycle": zod.object({
+  "green": zod.number(),
+  "prewarn": zod.number(),
+  "breach": zod.number(),
+  "na": zod.number()
+}),
+  "velocity": zod.object({
+  "stalled": zod.number(),
+  "slow": zod.number(),
+  "moving": zod.number(),
+  "insufficient": zod.number(),
+  "hasHistory": zod.boolean()
+}).describe('Movement-status tallies over the visible (filtered) marks, intersected with the velocity engine\'s per-identity results. All zero when there is no usable history (cold start).\n')
+}).describe('Server-computed Overview metrics for the filtered import. Byte-identical to what the client would compute locally from the full records payload.\n')
 
 
 /**

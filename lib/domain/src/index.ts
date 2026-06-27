@@ -1814,3 +1814,6 @@ export function resolveThickness(
 
   return { thicknessMm: null, thicknessSource: "unset" };
 }
+
+// Shared record filtering + aggregation (client + server single source of truth).
+export * from "./aggregate";

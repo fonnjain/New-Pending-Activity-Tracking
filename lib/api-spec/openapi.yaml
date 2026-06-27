@@ -680,6 +680,47 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /imports/{id}/summary:
+    post:
+      operationId: getImportSummary
+      tags: [imports]
+      summary: Get a server-computed Overview summary for a filtered import
+      description: >
+        Computes the Overview page's headline metrics SERVER-SIDE from the
+        import's records with the supplied filter set and (optional) resolved
+        date window applied, so the client never has to download the full ~40 MB
+        records payload just to render the dashboard. The filtering and
+        aggregation run the exact same shared code the client uses, so the
+        numbers are identical by construction. Purely additive and read-only —
+        never changes parsing, activity values, qty, dedup, or ageing math. The
+        date window is passed as resolved epoch-ms bounds (computed from the
+        client's local "today") so date classification matches the client
+        regardless of server timezone.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SummaryRequest"
+      responses:
+        "200":
+          description: Server-computed Overview summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportSummary"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /imports/{id}/movement:
     get:
       operationId: getImportMovement
@@ -1335,21 +1376,6 @@ components:
           type: string
         markTail:
           type: string
-        mNo:
-          type: string
-          description: The mark's own number, parsed from "Mark No." (col H).
-        proMno:
-          type: string
-          description: IS/SC/S rows only — the project-mark token in the 4-part markNumber; "" otherwise.
-        projectSuffix:
-          type: string
-          description: Legacy; superseded by proMno. Always "" under the current parser.
-        aliasCorrected:
-          type: string
-          description: Authoritative alias parsed from col H; overrides the Alias column in the backslash case.
-        markNumber:
-          type: string
-          description: Canonical mark key (aligns with markId).
         markNo:
           type: string
         alias:
@@ -1402,9 +1428,6 @@ components:
         ntltSubtype:
           type: ["string", "null"]
           description: NTLT subtype — "RSJ" | "EARTHING" | "GENERAL" | null (null for TLT/unknown).
-        groupType:
-          type: ["string", "null"]
-          description: Grouping dimension — "project" (TLT) | "section" (NTLT) | null.
         groupKey:
           type: ["string", "null"]
           description: Resolved grouping key (TLT = job; NTLT = cleaned section / "RSJ <dims>").
@@ -1426,10 +1449,6 @@ components:
           type: ["string", "null"]
           enum: [PUNCHING, DRILLING, NOT_SET, null]
           description: Derived hole operation. Channel/Beam/RSJ always DRILLING; Angle/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.
-        holeOperationSource:
-          type: ["string", "null"]
-          enum: [rule_thickness, rule_fixed, not_applicable, unknown, null]
-          description: How holeOperation was derived (rule_fixed for Channel/Beam/RSJ, rule_thickness for Angle/Plate, not_applicable otherwise, unknown when thickness unparseable).
       required:
         - id
         - importId
@@ -1438,11 +1457,6 @@ components:
         - job
         - structure
         - markTail
-        - mNo
-        - proMno
-        - projectSuffix
-        - aliasCorrected
-        - markNumber
         - markNo
         - alias
         - section
@@ -1466,9 +1480,195 @@ components:
         - currentStepIndex
         - category
         - ntltSubtype
-        - groupType
         - groupKey
         - active
+    SummaryFilters:
+      type: object
+      description: >
+        The active filter slots that determine which records are included. Mirrors
+        the frontend filter state. Empty/null slots impose no constraint.
+      properties:
+        category:
+          type: string
+          description: Order-type mode — "ALL" | "TLT" | "NTLT".
+        ntltSubtype:
+          type: ["string", "null"]
+        job:
+          type: ["string", "null"]
+        section:
+          type: ["string", "null"]
+        structure:
+          type: ["string", "null"]
+        mark:
+          type: ["string", "null"]
+        contractor:
+          type: ["string", "null"]
+        contractorCategory:
+          type: ["string", "null"]
+        outVendorType:
+          type: ["string", "null"]
+        activity:
+          type: ["string", "null"]
+        holeOperation:
+          type: ["string", "null"]
+        search:
+          type: string
+      required:
+        - category
+        - search
+    SummaryDateWindow:
+      type: object
+      description: >-
+        Resolved date window as calendar day keys (YYYYMMDD integers); start is
+        inclusive, end is exclusive. Day keys are timezone-independent so the
+        server filters identically to the client regardless of its timezone.
+      properties:
+        start:
+          type: number
+        end:
+          type: number
+      required:
+        - start
+        - end
+    SummaryRequest:
+      type: object
+      properties:
+        filters:
+          $ref: "#/components/schemas/SummaryFilters"
+        dateWindow:
+          oneOf:
+            - $ref: "#/components/schemas/SummaryDateWindow"
+            - type: "null"
+          description: Resolved date window (client computes from local today); null = no date filter.
+      required:
+        - filters
+    SummaryTopAgedMark:
+      type: object
+      properties:
+        markId:
+          type: ["string", "null"]
+        contractor:
+          type: ["string", "null"]
+        ageingDays:
+          type: ["integer", "null"]
+      required:
+        - markId
+        - contractor
+        - ageingDays
+    SummaryBusiestContractor:
+      type: object
+      properties:
+        contractor:
+          type: string
+        weight:
+          type: number
+        count:
+          type: integer
+      required:
+        - contractor
+        - weight
+        - count
+    SummaryLifecycleCounts:
+      type: object
+      properties:
+        green:
+          type: integer
+        prewarn:
+          type: integer
+        breach:
+          type: integer
+        na:
+          type: integer
+      required:
+        - green
+        - prewarn
+        - breach
+        - na
+    SummaryVelocityCounts:
+      type: object
+      description: >
+        Movement-status tallies over the visible (filtered) marks, intersected
+        with the velocity engine's per-identity results. All zero when there is
+        no usable history (cold start).
+      properties:
+        stalled:
+          type: integer
+        slow:
+          type: integer
+        moving:
+          type: integer
+        insufficient:
+          type: integer
+        hasHistory:
+          type: boolean
+      required:
+        - stalled
+        - slow
+        - moving
+        - insufficient
+        - hasHistory
+    ImportSummary:
+      type: object
+      description: >
+        Server-computed Overview metrics for the filtered import. Byte-identical
+        to what the client would compute locally from the full records payload.
+      properties:
+        importId:
+          type: integer
+        totalMarks:
+          type: integer
+        totalQty:
+          type: number
+        totalWt:
+          type: number
+        avgAgeing:
+          type: integer
+        contractorsCount:
+          type: integer
+        structuresCount:
+          type: integer
+        age0to30:
+          type: integer
+        age31to60:
+          type: integer
+        age60Plus:
+          type: integer
+        notStarted:
+          type: integer
+        noProductionDate:
+          type: integer
+        noAgeing:
+          type: integer
+        topAgedMarks:
+          type: array
+          items:
+            $ref: "#/components/schemas/SummaryTopAgedMark"
+        busiestContractors:
+          type: array
+          items:
+            $ref: "#/components/schemas/SummaryBusiestContractor"
+        lifecycle:
+          $ref: "#/components/schemas/SummaryLifecycleCounts"
+        velocity:
+          $ref: "#/components/schemas/SummaryVelocityCounts"
+      required:
+        - importId
+        - totalMarks
+        - totalQty
+        - totalWt
+        - avgAgeing
+        - contractorsCount
+        - structuresCount
+        - age0to30
+        - age31to60
+        - age60Plus
+        - notStarted
+        - noProductionDate
+        - noAgeing
+        - topAgedMarks
+        - busiestContractors
+        - lifecycle
+        - velocity
     SanitizeRequest:
       type: object
       properties:

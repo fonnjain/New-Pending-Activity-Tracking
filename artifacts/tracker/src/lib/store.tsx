@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
 import { useListImports, useListContractorCategories, type Record } from "@workspace/api-client-react";
-import { bundleActivitySet, getActivityBundle, normalizeContractorName } from "@workspace/domain";
+import { getActivityBundle, normalizeContractorName, filterRecords, parseAssignDateMs, dateToDayKey, type RecordFilters } from "@workspace/domain";
 
 // Sentinel prefix that marks an activity-bundle selection inside the single
 // `filters.activity` slot. A plain activity code (e.g. "Y") is matched exactly;
@@ -172,18 +172,11 @@ export function dateRangeWindow(code: string | null): { start: Date; end: Date }
   }
 }
 
+// Thin wrapper over the shared domain parser (single source of truth) returning
+// a Date for the local date-window helpers above.
 function parseAssignDate(s: string | null | undefined): Date | null {
-  if (!s) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
-  if (!m) return null;
-  const yy = Number(m[1]);
-  const mo = Number(m[2]);
-  const dd = Number(m[3]);
-  if (mo < 1 || mo > 12 || dd < 1 || dd > 31) return null;
-  const d = new Date(yy, mo - 1, dd);
-  // Reject values that JS would silently normalize (e.g. 2025-02-30).
-  if (d.getFullYear() !== yy || d.getMonth() !== mo - 1 || d.getDate() !== dd) return null;
-  return d;
+  const ms = parseAssignDateMs(s);
+  return ms === null ? null : new Date(ms);
 }
 
 export function isWithinDateRange(assignDate: string | null | undefined, code: string | null): boolean {
@@ -229,81 +222,41 @@ export function contractorCategoryFor(
   return hit ?? { category: "UNCLASSIFIED", outVendorType: [], displayName: contractor ?? "" };
 }
 
+// Resolve the active filters into the shared RecordFilters shape plus the
+// concrete date window (epoch ms, computed from LOCAL today). The server
+// summary endpoint receives this resolved window so both sides classify dates
+// identically regardless of server timezone.
+export function resolveActiveFilters(filters: Filters): {
+  filters: RecordFilters;
+  dateWindow: { start: number; end: number } | null;
+} {
+  const win = dateRangeWindow(filters.dateRange);
+  return {
+    filters: {
+      category: filters.category,
+      ntltSubtype: filters.ntltSubtype,
+      job: filters.job,
+      section: filters.section,
+      structure: filters.structure,
+      mark: filters.mark,
+      contractor: filters.contractor,
+      contractorCategory: filters.contractorCategory,
+      outVendorType: filters.outVendorType,
+      activity: filters.activity,
+      holeOperation: filters.holeOperation,
+      search: filters.search,
+    },
+    dateWindow: win ? { start: dateToDayKey(win.start), end: dateToDayKey(win.end) } : null,
+  };
+}
+
 export function useFilteredRecords(records: Record[] | undefined) {
   const { filters } = useTracker();
   const categoryMap = useContractorCategoryMap();
 
   return useMemo(() => {
     if (!records) return [];
-
-    const win = dateRangeWindow(filters.dateRange);
-    const q = filters.search.trim().toLowerCase();
-
-    // Resolve an activity-bundle selection once per pass. A "bundle:<id>" value
-    // OR-matches the bundle's member codes; a plain code matches exactly.
-    const activityFilter = filters.activity;
-    const bundleSet =
-      activityFilter && activityFilter.startsWith(BUNDLE_PREFIX)
-        ? bundleActivitySet(activityFilter.slice(BUNDLE_PREFIX.length))
-        : null;
-
-    // Smart search: if the query is exactly a job code, treat it as a job
-    // filter (show only that job). Otherwise it's a free-text mark search.
-    // This resolves the common confusion where a mark is literally named after
-    // another job's number (e.g. job 900 has a mark named "902"), which would
-    // otherwise make a "902" search surface job-900 rows.
-    const jobCodes = q ? new Set(records.map((r) => r.job?.toLowerCase()).filter(Boolean)) : null;
-    const searchIsJob = !!q && !!jobCodes && jobCodes.has(q);
-
-    return records.filter((r) => {
-      if (win) {
-        const d = parseAssignDate(r.assignDate);
-        if (!d || d < win.start || d >= win.end) return false;
-      }
-      // "All" Order Type includes both TLT and NTLT (no category gate).
-      if (filters.category !== "ALL" && (r.category || "TLT") !== filters.category) return false;
-      // Inactive marks (e.g. FOUNDATION BOLT) are captured but excluded from
-      // every workflow metric/view. TLT rows are always active, so this never
-      // changes TLT behaviour.
-      if (r.active === false) return false;
-      if (filters.ntltSubtype && r.ntltSubtype !== filters.ntltSubtype) return false;
-      if (filters.job && r.job !== filters.job) return false;
-      if (filters.section && r.groupKey !== filters.section) return false;
-      if (filters.structure && r.structure !== filters.structure) return false;
-      if (filters.mark && r.markId !== filters.mark && r.markTail !== filters.mark) return false;
-      if (filters.contractor && r.contractor !== filters.contractor) return false;
-      if (filters.contractorCategory || filters.outVendorType) {
-        const info = contractorCategoryFor(r.contractor, categoryMap);
-        if (filters.contractorCategory && info.category !== filters.contractorCategory) return false;
-        if (filters.outVendorType && !info.outVendorType.includes(filters.outVendorType)) return false;
-      }
-      if (activityFilter) {
-        if (bundleSet) {
-          if (!bundleSet.has((r.activity ?? "").toUpperCase())) return false;
-        } else if (r.activity !== activityFilter) {
-          return false;
-        }
-      }
-      // Hole operation (derived). Legacy rows pending backfill report it live, so
-      // null only happens transiently; coalesce to NOT_SET for a stable match.
-      if (filters.holeOperation && (r.holeOperation || "NOT_SET") !== filters.holeOperation) {
-        return false;
-      }
-
-      if (q) {
-        if (searchIsJob) {
-          if (r.job?.toLowerCase() !== q) return false;
-        } else {
-          const matchSearch =
-            r.markId?.toLowerCase().includes(q) ||
-            r.markTail?.toLowerCase().includes(q) ||
-            r.section?.toLowerCase().includes(q) ||
-            r.contractor?.toLowerCase().includes(q);
-          if (!matchSearch) return false;
-        }
-      }
-
-      return true;
-    });
+    const { filters: rf, dateWindow } = resolveActiveFilters(filters);
+    return filterRecords(records, rf, { dateWindow, categoryMap });
   }, [records, filters, categoryMap]);
 }

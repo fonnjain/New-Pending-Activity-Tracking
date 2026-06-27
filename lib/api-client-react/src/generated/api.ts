@@ -38,6 +38,7 @@ import type {
   FabricationPriorityInput,
   HealthStatus,
   Import,
+  ImportSummary,
   ImportUpload,
   ManualThickness,
   ManualThicknessInput,
@@ -53,6 +54,7 @@ import type {
   SanitizeRequest,
   SanitizeResult,
   StageResult,
+  SummaryRequest,
   TurnaroundSettings,
   UploadResult,
   ValidateRequest,
@@ -2292,6 +2294,80 @@ export function useGetImportRecords<TData = Awaited<ReturnType<typeof getImportR
 
 
 
+
+export const getGetImportSummaryUrl = (id: number,) => {
+
+
+
+
+  return `/api/imports/${id}/summary`
+}
+
+/**
+ * Computes the Overview page's headline metrics SERVER-SIDE from the import's records with the supplied filter set and (optional) resolved date window applied, so the client never has to download the full ~40 MB records payload just to render the dashboard. The filtering and aggregation run the exact same shared code the client uses, so the numbers are identical by construction. Purely additive and read-only — never changes parsing, activity values, qty, dedup, or ageing math. The date window is passed as resolved epoch-ms bounds (computed from the client's local "today") so date classification matches the client regardless of server timezone.
+
+ * @summary Get a server-computed Overview summary for a filtered import
+ */
+export const getImportSummary = async (id: number,
+    summaryRequest: SummaryRequest, options?: RequestInit): Promise<ImportSummary> => {
+
+  return customFetch<ImportSummary>(getGetImportSummaryUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      summaryRequest,)
+  }
+);}
+
+
+
+
+export const getGetImportSummaryMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getImportSummary>>, TError,{id: number;data: BodyType<SummaryRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof getImportSummary>>, TError,{id: number;data: BodyType<SummaryRequest>}, TContext> => {
+
+const mutationKey = ['getImportSummary'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getImportSummary>>, {id: number;data: BodyType<SummaryRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  getImportSummary(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetImportSummaryMutationResult = NonNullable<Awaited<ReturnType<typeof getImportSummary>>>
+    export type GetImportSummaryMutationBody = BodyType<SummaryRequest>
+    export type GetImportSummaryMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Get a server-computed Overview summary for a filtered import
+ */
+export const useGetImportSummary = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getImportSummary>>, TError,{id: number;data: BodyType<SummaryRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof getImportSummary>>,
+        TError,
+        {id: number;data: BodyType<SummaryRequest>},
+        TContext
+      > => {
+      return useMutation(getGetImportSummaryMutationOptions(options));
+    }
 
 export const getGetImportMovementUrl = (id: number,) => {
 

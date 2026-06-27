@@ -1,20 +1,17 @@
-import { useTracker, useFilteredRecords } from "@/lib/store";
-import { useGetImportRecords, getGetImportRecordsQueryKey, type Record as ApiRecord } from "@workspace/api-client-react";
+import { useTracker, resolveActiveFilters } from "@/lib/store";
+import { getImportSummary, type SummaryRequest } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { formatWeight } from "@/lib/utils";
 import { useMemo } from "react";
 import { ChangesPanel } from "@/components/changes-panel";
-import { isCutting } from "@/lib/ageing";
-import { useSettings } from "@/lib/settings";
-import { lifecycleStatus, migrateTurnaroundSettings, scopeFor, sequenceFor } from "@workspace/domain";
-import { useVelocityInfo, velocityKey } from "@/lib/velocity";
 import { Clock, AlertTriangle, ChevronRight } from "lucide-react";
 
 export default function Overview() {
   const { selectedImportId } = useTracker();
-  
+
   if (!selectedImportId) {
     return <EmptyState />;
   }
@@ -23,78 +20,58 @@ export default function Overview() {
 }
 
 function OverviewContent() {
-  const { selectedImportId } = useTracker();
-  const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
-    query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
+  const { selectedImportId, filters } = useTracker();
+  const importId = selectedImportId as number;
+
+  // Build the server-summary request from the active header filters + resolved
+  // date window. The window is resolved from the client's LOCAL today so the
+  // server classifies dates identically regardless of its timezone.
+  const request: SummaryRequest = useMemo(() => {
+    const { filters: rf, dateWindow } = resolveActiveFilters(filters);
+    return { filters: rf, dateWindow };
+  }, [filters]);
+
+  // Server computes every headline metric (KPIs, ageing buckets, top aged,
+  // busiest contractors, lifecycle + velocity tallies) from the same shared
+  // code the client used to run locally, so the numbers are identical — but we
+  // no longer download the full ~40 MB records payload to render the dashboard.
+  const { data: summary, isLoading } = useQuery({
+    queryKey: ["importSummary", importId, request],
+    queryFn: () => getImportSummary(importId, request),
+    enabled: !!importId,
   });
-  const records = useFilteredRecords(allRecords);
 
-  const {
-    totalMarks, totalQty, totalWt, avgAgeing, contractorsCount, structuresCount,
-    topAgedMarks, busiestContractors, age0to30, age31to60, age60Plus,
-    notStarted, noProductionDate, noAgeing,
-    p0to30, p31to60, p60Plus, pNoAgeing,
-  } = useMemo(() => {
-    const totalMarks = records.length;
-    const totalQty = records.reduce((sum, r) => sum + r.balanceQty, 0);
-    const totalWt = records.reduce((sum, r) => sum + r.balanceWt, 0);
-
-    const recordsWithAgeing = records.filter(r => r.ageingDays !== null);
-    const avgAgeing = recordsWithAgeing.length ?
-      Math.round(recordsWithAgeing.reduce((sum, r) => sum + (r.ageingDays || 0), 0) / recordsWithAgeing.length) : 0;
-
-    const contractorsCount = new Set(records.map(r => r.contractor).filter(Boolean)).size;
-    const structuresCount = new Set(records.map(r => r.structure).filter(Boolean)).size;
-
-    const topAgedMarks = [...recordsWithAgeing]
-      .sort((a, b) => (b.ageingDays || 0) - (a.ageingDays || 0))
-      .slice(0, 8);
-
-    const contractorMap = new Map<string, { weight: number, count: number }>();
-    records.forEach(r => {
-      const c = r.contractor || "Unassigned";
-      if (!contractorMap.has(c)) contractorMap.set(c, { weight: 0, count: 0 });
-      const stat = contractorMap.get(c)!;
-      stat.weight += r.balanceWt;
-      stat.count += 1;
-    });
-
-    const busiestContractors = Array.from(contractorMap.entries())
-      .sort((a, b) => b[1].weight - a[1].weight)
-      .slice(0, 5);
-
-    const age0to30 = recordsWithAgeing.filter(r => r.ageingDays !== null && r.ageingDays <= 30).length;
-    const age31to60 = recordsWithAgeing.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length;
-    const age60Plus = recordsWithAgeing.filter(r => r.ageingDays !== null && r.ageingDays > 60).length;
-
-    const noDate = records.filter(r => r.ageingDays === null);
-    const notStarted = noDate.filter(r => isCutting(r.activity)).length;
-    const noProductionDate = noDate.length - notStarted;
-    const noAgeing = noDate.length;
-    const totalAged = age0to30 + age31to60 + age60Plus + noAgeing || 1;
-
+  const ageingPct = useMemo(() => {
+    if (!summary) return { p0to30: 0, p31to60: 0, p60Plus: 0, pNoAgeing: 0 };
+    const totalAged =
+      summary.age0to30 + summary.age31to60 + summary.age60Plus + summary.noAgeing || 1;
     return {
-      totalMarks, totalQty, totalWt, avgAgeing, contractorsCount, structuresCount,
-      topAgedMarks, busiestContractors, age0to30, age31to60, age60Plus,
-      notStarted, noProductionDate, noAgeing,
-      p0to30: (age0to30 / totalAged) * 100,
-      p31to60: (age31to60 / totalAged) * 100,
-      p60Plus: (age60Plus / totalAged) * 100,
-      pNoAgeing: (noAgeing / totalAged) * 100,
+      p0to30: (summary.age0to30 / totalAged) * 100,
+      p31to60: (summary.age31to60 / totalAged) * 100,
+      p60Plus: (summary.age60Plus / totalAged) * 100,
+      pNoAgeing: (summary.noAgeing / totalAged) * 100,
     };
-  }, [records]);
+  }, [summary]);
+
+  if (isLoading || !summary) {
+    return (
+      <div className="flex items-center justify-center min-h-[40vh]">
+        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <SnapshotCards records={records} importId={selectedImportId as number} />
+      <SnapshotCards summary={summary} />
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <KpiTile title="Pending Marks" value={totalMarks} />
-        <KpiTile title="Balance Qty" value={totalQty.toLocaleString()} />
-        <KpiTile title="Balance Wt" value={formatWeight(totalWt)} />
-        <KpiTile title="Avg Ageing (d)" value={avgAgeing} />
-        <KpiTile title="Contractors" value={contractorsCount} />
-        <KpiTile title="Structures" value={structuresCount} />
+        <KpiTile title="Pending Marks" value={summary.totalMarks} />
+        <KpiTile title="Balance Qty" value={summary.totalQty.toLocaleString()} />
+        <KpiTile title="Balance Wt" value={formatWeight(summary.totalWt)} />
+        <KpiTile title="Avg Ageing (d)" value={summary.avgAgeing} />
+        <KpiTile title="Contractors" value={summary.contractorsCount} />
+        <KpiTile title="Structures" value={summary.structuresCount} />
       </div>
 
       <Card>
@@ -103,16 +80,16 @@ function OverviewContent() {
         </CardHeader>
         <CardContent>
           <div className="flex h-6 rounded-sm overflow-hidden mb-3">
-            <div style={{ width: `${p0to30}%` }} className="bg-ageing-green transition-all" title="0-30 Days" />
-            <div style={{ width: `${p31to60}%` }} className="bg-ageing-amber transition-all" title="31-60 Days" />
-            <div style={{ width: `${p60Plus}%` }} className="bg-ageing-red transition-all" title="60+ Days" />
-            <div style={{ width: `${pNoAgeing}%` }} className="bg-ageing-neutral transition-all" title="No ageing date" />
+            <div style={{ width: `${ageingPct.p0to30}%` }} className="bg-ageing-green transition-all" title="0-30 Days" />
+            <div style={{ width: `${ageingPct.p31to60}%` }} className="bg-ageing-amber transition-all" title="31-60 Days" />
+            <div style={{ width: `${ageingPct.p60Plus}%` }} className="bg-ageing-red transition-all" title="60+ Days" />
+            <div style={{ width: `${ageingPct.pNoAgeing}%` }} className="bg-ageing-neutral transition-all" title="No ageing date" />
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold">
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-ageing-green" />0-30d ({age0to30})</div>
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-ageing-amber" />31-60d ({age31to60})</div>
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-ageing-red" />60d+ ({age60Plus})</div>
-            <div className="flex items-center gap-1.5" title="Not started: activity C, no production date. No production date: progressed past cutting but date missing."><div className="w-3 h-3 rounded-sm bg-ageing-neutral" />No ageing date ({noAgeing}) — {notStarted} not started, {noProductionDate} no prod. date</div>
+            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-ageing-green" />0-30d ({summary.age0to30})</div>
+            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-ageing-amber" />31-60d ({summary.age31to60})</div>
+            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-ageing-red" />60d+ ({summary.age60Plus})</div>
+            <div className="flex items-center gap-1.5" title="Not started: activity C, no production date. No production date: progressed past cutting but date missing."><div className="w-3 h-3 rounded-sm bg-ageing-neutral" />No ageing date ({summary.noAgeing}) — {summary.notStarted} not started, {summary.noProductionDate} no prod. date</div>
           </div>
         </CardContent>
       </Card>
@@ -124,8 +101,8 @@ function OverviewContent() {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {topAgedMarks.map(m => (
-                <div key={m.id} className="flex justify-between items-center text-sm p-2 bg-muted/30 hover:bg-muted/50 transition-colors rounded-md border border-transparent hover:border-border">
+              {summary.topAgedMarks.map((m, i) => (
+                <div key={`${m.markId ?? ""}-${i}`} className="flex justify-between items-center text-sm p-2 bg-muted/30 hover:bg-muted/50 transition-colors rounded-md border border-transparent hover:border-border">
                   <div>
                     <div className="font-mono font-medium text-foreground">{m.markId}</div>
                     <div className="text-xs text-muted-foreground">{m.contractor || 'Unassigned'}</div>
@@ -135,7 +112,7 @@ function OverviewContent() {
                   </div>
                 </div>
               ))}
-              {topAgedMarks.length === 0 && <div className="text-sm text-muted-foreground">No marks with assign dates.</div>}
+              {summary.topAgedMarks.length === 0 && <div className="text-sm text-muted-foreground">No marks with assign dates.</div>}
             </div>
           </CardContent>
         </Card>
@@ -146,16 +123,16 @@ function OverviewContent() {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {busiestContractors.map(([c, stats]) => (
-                <div key={c} className="flex justify-between items-center text-sm p-2 bg-muted/30 hover:bg-muted/50 transition-colors rounded-md border border-transparent hover:border-border">
-                  <div className="font-medium text-foreground">{c}</div>
+              {summary.busiestContractors.map((stats) => (
+                <div key={stats.contractor} className="flex justify-between items-center text-sm p-2 bg-muted/30 hover:bg-muted/50 transition-colors rounded-md border border-transparent hover:border-border">
+                  <div className="font-medium text-foreground">{stats.contractor}</div>
                   <div className="text-right">
                     <div className="font-bold tabular-nums">{formatWeight(stats.weight)}</div>
                     <div className="text-xs text-muted-foreground">{stats.count} marks</div>
                   </div>
                 </div>
               ))}
-              {busiestContractors.length === 0 && <div className="text-sm text-muted-foreground">No contractors found.</div>}
+              {summary.busiestContractors.length === 0 && <div className="text-sm text-muted-foreground">No contractors found.</div>}
             </div>
           </CardContent>
         </Card>
@@ -167,54 +144,19 @@ function OverviewContent() {
 }
 
 // Overview snapshot hub: two compact cards summarising the Turnaround and
-// Velocity/Stuck pages, each linking through for the full deep-dive. Respects
-// the active header filters and degrades gracefully without movement history.
+// Velocity/Stuck pages, each linking through for the full deep-dive. The
+// lifecycle + movement tallies come from the server summary (computed on the
+// same identity basis as the deep-dive pages) and degrade gracefully without
+// movement history.
 function SnapshotCards({
-  records,
-  importId,
+  summary,
 }: {
-  records: ApiRecord[];
-  importId: number;
+  summary: {
+    lifecycle: { green: number; prewarn: number; breach: number; na: number };
+    velocity: { stalled: number; slow: number; hasHistory: boolean };
+  };
 }) {
-  const { settings: rawSettings } = useSettings();
-  const settings = useMemo(
-    () => migrateTurnaroundSettings(rawSettings),
-    [rawSettings],
-  );
-  const velocity = useVelocityInfo(importId);
-
-  const turnaround = useMemo(() => {
-    let green = 0;
-    let prewarn = 0;
-    let breach = 0;
-    let na = 0;
-    for (const r of records) {
-      const res = lifecycleStatus(
-        { activity: r.activity, ageingDays: r.ageingDays, scope: scopeFor(r), sequence: sequenceFor(r) },
-        settings,
-      );
-      if (res.status === "na") na++;
-      else if (res.status === "green") green++;
-      else if (res.status.startsWith("breach")) breach++;
-      else prewarn++;
-    }
-    return { green, prewarn, breach, na };
-  }, [records, settings]);
-
-  // Count stalled + slow on the SAME identity basis as the /stuck page so the
-  // snapshot totals never disagree with the deep-dive. Filter velocity items to
-  // the identities visible under the active header filters.
-  const velocityCounts = useMemo(() => {
-    let stalledCount = 0;
-    let slow = 0;
-    const visible = new Set(records.map((r) => velocityKey(r.markId, r.jobCardNo)));
-    for (const v of velocity.items) {
-      if (!visible.has(velocityKey(v.markId, v.jobCardNo))) continue;
-      if (v.status === "stalled") stalledCount++;
-      else if (v.status === "slow") slow++;
-    }
-    return { stalledCount, slow };
-  }, [records, velocity.items]);
+  const { lifecycle, velocity } = summary;
 
   return (
     <div className="grid md:grid-cols-2 gap-4">
@@ -230,10 +172,10 @@ function SnapshotCards({
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-4 gap-2 text-center">
-              <SnapStat label="On track" value={turnaround.green} cls="bg-lc-green" />
-              <SnapStat label="Pre-warn" value={turnaround.prewarn} cls="bg-lc-prewarn2" />
-              <SnapStat label="Breached" value={turnaround.breach} cls="bg-lc-breach3" />
-              <SnapStat label="n/a" value={turnaround.na} cls="bg-lc-na" />
+              <SnapStat label="On track" value={lifecycle.green} cls="bg-lc-green" />
+              <SnapStat label="Pre-warn" value={lifecycle.prewarn} cls="bg-lc-prewarn2" />
+              <SnapStat label="Breached" value={lifecycle.breach} cls="bg-lc-breach3" />
+              <SnapStat label="n/a" value={lifecycle.na} cls="bg-lc-na" />
             </div>
             <p className="text-xs text-muted-foreground mt-3">
               Open the deep-dive for the 8-state lifecycle, per-activity bars,
@@ -255,8 +197,8 @@ function SnapshotCards({
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-2 text-center">
-              <SnapStat label="Stalled" value={velocityCounts.stalledCount} cls="bg-red-500" />
-              <SnapStat label="Slow" value={velocityCounts.slow} cls="bg-amber-500" />
+              <SnapStat label="Stalled" value={velocity.stalled} cls="bg-red-500" />
+              <SnapStat label="Slow" value={velocity.slow} cls="bg-amber-500" />
             </div>
             <p className="text-xs text-muted-foreground mt-3">
               {velocity.hasHistory
