@@ -60,11 +60,12 @@ import { formatWeight } from "@/lib/utils";
 import { ageingCell } from "@/lib/ageing";
 import { getAgeingColor } from "./overview";
 import { AiTurnaroundReport } from "@/components/ai-turnaround-report";
+import PlantOperationView from "./plant-operation";
 import { FileSpreadsheet, Check, Eye, EyeOff } from "lucide-react";
 
 type SortKey = "activity" | "ageing" | "contractor";
 
-type ReportType = "jobwise" | "fabload" | "ai";
+type ReportType = "jobwise" | "fabload" | "plantop" | "ai";
 
 const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
   {
@@ -78,6 +79,12 @@ const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
     name: "Fabrication Load for TLT",
     description:
       "TLT fabrication load by project and weight (tonnes), split into Operational Load (at the operation) and In Hand (before it), with a per-row Priority.",
+  },
+  {
+    id: "plantop",
+    name: "Plant Operation Wise",
+    description:
+      "Fabrication and galvanization grouped by project and contractor, with hole-operation breakdown and weights, exportable to Excel.",
   },
   {
     id: "ai",
@@ -1018,6 +1025,8 @@ export default function ReportsView() {
         <ReportBuilder />
       ) : reportType === "fabload" ? (
         <FabricationLoadReport />
+      ) : reportType === "plantop" ? (
+        <PlantOperationView />
       ) : (
         <AiTurnaroundReport />
       )}
