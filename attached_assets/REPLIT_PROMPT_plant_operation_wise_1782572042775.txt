@@ -1,0 +1,69 @@
+REPLIT AGENT PROMPT — "PLANT OPERATION WISE" PAGE (Fabrication + Galvanization tabs)
+====================================================================================
+Add a new nav page "Plant Operation Wise" with two tabs: "Fabrication" and "Galvanization".
+It respects the TLT / NTLT toggle. For now only the TLT side is built; NTLT shows "Coming
+soon". Primary grouping inside each tab is by PROJECT, then CONTRACTOR. Display/aggregation
+page; do not change parsing, ageing, dedup, classification, or the alert math — reuse what
+exists.
+
+USES EXISTING DATA
+  - Activity bundles (TLT_FABRICATION = C..Q; GALVANIZING = TS,G,GB), per-category sequences,
+    category/group_key classification, hole_operation (PUNCHING/DRILLING/NOT_SET),
+    thickness_mm, contractor fields — all already in the records. Reuse them.
+
+PAGE & TABS
+  - Add "Plant Operation Wise" to the nav.
+  - Two tabs at the top: [ Fabrication ] [ Galvanization ].
+  - The page respects the global ORDER TYPE toggle (TLT / NTLT) and the global filters
+    (contractor, date, etc.).
+
+------------------------------------------------------------
+TAB 1 — FABRICATION
+------------------------------------------------------------
+TLT mode:
+  - Scope = marks whose CURRENT activity is in the Fabrication bundle (C, RFI, NH, B, HAB,
+    HG, W, Q) i.e. TLT_FABRICATION.
+  - PRIMARY GROUPING: Project -> Contractor. For each Project, list its contractors; under
+    each contractor show the fabrication marks (and rollups: marks count, balance qty,
+    balance weight, avg ageing).
+  - PUNCHING / DRILLING: surface the hole_operation split within the tab. At minimum:
+      * a Punching vs Drilling summary (marks & weight) for the current scope, and
+      * the ability to filter/break the Project->Contractor rollup by Punching / Drilling /
+        Not set (e.g. columns or a sub-split for Punching vs Drilling counts/weights).
+  - Activity ordering uses the TLT sequence; show per-activity counts within fabrication if
+    useful.
+NTLT mode:
+  - Show a "Coming soon" placeholder for the Fabrication tab (NTLT fabrication to be defined
+    later). Do not error; just a clear placeholder.
+
+------------------------------------------------------------
+TAB 2 — GALVANIZATION
+------------------------------------------------------------
+TLT mode:
+  - Scope = marks whose CURRENT activity is in the Galvanizing bundle (TS, G, GB) i.e.
+    GALVANIZING.
+  - PRIMARY GROUPING: Project -> Contractor (same structure as Fabrication). Rollups: marks,
+    qty, weight, avg ageing per project/contractor.
+  - Show THICKNESS (thickness_mm) where relevant for galvanizing marks (it is the galvanizing
+    parameter); a thickness column / breakdown, and a count of "thickness not set".
+NTLT mode:
+  - "Coming soon" placeholder (NTLT galvanization to be defined later).
+
+GENERAL
+  - Both tabs respect the global filters (contractor, date) and the Project->Structure->Mark
+    drilldown where it fits.
+  - Results only (no settings/inputs on this page).
+  - Reuse existing components/aggregations; this is a new lens over existing data, not new
+    engine logic.
+  - Exports for each tab include the relevant columns (project, contractor, marks, qty,
+    weight, ageing, + hole_operation for Fabrication, + thickness for Galvanization).
+
+ACCEPTANCE CHECK
+  - New "Plant Operation Wise" page with Fabrication and Galvanization tabs in nav.
+  - TLT + Fabrication: shows C..Q marks grouped Project -> Contractor, with a Punching vs
+    Drilling breakdown and the ability to filter by Punching/Drilling/Not set.
+  - TLT + Galvanization: shows TS/G/GB marks grouped Project -> Contractor, with thickness
+    shown and a "thickness not set" count.
+  - NTLT mode: both tabs show a "Coming soon" placeholder (no errors).
+  - Respects the TLT/NTLT toggle and global filters; results-only; reuses existing data.
+  - No change to parsing, ageing, dedup, classification, or alert math.
