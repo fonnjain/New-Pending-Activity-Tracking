@@ -60,7 +60,7 @@ import { formatWeight } from "@/lib/utils";
 import { ageingCell } from "@/lib/ageing";
 import { getAgeingColor } from "./overview";
 import { AiTurnaroundReport } from "@/components/ai-turnaround-report";
-import { FileSpreadsheet, Check } from "lucide-react";
+import { FileSpreadsheet, Check, Eye, EyeOff } from "lucide-react";
 
 type SortKey = "activity" | "ageing" | "contractor";
 
@@ -156,6 +156,7 @@ function ReportBuilder() {
   const unsorted = useFilteredRecords(allRecords);
 
   const [sortBy, setSortBy] = useState<SortKey>("activity");
+  const [showItemwise, setShowItemwise] = useState(true);
 
   // Sort the report rows by the selected key. Activity uses the canonical
   // process sequence (@workspace/domain); ageing is oldest-first; contractor
@@ -384,6 +385,19 @@ function ReportBuilder() {
             {formatWeight(totalWt)}
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5"
+              onClick={() => setShowItemwise((v) => !v)}
+            >
+              {showItemwise ? (
+                <EyeOff className="w-4 h-4" />
+              ) : (
+                <Eye className="w-4 h-4" />
+              )}
+              {showItemwise ? "Hide Itemwise" : "Show Itemwise"}
+            </Button>
             <label className="text-xs font-semibold text-muted-foreground uppercase">
               Sort by
             </label>
@@ -470,7 +484,7 @@ function ReportBuilder() {
                   ))}
                 </>
               )}
-              {rows.length > 0 && (
+              {rows.length > 0 && showItemwise && (
                 <>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
@@ -506,7 +520,7 @@ function ReportBuilder() {
                   </TableRow>
                 </>
               )}
-              {visible.map((r, i) => (
+              {showItemwise && visible.map((r, i) => (
                 <TableRow key={`${r.markId}-${i}`}>
                   <TableCell>{r.activity ?? "-"}</TableCell>
                   <TableCell>{r.section ?? "-"}</TableCell>
@@ -584,7 +598,7 @@ function ReportBuilder() {
             </TableBody>
           </Table>
         </div>
-        {rows.length > TABLE_CAP && (
+        {showItemwise && rows.length > TABLE_CAP && (
           <div className="text-xs text-muted-foreground">
             Showing first {TABLE_CAP.toLocaleString()} of {rows.length.toLocaleString()} rows. Export
             to Excel for the full set.
