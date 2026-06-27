@@ -90,7 +90,17 @@ const REPORT_COLUMNS: XlsxColumn[] = [
   { label: "ETA (days)", field: "etaDays", numeric: true, decimals: 1 },
   { label: "ETA Gap (days)", field: "etaGap", numeric: true, decimals: 1 },
   { label: "Trend", field: "trendLabel" },
+  { label: "Section Type", field: "sectionType" },
+  { label: "Hole Operation", field: "holeOperationLabel" },
 ];
+
+// Derived hole-operation display labels (no emojis).
+const HOLE_OP_LABELS: Record<string, string> = {
+  PUNCHING: "Punching",
+  DRILLING: "Drilling",
+  NOT_SET: "Not set",
+};
+const HOLE_OP_ORDER = ["PUNCHING", "DRILLING", "NOT_SET"] as const;
 
 const COL_COUNT = REPORT_COLUMNS.length;
 const TABLE_CAP = 500;
@@ -176,6 +186,7 @@ function ReportBuilder() {
           etaGap: v?.etaGap ?? null,
           trendLabel: v ? TREND_LABELS[v.trend] : "",
           trendRaw: v?.trend ?? null,
+          holeOperationLabel: HOLE_OP_LABELS[r.holeOperation ?? "NOT_SET"] ?? "Not set",
         };
       }),
     [rows, settings, stalled, velocity],
@@ -217,6 +228,36 @@ function ReportBuilder() {
       }),
     ];
   }, [rows]);
+
+  // Hole-operation breakdown (marks + Qty + Wt) for both the Excel Summary sheet
+  // and the on-screen chips. Derived/display only — coalesce null -> NOT_SET.
+  const holeOpBreakdown = useMemo(() => {
+    const groups = new Map<string, { marks: number; qty: number; wt: number }>();
+    for (const r of rows) {
+      const key = (r.holeOperation as string) || "NOT_SET";
+      const g = groups.get(key) ?? { marks: 0, qty: 0, wt: 0 };
+      g.marks += 1;
+      g.qty += r.balanceQty ?? 0;
+      g.wt += r.balanceWt ?? 0;
+      groups.set(key, g);
+    }
+    return HOLE_OP_ORDER.filter((k) => groups.has(k)).map((k) => ({
+      key: k,
+      label: HOLE_OP_LABELS[k],
+      ...groups.get(k)!,
+    }));
+  }, [rows]);
+
+  const holeOpSubtotals = useMemo<XlsxSummaryRow[]>(() => {
+    if (!holeOpBreakdown.length) return [];
+    return [
+      { label: "HOLE-OPERATION SUBTOTAL", values: {} },
+      ...holeOpBreakdown.map((h) => ({
+        label: h.label,
+        values: { balanceQty: h.qty, balanceWt: h.wt } as Record<string, number>,
+      })),
+    ];
+  }, [holeOpBreakdown]);
 
   // On-screen activity-wise subtotals (marks + Qty + Wt), process-ordered,
   // shown at the top of the table above the itemwise rows.
@@ -268,7 +309,12 @@ function ReportBuilder() {
       .map((act) => ({ name: act, columns: REPORT_COLUMNS, rows: byActivity.get(act)! }));
     const date = new Date().toISOString().slice(0, 10);
     exportToXlsxSheets(`report_${tag}_${date}.xlsx`, [
-      { name: "Summary", columns: REPORT_COLUMNS, rows: enrichedRows, summaryRows: activitySubtotals },
+      {
+        name: "Summary",
+        columns: REPORT_COLUMNS,
+        rows: enrichedRows,
+        summaryRows: [...activitySubtotals, ...holeOpSubtotals],
+      },
       ...activitySheets,
     ]);
   };
@@ -330,6 +376,26 @@ function ReportBuilder() {
           </div>
         </div>
 
+        {holeOpBreakdown.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mr-1">
+              Hole Operation
+            </span>
+            {holeOpBreakdown.map((h) => (
+              <div
+                key={h.key}
+                className="rounded-md border border-border bg-muted/30 px-3 py-1.5 text-xs"
+              >
+                <span className="font-semibold">{h.label}</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  • {h.marks.toLocaleString()} marks • {num(h.qty)} pcs • {formatWeight(h.wt)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="overflow-x-auto border border-border rounded-lg">
           <Table>
             <TableBody>
@@ -361,6 +427,8 @@ function ReportBuilder() {
                       <TableCell className={`text-right tabular-nums ${getAgeingColor(s.avgAge)}`}>
                         {s.avgAge !== null ? `${s.avgAge}d` : "-"}
                       </TableCell>
+                      <TableCell></TableCell>
+                      <TableCell></TableCell>
                       <TableCell></TableCell>
                       <TableCell></TableCell>
                       <TableCell></TableCell>
@@ -407,6 +475,8 @@ function ReportBuilder() {
                     <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">ETA</TableCell>
                     <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">ETA Gap</TableCell>
                     <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Trend</TableCell>
+                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Section Type</TableCell>
+                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Hole Op.</TableCell>
                   </TableRow>
                 </>
               )}
@@ -474,6 +544,8 @@ function ReportBuilder() {
                       "-"
                     )}
                   </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{r.sectionType ?? "-"}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{r.holeOperationLabel}</TableCell>
                 </TableRow>
               ))}
               {rows.length === 0 && (

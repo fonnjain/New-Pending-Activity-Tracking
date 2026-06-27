@@ -1078,7 +1078,10 @@ export const GetImportRecordsResponseItem = zod.object({
   "groupKey": zod.string().nullable().describe('Resolved grouping key (TLT = job; NTLT = cleaned section \/ \"RSJ <dims>\").'),
   "active": zod.boolean().describe('Whether the mark participates in workflow metrics (false for FOUNDATION BOLT).'),
   "thicknessMm": zod.number().nullish().describe('Live-resolved galvanizing thickness (mm). Null when unset\/unparseable. Never stored on the pool row, never in the hash.'),
-  "thicknessSource": zod.enum(['tlt_angle', 'tlt_plate', 'rsj_exact', 'rsj_base', 'rsj_default', 'manual', 'unset']).optional().describe('How thicknessMm was derived (or \"unset\" when not yet resolved).')
+  "thicknessSource": zod.enum(['tlt_angle', 'tlt_plate', 'rsj_exact', 'rsj_base', 'rsj_default', 'manual', 'unset']).optional().describe('How thicknessMm was derived (or \"unset\" when not yet resolved).'),
+  "sectionType": zod.union([zod.literal('ANGLE'),zod.literal('PLATE'),zod.literal('CHANNEL'),zod.literal('BEAM'),zod.literal('RSJ'),zod.literal('FLAT'),zod.literal('PIPE'),zod.literal('ROUND'),zod.literal('GRATING'),zod.literal('OTHER'),zod.literal(null)]).nullish().describe('Derived section family from the Section string. Null only on legacy rows pending backfill.'),
+  "holeOperation": zod.union([zod.literal('PUNCHING'),zod.literal('DRILLING'),zod.literal('NOT_SET'),zod.literal(null)]).nullish().describe('Derived hole operation. Channel\/Beam\/RSJ always DRILLING; Angle\/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.'),
+  "holeOperationSource": zod.union([zod.literal('rule_thickness'),zod.literal('rule_fixed'),zod.literal('not_applicable'),zod.literal('unknown'),zod.literal(null)]).nullish().describe('How holeOperation was derived (rule_fixed for Channel\/Beam\/RSJ, rule_thickness for Angle\/Plate, not_applicable otherwise, unknown when thickness unparseable).')
 })
 export const GetImportRecordsResponse = zod.array(GetImportRecordsResponseItem)
 

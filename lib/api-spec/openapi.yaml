@@ -1346,6 +1346,18 @@ components:
           type: string
           enum: [tlt_angle, tlt_plate, rsj_exact, rsj_base, rsj_default, manual, unset]
           description: How thicknessMm was derived (or "unset" when not yet resolved).
+        sectionType:
+          type: ["string", "null"]
+          enum: [ANGLE, PLATE, CHANNEL, BEAM, RSJ, FLAT, PIPE, ROUND, GRATING, OTHER, null]
+          description: Derived section family from the Section string. Null only on legacy rows pending backfill.
+        holeOperation:
+          type: ["string", "null"]
+          enum: [PUNCHING, DRILLING, NOT_SET, null]
+          description: Derived hole operation. Channel/Beam/RSJ always DRILLING; Angle/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.
+        holeOperationSource:
+          type: ["string", "null"]
+          enum: [rule_thickness, rule_fixed, not_applicable, unknown, null]
+          description: How holeOperation was derived (rule_fixed for Channel/Beam/RSJ, rule_thickness for Angle/Plate, not_applicable otherwise, unknown when thickness unparseable).
       required:
         - id
         - importId

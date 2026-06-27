@@ -166,6 +166,32 @@ function FilterBar() {
     return groups;
   }, [activities, isNtlt]);
 
+  // Hole operation (derived, all order types) counts scoped to the current
+  // drill-down, so the dropdown shows how many marks fall in each bucket and the
+  // NOT_SET gap is always visible.
+  const holeOpCounts = useMemo(() => {
+    const c: { PUNCHING: number; DRILLING: number; NOT_SET: number } = {
+      PUNCHING: 0,
+      DRILLING: 0,
+      NOT_SET: 0,
+    };
+    for (const r of scopedRecords) {
+      const op = (r.holeOperation as keyof typeof c) || "NOT_SET";
+      if (op in c) c[op] += 1;
+      else c.NOT_SET += 1;
+    }
+    return c;
+  }, [scopedRecords]);
+
+  const holeOperationOptions = useMemo(
+    () => [
+      { value: "PUNCHING", label: `Punching (${holeOpCounts.PUNCHING})` },
+      { value: "DRILLING", label: `Drilling (${holeOpCounts.DRILLING})` },
+      { value: "NOT_SET", label: `Not set (${holeOpCounts.NOT_SET})` },
+    ],
+    [holeOpCounts],
+  );
+
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => {
     if (k === "category") return false; // Order Type is a mode, not a filter
     if (v === null || v === "") return false;
@@ -300,6 +326,19 @@ function FilterBar() {
                 allLabel="All Contractor Types"
                 searchPlaceholder="Search contractor types..."
               />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-muted-foreground uppercase">Hole Operation</label>
+              <SearchableSelect
+                value={filters.holeOperation}
+                onChange={(v) => setFilter("holeOperation", v)}
+                groups={[{ options: holeOperationOptions }]}
+                allLabel="All Operations"
+                searchPlaceholder="Search operations..."
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {holeOpCounts.NOT_SET} mark{holeOpCounts.NOT_SET === 1 ? "" : "s"} not set
+              </p>
             </div>
             {filters.contractorCategory === "OUT_VENDOR" && (
               <div className="space-y-1">

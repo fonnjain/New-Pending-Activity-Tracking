@@ -18,6 +18,7 @@ export interface Filters {
   contractorCategory: string | null; // IN_HOUSE | SUB_CONTRACTOR | OUT_VENDOR | UNCLASSIFIED
   outVendorType: string | null; // FAB | GALVA (only meaningful with OUT_VENDOR)
   activity: string | null;
+  holeOperation: string | null; // "PUNCHING" | "DRILLING" | "NOT_SET" (derived)
   dateRange: string | null;
   search: string;
 }
@@ -41,6 +42,7 @@ const defaultFilters: Filters = {
   contractorCategory: null,
   outVendorType: null,
   activity: null,
+  holeOperation: null,
   dateRange: null,
   search: "",
 };
@@ -281,6 +283,11 @@ export function useFilteredRecords(records: Record[] | undefined) {
         } else if (r.activity !== activityFilter) {
           return false;
         }
+      }
+      // Hole operation (derived). Legacy rows pending backfill report it live, so
+      // null only happens transiently; coalesce to NOT_SET for a stable match.
+      if (filters.holeOperation && (r.holeOperation || "NOT_SET") !== filters.holeOperation) {
+        return false;
       }
 
       if (q) {

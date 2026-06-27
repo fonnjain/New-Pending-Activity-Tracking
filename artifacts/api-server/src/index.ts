@@ -1,6 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { backfillClassification } from "./lib/backfill";
+import { backfillClassification, backfillHoleOperation } from "./lib/backfill";
 import { seedContractorCategories } from "./lib/seedContractorCategories";
 
 const rawPort = process.env["PORT"];
@@ -30,6 +30,13 @@ app.listen(port, (err) => {
   // fails startup (a no-op once there are no unclassified known-nature rows).
   backfillClassification().catch((err) => {
     logger.error({ err }, "Classification backfill failed");
+  });
+
+  // Best-effort, one-time backfill of the derived hole-operation columns on
+  // legacy pool rows so punching/drilling sorting + reporting works on historical
+  // data. Fire-and-forget; self-draining and idempotent. Never blocks startup.
+  backfillHoleOperation().catch((err) => {
+    logger.error({ err }, "Hole operation backfill failed");
   });
 
   // Best-effort, one-time seed of known out-vendor contractor mappings. Fire-

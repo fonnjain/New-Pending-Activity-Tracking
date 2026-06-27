@@ -59,6 +59,17 @@ export const recordPoolTable = pgTable("record_pool", {
   // Whether the mark participates in workflow metrics. FOUNDATION BOLT rows are
   // captured but inactive (active=false). Defaults true.
   active: boolean("active").notNull().default(true),
+  // --- Hole operation (additive, display/report-only; NOT part of the row hash). ---
+  // Derived purely from the immutable Section string (deriveHoleOperation): the
+  // section family + a fixed thickness cutoff. Stable across re-imports (no
+  // dependence on manual pins / RSJ lookups). Used to sort/filter/report
+  // punching vs drilling. Backfilled for legacy rows from the stored `section`.
+  // "ANGLE" | "PLATE" | "CHANNEL" | "BEAM" | "RSJ" | "FLAT" | "PIPE" | "ROUND" | "GRATING" | "OTHER".
+  sectionType: text("section_type"),
+  // "PUNCHING" | "DRILLING" | "NOT_SET"; null only on legacy rows pending backfill.
+  holeOperation: text("hole_operation"),
+  // "rule_thickness" | "rule_fixed" | "not_applicable" | "unknown".
+  holeOperationSource: text("hole_operation_source"),
 });
 
 export const insertRecordPoolSchema = createInsertSchema(recordPoolTable).omit({

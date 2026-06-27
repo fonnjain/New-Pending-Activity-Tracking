@@ -35,6 +35,7 @@ import {
   sequenceForCategory,
   resolveThickness,
   buildRsjBaseIndex,
+  deriveHoleOperation,
   type VelocitySnapshot,
   type TurnaroundSettings,
   type ActivitySequence,
@@ -235,6 +236,9 @@ function serializeRecord(
     },
     thicknessLookups,
   );
+  // Live-derived from the immutable section (mirrors thickness), so the API is
+  // correct even before the boot backfill stamps the stored columns.
+  const hole = deriveHoleOperation(r.section);
   return {
     id,
     importId,
@@ -276,6 +280,9 @@ function serializeRecord(
     active: r.active,
     thicknessMm,
     thicknessSource,
+    sectionType: hole.sectionType,
+    holeOperation: hole.holeOperation,
+    holeOperationSource: hole.holeOperationSource,
   };
 }
 

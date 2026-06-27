@@ -1517,6 +1517,109 @@ export function parsePlateThickness(section: string | null | undefined): number 
   return Number.isFinite(v) && v > 0 ? v : null;
 }
 
+// ---------------------------------------------------------------------------
+// Hole operation (PUNCHING / DRILLING) — derived, display/report-only.
+//
+// A deterministic per-mark attribute derived purely from the immutable Section
+// string (NOT manual pins / RSJ lookups), so a stored value stays stable across
+// re-imports and never depends on mutable config. NOT part of the row hash.
+// Lets data be sorted / filtered / reported by punching vs drilling.
+// ---------------------------------------------------------------------------
+
+export type SectionType =
+  | "ANGLE"
+  | "PLATE"
+  | "CHANNEL"
+  | "BEAM"
+  | "RSJ"
+  | "FLAT"
+  | "PIPE"
+  | "ROUND"
+  | "GRATING"
+  | "OTHER";
+
+export type HoleOperation = "PUNCHING" | "DRILLING" | "NOT_SET";
+
+export type HoleOperationSource =
+  | "rule_thickness"
+  | "rule_fixed"
+  | "not_applicable"
+  | "unknown";
+
+// Fixed cutoff: <= 12 mm -> punching, > 12 mm -> drilling (no gap; decimals ok).
+export const HOLE_OPERATION_THICKNESS_CUTOFF_MM = 12;
+
+// Detect the section family from the (uppercased, trimmed) Section text. Priority
+// order is significant: PLATE wins over everything (incl. "CHQ. PLATE"); the
+// angle pattern is the last specific test before the OTHER fallback.
+export function detectSectionType(
+  section: string | null | undefined,
+): SectionType {
+  if (!section) return "OTHER";
+  const s = section.toUpperCase().trim();
+  if (!s) return "OTHER";
+  if (s.includes("PLATE")) return "PLATE";
+  if (s.startsWith("RSJ")) return "RSJ";
+  if (s.includes("ISMC")) return "CHANNEL";
+  if (s.includes("ISMB")) return "BEAM";
+  if (s.startsWith("FLAT")) return "FLAT";
+  if (s.includes("PIPE")) return "PIPE";
+  if (s.includes("ROUND")) return "ROUND";
+  if (s.includes("GRATING")) return "GRATING";
+  if (/^A?\s*\d+X\d+X[\d.]+/.test(s)) return "ANGLE";
+  return "OTHER";
+}
+
+export interface HoleOperationResult {
+  sectionType: SectionType;
+  holeOperation: HoleOperation;
+  holeOperationSource: HoleOperationSource;
+}
+
+// Derive the hole operation for a mark from its Section alone. Channel/Beam/RSJ
+// are always drilled; Angle/Plate use the thickness cutoff (last angle dim /
+// plate number; <= 12 -> punch, > 12 -> drill); everything else is NOT_SET (not
+// applicable yet). An Angle/Plate whose thickness can't be parsed is
+// NOT_SET/"unknown" (flagged for review, never guessed).
+export function deriveHoleOperation(
+  section: string | null | undefined,
+): HoleOperationResult {
+  const sectionType = detectSectionType(section);
+  switch (sectionType) {
+    case "CHANNEL":
+    case "BEAM":
+    case "RSJ":
+      return {
+        sectionType,
+        holeOperation: "DRILLING",
+        holeOperationSource: "rule_fixed",
+      };
+    case "ANGLE":
+    case "PLATE": {
+      const thickness =
+        sectionType === "ANGLE"
+          ? parseAngleThickness(section)
+          : parsePlateThickness(section);
+      if (thickness == null) {
+        return {
+          sectionType,
+          holeOperation: "NOT_SET",
+          holeOperationSource: "unknown",
+        };
+      }
+      const holeOperation: HoleOperation =
+        thickness <= HOLE_OPERATION_THICKNESS_CUTOFF_MM ? "PUNCHING" : "DRILLING";
+      return { sectionType, holeOperation, holeOperationSource: "rule_thickness" };
+    }
+    default:
+      return {
+        sectionType,
+        holeOperation: "NOT_SET",
+        holeOperationSource: "not_applicable",
+      };
+  }
+}
+
 // Section-derived thickness shared by TLT and NTLT/Earthing: angle first, then
 // plate. Returns the value + which pattern matched (null/unset if neither).
 function sectionThickness(section: string | null | undefined): ThicknessResult {

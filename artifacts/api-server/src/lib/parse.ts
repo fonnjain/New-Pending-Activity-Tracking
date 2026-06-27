@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import * as XLSX from "xlsx";
+import { deriveHoleOperation } from "@workspace/domain";
 import type { InsertRecordPool, ParseSummary } from "@workspace/db";
 
 export type { ParseSummary };
@@ -715,6 +716,14 @@ export function parseWorkbook(
         }
       }
     }
+
+    // Derive the (stored, display/report-only) hole operation from the FINAL
+    // section value — after any accepted cleanup remap above — so the stored
+    // attribute always matches the persisted section. NOT part of the hash.
+    const holeOp = deriveHoleOperation(base.section);
+    base.sectionType = holeOp.sectionType;
+    base.holeOperation = holeOp.holeOperation;
+    base.holeOperationSource = holeOp.holeOperationSource;
 
     rows.push({ ...base, hash: hashRow(base) });
   }

@@ -1,5 +1,6 @@
 import { sql, isNull, and } from "drizzle-orm";
 import { db, recordPoolTable } from "@workspace/db";
+import { deriveHoleOperation } from "@workspace/domain";
 import { classifyMark } from "./parse";
 import { logger } from "./logger";
 
@@ -85,6 +86,68 @@ export async function backfillClassification(): Promise<number> {
 
   if (totalUpdated > 0) {
     logger.info({ totalUpdated }, "Backfilled record_pool classification");
+  }
+  return totalUpdated;
+}
+
+/**
+ * One-time, idempotent backfill of the (display/report-only) hole-operation
+ * columns (`section_type`, `hole_operation`, `hole_operation_source`) on
+ * existing record_pool rows that pre-date the feature. The attribute is a pure
+ * function of the stored, immutable `section` string (deriveHoleOperation) and
+ * is NOT part of the row hash, so this never changes identity, dedup, ageing, or
+ * any computed metric — it only lights up punching/drilling sorting/reporting on
+ * historical data. Safe to run repeatedly.
+ *
+ * deriveHoleOperation ALWAYS returns a non-null hole_operation (NOT_SET when not
+ * applicable), so every backfilled row leaves the `hole_operation IS NULL` set
+ * and the loop self-drains — a no-op on every subsequent boot. Applies to ALL
+ * order types (no nature filter), written with a single set-based UPDATE per
+ * batch.
+ */
+export async function backfillHoleOperation(): Promise<number> {
+  const batchSize = 1000;
+  let totalUpdated = 0;
+
+  for (;;) {
+    const rows = await db
+      .select({
+        id: recordPoolTable.id,
+        section: recordPoolTable.section,
+      })
+      .from(recordPoolTable)
+      .where(isNull(recordPoolTable.holeOperation))
+      .orderBy(recordPoolTable.id)
+      .limit(batchSize);
+
+    if (rows.length === 0) break;
+
+    const valueRows = rows.map((r) => {
+      const h = deriveHoleOperation(r.section);
+      return sql`(${r.id}::int, ${h.sectionType}::text, ${h.holeOperation}::text, ${h.holeOperationSource}::text)`;
+    });
+
+    await db.execute(sql`
+      update record_pool as rp set
+        section_type = v.section_type,
+        hole_operation = v.hole_operation,
+        hole_operation_source = v.hole_operation_source
+      from (values ${sql.join(valueRows, sql`, `)})
+        as v(id, section_type, hole_operation, hole_operation_source)
+      where rp.id = v.id
+    `);
+
+    totalUpdated += rows.length;
+    logger.info(
+      { batch: rows.length, totalUpdated },
+      "Backfilling record_pool hole operation",
+    );
+
+    if (rows.length < batchSize) break;
+  }
+
+  if (totalUpdated > 0) {
+    logger.info({ totalUpdated }, "Backfilled record_pool hole operation");
   }
   return totalUpdated;
 }

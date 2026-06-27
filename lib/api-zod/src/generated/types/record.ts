@@ -5,6 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { RecordHoleOperation } from './recordHoleOperation';
+import type { RecordHoleOperationSource } from './recordHoleOperationSource';
+import type { RecordSectionType } from './recordSectionType';
 import type { RecordThicknessSource } from './recordThicknessSource';
 
 export interface Record {
@@ -99,4 +102,19 @@ export interface Record {
   thicknessMm?: number | null;
   /** How thicknessMm was derived (or "unset" when not yet resolved). */
   thicknessSource?: RecordThicknessSource;
+  /**
+     * Derived section family from the Section string. Null only on legacy rows pending backfill.
+     * @nullable
+     */
+  sectionType?: RecordSectionType;
+  /**
+     * Derived hole operation. Channel/Beam/RSJ always DRILLING; Angle/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.
+     * @nullable
+     */
+  holeOperation?: RecordHoleOperation;
+  /**
+     * How holeOperation was derived (rule_fixed for Channel/Beam/RSJ, rule_thickness for Angle/Plate, not_applicable otherwise, unknown when thickness unparseable).
+     * @nullable
+     */
+  holeOperationSource?: RecordHoleOperationSource;
 }

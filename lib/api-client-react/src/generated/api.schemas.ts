@@ -245,6 +245,53 @@ export const RecordThicknessSource = {
   unset: 'unset',
 } as const;
 
+/**
+ * Derived section family from the Section string. Null only on legacy rows pending backfill.
+ * @nullable
+ */
+export type RecordSectionType = typeof RecordSectionType[keyof typeof RecordSectionType] | null;
+
+
+export const RecordSectionType = {
+  ANGLE: 'ANGLE',
+  PLATE: 'PLATE',
+  CHANNEL: 'CHANNEL',
+  BEAM: 'BEAM',
+  RSJ: 'RSJ',
+  FLAT: 'FLAT',
+  PIPE: 'PIPE',
+  ROUND: 'ROUND',
+  GRATING: 'GRATING',
+  OTHER: 'OTHER',
+} as const;
+
+/**
+ * Derived hole operation. Channel/Beam/RSJ always DRILLING; Angle/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.
+ * @nullable
+ */
+export type RecordHoleOperation = typeof RecordHoleOperation[keyof typeof RecordHoleOperation] | null;
+
+
+export const RecordHoleOperation = {
+  PUNCHING: 'PUNCHING',
+  DRILLING: 'DRILLING',
+  NOT_SET: 'NOT_SET',
+} as const;
+
+/**
+ * How holeOperation was derived (rule_fixed for Channel/Beam/RSJ, rule_thickness for Angle/Plate, not_applicable otherwise, unknown when thickness unparseable).
+ * @nullable
+ */
+export type RecordHoleOperationSource = typeof RecordHoleOperationSource[keyof typeof RecordHoleOperationSource] | null;
+
+
+export const RecordHoleOperationSource = {
+  rule_thickness: 'rule_thickness',
+  rule_fixed: 'rule_fixed',
+  not_applicable: 'not_applicable',
+  unknown: 'unknown',
+} as const;
+
 export interface Record {
   id: number;
   importId: number;
@@ -337,6 +384,21 @@ export interface Record {
   thicknessMm?: number | null;
   /** How thicknessMm was derived (or "unset" when not yet resolved). */
   thicknessSource?: RecordThicknessSource;
+  /**
+     * Derived section family from the Section string. Null only on legacy rows pending backfill.
+     * @nullable
+     */
+  sectionType?: RecordSectionType;
+  /**
+     * Derived hole operation. Channel/Beam/RSJ always DRILLING; Angle/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.
+     * @nullable
+     */
+  holeOperation?: RecordHoleOperation;
+  /**
+     * How holeOperation was derived (rule_fixed for Channel/Beam/RSJ, rule_thickness for Angle/Plate, not_applicable otherwise, unknown when thickness unparseable).
+     * @nullable
+     */
+  holeOperationSource?: RecordHoleOperationSource;
 }
 
 export interface SanitizeRequest {
