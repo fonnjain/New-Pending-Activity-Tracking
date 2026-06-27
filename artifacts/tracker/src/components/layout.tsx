@@ -39,12 +39,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
       {/* Top Nav (Desktop) */}
       <header className="hidden md:flex sticky top-0 z-40 min-h-14 bg-sidebar border-b border-sidebar-border items-center flex-wrap gap-x-3 gap-y-1 px-4 py-1.5">
         <div className="font-bold text-lg text-primary tracking-tight shrink-0">TRACKER</div>
-        <nav className="flex items-center flex-wrap gap-0.5">
+        <nav className="flex flex-1 items-center justify-center flex-wrap gap-x-1 gap-y-1">
           {navItems.map((item) => (
             <Link key={item.href} href={item.href}>
               <div
                 title={item.label}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                className={`px-2.5 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
                   location === item.href
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "text-sidebar-foreground hover:bg-sidebar-accent/50"
