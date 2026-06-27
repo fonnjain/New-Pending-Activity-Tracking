@@ -5,4 +5,5 @@
 - [TLT/NTLT/All category mode](tracker-category-mode.md) — Order Type mode (ALL/TLT/NTLT, default TLT) switches filter dimension (Project↔Section) + grouping; All includes both via per-row, prefixed keys (never coerce All→TLT on single-dimension pages).
 - [Thickness lookup + markId hazard](tracker-thickness.md) — thickness is live-resolved (never hashed); DELETE endpoints keyed on markId/groupKey must use query params, not path segments (backslashes/spaces break path routing).
 - [TLT/NTLT category sequences](tracker-categories.md) — marks follow per-category process sequences (TLT 12-step default, NTLT RSJ/Earthing/General shorter); resolve sequenceFor(record) before any "before Y" test; classification fields not in hash.
+- [Tracker milestones (Ready/Dispatched)](tracker-milestones.md) — capture-once; dispatch-on-disappear must NOT rely only on replayable import_rows (deletion cascades them) — persist advance-forward-only last_seen pointer.
 - [Contractor sub-categories](tracker-contractor-categories.md) — additive display-only classification overlay (In-house/Sub/Out-vendor + FAB/GALVA); joined live on a normalized name key; never mutates contractor strings.

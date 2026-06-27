@@ -1,0 +1,84 @@
+REPLIT AGENT PROMPT — PUNCHING / DRILLING OPERATION (derived per mark, for sorting & reports)
+=============================================================================================
+Add a derived attribute "hole_operation" = Punching or Drilling (or not-set) for every mark,
+based on its SECTION TYPE and THICKNESS. Applies to ALL order types (TLT and NTLT). Stored in
+the DB so data can be sorted/filtered and reported by punching vs drilling. Deterministic
+engine; do not change parsing of other fields, ageing, dedup, or the alert math.
+
+============================================================
+1. DETECT SECTION TYPE (from the Section text)
+============================================================
+Add field section_type: "ANGLE" | "PLATE" | "CHANNEL" | "BEAM" | "RSJ" | "FLAT" | "PIPE" |
+"ROUND" | "GRATING" | "OTHER". Detect from the (uppercased, trimmed) Section value, in this
+priority order:
+  - starts with "PLATE" or "CHQ. PLATE" / contains "PLATE"      -> PLATE
+  - starts with "RSJ"                                            -> RSJ   (a beam)
+  - contains "ISMC"                                              -> CHANNEL
+  - contains "ISMB"                                              -> BEAM
+  - starts with "FLAT"                                           -> FLAT
+  - contains "PIPE"                                              -> PIPE
+  - contains "ROUND"                                             -> ROUND
+  - contains "GRATING"                                           -> GRATING
+  - matches an angle pattern: optional leading "A " then A x B x C
+        (e.g. "45X45X4 MS", "A 130X130X10 MS")  regex ^A?\s*[0-9]+X[0-9]+X[0-9.]+  -> ANGLE
+  - else                                                          -> OTHER
+(Keep raw Section; section_type is derived.)
+
+============================================================
+2. DERIVE THE OPERATION (hole_operation)
+============================================================
+Add field hole_operation: "PUNCHING" | "DRILLING" | "NOT_SET", with hole_operation_source for
+traceability ("rule_thickness" | "rule_fixed" | "not_applicable" | "unknown").
+
+Rules:
+  - CHANNEL, BEAM, RSJ  -> always DRILLING.            (source "rule_fixed")
+  - ANGLE  -> use the angle thickness = last dimension (C in AxBxC):
+        thickness <= 12 mm  -> PUNCHING
+        thickness  > 12 mm  -> DRILLING
+        thickness below the minimum / very small -> PUNCHING (per rule: less than prescribed
+        goes to punching).                            (source "rule_thickness")
+  - PLATE  -> use the plate thickness (the number in "PLATE <n> MM"):
+        thickness <= 12 mm  -> PUNCHING
+        thickness  > 12 mm  -> DRILLING
+        below minimum -> PUNCHING.                     (source "rule_thickness")
+  - FLAT, PIPE, ROUND, GRATING, OTHER  -> NOT_SET (operation not applicable for now).
+        (source "not_applicable")                      Do NOT guess; these can be assigned a
+        rule later if needed.
+  - If section_type is ANGLE/PLATE but thickness can't be parsed -> NOT_SET, source "unknown",
+    flagged for review (do not guess).
+  CUTOFF is fixed: <= 12 mm Punching, > 12 mm Drilling (no gap). Decimals allowed (e.g. 7.5).
+
+THICKNESS SOURCE: reuse the existing thickness derivation where present (TLT angle = last
+dim; TLT/plate = plate number). For NTLT angle/plate sections apply the same parse. (RSJ uses
+the fixed DRILLING rule, so RSJ thickness from the lookup table is not needed for this.)
+
+============================================================
+3. SCOPE: ALL ORDER TYPES
+============================================================
+Apply to TLT and NTLT alike. Channel/Beam/RSJ -> Drilling regardless of category; Angle/Plate
+-> thickness rule regardless of category.
+
+============================================================
+4. STORE / SORT / REPORT (the purpose)
+============================================================
+  - Persist section_type, hole_operation, hole_operation_source on record_pool / records
+    (Drizzle migration); add to the API and exports; regenerate hooks/Zod.
+  - Keep these OUT of the across-upload row hash (derived values, not source columns).
+  - Add a FILTER for hole_operation (Punching / Drilling / Not set) on the data pages
+    (Activity, Ageing, Job-wise/Section-wise, Reports), usable alongside existing filters.
+  - Allow grouping/sorting and a report breakdown by hole_operation (e.g. marks & weight
+    that are Punching vs Drilling, by project/section/contractor).
+  - Surface a count of NOT_SET (and "unknown" thickness) rows so gaps are visible.
+  - Recompute live; backfill existing rows so the attribute exists for all current data.
+
+ACCEPTANCE CHECK
+  - "45X45X4 MS" (angle, 4mm) -> ANGLE, PUNCHING. "150X150X16 MS" (16mm) -> ANGLE, DRILLING.
+  - "PLATE 6 MM MS" -> PLATE, PUNCHING. "PLATE 16 MM MS" -> PLATE, DRILLING.
+  - "ISMC ..." -> CHANNEL, DRILLING. "ISMB ..." -> BEAM, DRILLING. "RSJ 152X152X11 ..." ->
+    RSJ, DRILLING.
+  - FLAT/PIPE/ROUND/GRATING/OTHER -> NOT_SET (not applicable).
+  - Applies to TLT and NTLT. hole_operation stored, filterable, sortable, reportable; NOT_SET
+    count shown; not in dedup hash.
+  - Cutoff <=12 Punching / >12 Drilling; below-minimum -> Punching; unparsable thickness ->
+    NOT_SET flagged.
+  - No change to ageing, dedup, alert math, or other parsing.

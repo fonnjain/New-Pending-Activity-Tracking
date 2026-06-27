@@ -84,6 +84,9 @@ interface WalkState {
   dispatchedImportId: number | null;
   reopened: boolean;
   limitedHistory: boolean;
+  // Most recent import (id + report date) in which the project was present.
+  lastSeenImportId: number | null;
+  lastSeenDate: string | null;
   identities: Set<string>;
 }
 
@@ -97,6 +100,8 @@ function newState(): WalkState {
     dispatchedImportId: null,
     reopened: false,
     limitedHistory: false,
+    lastSeenImportId: null,
+    lastSeenDate: null,
     identities: new Set<string>(),
   };
 }
@@ -135,6 +140,14 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
     .orderBy(asc(importsTable.id));
 
   const states = new Map<string, WalkState>();
+
+  // Track the NEWEST import (max id = last in ascending order) and the projects
+  // present in it. Used by the data-retention dispatch capture below so a project
+  // absent from the newest report can be Dispatched even if the import that
+  // established its presence was deleted.
+  let latestImportId: number | null = null;
+  let latestYmd: string | null = null;
+  let latestPresent = new Set<string>();
 
   for (const imp of imports) {
     // Light per-membership projection for this import (no full row expansion).
@@ -176,6 +189,10 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
       }
       for (const id of info.ids) st.identities.add(id);
       if (info.anyEarlier) st.inProgressObserved = true;
+      // Record the latest import in which this project was present (advances in
+      // ascending id order). Persisted so it survives import deletion/pruning.
+      st.lastSeenImportId = imp.id;
+      st.lastSeenDate = ymd;
       // Ready: present, has marks, and none still in an earlier activity.
       if (st.readyDate === null && info.ids.size > 0 && !info.anyEarlier) {
         st.readyDate = ymd;
@@ -202,6 +219,12 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
       }
       if (isPresent) st.seenBefore = true;
     }
+
+    // Newest import wins (ascending order): snapshot its present project set so
+    // the data-retention dispatch capture can tell which projects are absent.
+    latestImportId = imp.id;
+    latestYmd = ymd;
+    latestPresent = new Set(present.keys());
   }
 
   // Earliest Assign Date per project across the whole permanent pool.
@@ -234,14 +257,55 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
     const st = states.get(project);
     const ex = existing.get(project);
     const projectStart = startByJob.get(project) ?? ex?.projectStart ?? null;
-    const readyDate = ex?.readyDate ?? st?.readyDate ?? null;
-    const readyImportId = ex?.readyImportId ?? st?.readyImportId ?? null;
-    const dispatchedDate = ex?.dispatchedDate ?? st?.dispatchedDate ?? null;
-    const dispatchedImportId =
+    let readyDate = ex?.readyDate ?? st?.readyDate ?? null;
+    let readyImportId = ex?.readyImportId ?? st?.readyImportId ?? null;
+    let dispatchedDate = ex?.dispatchedDate ?? st?.dispatchedDate ?? null;
+    let dispatchedImportId =
       ex?.dispatchedImportId ?? st?.dispatchedImportId ?? null;
     const marksTotal = Math.max(st?.identities.size ?? 0, ex?.marksTotal ?? 0);
     const reopened = (st?.reopened ?? false) || (ex?.reopened ?? false);
-    const limitedHistory = ex?.limitedHistory ?? st?.limitedHistory ?? false;
+    let limitedHistory = ex?.limitedHistory ?? st?.limitedHistory ?? false;
+
+    // Merge last-seen presence: keep the GREATER import id (advance forward only)
+    // so a deleted/pruned import can never roll it backward. This is what makes
+    // dispatch-on-disappear survive deletion of the import that established the
+    // project's presence.
+    const stLastSeenId = st?.lastSeenImportId ?? null;
+    const exLastSeenId = ex?.lastSeenImportId ?? null;
+    let lastSeenImportId: number | null;
+    let lastSeenDate: string | null;
+    if (
+      stLastSeenId !== null &&
+      (exLastSeenId === null || stLastSeenId >= exLastSeenId)
+    ) {
+      lastSeenImportId = stLastSeenId;
+      lastSeenDate = st?.lastSeenDate ?? null;
+    } else {
+      lastSeenImportId = exLastSeenId;
+      lastSeenDate = ex?.lastSeenDate ?? null;
+    }
+
+    // Data-retention dispatch capture: a project with a known last-seen presence
+    // that PREDATES the newest report and is absent from it is Dispatched — even
+    // if the import that established its presence has since been deleted (so the
+    // replay-based capture above never fired). Dated from the newest report.
+    // Honours capture-once: only fills a still-null dispatch, never moves one.
+    if (
+      dispatchedDate === null &&
+      lastSeenImportId !== null &&
+      latestImportId !== null &&
+      lastSeenImportId < latestImportId &&
+      !latestPresent.has(project)
+    ) {
+      dispatchedDate = latestYmd;
+      dispatchedImportId = latestImportId;
+      // Straight-to-gone: never observed all-in-yard, stamp Ready too (lag 0).
+      if (readyDate === null) {
+        readyDate = latestYmd;
+        readyImportId = latestImportId;
+        if (!(st?.inProgressObserved ?? false)) limitedHistory = true;
+      }
+    }
 
     const readyTurnaroundDays = dayDiff(readyDate, projectStart);
     const dispatchedTurnaroundDays = dayDiff(dispatchedDate, projectStart);
@@ -284,6 +348,8 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
       varianceReadyDays,
       limitedHistory,
       reopened,
+      lastSeenImportId,
+      lastSeenDate,
       updatedAt: new Date(),
     });
   }
@@ -309,6 +375,8 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
           varianceReadyDays: sql`excluded.variance_ready_days`,
           limitedHistory: sql`excluded.limited_history`,
           reopened: sql`excluded.reopened`,
+          lastSeenImportId: sql`excluded.last_seen_import_id`,
+          lastSeenDate: sql`excluded.last_seen_date`,
           updatedAt: sql`excluded.updated_at`,
         },
       });

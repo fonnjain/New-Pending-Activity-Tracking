@@ -1004,6 +1004,14 @@ router.delete("/imports/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
+  // Refresh permanent project milestones so last-seen / dispatch state stays
+  // consistent after the deletion (best-effort; never fails the request).
+  try {
+    await recomputeMilestones();
+  } catch (err) {
+    req.log.warn({ err }, "Milestone recompute failed after import delete");
+  }
+
   res.sendStatus(204);
 });
 

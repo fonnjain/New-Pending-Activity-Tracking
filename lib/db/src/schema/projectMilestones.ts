@@ -33,6 +33,12 @@ export const projectMilestonesTable = pgTable("project_milestones", {
   limitedHistory: boolean("limited_history").notNull().default(false),
   // A mark returned to an earlier activity after a milestone was captured.
   reopened: boolean("reopened").notNull().default(false),
+  // Last import (id + report date) in which the project was observed present.
+  // Advances forward only and is PRESERVED across import deletion/pruning, so a
+  // project orphaned by a deleted import can still be recognised as Dispatched
+  // when it is absent from the newest report. Internal — not exposed via the API.
+  lastSeenImportId: integer("last_seen_import_id"),
+  lastSeenDate: date("last_seen_date", { mode: "string" }),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
