@@ -293,14 +293,13 @@ export const FAB_LOAD_COLUMNS: { value: FabLoadColumn; label: string }[] = [
   { value: "bending", label: "Bending Load" },
 ];
 
-// The operation sheet's In Hand (work BEFORE the operation) section carries the
-// four weld/hole operations only — there is no separate Bending column there.
+// Both sections (Operational and In Hand) carry the same five columns —
+// Welded, Drilling, Plate Punch, Plate Drill, Bending — in the same order.
+// In-Hand Bending = marks positioned before B in the TLT sequence (C, RFI, NH).
 export function fabLoadColumnsForSection(
-  section: FabLoadSection,
+  _section: FabLoadSection,
 ): { value: FabLoadColumn; label: string }[] {
-  return section === "inhand"
-    ? FAB_LOAD_COLUMNS.filter((c) => c.value !== "bending")
-    : FAB_LOAD_COLUMNS;
+  return FAB_LOAD_COLUMNS;
 }
 
 // P1..P10 (extendable later by widening this range).
