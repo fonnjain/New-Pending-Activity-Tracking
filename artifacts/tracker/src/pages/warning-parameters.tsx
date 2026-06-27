@@ -171,7 +171,7 @@ export default function WarningParameters() {
   );
 }
 
-function WarningParametersContent() {
+export function WarningParametersContent() {
   const { settings, updateSettings, reset, saving } = useSettings();
   const { selectedImportId } = useTracker();
   const { toast } = useToast();

@@ -11,12 +11,49 @@ import { AiReviewPanel } from "@/components/ai-review-panel";
 import { StagedUploadPanel } from "@/components/staged-upload-panel";
 import { LoginGate, LogoutButton } from "@/components/login-gate";
 import { useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
+import { Segmented } from "@/components/ui/segmented";
+import { ContractorSetupContent } from "@/pages/contractor-setup";
+import { WarningParametersContent } from "@/pages/warning-parameters";
+import { ThicknessContent } from "@/pages/thickness";
+
+const ADMIN_TABS = [
+  { path: "/data", label: "Data" },
+  { path: "/contractor-setup", label: "Contractor Setup" },
+  { path: "/warning-parameters", label: "Warning Parameters" },
+  { path: "/thickness", label: "Thickness" },
+] as const;
 
 export default function DataView() {
   return (
     <LoginGate>
-      <DataViewContent />
+      <AdminTabbedPage />
     </LoginGate>
+  );
+}
+
+function AdminTabbedPage() {
+  const [location, setLocation] = useLocation();
+  const active = ADMIN_TABS.find((t) => t.path === location)?.path ?? "/data";
+  return (
+    <div className="space-y-6">
+      <div className="overflow-x-auto -mx-1 px-1 pb-1">
+        <Segmented
+          value={active}
+          onChange={(v) => v && setLocation(v)}
+          options={ADMIN_TABS.map((t) => ({ value: t.path, label: t.label }))}
+        />
+      </div>
+      {active === "/contractor-setup" ? (
+        <ContractorSetupContent />
+      ) : active === "/warning-parameters" ? (
+        <WarningParametersContent />
+      ) : active === "/thickness" ? (
+        <ThicknessContent />
+      ) : (
+        <DataViewContent />
+      )}
+    </div>
   );
 }
 

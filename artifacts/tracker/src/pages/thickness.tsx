@@ -63,7 +63,7 @@ export default function ThicknessView() {
   );
 }
 
-function ThicknessContent() {
+export function ThicknessContent() {
   const { selectedImportId } = useTracker();
   const queryClient = useQueryClient();
 

@@ -1,0 +1,80 @@
+REPLIT AGENT PROMPT — VERIFY THE "FABRICATION LOAD" LOGIC (prove it's correct)
+==============================================================================
+Do NOT change features. RUN a verification pass on the existing "Fabrication Load for TLT"
+report and its dashboard, and produce a short PASS/FAIL report so we can confirm the logic is
+correct. If a check FAILS, fix only what's needed to make the logic match the spec below,
+then re-run and show the results. Reuse existing data (activity, section_type, hole_operation,
+thickness, weight, project, TLT sequence).
+
+THE SPEC TO VERIFY AGAINST (TLT only; weight in TONNES = Balance Wt / 1000)
+TLT sequence: C, RFI, NH, B, HAB, HG, W, Q, TS, G, GB, Y.
+hole qualification: ANGLE/PLATE thickness <= 12mm -> PUNCHING; > 12mm -> DRILLING
+                    (below minimum -> PUNCHING). CHANNEL/BEAM/RSJ -> DRILLING (not used in
+                    the Angle/Plate columns of this report).
+
+OPERATIONAL LOAD (current Activity is EXACTLY that operation):
+  Welded      = Activity == W
+  Bending     = Activity == B
+  Drilling    = section_type ANGLE & Activity == RFI & hole_operation == DRILLING
+  Plate Punch = section_type PLATE & Activity == RFI & hole_operation == PUNCHING
+  Plate Drill = section_type PLATE & Activity == RFI & hole_operation == DRILLING
+
+IN HAND (upcoming):
+  Welded      = Activity BEFORE W in sequence (C,RFI,NH,B,HAB,HG), NOT W   (positional)
+  Bending     = Activity BEFORE B in sequence (C,RFI,NH), NOT B            (positional)
+  Drilling    = section_type ANGLE & Activity == C & hole_operation == DRILLING
+  Plate Punch = section_type PLATE & Activity == C & hole_operation == PUNCHING
+  Plate Drill = section_type PLATE & Activity == C & hole_operation == DRILLING
+
+CHECKS TO RUN (report each as PASS/FAIL with the numbers)
+
+1) RULE WIRING (assert the code's filters match the spec)
+   - Welded/Bending Operational use Activity == W / == B exactly.
+   - Welded/Bending In Hand use stage_index < index(W) / < index(B) (NOT just Activity==C).
+   - The 3 hole columns Operational use Activity == RFI; In Hand use Activity == C.
+   - Hole columns also require the section_type AND hole_operation shown above.
+   Print the actual predicate used for each of the 10 cells.
+
+2) ROW-LEVEL SPOT CHECKS (pick real marks from the data and show they land correctly)
+   - An ANGLE mark with thickness <= 12 at RFI: must NOT appear in Drilling (it's punching;
+     and this report has no Angle-Punch column) -> appears in NO hole column.
+   - An ANGLE mark with thickness > 12 at RFI -> Drilling Operational only.
+   - A PLATE mark thickness <= 12 at C -> Plate Punch In Hand only.
+   - A PLATE mark thickness > 12 at RFI -> Plate Drill Operational only.
+   - A mark at NH -> counts in Welded In Hand AND Bending In Hand (before both), but NOT in
+     any Operational column.
+   - A mark at W -> Welded Operational; NOT Welded In Hand.
+   Show mark id, section_type, activity, thickness, hole_operation, and which cells it falls in.
+
+3) NO DOUBLE-COUNTING / NO MISSING (within a column set)
+   - For Welded: every TLT mark is either Operational (at W) OR In Hand (before W) OR neither
+     (at/after Q i.e. W done) — never both. Print counts: at W, before W, after W; confirm
+     Operational+InHand have no overlap.
+   - Same partition logic for Bending.
+   - For each hole column, Operational (RFI) and In Hand (C) sets are disjoint (different
+     activities) — confirm zero overlap.
+
+4) WEIGHT / TOTALS
+   - Recompute each column's G. Total independently (sum tonnes per project) and compare to
+     what the report/dashboard shows; they must match to 3 decimals.
+   - Confirm tonnes = Balance Wt / 1000 (not kg) and rounding is 3 decimals.
+
+5) SCOPE
+   - Only TLT (category == TLT / Order Nature Structure) rows are included; NTLT excluded.
+   - A project shows in a column only if its matching weight > 0.
+
+6) CROSS-CHECK REPORT vs DASHBOARD
+   - The Reports-page "Fabrication Load for TLT" and the Plant Operation Wise -> Fabrication
+     dashboard produce IDENTICAL numbers for the same filters (they share logic). Print a
+     side-by-side of the 10 G. Totals from both; they must be equal.
+   - Priority values are the SAME persisted source in both.
+
+OUTPUT
+  - A concise PASS/FAIL table for checks 1-6 with the supporting numbers (counts, sample
+    marks, the 10 G. Totals). Where a check FAILS, state the cause and the minimal fix, apply
+    it, and re-run so the final output is all PASS.
+  - Do NOT alter the agreed rules; only correct deviations from this spec.
+
+ACCEPTANCE
+  - All six checks PASS with shown numbers; report and dashboard match; spot-check marks land
+    in exactly the right cells; no double-counting; tonnes/totals correct; TLT-only.

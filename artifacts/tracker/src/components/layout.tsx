@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
-import { BarChart3, Briefcase, Activity, Users, UserCog, Database, FileText, SlidersHorizontal, Filter, X, Timer, Gauge, CheckCircle2, Layers, Factory } from "lucide-react";
+import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, CheckCircle2, Factory } from "lucide-react";
 import { useTracker, dateRangeWindow } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -16,14 +16,11 @@ const navItems = [
   { href: "/activity", icon: Activity, label: "Activity Wise", short: "Activity" },
   { href: "/contractor", icon: Users, label: "Contractor Wise", short: "Contractors" },
   { href: "/plant", icon: Factory, label: "Plant Operation Wise", short: "Plant Ops" },
-  { href: "/contractor-setup", icon: UserCog, label: "Contractor Setup", short: "Setup" },
   { href: "/reports", icon: FileText, label: "Reports", short: "Reports" },
   { href: "/turnaround", icon: Timer, label: "Turn Around Time", short: "Turnaround" },
   { href: "/stuck", icon: Gauge, label: "Stuck Projects", short: "Stuck" },
   { href: "/completed", icon: CheckCircle2, label: "Completed", short: "Completed" },
   { href: "/data", icon: Database, label: "Data", short: "Data" },
-  { href: "/thickness", icon: Layers, label: "Thickness", short: "Thickness" },
-  { href: "/warning-parameters", icon: SlidersHorizontal, label: "Warning Params", short: "Warnings" },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -31,8 +28,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { selectedImportId } = useTracker();
   const showFilters =
     location !== "/data" &&
-    location !== "/jobs" &&
+    location !== "/contractor-setup" &&
     location !== "/warning-parameters" &&
+    location !== "/thickness" &&
+    location !== "/jobs" &&
     selectedImportId != null;
 
   return (
@@ -45,13 +44,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <Link key={item.href} href={item.href}>
               <div
                 title={item.label}
-                className={`px-3 py-1.5 rounded-md text-[13px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
                   location === item.href
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "text-sidebar-foreground hover:bg-sidebar-accent/50"
                 }`}
               >
-                {item.short}
+                {item.label}
               </div>
             </Link>
           ))}

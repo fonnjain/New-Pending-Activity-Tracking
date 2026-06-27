@@ -909,19 +909,21 @@ function FabricationLoadReport() {
               {s.label}
             </h2>
             <div className="overflow-x-auto rounded-lg border border-border">
-              <div className="flex divide-x divide-border min-w-max">
+              <div
+                className="grid divide-x divide-border min-w-[560px]"
+                style={{
+                  gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))`,
+                }}
+              >
                 {columns.map((c) => {
                   const cell = data.get(`${s.value}|${c.value}`)!;
                   const rows = orderedRows(s.value, c.value, cell);
                   return (
-                    <div
-                      key={c.value}
-                      className="w-72 shrink-0 flex flex-col"
-                    >
-                      <div className="px-3 py-2 bg-muted/50 border-b border-border flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold">{c.label}</span>
-                        <span className="text-xs font-normal text-muted-foreground">
-                          {rows.length} proj
+                    <div key={c.value} className="min-w-0 flex flex-col">
+                      <div className="px-2 py-2 bg-muted/50 border-b border-border flex items-center justify-between gap-1">
+                        <span className="text-xs font-semibold truncate">{c.label}</span>
+                        <span className="text-[10px] font-normal text-muted-foreground shrink-0">
+                          {rows.length}
                         </span>
                       </div>
                       {rows.length === 0 ? (
@@ -931,14 +933,14 @@ function FabricationLoadReport() {
                       ) : (
                         <Table>
                           <TableBody>
-                            <TableRow className="text-[11px] uppercase tracking-wide text-muted-foreground hover:bg-transparent">
-                              <TableCell className="py-1.5 font-medium">
+                            <TableRow className="text-[10px] uppercase tracking-wide text-muted-foreground hover:bg-transparent">
+                              <TableCell className="px-1.5 py-1.5 font-medium">
                                 Project
                               </TableCell>
-                              <TableCell className="py-1.5 text-right font-medium">
+                              <TableCell className="px-1.5 py-1.5 text-right font-medium">
                                 Weight
                               </TableCell>
-                              <TableCell className="py-1.5 font-medium">
+                              <TableCell className="px-1.5 py-1.5 font-medium">
                                 Priority
                               </TableCell>
                             </TableRow>
@@ -948,13 +950,13 @@ function FabricationLoadReport() {
                                 priorityMap.get(key) ?? NONE_PRIORITY;
                               return (
                                 <TableRow key={r.project}>
-                                  <TableCell className="font-medium py-1.5">
+                                  <TableCell className="font-medium py-1.5 px-1.5 text-xs">
                                     {r.project}
                                   </TableCell>
-                                  <TableCell className="text-right tabular-nums py-1.5">
+                                  <TableCell className="text-right tabular-nums py-1.5 px-1.5 text-xs">
                                     {fmtTonnes(r.weightKg)}
                                   </TableCell>
-                                  <TableCell className="py-1.5 w-24">
+                                  <TableCell className="py-1.5 px-1.5">
                                     <Select
                                       value={current}
                                       onValueChange={(v) =>
@@ -985,11 +987,11 @@ function FabricationLoadReport() {
                               );
                             })}
                             <TableRow className="border-t-2 font-semibold">
-                              <TableCell className="py-1.5">G. Total</TableCell>
-                              <TableCell className="text-right tabular-nums py-1.5">
+                              <TableCell className="py-1.5 px-1.5 text-xs">G. Total</TableCell>
+                              <TableCell className="text-right tabular-nums py-1.5 px-1.5 text-xs">
                                 {fmtTonnes(cell.totalKg)}
                               </TableCell>
-                              <TableCell className="py-1.5" />
+                              <TableCell className="py-1.5 px-1.5" />
                             </TableRow>
                           </TableBody>
                         </Table>

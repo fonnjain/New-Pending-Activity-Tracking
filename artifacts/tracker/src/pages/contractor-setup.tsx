@@ -53,7 +53,7 @@ export default function ContractorSetupView() {
   );
 }
 
-function ContractorSetupContent() {
+export function ContractorSetupContent() {
   const { selectedImportId } = useTracker();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
