@@ -78,6 +78,72 @@ export const PROCESS_STEP_LABELS: Record<ProcessStep, string> = {
   Y: "Yard",
 };
 
+// ---------------------------------------------------------------------------
+// Process phases (coarse roll-up of the TLT sequence)
+// ---------------------------------------------------------------------------
+// Four shop-floor phases that group activities into the stages the workshop
+// reports against. The TLT bands are SLICED from PROCESS_SEQUENCE (single source,
+// so they can never drift from the canonical ordering). Display/roll-up only —
+// never changes parsing, Activity values, qty, ageing, or dedup.
+//   Cutting            = first step (C)
+//   Quality Check      = everything between cutting and galvanising (RFI..Q)
+//   Galvanising        = TS..GB
+//   Ready for Dispatch = terminal step (Y)
+export type ProcessPhaseKey = "cutting" | "quality" | "galvanising" | "dispatch";
+
+const GALV_START_INDEX = PROCESS_SEQUENCE.indexOf("TS");
+const DISPATCH_INDEX = PROCESS_SEQUENCE.length - 1;
+
+// NTLT-only pre-galvanising fabrication codes (e.g. NTF/NTFSW/NTFW): they appear
+// in an NTLT sequence ahead of "TS" but are absent from the TLT sequence. Roll
+// them into Quality Check so NTLT/ALL views don't drop marks from the phases.
+const NTLT_FAB_CODES = Array.from(
+  new Set(
+    Object.values(SEQUENCES).flatMap((seq) => {
+      const tsIdx = seq.indexOf("TS");
+      const head = (tsIdx === -1 ? seq : seq.slice(0, tsIdx)) as readonly string[];
+      return head.filter((c) => !(PROCESS_SEQUENCE as readonly string[]).includes(c));
+    }),
+  ),
+);
+
+export const PROCESS_PHASES: {
+  key: ProcessPhaseKey;
+  label: string;
+  activities: readonly string[];
+}[] = [
+  { key: "cutting", label: "Cutting", activities: [PROCESS_SEQUENCE[0]] },
+  {
+    key: "quality",
+    label: "Quality Check",
+    activities: [...PROCESS_SEQUENCE.slice(1, GALV_START_INDEX), ...NTLT_FAB_CODES],
+  },
+  {
+    key: "galvanising",
+    label: "Galvanising",
+    activities: PROCESS_SEQUENCE.slice(GALV_START_INDEX, DISPATCH_INDEX),
+  },
+  {
+    key: "dispatch",
+    label: "Ready for Dispatch",
+    activities: [PROCESS_SEQUENCE[DISPATCH_INDEX]],
+  },
+];
+
+const PHASE_BY_CODE = new Map<string, ProcessPhaseKey>();
+for (const phase of PROCESS_PHASES) {
+  for (const code of phase.activities) PHASE_BY_CODE.set(code.toUpperCase(), phase.key);
+}
+
+// Map an activity code to its coarse process phase (case-insensitive). Known TLT
+// and NTLT codes resolve to a phase; only genuinely unknown codes return null, so
+// callers can surface those separately rather than miscount.
+export function processPhase(code: string | null | undefined): ProcessPhaseKey | null {
+  const c = (code ?? "").trim().toUpperCase();
+  if (!c) return null;
+  return PHASE_BY_CODE.get(c) ?? null;
+}
+
 // Normalize an activity code for matching only (trim + uppercase). Used for
 // case-insensitive comparison so "Hab"/"HAB" rank the same. The original value
 // is always preserved for display.

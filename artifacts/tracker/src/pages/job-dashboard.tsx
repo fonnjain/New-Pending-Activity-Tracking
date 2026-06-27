@@ -1,5 +1,11 @@
 import { useState, useMemo } from "react";
-import { compareActivity, sortActivities } from "@workspace/domain";
+import {
+  compareActivity,
+  sortActivities,
+  processPhase,
+  PROCESS_PHASES,
+  type ProcessPhaseKey,
+} from "@workspace/domain";
 import { useTracker, isWithinDateRange } from "@/lib/store";
 import {
   useGetImportRecords,
@@ -187,12 +193,26 @@ function JobDashboardContent() {
         projGroups.get(key)!.push(r);
       });
 
-      const byProject = Array.from(projGroups.entries()).map(([job, recs]) => ({
+      const emptyPhases = () =>
+        Object.fromEntries(
+          PROCESS_PHASES.map((p) => [p.key, { marks: 0, weight: 0 }]),
+        ) as Record<ProcessPhaseKey, { marks: number; weight: number }>;
+
+      const byProject = Array.from(projGroups.entries()).map(([job, recs]) => {
+        const phases = emptyPhases();
+        for (const r of recs) {
+          const key = processPhase(r.activity);
+          if (!key) continue;
+          phases[key].marks += 1;
+          phases[key].weight += r.balanceWt;
+        }
+        return {
         job,
         structures: new Set(recs.map((r) => secondaryOf(r)).filter(Boolean)).size,
         marks: recs.length,
         qty: recs.reduce((s, r) => s + r.balanceQty, 0),
         weight: recs.reduce((s, r) => s + r.balanceWt, 0),
+        phases,
         avgAge: avg(recs),
         firstAssign: recs.reduce<string | null>((min, r) => {
           const d = isoDate(r.assignDate);
@@ -204,7 +224,8 @@ function JobDashboardContent() {
           (r) => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60,
         ).length,
         c60Plus: recs.filter((r) => r.ageingDays !== null && r.ageingDays > 60).length,
-      }));
+        };
+      });
 
       const actGroups = new Map<string, typeof filtered>();
       filtered.forEach((r) => {
@@ -393,16 +414,15 @@ function JobDashboardContent() {
               <TableHeader>
                 <TableRow>
                   <TableHead>{primaryLabel}</TableHead>
-                  <TableHead className="text-right">
-                    {isAll ? "No. of Sub-groups" : isNtlt ? "No. of Sub-cats" : "No. of Structures"}
-                  </TableHead>
-                  <TableHead className="text-right">Marks</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Wt</TableHead>
+                  {PROCESS_PHASES.map((ph) => (
+                    <TableHead key={ph.key} className="text-right whitespace-nowrap">
+                      {ph.label}
+                      <span className="block text-[10px] font-normal text-muted-foreground normal-case">
+                        marks / wt
+                      </span>
+                    </TableHead>
+                  ))}
                   <TableHead className="text-right">Avg Ageing</TableHead>
-                  <TableHead className="text-right">0-30</TableHead>
-                  <TableHead className="text-right">31-60</TableHead>
-                  <TableHead className="text-right">60+</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -413,23 +433,33 @@ function JobDashboardContent() {
                     onClick={() => setSelectedJob(p.job)}
                   >
                     <TableCell className="font-bold text-primary">{p.job}</TableCell>
-                    <TableCell className="text-right">{p.structures}</TableCell>
-                    <TableCell className="text-right">{p.marks}</TableCell>
-                    <TableCell className="text-right">{p.qty}</TableCell>
-                    <TableCell className="text-right">{formatWeight(p.weight)}</TableCell>
+                    {PROCESS_PHASES.map((ph) => {
+                      const cell = p.phases[ph.key];
+                      return (
+                        <TableCell key={ph.key} className="text-right tabular-nums">
+                          {cell.marks > 0 ? (
+                            <>
+                              <span className="font-semibold">{cell.marks}</span>
+                              <span className="block text-xs text-muted-foreground">
+                                {formatWeight(cell.weight)}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                      );
+                    })}
                     <TableCell
                       className={`text-right font-bold tabular-nums ${getAgeingColor(p.avgAge)}`}
                     >
                       {p.avgAge !== null ? `${p.avgAge}d` : "-"}
                     </TableCell>
-                    <TableCell className="text-right text-muted-foreground">{p.c0to30}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">{p.c31to60}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">{p.c60Plus}</TableCell>
                   </TableRow>
                 ))}
                 {byProject.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">
+                    <TableCell colSpan={PROCESS_PHASES.length + 2} className="text-center py-4 text-muted-foreground">
                       No data for the selected filters.
                     </TableCell>
                   </TableRow>

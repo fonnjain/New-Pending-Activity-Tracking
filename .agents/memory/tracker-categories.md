@@ -37,3 +37,18 @@ identity/dedup/ageing.
 ## Degradation
 NTLT activities missing from `settings` fall back to `DEFAULT_ACTIVITY_CONFIG`
 (idealDays 3) until per-category config is added in a later phase.
+
+## Process phases (coarse 4-stage roll-up)
+`PROCESS_PHASES` + `processPhase(activity)` group the fine activities into the
+four stages the workshop reports against: **Cutting** (C), **Quality Check**
+(RFI..Q), **Galvanising** (TS,G,GB), **Ready for Dispatch** (Y). Used by the
+Job-wise "By Project/Section" table (marks + balance wt per phase) instead of the
+old structures/qty columns.
+
+**Why:** the shop reports progress by these named stages, not raw activity codes.
+
+**How to apply:** TLT bands are SLICED from `PROCESS_SEQUENCE` (never hardcode the
+literals — single source, can't drift). NTLT-only pre-`TS` fab codes
+(NTF/NTFSW/NTFW, computed from `SEQUENCES`) roll into Quality Check so NTLT/ALL
+views don't drop marks; `processPhase` returns null ONLY for genuinely unknown
+codes. Display/roll-up only — never touches parsing/qty/ageing/dedup.
