@@ -1,0 +1,57 @@
+REPLIT AGENT PROMPT — RSJ THICKNESS: USER INPUT > EXACT > BASE MATCH > 6.0 DEFAULT
+==================================================================================
+Extend the RSJ thickness resolution so unlisted RSJ variations still get a thickness via a
+base-dimension match, with a 6.0 mm default, and a manual user input that overrides
+everything. Builds on the existing RSJ Types & Thickness table. Deterministic; do not change
+ageing, dedup, or the alert math.
+
+CONTEXT
+The table holds exact RSJ types -> thickness (e.g. RSJ 152X152X15 = 7.9). Many real sections
+are variations of a base (152X152X13, 152X152X11, 152X152X16 ...) that should inherit the
+base's thickness. Unknown bases should default to 6.0 mm. A manually entered value always
+wins.
+
+RESOLUTION ORDER (for an NTLT -> RSJ row) — first match wins:
+  1) USER INPUT: if a manual thickness has been entered for this row (or its exact type),
+     use it. ALWAYS wins over table/base/default. source = "manual".
+  2) EXACT TYPE: else if the row's cleaned RSJ type (leading "RSJ <A>X<B>X<C>" prefix,
+     trailing junk stripped) exactly matches a Type in the table -> that thickness.
+     source = "rsj_exact".
+  3) BASE MATCH: else take the BASE = first two dimensions only ("RSJ <A>X<B>", ignoring the
+     third number). If any table entry shares that base, use that base's thickness.
+     e.g. RSJ 152X152X13 -> base "152X152" -> matches RSJ 152X152X15 (7.9) -> 7.9 mm.
+     source = "rsj_base".
+  4) DEFAULT: else thickness = 6.0 mm. source = "rsj_default".
+
+BASE COMPUTATION
+  - base(section) = the "RSJ <A>X<B>" prefix from the cleaned type (drop the third dim and
+    any trailing junk). Match case/space-insensitively.
+  - Build a base->thickness index from the table's entries (each entry's base = its first
+    two dims). If a base has exactly one thickness across listed types, use it.
+  - EDGE CASE (multiple thicknesses for one base): if a base maps to >1 different thickness
+    in the table, do NOT guess — use 6.0 default and FLAG "ambiguous base, set manually";
+    the user's manual input (rule 1) resolves it. (Currently each base is unique, so this is
+    just a safety net.)
+
+USER INPUT (rule 1) — how it's captured
+  - On the Galvanizing/RSJ surfaces, allow a manual thickness entry per RSJ row (and/or per
+    section group). Persist it keyed by mark_id (and/or group_key) so it survives re-imports;
+    re-apply on import. A manual value sets source="manual" and overrides exact/base/default.
+  - Provide a way to clear the manual value (revert to the exact/base/default cascade).
+
+CAPTURE / FLAGGING
+  - Store thickness_mm + thickness_source ("manual" | "rsj_exact" | "rsj_base" |
+    "rsj_default") per record. Keep out of the across-upload row hash.
+  - Show the source so the user can see WHY a value was applied: exact, inherited-from-base,
+    default 6.0, or manual. Surface counts of rows resolved by base and by default so the
+    user can add precise types/manual values where they matter.
+  - Recompute live when the table changes or a manual value is entered/cleared; no re-import.
+
+ACCEPTANCE CHECK
+  - RSJ 152X152X15 (listed) -> 7.9 (rsj_exact).
+  - RSJ 152X152X13 / X11 / X16 (unlisted, base 152X152) -> 7.9 (rsj_base).
+  - RSJ 999X999X10 (no base in table) -> 6.0 (rsj_default).
+  - A row with a manual thickness entered -> that manual value regardless of exact/base/
+    default (source manual); clearing it reverts to the cascade.
+  - thickness_source visible; counts of base/default-resolved rows shown.
+  - No change to ageing, dedup, or alert math.
