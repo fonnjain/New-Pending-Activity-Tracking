@@ -52,10 +52,12 @@ import {
 } from "@/components/ui/select";
 import {
   exportToXlsxSheets,
+  exportToXlsxBlockGrid,
   exportToCsvRaw,
   type XlsxColumn,
-  type XlsxSheet,
   type XlsxSummaryRow,
+  type XlsxGridSheet,
+  type XlsxGridBlock,
 } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import { ageingCell } from "@/lib/ageing";
@@ -814,78 +816,70 @@ function FabricationLoadReport() {
 
   const exportExcel = () => {
     const date = new Date().toISOString().slice(0, 10);
-    const sheets: XlsxSheet[] = FAB_LOAD_SECTIONS.map((s) => {
-      const { blocks, maxLen } = buildSectionGrid(s.value);
-      const columns: XlsxColumn[] = [];
-      for (const { c } of blocks) {
-        columns.push({ label: `${c.label} — Project`, field: `${c.value}_p` });
-        columns.push({
-          label: `${c.label} — Wt (t)`,
-          field: `${c.value}_w`,
-          numeric: true,
-          decimals: 3,
-        });
-        columns.push({ label: `${c.label} — Priority`, field: `${c.value}_pr` });
-      }
-      const rows: Record<string, string | number>[] = [];
-      for (let i = 0; i < maxLen; i++) {
-        const row: Record<string, string | number> = {};
-        for (const { c, rows: rs } of blocks) {
-          const r = rs[i];
-          if (!r) continue;
-          row[`${c.value}_p`] = r.project;
-          row[`${c.value}_w`] = toTonnes(r.weightKg);
-          row[`${c.value}_pr`] =
-            priorityMap.get(priKey(s.value, c.value, r.project)) ?? "";
-        }
-        rows.push(row);
-      }
-      const totalValues: Record<string, number> = {};
-      for (const { c, cell } of blocks)
-        totalValues[`${c.value}_w`] = toTonnes(cell.totalKg);
-      const summaryRows: XlsxSummaryRow[] = [
-        { label: "G. Total", values: totalValues },
-      ];
-      return { name: s.label, columns, rows, summaryRows };
+    const sheets: XlsxGridSheet[] = FAB_LOAD_SECTIONS.map((s) => {
+      const { blocks } = buildSectionGrid(s.value);
+      const gridBlocks: XlsxGridBlock[] = blocks.map(({ c, cell, rows: rs }) => ({
+        title: c.label,
+        headers: ["Project", "Wt (t)", "Priority"],
+        numeric: [false, true, false],
+        decimals: 3,
+        rows: rs.map((r) => [
+          r.project,
+          toTonnes(r.weightKg),
+          priorityMap.get(priKey(s.value, c.value, r.project)) ?? "",
+        ]),
+        totals: ["G. Total", toTonnes(cell.totalKg), ""],
+      }));
+      return { name: s.label, blocks: gridBlocks };
     });
-    exportToXlsxSheets(`fabrication_load_tlt_${date}.xlsx`, sheets);
+    exportToXlsxBlockGrid(`fabrication_load_tlt_${date}.xlsx`, sheets);
   };
 
   const exportCsv = () => {
     const date = new Date().toISOString().slice(0, 10);
     const aoa: (string | number)[][] = [];
+    // A blank cell after each block's 3 columns mirrors the spacer column in the
+    // Excel grid (no spacer trails the last block).
+    const withSpacers = (
+      cells: (string | number)[][],
+    ): (string | number)[] => {
+      const out: (string | number)[] = [];
+      cells.forEach((triplet, idx) => {
+        out.push(...triplet);
+        if (idx < cells.length - 1) out.push("");
+      });
+      return out;
+    };
     for (const s of FAB_LOAD_SECTIONS) {
       const { blocks, maxLen } = buildSectionGrid(s.value);
       aoa.push([s.label]);
-      const header: string[] = [];
-      for (const { c } of blocks)
-        header.push(`${c.label} Project`, `${c.label} Wt (t)`, `${c.label} Priority`);
-      aoa.push(header);
+      aoa.push(withSpacers(blocks.map(({ c }) => [c.label, "", ""])));
+      aoa.push(withSpacers(blocks.map(() => ["Project", "Wt (t)", "Priority"])));
       for (let i = 0; i < maxLen; i++) {
-        const row: (string | number)[] = [];
-        for (const { c, rows: rs } of blocks) {
-          const r = rs[i];
-          if (r) {
-            row.push(
-              r.project,
-              toTonnes(r.weightKg).toFixed(3),
-              priorityMap.get(priKey(s.value, c.value, r.project)) ?? "",
-            );
-          } else {
-            row.push("", "", "");
-          }
-        }
-        aoa.push(row);
-      }
-      const totalRow: (string | number)[] = [];
-      blocks.forEach(({ cell }, idx) => {
-        totalRow.push(
-          idx === 0 ? "G. Total" : "",
-          toTonnes(cell.totalKg).toFixed(3),
-          "",
+        aoa.push(
+          withSpacers(
+            blocks.map(({ c, rows: rs }) => {
+              const r = rs[i];
+              return r
+                ? [
+                    r.project,
+                    toTonnes(r.weightKg).toFixed(3),
+                    priorityMap.get(priKey(s.value, c.value, r.project)) ?? "",
+                  ]
+                : ["", "", ""];
+            }),
+          ),
         );
-      });
-      aoa.push(totalRow);
+      }
+      aoa.push(
+        withSpacers(
+          blocks.map(({ cell }) => [
+            "G. Total",
+            toTonnes(cell.totalKg).toFixed(3),
+            "",
+          ]),
+        ),
+      );
       aoa.push([]);
     }
     exportToCsvRaw(`fabrication_load_tlt_${date}.csv`, aoa);
