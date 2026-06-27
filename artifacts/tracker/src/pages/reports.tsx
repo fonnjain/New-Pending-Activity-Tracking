@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import {
   activityRank,
   compareActivity,
-  FAB_LOAD_COLUMNS,
   FAB_LOAD_SECTIONS,
+  fabLoadColumnsForSection,
   FAB_PRIORITIES,
   lifecycleStatus,
   migrateTurnaroundSettings,
@@ -715,7 +715,7 @@ function FabricationLoadReport() {
   const data = useMemo(() => {
     const out = new Map<string, FabColumnData>();
     for (const s of FAB_LOAD_SECTIONS) {
-      for (const c of FAB_LOAD_COLUMNS) {
+      for (const c of fabLoadColumnsForSection(s.value)) {
         out.set(`${s.value}|${c.value}`, { rows: [], totalKg: 0 });
       }
     }
@@ -726,7 +726,7 @@ function FabricationLoadReport() {
       const wt = r.balanceWt ?? 0;
       if (wt <= 0) continue;
       for (const s of FAB_LOAD_SECTIONS) {
-        for (const c of FAB_LOAD_COLUMNS) {
+        for (const c of fabLoadColumnsForSection(s.value)) {
           if (!fabLoadMatch(s.value, c.value, r)) continue;
           const cell = `${s.value}|${c.value}`;
           let pm = acc.get(cell);
@@ -801,7 +801,7 @@ function FabricationLoadReport() {
   const buildExportRows = (): Record<string, string | number>[] => {
     const rows: Record<string, string | number>[] = [];
     for (const s of FAB_LOAD_SECTIONS) {
-      for (const c of FAB_LOAD_COLUMNS) {
+      for (const c of fabLoadColumnsForSection(s.value)) {
         const cell = data.get(`${s.value}|${c.value}`)!;
         for (const r of orderedRows(s.value, c.value, cell)) {
           rows.push({
@@ -901,84 +901,107 @@ function FabricationLoadReport() {
         </div>
       </div>
 
-      {FAB_LOAD_SECTIONS.map((s) => (
-        <div key={s.value} className="space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            {s.label}
-          </h2>
-          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-            {FAB_LOAD_COLUMNS.map((c) => {
-              const cell = data.get(`${s.value}|${c.value}`)!;
-              const rows = orderedRows(s.value, c.value, cell);
-              return (
-                <Card key={c.value} className="border-border">
-                  <CardHeader className="py-3">
-                    <CardTitle className="text-sm flex items-center justify-between gap-2">
-                      <span>{c.label}</span>
-                      <span className="text-xs font-normal text-muted-foreground">
-                        {rows.length} proj
-                      </span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-0">
-                    {rows.length === 0 ? (
-                      <p className="text-xs text-muted-foreground py-2">
-                        No matching marks.
-                      </p>
-                    ) : (
-                      <Table>
-                        <TableBody>
-                          {rows.map((r) => {
-                            const key = priKey(s.value, c.value, r.project);
-                            const current = priorityMap.get(key) ?? NONE_PRIORITY;
-                            return (
-                              <TableRow key={r.project}>
-                                <TableCell className="font-medium py-1.5">
-                                  {r.project}
-                                </TableCell>
-                                <TableCell className="text-right tabular-nums py-1.5">
-                                  {fmtTonnes(r.weightKg)}
-                                </TableCell>
-                                <TableCell className="py-1.5 w-24">
-                                  <Select
-                                    value={current}
-                                    onValueChange={(v) =>
-                                      setPriority(s.value, c.value, r.project, v)
-                                    }
-                                  >
-                                    <SelectTrigger className="h-7 text-xs">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value={NONE_PRIORITY}>—</SelectItem>
-                                      {FAB_PRIORITIES.map((p) => (
-                                        <SelectItem key={p} value={p}>
-                                          {p}
+      {FAB_LOAD_SECTIONS.map((s) => {
+        const columns = fabLoadColumnsForSection(s.value);
+        return (
+          <div key={s.value} className="space-y-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              {s.label}
+            </h2>
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <div className="flex divide-x divide-border min-w-max">
+                {columns.map((c) => {
+                  const cell = data.get(`${s.value}|${c.value}`)!;
+                  const rows = orderedRows(s.value, c.value, cell);
+                  return (
+                    <div
+                      key={c.value}
+                      className="w-72 shrink-0 flex flex-col"
+                    >
+                      <div className="px-3 py-2 bg-muted/50 border-b border-border flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold">{c.label}</span>
+                        <span className="text-xs font-normal text-muted-foreground">
+                          {rows.length} proj
+                        </span>
+                      </div>
+                      {rows.length === 0 ? (
+                        <p className="text-xs text-muted-foreground px-3 py-3">
+                          No matching marks.
+                        </p>
+                      ) : (
+                        <Table>
+                          <TableBody>
+                            <TableRow className="text-[11px] uppercase tracking-wide text-muted-foreground hover:bg-transparent">
+                              <TableCell className="py-1.5 font-medium">
+                                Project
+                              </TableCell>
+                              <TableCell className="py-1.5 text-right font-medium">
+                                Weight
+                              </TableCell>
+                              <TableCell className="py-1.5 font-medium">
+                                Priority
+                              </TableCell>
+                            </TableRow>
+                            {rows.map((r) => {
+                              const key = priKey(s.value, c.value, r.project);
+                              const current =
+                                priorityMap.get(key) ?? NONE_PRIORITY;
+                              return (
+                                <TableRow key={r.project}>
+                                  <TableCell className="font-medium py-1.5">
+                                    {r.project}
+                                  </TableCell>
+                                  <TableCell className="text-right tabular-nums py-1.5">
+                                    {fmtTonnes(r.weightKg)}
+                                  </TableCell>
+                                  <TableCell className="py-1.5 w-24">
+                                    <Select
+                                      value={current}
+                                      onValueChange={(v) =>
+                                        setPriority(
+                                          s.value,
+                                          c.value,
+                                          r.project,
+                                          v,
+                                        )
+                                      }
+                                    >
+                                      <SelectTrigger className="h-7 text-xs">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value={NONE_PRIORITY}>
+                                          —
                                         </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                          <TableRow className="border-t-2 font-semibold">
-                            <TableCell className="py-1.5">G. Total</TableCell>
-                            <TableCell className="text-right tabular-nums py-1.5">
-                              {fmtTonnes(cell.totalKg)}
-                            </TableCell>
-                            <TableCell className="py-1.5" />
-                          </TableRow>
-                        </TableBody>
-                      </Table>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })}
+                                        {FAB_PRIORITIES.map((p) => (
+                                          <SelectItem key={p} value={p}>
+                                            {p}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                            <TableRow className="border-t-2 font-semibold">
+                              <TableCell className="py-1.5">G. Total</TableCell>
+                              <TableCell className="text-right tabular-nums py-1.5">
+                                {fmtTonnes(cell.totalKg)}
+                              </TableCell>
+                              <TableCell className="py-1.5" />
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

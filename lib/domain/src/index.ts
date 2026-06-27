@@ -279,17 +279,29 @@ export type FabLoadColumn =
   | "plateDrill";
 
 export const FAB_LOAD_SECTIONS: { value: FabLoadSection; label: string }[] = [
-  { value: "operational", label: "Operational Load" },
+  { value: "operational", label: "Operation Load" },
   { value: "inhand", label: "In Hand" },
 ];
 
+// Column order matches the operation sheet: Welded, Drilling, Plate Punch,
+// Plate Drill, Bending.
 export const FAB_LOAD_COLUMNS: { value: FabLoadColumn; label: string }[] = [
   { value: "welded", label: "Welded Load" },
-  { value: "bending", label: "Bending Load" },
   { value: "drilling", label: "Drilling Load" },
   { value: "platePunch", label: "Plate Punch" },
   { value: "plateDrill", label: "Plate Drill" },
+  { value: "bending", label: "Bending Load" },
 ];
+
+// The operation sheet's In Hand (work BEFORE the operation) section carries the
+// four weld/hole operations only — there is no separate Bending column there.
+export function fabLoadColumnsForSection(
+  section: FabLoadSection,
+): { value: FabLoadColumn; label: string }[] {
+  return section === "inhand"
+    ? FAB_LOAD_COLUMNS.filter((c) => c.value !== "bending")
+    : FAB_LOAD_COLUMNS;
+}
 
 // P1..P10 (extendable later by widening this range).
 export const FAB_PRIORITIES: string[] = Array.from(
