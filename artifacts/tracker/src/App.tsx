@@ -13,7 +13,6 @@ import StuckProjectsView from "@/pages/stuck-projects";
 import CompletedView from "@/pages/completed";
 import JobDashboard from "@/pages/job-dashboard";
 import ActivityView from "@/pages/activity";
-import AgeingView from "@/pages/ageing";
 import ContractorView from "@/pages/contractor";
 import PlantOperationView from "@/pages/plant-operation";
 import ContractorSetupView from "@/pages/contractor-setup";
@@ -44,7 +43,6 @@ function Router() {
         <Route path="/completed" component={CompletedView} />
         <Route path="/jobs" component={JobDashboard} />
         <Route path="/activity" component={ActivityView} />
-        <Route path="/ageing" component={AgeingView} />
         <Route path="/contractor" component={ContractorView} />
         <Route path="/plant" component={PlantOperationView} />
         <Route path="/contractor-setup" component={ContractorSetupView} />
