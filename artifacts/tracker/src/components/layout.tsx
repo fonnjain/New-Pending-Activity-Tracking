@@ -11,19 +11,19 @@ import { Segmented } from "@/components/ui/segmented";
 import { sortActivities, ACTIVITY_BUNDLES, CONTRACTOR_CATEGORIES, OUT_VENDOR_TYPES } from "@workspace/domain";
 
 const navItems = [
-  { href: "/", icon: BarChart3, label: "Overview" },
-  { href: "/jobs", icon: Briefcase, label: "Project Wise" },
-  { href: "/activity", icon: Activity, label: "Activity Wise" },
-  { href: "/contractor", icon: Users, label: "Contractor Wise" },
-  { href: "/plant", icon: Factory, label: "Plant Operation Wise" },
-  { href: "/contractor-setup", icon: UserCog, label: "Contractor Setup" },
-  { href: "/reports", icon: FileText, label: "Reports" },
-  { href: "/turnaround", icon: Timer, label: "Turn Around Time" },
-  { href: "/stuck", icon: Gauge, label: "Stuck Projects" },
-  { href: "/completed", icon: CheckCircle2, label: "Completed" },
-  { href: "/data", icon: Database, label: "Data" },
-  { href: "/thickness", icon: Layers, label: "Thickness" },
-  { href: "/warning-parameters", icon: SlidersHorizontal, label: "Warning Params" },
+  { href: "/", icon: BarChart3, label: "Overview", short: "Overview" },
+  { href: "/jobs", icon: Briefcase, label: "Project Wise", short: "Projects" },
+  { href: "/activity", icon: Activity, label: "Activity Wise", short: "Activity" },
+  { href: "/contractor", icon: Users, label: "Contractor Wise", short: "Contractors" },
+  { href: "/plant", icon: Factory, label: "Plant Operation Wise", short: "Plant Ops" },
+  { href: "/contractor-setup", icon: UserCog, label: "Contractor Setup", short: "Setup" },
+  { href: "/reports", icon: FileText, label: "Reports", short: "Reports" },
+  { href: "/turnaround", icon: Timer, label: "Turn Around Time", short: "Turnaround" },
+  { href: "/stuck", icon: Gauge, label: "Stuck Projects", short: "Stuck" },
+  { href: "/completed", icon: CheckCircle2, label: "Completed", short: "Completed" },
+  { href: "/data", icon: Database, label: "Data", short: "Data" },
+  { href: "/thickness", icon: Layers, label: "Thickness", short: "Thickness" },
+  { href: "/warning-parameters", icon: SlidersHorizontal, label: "Warning Params", short: "Warnings" },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -39,14 +39,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground pb-16 md:pb-0 md:pt-14">
       {/* Top Nav (Desktop) */}
       <header className="hidden md:flex fixed top-0 left-0 right-0 h-14 bg-sidebar border-b border-sidebar-border z-40 items-center px-4">
-        <div className="font-bold text-lg text-primary mr-8 tracking-tight">TRACKER</div>
-        <nav className="flex space-x-1">
+        <div className="font-bold text-lg text-primary mr-6 tracking-tight shrink-0">TRACKER</div>
+        <nav className="flex items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {navItems.map((item) => (
             <Link key={item.href} href={item.href}>
-              <div className={`px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
-                location === item.href ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/50"
-              }`}>
-                {item.label}
+              <div
+                title={item.label}
+                className={`px-3 py-1.5 rounded-md text-[13px] font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                  location === item.href
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground hover:bg-sidebar-accent/50"
+                }`}
+              >
+                {item.short}
               </div>
             </Link>
           ))}
