@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
-import { BarChart3, Briefcase, Activity, Clock, Users, Database, FileText, SlidersHorizontal, Filter, X, Timer, Gauge, CheckCircle2, Layers } from "lucide-react";
+import { BarChart3, Briefcase, Activity, Clock, Users, UserCog, Database, FileText, SlidersHorizontal, Filter, X, Timer, Gauge, CheckCircle2, Layers } from "lucide-react";
 import { useTracker, dateRangeWindow } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -8,13 +8,14 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DateRangeSelect } from "@/components/date-range-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Segmented } from "@/components/ui/segmented";
-import { sortActivities, ACTIVITY_BUNDLES } from "@workspace/domain";
+import { sortActivities, ACTIVITY_BUNDLES, CONTRACTOR_CATEGORIES, OUT_VENDOR_TYPES } from "@workspace/domain";
 
 const navItems = [
   { href: "/", icon: BarChart3, label: "Overview" },
   { href: "/jobs", icon: Briefcase, label: "Project Wise" },
   { href: "/activity", icon: Activity, label: "Activity Wise" },
   { href: "/contractor", icon: Users, label: "Contractor Wise" },
+  { href: "/contractor-setup", icon: UserCog, label: "Contractor Setup" },
   { href: "/reports", icon: FileText, label: "Reports" },
   { href: "/turnaround", icon: Timer, label: "Turn Around Time" },
   { href: "/stuck", icon: Gauge, label: "Stuck Projects" },
@@ -290,6 +291,28 @@ function FilterBar() {
                 disabled={marks.length === 0}
               />
             </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-muted-foreground uppercase">Contractor Type</label>
+              <SearchableSelect
+                value={filters.contractorCategory}
+                onChange={(v) => setFilter("contractorCategory", v)}
+                groups={[{ options: CONTRACTOR_CATEGORIES.map((c) => ({ value: c.value, label: c.label })) }]}
+                allLabel="All Contractor Types"
+                searchPlaceholder="Search contractor types..."
+              />
+            </div>
+            {filters.contractorCategory === "OUT_VENDOR" && (
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Out-vendor Tag</label>
+                <SearchableSelect
+                  value={filters.outVendorType}
+                  onChange={(v) => setFilter("outVendorType", v)}
+                  groups={[{ options: OUT_VENDOR_TYPES.map((t) => ({ value: t.value, label: t.label })) }]}
+                  allLabel="All Tags"
+                  searchPlaceholder="Search tags..."
+                />
+              </div>
+            )}
           </div>
         </CollapsibleContent>
       </Collapsible>

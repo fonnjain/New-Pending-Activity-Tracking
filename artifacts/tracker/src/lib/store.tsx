@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
-import { useListImports, type Record } from "@workspace/api-client-react";
-import { bundleActivitySet, getActivityBundle } from "@workspace/domain";
+import { useListImports, useListContractorCategories, type Record } from "@workspace/api-client-react";
+import { bundleActivitySet, getActivityBundle, normalizeContractorName } from "@workspace/domain";
 
 // Sentinel prefix that marks an activity-bundle selection inside the single
 // `filters.activity` slot. A plain activity code (e.g. "Y") is matched exactly;
@@ -15,6 +15,8 @@ export interface Filters {
   structure: string | null;
   mark: string | null;
   contractor: string | null;
+  contractorCategory: string | null; // IN_HOUSE | SUB_CONTRACTOR | OUT_VENDOR | UNCLASSIFIED
+  outVendorType: string | null; // FAB | GALVA (only meaningful with OUT_VENDOR)
   activity: string | null;
   dateRange: string | null;
   search: string;
@@ -36,6 +38,8 @@ const defaultFilters: Filters = {
   structure: null,
   mark: null,
   contractor: null,
+  contractorCategory: null,
+  outVendorType: null,
   activity: null,
   dateRange: null,
   search: "",
@@ -96,6 +100,11 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
         next.mark = null;
       } else if (key === "structure") {
         next.mark = null;
+      } else if (key === "contractorCategory") {
+        // The FAB/GALVA tag only narrows Out-vendors; drop it whenever the
+        // category is anything other than OUT_VENDOR so it can't silently empty
+        // the view.
+        if (value !== "OUT_VENDOR") next.outVendorType = null;
       }
       return next;
     });
@@ -183,8 +192,44 @@ export function isWithinDateRange(assignDate: string | null | undefined, code: s
   return d >= win.start && d < win.end;
 }
 
+// Live contractor sub-category overlay: normalized contractor name -> entry.
+// Joined to records at read time; an unmapped contractor is treated as
+// UNCLASSIFIED. This NEVER alters parsing/ageing/dedup/qty or the contractor
+// string — it only powers descriptive filters/labels.
+export interface ContractorCategoryInfo {
+  category: string; // CONTRACTOR_CATEGORIES value
+  outVendorType: string[]; // FAB/GALVA tags
+  displayName: string;
+}
+
+export function useContractorCategoryMap(): Map<string, ContractorCategoryInfo> {
+  const { data } = useListContractorCategories();
+  return useMemo(() => {
+    const m = new Map<string, ContractorCategoryInfo>();
+    for (const row of data ?? []) {
+      m.set(row.nameKey, {
+        category: row.category,
+        outVendorType: row.outVendorType ?? [],
+        displayName: row.displayName,
+      });
+    }
+    return m;
+  }, [data]);
+}
+
+// Resolve a contractor's category info from the overlay map, defaulting to
+// UNCLASSIFIED with no tags when the contractor is not mapped.
+export function contractorCategoryFor(
+  contractor: string | null | undefined,
+  map: Map<string, ContractorCategoryInfo>,
+): ContractorCategoryInfo {
+  const hit = map.get(normalizeContractorName(contractor));
+  return hit ?? { category: "UNCLASSIFIED", outVendorType: [], displayName: contractor ?? "" };
+}
+
 export function useFilteredRecords(records: Record[] | undefined) {
   const { filters } = useTracker();
+  const categoryMap = useContractorCategoryMap();
 
   return useMemo(() => {
     if (!records) return [];
@@ -225,6 +270,11 @@ export function useFilteredRecords(records: Record[] | undefined) {
       if (filters.structure && r.structure !== filters.structure) return false;
       if (filters.mark && r.markId !== filters.mark && r.markTail !== filters.mark) return false;
       if (filters.contractor && r.contractor !== filters.contractor) return false;
+      if (filters.contractorCategory || filters.outVendorType) {
+        const info = contractorCategoryFor(r.contractor, categoryMap);
+        if (filters.contractorCategory && info.category !== filters.contractorCategory) return false;
+        if (filters.outVendorType && !info.outVendorType.includes(filters.outVendorType)) return false;
+      }
       if (activityFilter) {
         if (bundleSet) {
           if (!bundleSet.has((r.activity ?? "").toUpperCase())) return false;
@@ -248,5 +298,5 @@ export function useFilteredRecords(records: Record[] | undefined) {
 
       return true;
     });
-  }, [records, filters]);
+  }, [records, filters, categoryMap]);
 }

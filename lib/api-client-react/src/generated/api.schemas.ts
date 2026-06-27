@@ -504,6 +504,63 @@ export interface ManualThicknessInput {
 }
 
 /**
+ * Contractor sub-category.
+ */
+export type ContractorCategoryCategory = typeof ContractorCategoryCategory[keyof typeof ContractorCategoryCategory];
+
+
+export const ContractorCategoryCategory = {
+  IN_HOUSE: 'IN_HOUSE',
+  SUB_CONTRACTOR: 'SUB_CONTRACTOR',
+  OUT_VENDOR: 'OUT_VENDOR',
+  UNCLASSIFIED: 'UNCLASSIFIED',
+} as const;
+
+export type ContractorCategoryOutVendorTypeItem = typeof ContractorCategoryOutVendorTypeItem[keyof typeof ContractorCategoryOutVendorTypeItem];
+
+
+export const ContractorCategoryOutVendorTypeItem = {
+  FAB: 'FAB',
+  GALVA: 'GALVA',
+} as const;
+
+export interface ContractorCategory {
+  /** Normalized contractor name (join key). */
+  nameKey: string;
+  /** Contractor name as last seen/entered (for display). */
+  displayName: string;
+  /** Contractor sub-category. */
+  category: ContractorCategoryCategory;
+  /** FAB/GALVA tags (only meaningful when category=OUT_VENDOR). */
+  outVendorType: ContractorCategoryOutVendorTypeItem[];
+  updatedAt?: string;
+}
+
+export type ContractorCategoryInputCategory = typeof ContractorCategoryInputCategory[keyof typeof ContractorCategoryInputCategory];
+
+
+export const ContractorCategoryInputCategory = {
+  IN_HOUSE: 'IN_HOUSE',
+  SUB_CONTRACTOR: 'SUB_CONTRACTOR',
+  OUT_VENDOR: 'OUT_VENDOR',
+  UNCLASSIFIED: 'UNCLASSIFIED',
+} as const;
+
+export type ContractorCategoryInputOutVendorTypeItem = typeof ContractorCategoryInputOutVendorTypeItem[keyof typeof ContractorCategoryInputOutVendorTypeItem];
+
+
+export const ContractorCategoryInputOutVendorTypeItem = {
+  FAB: 'FAB',
+  GALVA: 'GALVA',
+} as const;
+
+export interface ContractorCategoryInput {
+  displayName: string;
+  category: ContractorCategoryInputCategory;
+  outVendorType?: ContractorCategoryInputOutVendorTypeItem[];
+}
+
+/**
  * Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). This is the TLT category.
  */
 export type TurnaroundSettingsActivities = {[key: string]: ActivityConfig};
@@ -983,6 +1040,10 @@ groupKey: string;
 
 export type DeleteManualThicknessParams = {
 markId: string;
+};
+
+export type DeleteContractorCategoryParams = {
+nameKey: string;
 };
 
 export type CompareImportsParams = {

@@ -1,4 +1,4 @@
-import { useTracker, useFilteredRecords } from "@/lib/store";
+import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, type ContractorCategoryInfo } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
@@ -9,7 +9,35 @@ import { Input } from "@/components/ui/input";
 import { formatWeight } from "@/lib/utils";
 import { ChevronDown, ChevronLeft, Search } from "lucide-react";
 import { useMemo, useState } from "react";
-import { compareActivity } from "@workspace/domain";
+import { compareActivity, contractorCategoryLabel, outVendorTypeLabel } from "@workspace/domain";
+
+// Small inline badge for a contractor's sub-category (+ FAB/GALVA tags). Display
+// only; resolved live from the overlay map. Unclassified contractors render a
+// muted chip so the absence of a mapping is visible.
+function ContractorCategoryBadge({ info }: { info: ContractorCategoryInfo }) {
+  const isUnclassified = info.category === "UNCLASSIFIED";
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span
+        className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-medium ${
+          isUnclassified
+            ? "bg-muted text-muted-foreground"
+            : "bg-secondary text-secondary-foreground"
+        }`}
+      >
+        {contractorCategoryLabel(info.category)}
+      </span>
+      {info.outVendorType.map((t) => (
+        <span
+          key={t}
+          className="inline-block rounded px-1.5 py-0.5 text-[11px] font-medium bg-primary/10 text-primary"
+        >
+          {outVendorTypeLabel(t)}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 const ROW_CAP = 300;
 
@@ -25,6 +53,7 @@ function ContractorContent() {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
   const records = useFilteredRecords(allRecords);
+  const categoryMap = useContractorCategoryMap();
 
   const [selectedContractor, setSelectedContractor] = useState<string | null>(null);
 
@@ -68,6 +97,7 @@ function ContractorContent() {
       <ContractorDetail
         name={selectedContractor}
         records={conMap.get(selectedContractor) ?? []}
+        categoryInfo={contractorCategoryFor(selectedContractor, categoryMap)}
         onBack={() => setSelectedContractor(null)}
       />
     );
@@ -96,9 +126,12 @@ function ContractorContent() {
                   onClick={() => setSelectedContractor(s.name)}
                   className="w-full space-y-1.5 text-left rounded-md p-1.5 -m-1.5 hover:bg-muted/40 transition-colors"
                 >
-                  <div className="flex justify-between text-sm">
-                    <span className="font-semibold text-foreground hover:text-primary transition-colors">{s.name}</span>
-                    <span className="text-muted-foreground font-mono">{formatWeight(s.weight)}</span>
+                  <div className="flex justify-between text-sm gap-2">
+                    <span className="font-semibold text-foreground hover:text-primary transition-colors flex items-center gap-2 min-w-0">
+                      <span className="truncate">{s.name}</span>
+                      <ContractorCategoryBadge info={contractorCategoryFor(s.name, categoryMap)} />
+                    </span>
+                    <span className="text-muted-foreground font-mono shrink-0">{formatWeight(s.weight)}</span>
                   </div>
                   <div className="h-2.5 bg-muted rounded-full overflow-hidden flex">
                     <div 
@@ -186,7 +219,7 @@ function ContractorContent() {
   );
 }
 
-function ContractorDetail({ name, records, onBack }: { name: string, records: any[], onBack: () => void }) {
+function ContractorDetail({ name, records, categoryInfo, onBack }: { name: string, records: any[], categoryInfo: ContractorCategoryInfo, onBack: () => void }) {
   const [search, setSearch] = useState("");
 
   const filtered = useMemo(() => {
@@ -223,7 +256,10 @@ function ContractorDetail({ name, records, onBack }: { name: string, records: an
           Back
         </button>
         <div className="min-w-0">
-          <h2 className="text-xl font-bold tracking-tight truncate">{name}</h2>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-xl font-bold tracking-tight truncate">{name}</h2>
+            <ContractorCategoryBadge info={categoryInfo} />
+          </div>
           <p className="text-xs text-muted-foreground">
             {filtered.length.toLocaleString()} marks • {totalQty.toLocaleString()} pcs • {formatWeight(totalWt)} • {sortedActivities.length} activities
           </p>

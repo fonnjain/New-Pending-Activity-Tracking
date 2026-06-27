@@ -187,6 +187,68 @@ paths:
       responses:
         "204":
           description: Deleted
+  /contractor-categories:
+    get:
+      operationId: listContractorCategories
+      tags: [contractorCategories]
+      summary: List contractor sub-category mappings
+      description: >
+        Returns the contractor sub-category overlay (normalized name key ->
+        category + FAB/GALVA tags). Joined to records at read time; never changes
+        parsing, ageing, dedup, qty, or the contractor string. Public (read-only).
+      responses:
+        "200":
+          description: Contractor sub-category entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContractorCategory"
+    put:
+      operationId: upsertContractorCategory
+      tags: [contractorCategories]
+      summary: Create or update a contractor sub-category mapping
+      description: >
+        Upserts one contractor mapping keyed by the normalized contractor name.
+        Requires authentication. Records for this contractor resolve to the new
+        category/tags on the next read (live join).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContractorCategoryInput"
+      responses:
+        "200":
+          description: Saved entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorCategory"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteContractorCategory
+      tags: [contractorCategories]
+      summary: Delete a contractor sub-category mapping
+      description: >
+        Removes one contractor mapping (the contractor reverts to Unclassified).
+        Requires authentication. The name key is passed as a query param (it can
+        contain spaces and punctuation) to avoid path-segment encoding issues.
+      parameters:
+        - name: nameKey
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
   /healthz:
     get:
       operationId: healthCheck
@@ -1562,6 +1624,48 @@ components:
       required:
         - markId
         - thicknessMm
+    ContractorCategory:
+      type: object
+      properties:
+        nameKey:
+          type: string
+          description: Normalized contractor name (join key).
+        displayName:
+          type: string
+          description: Contractor name as last seen/entered (for display).
+        category:
+          type: string
+          enum: [IN_HOUSE, SUB_CONTRACTOR, OUT_VENDOR, UNCLASSIFIED]
+          description: Contractor sub-category.
+        outVendorType:
+          type: array
+          items:
+            type: string
+            enum: [FAB, GALVA]
+          description: FAB/GALVA tags (only meaningful when category=OUT_VENDOR).
+        updatedAt:
+          type: string
+      required:
+        - nameKey
+        - displayName
+        - category
+        - outVendorType
+    ContractorCategoryInput:
+      type: object
+      properties:
+        displayName:
+          type: string
+        category:
+          type: string
+          enum: [IN_HOUSE, SUB_CONTRACTOR, OUT_VENDOR, UNCLASSIFIED]
+        outVendorType:
+          type: array
+          items:
+            type: string
+            enum: [FAB, GALVA]
+      required:
+        - displayName
+        - category
     TurnaroundSettings:
       type: object
       description: App-level turnaround-warning configuration. Singleton; global per-activity ideal days, grace cells and pre-warning thresholds keyed by canonical activity code, plus optional sparse per-project overrides and the stalled-mark threshold.

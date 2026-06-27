@@ -15,6 +15,7 @@ import JobDashboard from "@/pages/job-dashboard";
 import ActivityView from "@/pages/activity";
 import AgeingView from "@/pages/ageing";
 import ContractorView from "@/pages/contractor";
+import ContractorSetupView from "@/pages/contractor-setup";
 import DataView from "@/pages/data";
 import ReportsView from "@/pages/reports";
 import ThicknessView from "@/pages/thickness";
@@ -44,6 +45,7 @@ function Router() {
         <Route path="/activity" component={ActivityView} />
         <Route path="/ageing" component={AgeingView} />
         <Route path="/contractor" component={ContractorView} />
+        <Route path="/contractor-setup" component={ContractorSetupView} />
         <Route path="/data" component={DataView} />
         <Route path="/reports" component={ReportsView} />
         <Route path="/thickness" component={ThicknessView} />

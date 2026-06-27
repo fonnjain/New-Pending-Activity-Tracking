@@ -689,6 +689,51 @@ export const DeleteManualThicknessQueryParams = zod.object({
 
 
 /**
+ * Returns the contractor sub-category overlay (normalized name key -> category + FAB/GALVA tags). Joined to records at read time; never changes parsing, ageing, dedup, qty, or the contractor string. Public (read-only).
+
+ * @summary List contractor sub-category mappings
+ */
+export const ListContractorCategoriesResponseItem = zod.object({
+  "nameKey": zod.string().describe('Normalized contractor name (join key).'),
+  "displayName": zod.string().describe('Contractor name as last seen\/entered (for display).'),
+  "category": zod.enum(['IN_HOUSE', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']).describe('Contractor sub-category.'),
+  "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).describe('FAB\/GALVA tags (only meaningful when category=OUT_VENDOR).'),
+  "updatedAt": zod.string().optional()
+})
+export const ListContractorCategoriesResponse = zod.array(ListContractorCategoriesResponseItem)
+
+
+/**
+ * Upserts one contractor mapping keyed by the normalized contractor name. Requires authentication. Records for this contractor resolve to the new category/tags on the next read (live join).
+
+ * @summary Create or update a contractor sub-category mapping
+ */
+export const UpsertContractorCategoryBody = zod.object({
+  "displayName": zod.string(),
+  "category": zod.enum(['IN_HOUSE', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']),
+  "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).optional()
+})
+
+export const UpsertContractorCategoryResponse = zod.object({
+  "nameKey": zod.string().describe('Normalized contractor name (join key).'),
+  "displayName": zod.string().describe('Contractor name as last seen\/entered (for display).'),
+  "category": zod.enum(['IN_HOUSE', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']).describe('Contractor sub-category.'),
+  "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).describe('FAB\/GALVA tags (only meaningful when category=OUT_VENDOR).'),
+  "updatedAt": zod.string().optional()
+})
+
+
+/**
+ * Removes one contractor mapping (the contractor reverts to Unclassified). Requires authentication. The name key is passed as a query param (it can contain spaces and punctuation) to avoid path-segment encoding issues.
+
+ * @summary Delete a contractor sub-category mapping
+ */
+export const DeleteContractorCategoryQueryParams = zod.object({
+  "nameKey": zod.coerce.string()
+})
+
+
+/**
  * Returns server health status
  * @summary Health check
  */

@@ -1,5 +1,6 @@
 import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, getListImportsQueryKey, getGetImportRecordsQueryKey, type UploadResult } from "@workspace/api-client-react";
-import { useTracker, useFilteredRecords } from "@/lib/store";
+import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor } from "@/lib/store";
+import { contractorCategoryLabel } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { FileDown, CheckCircle2, Trash2, DownloadCloud, AlertTriangle } from "lucide-react";
@@ -31,6 +32,7 @@ function DataViewContent() {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
   const filteredRecords = useFilteredRecords(allRecords);
+  const contractorCategories = useContractorCategoryMap();
 
   const selectedImport = imports.find(s => s.id === selectedImportId);
 
@@ -85,7 +87,15 @@ function DataViewContent() {
       toast({ variant: "destructive", title: "No data to export" });
       return;
     }
-    exportToCsv(`tracker_export_${new Date().toISOString().slice(0,10)}.csv`, filteredRecords);
+    const enriched = filteredRecords.map((r) => {
+      const info = contractorCategoryFor(r.contractor, contractorCategories);
+      return {
+        ...r,
+        contractor_category: contractorCategoryLabel(info.category),
+        out_vendor_type: info.outVendorType.join(";"),
+      };
+    });
+    exportToCsv(`tracker_export_${new Date().toISOString().slice(0,10)}.csv`, enriched);
   };
 
   const doExportJson = () => {

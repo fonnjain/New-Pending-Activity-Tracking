@@ -26,7 +26,10 @@ import type {
   ChangeSet,
   CommitRequest,
   CompareImportsParams,
+  ContractorCategory,
+  ContractorCategoryInput,
   DeleteAllResult,
+  DeleteContractorCategoryParams,
   DeleteManualThicknessParams,
   DeleteRsjThicknessParams,
   ErrorResponse,
@@ -678,6 +681,237 @@ export const useDeleteManualThickness = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteManualThicknessMutationOptions(options));
+    }
+
+export const getListContractorCategoriesUrl = () => {
+
+
+
+
+  return `/api/contractor-categories`
+}
+
+/**
+ * Returns the contractor sub-category overlay (normalized name key -> category + FAB/GALVA tags). Joined to records at read time; never changes parsing, ageing, dedup, qty, or the contractor string. Public (read-only).
+
+ * @summary List contractor sub-category mappings
+ */
+export const listContractorCategories = async ( options?: RequestInit): Promise<ContractorCategory[]> => {
+
+  return customFetch<ContractorCategory[]>(getListContractorCategoriesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListContractorCategoriesQueryKey = () => {
+    return [
+    `/api/contractor-categories`
+    ] as const;
+    }
+
+
+export const getListContractorCategoriesQueryOptions = <TData = Awaited<ReturnType<typeof listContractorCategories>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContractorCategories>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListContractorCategoriesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listContractorCategories>>> = ({ signal }) => listContractorCategories({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listContractorCategories>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListContractorCategoriesQueryResult = NonNullable<Awaited<ReturnType<typeof listContractorCategories>>>
+export type ListContractorCategoriesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List contractor sub-category mappings
+ */
+
+export function useListContractorCategories<TData = Awaited<ReturnType<typeof listContractorCategories>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContractorCategories>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListContractorCategoriesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpsertContractorCategoryUrl = () => {
+
+
+
+
+  return `/api/contractor-categories`
+}
+
+/**
+ * Upserts one contractor mapping keyed by the normalized contractor name. Requires authentication. Records for this contractor resolve to the new category/tags on the next read (live join).
+
+ * @summary Create or update a contractor sub-category mapping
+ */
+export const upsertContractorCategory = async (contractorCategoryInput: ContractorCategoryInput, options?: RequestInit): Promise<ContractorCategory> => {
+
+  return customFetch<ContractorCategory>(getUpsertContractorCategoryUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      contractorCategoryInput,)
+  }
+);}
+
+
+
+
+export const getUpsertContractorCategoryMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertContractorCategory>>, TError,{data: BodyType<ContractorCategoryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof upsertContractorCategory>>, TError,{data: BodyType<ContractorCategoryInput>}, TContext> => {
+
+const mutationKey = ['upsertContractorCategory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertContractorCategory>>, {data: BodyType<ContractorCategoryInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  upsertContractorCategory(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpsertContractorCategoryMutationResult = NonNullable<Awaited<ReturnType<typeof upsertContractorCategory>>>
+    export type UpsertContractorCategoryMutationBody = BodyType<ContractorCategoryInput>
+    export type UpsertContractorCategoryMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Create or update a contractor sub-category mapping
+ */
+export const useUpsertContractorCategory = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertContractorCategory>>, TError,{data: BodyType<ContractorCategoryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof upsertContractorCategory>>,
+        TError,
+        {data: BodyType<ContractorCategoryInput>},
+        TContext
+      > => {
+      return useMutation(getUpsertContractorCategoryMutationOptions(options));
+    }
+
+export const getDeleteContractorCategoryUrl = (params: DeleteContractorCategoryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/contractor-categories?${stringifiedParams}` : `/api/contractor-categories`
+}
+
+/**
+ * Removes one contractor mapping (the contractor reverts to Unclassified). Requires authentication. The name key is passed as a query param (it can contain spaces and punctuation) to avoid path-segment encoding issues.
+
+ * @summary Delete a contractor sub-category mapping
+ */
+export const deleteContractorCategory = async (params: DeleteContractorCategoryParams, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteContractorCategoryUrl(params),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteContractorCategoryMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteContractorCategory>>, TError,{params: DeleteContractorCategoryParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteContractorCategory>>, TError,{params: DeleteContractorCategoryParams}, TContext> => {
+
+const mutationKey = ['deleteContractorCategory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteContractorCategory>>, {params: DeleteContractorCategoryParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  deleteContractorCategory(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteContractorCategoryMutationResult = NonNullable<Awaited<ReturnType<typeof deleteContractorCategory>>>
+
+    export type DeleteContractorCategoryMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a contractor sub-category mapping
+ */
+export const useDeleteContractorCategory = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteContractorCategory>>, TError,{params: DeleteContractorCategoryParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteContractorCategory>>,
+        TError,
+        {params: DeleteContractorCategoryParams},
+        TContext
+      > => {
+      return useMutation(getDeleteContractorCategoryMutationOptions(options));
     }
 
 export const getHealthCheckUrl = () => {

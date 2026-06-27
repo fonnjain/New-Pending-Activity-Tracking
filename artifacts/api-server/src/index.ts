@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { backfillClassification } from "./lib/backfill";
+import { seedContractorCategories } from "./lib/seedContractorCategories";
 
 const rawPort = process.env["PORT"];
 
@@ -29,5 +30,12 @@ app.listen(port, (err) => {
   // fails startup (a no-op once there are no unclassified known-nature rows).
   backfillClassification().catch((err) => {
     logger.error({ err }, "Classification backfill failed");
+  });
+
+  // Best-effort, one-time seed of known out-vendor contractor mappings. Fire-
+  // and-forget; onConflictDoNothing keeps it idempotent and never overwrites
+  // user edits. Never blocks or fails startup.
+  seedContractorCategories().catch((err) => {
+    logger.error({ err }, "Contractor category seed failed");
   });
 });

@@ -5,6 +5,7 @@ import importsRouter from "./imports";
 import aiRouter from "./ai";
 import settingsRouter from "./settings";
 import thicknessRouter from "./thickness";
+import contractorCategoriesRouter from "./contractorCategories";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(importsRouter);
 router.use(aiRouter);
 router.use(settingsRouter);
 router.use(thicknessRouter);
+router.use(contractorCategoriesRouter);
 
 export default router;

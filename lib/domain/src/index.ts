@@ -204,6 +204,120 @@ export function bundleActivitySet(id: string): Set<string> | null {
   return new Set(b.activities.map((a) => a.toUpperCase()));
 }
 
+// ---------------------------------------------------------------------------
+// Contractor sub-categories (config overlay, additive)
+// ---------------------------------------------------------------------------
+// A purely descriptive classification of each contractor into In-house /
+// Sub-contractor / Out-vendor, with Out-vendors additionally tagged FAB and/or
+// GALVA. It is stored in its own config table keyed by a NORMALIZED contractor
+// name and joined to records at read time — it NEVER changes parsing, Activity
+// values, qty, ageing, dedup, the row hash, or the contractor string itself.
+// Unmapped contractors are treated as "Unclassified".
+export type ContractorCategory =
+  | "IN_HOUSE"
+  | "SUB_CONTRACTOR"
+  | "OUT_VENDOR"
+  | "UNCLASSIFIED";
+
+export type OutVendorType = "FAB" | "GALVA";
+
+export const CONTRACTOR_CATEGORIES: {
+  value: ContractorCategory;
+  label: string;
+}[] = [
+  { value: "IN_HOUSE", label: "In-house" },
+  { value: "SUB_CONTRACTOR", label: "Sub-contractor" },
+  { value: "OUT_VENDOR", label: "Out-vendor" },
+  { value: "UNCLASSIFIED", label: "Unclassified" },
+];
+
+export const OUT_VENDOR_TYPES: { value: OutVendorType; label: string }[] = [
+  { value: "FAB", label: "Fabrication" },
+  { value: "GALVA", label: "Galvanizing" },
+];
+
+const CONTRACTOR_CATEGORY_LABELS = new Map<ContractorCategory, string>(
+  CONTRACTOR_CATEGORIES.map((c) => [c.value, c.label]),
+);
+const OUT_VENDOR_TYPE_LABELS = new Map<OutVendorType, string>(
+  OUT_VENDOR_TYPES.map((t) => [t.value, t.label]),
+);
+
+export function contractorCategoryLabel(
+  value: string | null | undefined,
+): string {
+  return CONTRACTOR_CATEGORY_LABELS.get(value as ContractorCategory) ?? "Unclassified";
+}
+
+export function outVendorTypeLabel(value: string | null | undefined): string {
+  return OUT_VENDOR_TYPE_LABELS.get(value as OutVendorType) ?? String(value ?? "");
+}
+
+export function isContractorCategory(v: unknown): v is ContractorCategory {
+  return (
+    v === "IN_HOUSE" ||
+    v === "SUB_CONTRACTOR" ||
+    v === "OUT_VENDOR" ||
+    v === "UNCLASSIFIED"
+  );
+}
+
+export function isOutVendorType(v: unknown): v is OutVendorType {
+  return v === "FAB" || v === "GALVA";
+}
+
+// Normalize a contractor name into the join KEY: uppercase, collapse internal
+// whitespace runs to a single space, and trim. This only smooths over casing and
+// spacing inconsistencies (e.g. accidental double spaces) — it deliberately
+// preserves every alphanumeric token and suffix (GP-2, UNIT-II, (JW), -C), so
+// two contractors that differ by such a tag NEVER collapse onto the same key.
+export function normalizeContractorName(
+  name: string | null | undefined,
+): string {
+  return (name ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+export interface ContractorCategorySeed {
+  name: string;
+  category: ContractorCategory;
+  outVendorType: OutVendorType[];
+}
+
+// Seed list of known out-vendors with their FAB/GALVA tags (full names exactly
+// as they appear in the source workbook). Applied once at boot with
+// onConflictDoNothing on the normalized key, so user edits always win and
+// re-seeding is idempotent. In-house / Sub-contractor are intentionally NOT
+// seeded — they start Unclassified and are set in-app.
+export const CONTRACTOR_CATEGORY_SEED: ContractorCategorySeed[] = [
+  { name: "BAJRANG STEEL INDUSTRIES & MINERALS PVT.LTD.JW", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "DASHMESH ENGINEERING WORKS  (JW)", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "MAHIMA MERCHANDIZING P.V.T LTD. -JW", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "MARUTINANDAN STRUCTURES PVT LTD.", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "RR ISPAT LIMITED", category: "OUT_VENDOR", outVendorType: ["FAB", "GALVA"] },
+  { name: "RUKMANI ELECTRICAL & COMPONENTS PVT LTD - C", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "SANGAM ISPAT (INDIA) PVT LIMITED", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "SATYA STRUCTURES AND COMPONENTS PRIVATE LTD.", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "SAVITEK INFRA PRIVATE LIMITED", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "SDM AGRO ENGINEERING", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "SHREE SHYAM FABROTECH INDUSTRIES(c)", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "SHRINANDA ENGINEERING (JW)", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "SOLAR AQUA SOLUTIONS", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "SREE SATYA FASTNERS PVT LTD", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "SURYA STRUCTURE", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "TRANSRAIL STRUCTURES AND TOWRS", category: "OUT_VENDOR", outVendorType: ["FAB"] },
+  { name: "DHARAM INDUSTRIES", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "HELLO STEEL PVT LTD (JW)", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "KHYATI ISPAT PRIVATE LIMITED  - JW", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "NANDAN STEELS AND POWER LTD", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "PAVAN SAI WORKS - JW", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "PHOENIX STRUCTURAL & ENGINEERING PVT.LTD.", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "PHOENIX STRUCTURAL & ENGINEERING PVT.LTD. (NGP)", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "POWER LINE ACCESSORIES - JW", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "PREMIER ROLLING & FORGING WORKS", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "SHRI ASHUTOSH ENGINEERING INDUSTRIES UNIT II", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "SRISINGHANIYA STRUCTURES PRIVATE LIMITED", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+];
+
 // Map an activity code to its coarse process phase (case-insensitive). Known TLT
 // and NTLT codes resolve to a phase; only genuinely unknown codes return null, so
 // callers can surface those separately rather than miscount.
