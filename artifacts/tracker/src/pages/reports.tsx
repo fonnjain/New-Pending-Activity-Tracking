@@ -78,18 +78,6 @@ const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
       "Pending work filtered by the header filters, with turnaround and velocity columns, exportable to Excel.",
   },
   {
-    id: "fabload",
-    name: "Fabrication Load for TLT",
-    description:
-      "TLT fabrication load by project and weight (tonnes), split into Operational Load (at the operation) and In Hand (before it), with a per-row Priority.",
-  },
-  {
-    id: "plantop",
-    name: "Plant Operation Wise",
-    description:
-      "Fabrication and galvanization grouped by project and contractor, with hole-operation breakdown and weights, exportable to Excel.",
-  },
-  {
     id: "ai",
     name: "AI Report",
     description:

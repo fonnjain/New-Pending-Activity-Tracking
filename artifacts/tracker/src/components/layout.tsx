@@ -10,12 +10,20 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Segmented } from "@/components/ui/segmented";
 import { sortActivities, ACTIVITY_BUNDLES, CONTRACTOR_CATEGORIES, OUT_VENDOR_TYPES } from "@workspace/domain";
 
-const navItems = [
+type NavItem = {
+  href: string;
+  icon: typeof BarChart3;
+  label: string;
+  short: string;
+  disabled?: boolean;
+};
+
+const navItems: NavItem[] = [
   { href: "/", icon: BarChart3, label: "Overview", short: "Overview" },
   { href: "/jobs", icon: Briefcase, label: "Project Wise", short: "Projects" },
   { href: "/activity", icon: Activity, label: "Activity Wise", short: "Activity" },
   { href: "/contractor", icon: Users, label: "Contractor Wise", short: "Contractors" },
-  { href: "/plant", icon: Factory, label: "Plant Operation Wise", short: "Plant Ops" },
+  { href: "/plant", icon: Factory, label: "Plant Operation Wise", short: "Plant Ops", disabled: true },
   { href: "/reports", icon: FileText, label: "Reports", short: "Reports" },
   { href: "/turnaround", icon: Timer, label: "Turn Around Time", short: "Turnaround" },
   { href: "/stuck", icon: Gauge, label: "Stuck Projects", short: "Stuck" },
@@ -40,20 +48,31 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <header className="hidden md:flex sticky top-0 z-40 min-h-14 bg-sidebar border-b border-sidebar-border items-center flex-wrap gap-x-3 gap-y-1 px-4 py-1.5">
         <div className="font-bold text-lg text-primary tracking-tight shrink-0">TRACKER</div>
         <nav className="flex flex-1 items-center justify-center flex-wrap gap-x-1 gap-y-1">
-          {navItems.map((item) => (
-            <Link key={item.href} href={item.href}>
+          {navItems.map((item) =>
+            item.disabled ? (
               <div
-                title={item.label}
-                className={`px-2.5 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                  location === item.href
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent/50"
-                }`}
+                key={item.href}
+                title={`${item.label} (disabled)`}
+                aria-disabled="true"
+                className="px-2.5 py-1.5 rounded-md text-sm font-medium whitespace-nowrap text-sidebar-foreground/40 cursor-not-allowed select-none"
               >
                 {item.label}
               </div>
-            </Link>
-          ))}
+            ) : (
+              <Link key={item.href} href={item.href}>
+                <div
+                  title={item.label}
+                  className={`px-2.5 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                    location === item.href
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent/50"
+                  }`}
+                >
+                  {item.label}
+                </div>
+              </Link>
+            ),
+          )}
         </nav>
       </header>
 
@@ -70,6 +89,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {navItems.map((item) => {
           const isActive = location === item.href;
           const Icon = item.icon;
+          if (item.disabled) {
+            return (
+              <div
+                key={item.href}
+                aria-disabled="true"
+                className="flex-1 min-w-0 flex flex-col items-center justify-center h-full px-0.5 text-sidebar-foreground/30 cursor-not-allowed select-none"
+              >
+                <Icon className="h-5 w-5 mb-1 shrink-0" strokeWidth={2} />
+                <span className="text-[10px] font-medium leading-tight truncate max-w-full">{item.short}</span>
+              </div>
+            );
+          }
           return (
             <Link key={item.href} href={item.href} className="flex-1 min-w-0">
               <div className={`flex flex-col items-center justify-center w-full h-full px-0.5 cursor-pointer transition-colors ${
