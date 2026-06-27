@@ -1,0 +1,127 @@
+REPLIT AGENT PROMPT — ACTIVITY BUNDLES + CONTRACTOR SUB-CATEGORIES (TLT-namespaced)
+===================================================================================
+Add (1) activity "bundles" as filter shortcuts in the activity dropdown, and (2) three
+contractor sub-categories marked in the database, including the out-vendor list with
+FAB/GALVA tags. TLT-specific bundles are NAMESPACED with "TLT" so NTLT equivalents can be
+added later without collision. Deterministic/display + DB tagging; do not change parsing,
+ageing, dedup, or the alert math.
+
+==========================================================
+PART 1 — ACTIVITY BUNDLES (filter shortcuts in the activity dropdown)
+==========================================================
+A "bundle" selects a SET of activities at once (filter shortcut). Individual activities stay
+selectable. Define bundles with explicit IDs and scope:
+
+  TLT-scoped bundles (shown only when ORDER TYPE = TLT):
+    id "TLT_FABRICATION"        label "Fabrication (TLT)"
+        activities = [C, RFI, NH, B, HAB, HG, W, Q]            (C -> Q)
+    id "TLT_FAB_PENDING_QUALITY" label "Fab - Pending Quality (TLT)"
+        activities = [RFI, NH, B, HAB, HG, W, Q]               (RFI -> Q)
+
+  All-order-type bundles (shown for TLT and NTLT):
+    id "GALVANIZING"  label "Galvanizing"   activities = [TS, G, GB]
+    id "YARD"         label "Yard"          activities = [Y]
+
+  NAMESPACING: the TLT-only bundles carry "TLT" in BOTH id and label so that when NTLT
+  bundles are added later (e.g. "NTLT_RSJ_FABRICATION" for NTF/NTFSW/NTFW) there is no
+  collision. Galvanizing/Yard are shared (no category prefix) since they apply to all types.
+
+  DROPDOWN BEHAVIOUR:
+    - In TLT mode: dropdown shows the bundles (Fabrication (TLT), Fab - Pending Quality
+      (TLT), Galvanizing, Yard) as a "Bundles" group at the top, then individual activities
+      in TLT sequence order below.
+    - In NTLT mode: show ONLY Galvanizing and Yard bundles (NOT the TLT fabrication bundles),
+      then NTLT individual activities (NTF, NTFSW, NTFW, TS, G, GB, Y) in NTLT sequence
+      order. (No NTLT fabrication bundle for now.)
+    - Selecting a bundle filters to marks whose CURRENT activity is in the bundle's set.
+    - Define bundles in ONE constants module keyed by id, each with {label, activities[],
+      scope: "TLT" | "ALL"}, imported wherever the activity filter is built. Reuse the
+      per-category sequence ordering already in place.
+
+  Apply the bundle filter consistently across pages that have the activity filter (Overview,
+  Activity, Ageing, Job-wise/Section-wise, Reports/exports).
+
+==========================================================
+PART 2 — CONTRACTOR SUB-CATEGORIES (marked in the DB)
+==========================================================
+Add a contractor classification, stored and shown, applying to ALL order types:
+
+  contractor_category: "IN_HOUSE" | "SUB_CONTRACTOR" | "OUT_VENDOR" | "UNCLASSIFIED"
+  out_vendor_type (only for OUT_VENDOR): array/flags of {FAB, GALVA} (can be BOTH).
+
+  SEED from the provided out-vendor list (match on FULL contractor name INCLUDING suffixes
+  like (JW), - JW, UNIT II, (NGP), (c) — do NOT strip/normalize away these; they identify
+  distinct vendors). Tag each as OUT_VENDOR with the given type:
+
+  OUT_VENDOR / FAB:
+    BAJRANG STEEL INDUSTRIES & MINERALS PVT.LTD.JW
+    DASHMESH ENGINEERING WORKS  (JW)
+    MAHIMA MERCHANDIZING P.V.T LTD. -JW
+    MARUTINANDAN STRUCTURES PVT LTD.
+    RR ISPAT LIMITED                      (ALSO GALVA - tag BOTH)
+    RUKMANI ELECTRICAL & COMPONENTS PVT LTD - C
+    SANGAM ISPAT (INDIA) PVT LIMITED
+    SATYA STRUCTURES AND COMPONENTS PRIVATE LTD.
+    SAVITEK INFRA PRIVATE LIMITED
+    SDM AGRO ENGINEERING
+    SHREE SHYAM FABROTECH INDUSTRIES(c)
+    SHRINANDA ENGINEERING (JW)
+    SOLAR AQUA SOLUTIONS
+    SREE SATYA FASTNERS PVT LTD
+    SURYA STRUCTURE
+    TRANSRAIL STRUCTURES AND TOWRS
+
+  OUT_VENDOR / GALVA:
+    DHARAM INDUSTRIES
+    HELLO STEEL PVT LTD (JW)
+    KHYATI ISPAT PRIVATE LIMITED  - JW
+    NANDAN STEELS AND POWER LTD
+    PAVAN SAI WORKS - JW
+    PHOENIX STRUCTURAL & ENGINEERING PVT.LTD.
+    PHOENIX STRUCTURAL & ENGINEERING PVT.LTD. (NGP)
+    POWER LINE ACCESSORIES - JW
+    PREMIER ROLLING & FORGING WORKS
+    RR ISPAT LIMITED                      (ALSO FAB - tag BOTH)
+    SHRI ASHUTOSH ENGINEERING INDUSTRIES UNIT II
+    SRISINGHANIYA STRUCTURES PRIVATE LIMITED
+
+  RR ISPAT LIMITED appears in BOTH lists -> OUT_VENDOR with out_vendor_type = [FAB, GALVA].
+
+  IN_HOUSE and SUB_CONTRACTOR: do NOT auto-populate now. Any contractor not matched to the
+  out-vendor list = "UNCLASSIFIED" for now (the user will classify them, including which are
+  in-house vs sub-contractor, later).
+
+  EDITABLE IN-APP (like the RSJ thickness table): a small "Contractor Categories" settings
+  panel (on the Data or a Settings page) listing each distinct contractor with a dropdown to
+  set IN_HOUSE / SUB_CONTRACTOR / OUT_VENDOR, and for out-vendors a FAB/GALVA multi-select.
+  Seeded values (the out-vendors above) prefilled; user can edit/add. Persist; expose via
+  openapi.yaml; regenerate hooks/Zod.
+
+  MATCHING: case-insensitive, whitespace-collapsed comparison of the FULL name, but never
+  merging names whose alphanumeric token set differs (same rule as the sanitizer) so
+  distinct vendors stay distinct (e.g. the two PHOENIX ... entries, UNIT II).
+
+==========================================================
+PART 3 — USING THE CONTRACTOR CATEGORY
+==========================================================
+  - The Contractor filter/dropdown can filter by sub-category (In-house / Sub-contractor /
+    Out vendor) and, within Out vendor, by FAB / GALVA.
+  - Contractor dashboard groups/labels contractors by sub-category; out-vendors show their
+    FAB/GALVA tag.
+  - Exports include contractor_category and out_vendor_type.
+  - Store contractor_category + out_vendor_type per record (or per distinct contractor,
+    joined to records). Keep these OUT of the across-upload row hash (classification, not a
+    source column).
+
+ACCEPTANCE CHECK
+  - Activity dropdown shows bundles: TLT mode = Fabrication (TLT), Fab - Pending Quality
+    (TLT), Galvanizing, Yard; NTLT mode = Galvanizing, Yard only. Selecting a bundle filters
+    to its activity set.
+  - TLT bundles are namespaced (id/label contain "TLT"); Galvanizing/Yard shared.
+  - Each out-vendor from the list is tagged OUT_VENDOR with FAB and/or GALVA; RR ISPAT
+    LIMITED = both; names matched WITH suffixes (no truncation/merge).
+  - Contractor categories editable in-app; unmatched contractors = UNCLASSIFIED (in-house /
+    sub-contractor populated later).
+  - Contractor filtering/grouping by sub-category works for all order types; exports include
+    the new fields; not in the dedup hash.
+  - No change to parsing, ageing, dedup, or alert math.

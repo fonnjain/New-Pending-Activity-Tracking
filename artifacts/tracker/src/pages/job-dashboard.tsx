@@ -415,10 +415,13 @@ function JobDashboardContent() {
                 <TableRow>
                   <TableHead>{primaryLabel}</TableHead>
                   {PROCESS_PHASES.map((ph) => (
-                    <TableHead key={ph.key} className="text-right whitespace-nowrap">
-                      {ph.label}
+                    <TableHead key={ph.key} className="text-right align-bottom">
+                      <span className="block whitespace-nowrap">{ph.label}</span>
+                      <span className="block text-[10px] font-normal text-muted-foreground normal-case leading-tight max-w-[180px] ml-auto">
+                        ({ph.activities.join(", ")})
+                      </span>
                       <span className="block text-[10px] font-normal text-muted-foreground normal-case">
-                        marks / wt
+                        wt / marks
                       </span>
                     </TableHead>
                   ))}
@@ -439,9 +442,9 @@ function JobDashboardContent() {
                         <TableCell key={ph.key} className="text-right tabular-nums">
                           {cell.marks > 0 ? (
                             <>
-                              <span className="font-semibold">{cell.marks}</span>
+                              <span className="font-bold">{formatWeight(cell.weight)}</span>
                               <span className="block text-xs text-muted-foreground">
-                                {formatWeight(cell.weight)}
+                                {cell.marks} marks
                               </span>
                             </>
                           ) : (
