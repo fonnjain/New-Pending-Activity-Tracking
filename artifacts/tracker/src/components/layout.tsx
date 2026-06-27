@@ -230,27 +230,28 @@ function FilterBar() {
         </div>
         <div className="flex items-center justify-between p-3 md:px-6">
           <div className="flex items-center gap-2 flex-1 mr-4 flex-wrap">
-            {!isAll && (
-              <div className="w-full sm:w-[260px]">
-                {isNtlt ? (
-                  <SearchableSelect
-                    value={filters.section}
-                    onChange={(v) => setFilter("section", v)}
-                    options={sections}
-                    allLabel="All Sections"
-                    searchPlaceholder="Search sections..."
-                  />
-                ) : (
-                  <SearchableSelect
-                    value={filters.job}
-                    onChange={(v) => setFilter("job", v)}
-                    options={jobs}
-                    allLabel="All Jobs"
-                    searchPlaceholder="Search jobs..."
-                  />
-                )}
-              </div>
-            )}
+            {/* In ALL mode isNtlt is false, so this defaults to the Job picker —
+               the primary TLT dimension — which is what users expect when "All"
+               order types are shown. NTLT mode swaps it for the Section picker. */}
+            <div className="w-full sm:w-[260px]">
+              {isNtlt ? (
+                <SearchableSelect
+                  value={filters.section}
+                  onChange={(v) => setFilter("section", v)}
+                  options={sections}
+                  allLabel="All Sections"
+                  searchPlaceholder="Search sections..."
+                />
+              ) : (
+                <SearchableSelect
+                  value={filters.job}
+                  onChange={(v) => setFilter("job", v)}
+                  options={jobs}
+                  allLabel="All Jobs"
+                  searchPlaceholder="Search jobs..."
+                />
+              )}
+            </div>
             <div className="w-[200px]">
               <SearchableSelect
                 value={filters.activity}
@@ -293,7 +294,7 @@ function FilterBar() {
         
         <CollapsibleContent>
           <div className="p-3 md:px-6 pt-0 border-t bg-muted/30 grid grid-cols-2 gap-3">
-            {!isNtlt && !isAll && (
+            {!isNtlt && (
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-muted-foreground uppercase">Structure</label>
                 <SearchableSelect
