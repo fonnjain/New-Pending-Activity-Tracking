@@ -135,6 +135,75 @@ for (const phase of PROCESS_PHASES) {
   for (const code of phase.activities) PHASE_BY_CODE.set(code.toUpperCase(), phase.key);
 }
 
+// ---------------------------------------------------------------------------
+// Activity bundles (filter shortcuts)
+// ---------------------------------------------------------------------------
+// Named groupings of activity codes used purely as filter SHORTCUTS in the
+// activity dropdown. Selecting a bundle is equivalent to OR-ing its member
+// activities. Display/filter only — it NEVER changes parsing, Activity values,
+// qty, ageing, dedup, the process phases above, or the Project-Wise stage
+// buckets (which are independent and intentionally kept distinct).
+//
+// Member codes are SLICED from PROCESS_SEQUENCE (single source of truth) so they
+// can never drift from canonical ordering. TLT bundles are namespaced (id AND
+// label both carry "TLT") so NTLT counterparts can be added later without
+// collision. `scope` controls which Order Type modes a bundle is offered in:
+//   "TLT" — offered in TLT and All modes only
+//   "ALL" — offered in every mode (TLT, NTLT, All)
+export type BundleScope = "TLT" | "ALL";
+export interface ActivityBundle {
+  id: string;
+  label: string;
+  scope: BundleScope;
+  activities: readonly string[];
+}
+
+export const ACTIVITY_BUNDLES: readonly ActivityBundle[] = [
+  {
+    id: "TLT_FABRICATION",
+    label: "Fabrication (TLT)",
+    scope: "TLT",
+    // C -> Q (everything before galvanising).
+    activities: PROCESS_SEQUENCE.slice(0, GALV_START_INDEX),
+  },
+  {
+    id: "TLT_FAB_PENDING_QUALITY",
+    label: "Fab - Pending Quality (TLT)",
+    scope: "TLT",
+    // RFI -> Q (fabrication minus cutting).
+    activities: PROCESS_SEQUENCE.slice(1, GALV_START_INDEX),
+  },
+  {
+    id: "GALVANIZING",
+    label: "Galvanizing",
+    scope: "ALL",
+    // TS, G, GB.
+    activities: PROCESS_SEQUENCE.slice(GALV_START_INDEX, DISPATCH_INDEX),
+  },
+  {
+    id: "YARD",
+    label: "Yard",
+    scope: "ALL",
+    // Y (terminal).
+    activities: [PROCESS_SEQUENCE[DISPATCH_INDEX]],
+  },
+];
+
+const BUNDLE_BY_ID = new Map(ACTIVITY_BUNDLES.map((b) => [b.id, b]));
+
+// Look up a bundle definition by id.
+export function getActivityBundle(id: string): ActivityBundle | undefined {
+  return BUNDLE_BY_ID.get(id);
+}
+
+// Resolve a bundle id to the uppercased set of its member activity codes (for
+// case-insensitive matching), or null if the id is unknown.
+export function bundleActivitySet(id: string): Set<string> | null {
+  const b = BUNDLE_BY_ID.get(id);
+  if (!b) return null;
+  return new Set(b.activities.map((a) => a.toUpperCase()));
+}
+
 // Map an activity code to its coarse process phase (case-insensitive). Known TLT
 // and NTLT codes resolve to a phase; only genuinely unknown codes return null, so
 // callers can surface those separately rather than miscount.

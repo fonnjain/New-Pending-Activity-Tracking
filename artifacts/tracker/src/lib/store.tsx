@@ -1,5 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
 import { useListImports, type Record } from "@workspace/api-client-react";
+import { bundleActivitySet, getActivityBundle } from "@workspace/domain";
+
+// Sentinel prefix that marks an activity-bundle selection inside the single
+// `filters.activity` slot. A plain activity code (e.g. "Y") is matched exactly;
+// a "bundle:<id>" value is resolved to the bundle's member set and OR-matched.
+const BUNDLE_PREFIX = "bundle:";
 
 export interface Filters {
   category: string; // "TLT" | "NTLT" (Order type) — a MODE, never null
@@ -68,6 +74,13 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
         next.section = null;
         next.structure = null;
         next.mark = null;
+        // A TLT-scoped activity bundle is not offered outside TLT mode; drop it
+        // so the activity filter can't silently empty an NTLT view. Plain codes
+        // and ALL-scope bundles (Galvanizing/Yard) are valid everywhere and kept.
+        if (next.activity?.startsWith(BUNDLE_PREFIX)) {
+          const b = getActivityBundle(next.activity.slice(BUNDLE_PREFIX.length));
+          if (b && b.scope === "TLT" && value !== "TLT") next.activity = null;
+        }
       } else if (key === "job") {
         // TLT primary cascade: Project -> Structure -> Mark
         next.structure = null;
@@ -179,6 +192,14 @@ export function useFilteredRecords(records: Record[] | undefined) {
     const win = dateRangeWindow(filters.dateRange);
     const q = filters.search.trim().toLowerCase();
 
+    // Resolve an activity-bundle selection once per pass. A "bundle:<id>" value
+    // OR-matches the bundle's member codes; a plain code matches exactly.
+    const activityFilter = filters.activity;
+    const bundleSet =
+      activityFilter && activityFilter.startsWith(BUNDLE_PREFIX)
+        ? bundleActivitySet(activityFilter.slice(BUNDLE_PREFIX.length))
+        : null;
+
     // Smart search: if the query is exactly a job code, treat it as a job
     // filter (show only that job). Otherwise it's a free-text mark search.
     // This resolves the common confusion where a mark is literally named after
@@ -204,7 +225,13 @@ export function useFilteredRecords(records: Record[] | undefined) {
       if (filters.structure && r.structure !== filters.structure) return false;
       if (filters.mark && r.markId !== filters.mark && r.markTail !== filters.mark) return false;
       if (filters.contractor && r.contractor !== filters.contractor) return false;
-      if (filters.activity && r.activity !== filters.activity) return false;
+      if (activityFilter) {
+        if (bundleSet) {
+          if (!bundleSet.has((r.activity ?? "").toUpperCase())) return false;
+        } else if (r.activity !== activityFilter) {
+          return false;
+        }
+      }
 
       if (q) {
         if (searchIsJob) {

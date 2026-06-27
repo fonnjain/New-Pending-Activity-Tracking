@@ -8,7 +8,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DateRangeSelect } from "@/components/date-range-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Segmented } from "@/components/ui/segmented";
-import { sortActivities } from "@workspace/domain";
+import { sortActivities, ACTIVITY_BUNDLES } from "@workspace/domain";
 
 const navItems = [
   { href: "/", icon: BarChart3, label: "Overview" },
@@ -151,6 +151,20 @@ function FilterBar() {
     [scopedRecords]
   );
 
+  // Activity dropdown = a "Bundles" group (shortcut filters) above the plain
+  // "Activities" group. Bundle selections are encoded as "bundle:<id>" in the
+  // single activity slot. NTLT mode offers only ALL-scope bundles (Galvanizing,
+  // Yard); TLT and All modes offer every bundle.
+  const activityGroups = useMemo(() => {
+    const bundles = ACTIVITY_BUNDLES
+      .filter(b => (isNtlt ? b.scope === "ALL" : true))
+      .map(b => ({ value: `bundle:${b.id}`, label: b.label }));
+    const groups: { heading?: string; options: { value: string; label: string }[] }[] = [];
+    if (bundles.length) groups.push({ heading: "Bundles", options: bundles });
+    groups.push({ heading: "Activities", options: activities.map(a => ({ value: a, label: a })) });
+    return groups;
+  }, [activities, isNtlt]);
+
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => {
     if (k === "category") return false; // Order Type is a mode, not a filter
     if (v === null || v === "") return false;
@@ -210,13 +224,13 @@ function FilterBar() {
                 )}
               </div>
             )}
-            <div className="w-[150px]">
+            <div className="w-[200px]">
               <SearchableSelect
                 value={filters.activity}
                 onChange={(v) => setFilter("activity", v)}
-                options={activities}
+                groups={activityGroups}
                 allLabel="All Activities"
-                searchPlaceholder="Search activities..."
+                searchPlaceholder="Search activities or bundles..."
               />
             </div>
             <div className="flex-1 min-w-[200px] max-w-[360px]">
