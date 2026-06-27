@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { backfillClassification, backfillHoleOperation } from "./lib/backfill";
 import { seedContractorCategories } from "./lib/seedContractorCategories";
+import { seedRsjThickness } from "./lib/seedRsjThickness";
 
 const rawPort = process.env["PORT"];
 
@@ -44,5 +45,13 @@ app.listen(port, (err) => {
   // user edits. Never blocks or fails startup.
   seedContractorCategories().catch((err) => {
     logger.error({ err }, "Contractor category seed failed");
+  });
+
+  // Best-effort, one-time seed of the known RSJ types -> thickness so the lookup
+  // table is populated by default and base-match inheritance works out of the
+  // box. Fire-and-forget; onConflictDoNothing keeps it idempotent and never
+  // overwrites user edits. Never blocks or fails startup.
+  seedRsjThickness().catch((err) => {
+    logger.error({ err }, "RSJ thickness seed failed");
   });
 });

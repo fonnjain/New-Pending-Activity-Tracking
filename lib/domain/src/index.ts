@@ -1551,6 +1551,21 @@ export type ThicknessSource =
 // neither an exact nor an unambiguous base match in the lookup table.
 export const RSJ_DEFAULT_THICKNESS_MM = 6.0;
 
+// Known RSJ types pre-seeded into the lookup table so the resolution cascade has
+// something to match against out of the box (exact + base match). Every other
+// variation inherits by base ("RSJ <A>X<B>") or falls back to the 6.0 default;
+// a manual pin always wins. Seeded with onConflictDoNothing on groupKey, so any
+// in-app edit to a value is preserved and re-seeding on boot is a no-op. Keys
+// are the cleaned, uppercased "RSJ <dims>" form parse.ts produces.
+export const RSJ_THICKNESS_SEED: { groupKey: string; thicknessMm: number }[] = [
+  { groupKey: "RSJ 203X203X16", thicknessMm: 7.6 },
+  { groupKey: "RSJ 160X160X13", thicknessMm: 6.0 },
+  { groupKey: "RSJ 152X152X15", thicknessMm: 7.9 },
+  { groupKey: "RSJ 200X100X9", thicknessMm: 6.0 },
+  { groupKey: "RSJ 100X116X10", thicknessMm: 6.0 },
+  { groupKey: "RSJ 204X206X11", thicknessMm: 7.6 },
+];
+
 export interface ThicknessResult {
   thicknessMm: number | null;
   thicknessSource: ThicknessSource;

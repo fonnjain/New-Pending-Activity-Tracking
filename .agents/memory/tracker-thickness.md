@@ -46,3 +46,18 @@ key as a **query parameter**, not a path segment. Orval's `urlEncodeParameters`
 output flag did NOT fix path interpolation in v8.9.1; query params (URLSearchParams)
 encode correctly. Put auth (`requireAuth`) before the missing-param 400 check, so
 unauthenticated calls return 401 regardless.
+
+## RSJ types pre-seeded at boot
+
+The `rsj_thickness` lookup table is seeded at API-server boot from
+`RSJ_THICKNESS_SEED` (in `@workspace/domain`) so the resolution cascade has
+exact + base matches out of the box. Inserted with `onConflictDoNothing` on
+`groupKey` (uppercased), matching the PUT-route normalization.
+
+**Why:** the table started empty, so every RSJ row fell to the 6.0 default and
+base-match inheritance had nothing to inherit from.
+
+**How to apply:** seeded values behave as editable defaults — an in-app edit to a
+seeded key is preserved (onConflictDoNothing never overwrites), but DELETING a
+seeded row resurrects it on the next reboot (same tradeoff as the contractor-
+category seed). If deletions must persist, switch to a one-time flagged seed.
