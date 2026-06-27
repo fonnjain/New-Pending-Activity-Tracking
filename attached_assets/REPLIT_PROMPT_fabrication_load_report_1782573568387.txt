@@ -1,0 +1,75 @@
+REPLIT AGENT PROMPT — REPORT "Fabrication Load for TLT" (new report type)
+=========================================================================
+Add a new report type "Fabrication Load for TLT" to the Reports page (alongside the existing
+report types). It shows fabrication operation load by project and weight (tonnes), split into
+"Operational Load" (work AT an operation) and "In Hand" (work BEFORE an operation), with a
+user-selected Priority per row. TLT only for now. Display/aggregation + a small priority
+setting; do not change parsing, ageing, dedup, classification, or alert math — reuse existing
+data (activity, section_type, hole_operation, weight, project).
+
+SCOPE
+  - TLT only (Order Nature = Structure / category = TLT). Ignore NTLT for this report.
+  - Uses the TLT sequence: C, RFI, NH, B, HAB, HG, W, Q, TS, G, GB, Y.
+  - Weight is Balance Wt. expressed in TONNES (divide kg by 1000), summed per project per
+    column, to 3 decimals (match the sheet style, e.g. 52.851).
+
+THE REPORT HAS TWO SECTIONS, EACH WITH 5 LOAD COLUMNS
+Each column lists PROJECTS with their summed weight (tonnes) for that column, a Priority
+(P1..P10) selectable per row, and a column G. Total (sum of the column's project weights).
+A project appears in a column only if it has marks matching that column's rule (weight > 0).
+
+SECTION A — "Operational Load"  (marks currently AT the operation)
+  1) Welded Load  = marks whose current Activity == "W".
+  2) Bending Load = marks whose current Activity == "B".
+  3) Drilling Load = section_type == ANGLE AND current Activity == "RFI" AND
+                     hole_operation == "DRILLING".
+  4) Plate Punch  = section_type == PLATE AND current Activity == "RFI" AND
+                     hole_operation == "PUNCHING".
+  5) Plate Drill  = section_type == PLATE AND current Activity == "RFI" AND
+                     hole_operation == "DRILLING".
+
+SECTION B — "In Hand"  (marks BEFORE the operation, not including it)
+  1) Welded Load  = marks whose current Activity is BEFORE "W" in the TLT sequence
+                    (stage_index < index(W); i.e. C,RFI,NH,B,HAB,HG), NOT including W.
+  2) Bending Load = marks whose current Activity is BEFORE "B" in the TLT sequence
+                    (C,RFI,NH), NOT including B.
+  3) Drilling Load = section_type == ANGLE AND current Activity == "C" AND
+                     hole_operation == "DRILLING".
+  4) Plate Punch  = section_type == PLATE AND current Activity == "C" AND
+                     hole_operation == "PUNCHING".
+  5) Plate Drill  = section_type == PLATE AND current Activity == "C" AND
+                     hole_operation == "DRILLING".
+
+Notes on the rules:
+  - "Welded/Bending" use a POSITIONAL rule (at the activity = Operational; before it = In
+    Hand) by stage_index in the TLT sequence.
+  - "Drilling/Plate Punch/Plate Drill" use a SPECIFIC-ACTIVITY rule (RFI = Operational; C =
+    In Hand) combined with section_type + hole_operation (already derived).
+  - Each column sums Balance Wt (tonnes) per project for the matching marks.
+
+PRIORITY (per row)
+  - Each project row in each column has a Priority dropdown with values P1..P10 (extendable
+    later). User selects it; persist it. Default unset/blank.
+  - Decide the priority KEY granularity: simplest is per (section[A/B], column, project).
+    Persist so it survives reload/re-import; expose via openapi.yaml; regenerate hooks/Zod.
+  - (No "Achieved" row for now — omit it.)
+
+LAYOUT (mirror the attached sheet's spirit)
+  - Show the two sections; within each, the 5 columns, each as a small table:
+    Project | Weight (t) | Priority(P1..P10), with a G. Total row (sum of Weight) per column.
+  - Order projects within a column by weight desc (or by priority if set) — pick a sensible
+    default, sortable.
+  - Respect the global filters (contractor, date) where applicable; this report is TLT.
+  - Provide an export (Excel/CSV) of the full report with section, column, project, weight,
+    priority, and the G. Totals.
+
+ACCEPTANCE CHECK
+  - New "Fabrication Load for TLT" appears as a report type on the Reports page (TLT only).
+  - Operational Load: Welded=at W, Bending=at B, Drilling=Angle@RFI&Drilling,
+    Plate Punch=Plate@RFI&Punching, Plate Drill=Plate@RFI&Drilling — weights in tonnes per
+    project, G. Total per column.
+  - In Hand: Welded=before W (excl W), Bending=before B (excl B), Drilling=Angle@C&Drilling,
+    Plate Punch=Plate@C&Punching, Plate Drill=Plate@C&Drilling.
+  - Each project row has a P1..P10 Priority dropdown that persists.
+  - No "Achieved" row. Tonnes to 3 decimals; G. Totals correct.
+  - Export works. No change to parsing, ageing, dedup, classification, or alert math.

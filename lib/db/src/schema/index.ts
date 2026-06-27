@@ -9,3 +9,4 @@ export * from "./projectMilestones";
 export * from "./rsjThickness";
 export * from "./manualThickness";
 export * from "./contractorCategories";
+export * from "./fabricationPriorities";

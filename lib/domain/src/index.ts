@@ -266,6 +266,55 @@ export function isOutVendorType(v: unknown): v is OutVendorType {
   return v === "FAB" || v === "GALVA";
 }
 
+// --- "Fabrication Load for TLT" report (display/planning overlay only) ---------
+// Two sections (work AT an operation = operational; work BEFORE it = inhand),
+// five load columns each, and a per-row Priority (P1..P10). These constants are
+// the single source of truth shared by the API validators and the frontend.
+export type FabLoadSection = "operational" | "inhand";
+export type FabLoadColumn =
+  | "welded"
+  | "bending"
+  | "drilling"
+  | "platePunch"
+  | "plateDrill";
+
+export const FAB_LOAD_SECTIONS: { value: FabLoadSection; label: string }[] = [
+  { value: "operational", label: "Operational Load" },
+  { value: "inhand", label: "In Hand" },
+];
+
+export const FAB_LOAD_COLUMNS: { value: FabLoadColumn; label: string }[] = [
+  { value: "welded", label: "Welded Load" },
+  { value: "bending", label: "Bending Load" },
+  { value: "drilling", label: "Drilling Load" },
+  { value: "platePunch", label: "Plate Punch" },
+  { value: "plateDrill", label: "Plate Drill" },
+];
+
+// P1..P10 (extendable later by widening this range).
+export const FAB_PRIORITIES: string[] = Array.from(
+  { length: 10 },
+  (_, i) => `P${i + 1}`,
+);
+
+export function isFabLoadSection(v: unknown): v is FabLoadSection {
+  return v === "operational" || v === "inhand";
+}
+
+export function isFabLoadColumn(v: unknown): v is FabLoadColumn {
+  return (
+    v === "welded" ||
+    v === "bending" ||
+    v === "drilling" ||
+    v === "platePunch" ||
+    v === "plateDrill"
+  );
+}
+
+export function isFabPriority(v: unknown): v is string {
+  return typeof v === "string" && FAB_PRIORITIES.includes(v);
+}
+
 // Normalize a contractor name into the join KEY: uppercase, collapse internal
 // whitespace runs to a single space, and trim. This only smooths over casing and
 // spacing inconsistencies (e.g. accidental double spaces) — it deliberately
