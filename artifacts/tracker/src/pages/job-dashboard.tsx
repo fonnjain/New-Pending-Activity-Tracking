@@ -21,6 +21,7 @@ import {
   TableHead,
   TableBody,
   TableCell,
+  TableFooter,
 } from "@/components/ui/table";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Segmented } from "@/components/ui/segmented";
@@ -468,6 +469,34 @@ function JobDashboardContent() {
                   </TableRow>
                 )}
               </TableBody>
+              {byProject.length > 0 && (
+                <TableFooter>
+                  <TableRow className="border-t-2">
+                    <TableCell className="font-bold uppercase tracking-wider text-xs">Total</TableCell>
+                    {PROCESS_PHASES.map((ph) => {
+                      const marks = byProject.reduce((s, p) => s + p.phases[ph.key].marks, 0);
+                      const weight = byProject.reduce((s, p) => s + p.phases[ph.key].weight, 0);
+                      return (
+                        <TableCell key={ph.key} className="text-right tabular-nums">
+                          {marks > 0 ? (
+                            <>
+                              <span className="font-bold">{formatWeight(weight)}</span>
+                              <span className="block text-xs text-muted-foreground">
+                                {marks} marks
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                      );
+                    })}
+                    <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(avgAgeing)}`}>
+                      {avgAgeing}d
+                    </TableCell>
+                  </TableRow>
+                </TableFooter>
+              )}
             </Table>
           </div>
         </CardContent>
@@ -513,6 +542,19 @@ function JobDashboardContent() {
                   </TableRow>
                 )}
               </TableBody>
+              {byActivity.length > 0 && (
+                <TableFooter className="sticky bottom-0 bg-card z-10">
+                  <TableRow className="border-t-2">
+                    <TableCell className="font-bold uppercase tracking-wider text-xs">Total</TableCell>
+                    <TableCell className="text-right font-bold tabular-nums">{totalMarks}</TableCell>
+                    <TableCell className="text-right font-bold tabular-nums">{totalQty.toLocaleString()}</TableCell>
+                    <TableCell className="text-right font-bold tabular-nums">{formatWeight(totalWt)}</TableCell>
+                    <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(avgAgeing)}`}>
+                      {avgAgeing}d
+                    </TableCell>
+                  </TableRow>
+                </TableFooter>
+              )}
             </Table>
           </div>
         </CardContent>
