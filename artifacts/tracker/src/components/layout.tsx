@@ -36,11 +36,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
     selectedImportId != null;
 
   return (
-    <div className="min-h-[100dvh] flex flex-col bg-background text-foreground pb-16 md:pb-0 md:pt-14">
+    <div className="min-h-[100dvh] flex flex-col bg-background text-foreground pb-16 md:pb-0">
       {/* Top Nav (Desktop) */}
-      <header className="hidden md:flex fixed top-0 left-0 right-0 h-14 bg-sidebar border-b border-sidebar-border z-40 items-center px-4">
-        <div className="font-bold text-lg text-primary mr-6 tracking-tight shrink-0">TRACKER</div>
-        <nav className="flex items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <header className="hidden md:flex sticky top-0 z-40 min-h-14 bg-sidebar border-b border-sidebar-border items-center flex-wrap gap-x-3 gap-y-1 px-4 py-1.5">
+        <div className="font-bold text-lg text-primary tracking-tight shrink-0">TRACKER</div>
+        <nav className="flex items-center flex-wrap gap-0.5">
           {navItems.map((item) => (
             <Link key={item.href} href={item.href}>
               <div
