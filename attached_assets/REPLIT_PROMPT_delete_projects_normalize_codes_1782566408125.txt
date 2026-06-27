@@ -1,0 +1,57 @@
+REPLIT AGENT PROMPT — DELETE DROPPED PROJECTS (588, 857, VS-91) + NORMALIZE PROJECT CODES
+==========================================================================================
+Two things: (1) remove three TLT projects that no longer appear in the latest WIP report,
+and (2) fix a project-code formatting issue where "912" and "912." are treated as different
+projects. Deterministic data-maintenance change; do not alter ageing, the alert math, or the
+classification rules.
+
+BACKGROUND
+Comparing WIP 24-Jun-2026 vs WIP 27-Jun-2026: three projects dropped out entirely and must
+be deleted; one project (912) only LOOKED dropped because the new file writes it as "912."
+(trailing dot) and it is actually still active and growing.
+
+PART 1 — NORMALIZE PROJECT CODE (do this FIRST)
+  - Project Code must be normalized consistently on parse: trim whitespace AND strip a
+    trailing dot/period (and any trailing ".0" from numeric coercion). So "912.", "912",
+    and "912.0" all normalize to the same project key "912".
+  - Apply this normalization everywhere the project key is derived (group_key for TLT,
+    filters, rollups, milestones). Keep the raw value if useful, but the GROUPING/MATCHING
+    key is the normalized one.
+  - BACKFILL existing rows so any stored "912." (or similar) collapses to "912" and merges
+    with the existing 912 history (same project, not a new one). After this, project 912
+    should show as ONE project with its full current marks (~648 in the 27-Jun data), not
+    split into "912" and "912.".
+  - This prevents phantom "project disappeared / new project appeared" churn from trailing
+    punctuation.
+
+PART 2 — DELETE THE THREE GENUINELY-DROPPED PROJECTS
+  - After normalization, delete these TLT projects and all their marks from the tracking
+    data, because they are absent from the latest report (WIP 27-Jun-2026):
+        588      (1 mark)
+        857      (231 marks)
+        VS-91    (3 marks)
+  - Do NOT delete 912 — it is present as "912." and is active/growing; normalization (Part 1)
+    keeps it.
+  - "Delete" handling — choose the approach consistent with the app's model:
+        * If the app already treats "absent from latest upload" as completed/removed via the
+          change-log, ensure these three are marked removed/closed (not lingering as pending).
+        * If a hard delete is intended, remove their records from the active record_pool /
+          views so they no longer appear in TLT counts, dashboards, or filters. Preserve any
+          permanently-captured turnaround milestones for them if already recorded (history),
+          but they should not show as pending/active work.
+  - Make this idempotent: re-running does nothing if they're already gone.
+
+VERIFICATION AFTER RUN
+  - TLT project list no longer contains 588, 857, VS-91.
+  - Project 912 appears ONCE (merged from "912."/"912"), active, with its current marks
+    (~648) — NOT deleted, NOT duplicated.
+  - TLT totals reflect the removal of the three projects' marks; no phantom "912 vs 912."
+    split anywhere (filters, Job-wise, milestones).
+  - No change to ageing, alert math, NTLT, or contractor/thickness logic.
+
+ACCEPTANCE CHECK
+  - Searching projects: 588 / 857 / VS-91 absent; 912 present as a single project (~648
+    marks) with no "912." duplicate.
+  - Re-running the cleanup is a no-op (idempotent).
+  - Normalization strips trailing dot/period/".0" from project codes on parse and on the
+    existing data (backfill).

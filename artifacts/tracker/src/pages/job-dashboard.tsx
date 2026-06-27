@@ -426,6 +426,12 @@ function JobDashboardContent() {
                       </span>
                     </TableHead>
                   ))}
+                  <TableHead className="text-right align-bottom">
+                    <span className="block whitespace-nowrap">Total</span>
+                    <span className="block text-[10px] font-normal text-muted-foreground normal-case">
+                      wt / marks
+                    </span>
+                  </TableHead>
                   <TableHead className="text-right">Avg Ageing</TableHead>
                 </TableRow>
               </TableHeader>
@@ -454,6 +460,12 @@ function JobDashboardContent() {
                         </TableCell>
                       );
                     })}
+                    <TableCell className="text-right tabular-nums bg-muted/30">
+                      <span className="font-bold">{formatWeight(p.weight)}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {p.marks} marks
+                      </span>
+                    </TableCell>
                     <TableCell
                       className={`text-right font-bold tabular-nums ${getAgeingColor(p.avgAge)}`}
                     >
@@ -463,7 +475,7 @@ function JobDashboardContent() {
                 ))}
                 {byProject.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={PROCESS_PHASES.length + 2} className="text-center py-4 text-muted-foreground">
+                    <TableCell colSpan={PROCESS_PHASES.length + 3} className="text-center py-4 text-muted-foreground">
                       No data for the selected filters.
                     </TableCell>
                   </TableRow>
@@ -491,6 +503,12 @@ function JobDashboardContent() {
                         </TableCell>
                       );
                     })}
+                    <TableCell className="text-right tabular-nums bg-muted/50">
+                      <span className="font-bold">{formatWeight(totalWt)}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {totalMarks} marks
+                      </span>
+                    </TableCell>
                     <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(avgAgeing)}`}>
                       {avgAgeing}d
                     </TableCell>
