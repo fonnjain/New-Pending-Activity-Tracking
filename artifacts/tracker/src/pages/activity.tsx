@@ -26,7 +26,7 @@ function ActivityContent() {
   });
   const records = useFilteredRecords(allRecords);
 
-  const { activities, sortedActivities } = useMemo(() => {
+  const { activities, sortedActivities, totalWt, totalMarks } = useMemo(() => {
     // Group by activity
     const activities = new Map<string, any[]>();
     records.forEach(r => {
@@ -36,8 +36,9 @@ function ActivityContent() {
     });
 
     const sortedActivities = Array.from(activities.keys()).sort(compareActivity);
+    const totalWt = records.reduce((sum, r) => sum + (r.balanceWt ?? 0), 0);
 
-    return { activities, sortedActivities };
+    return { activities, sortedActivities, totalWt, totalMarks: records.length };
   }, [records]);
 
   return (
@@ -46,6 +47,21 @@ function ActivityContent() {
         <ActivityCard key={act} activity={act} records={activities.get(act)!} />
       ))}
       {sortedActivities.length === 0 && <div className="text-center p-8 text-muted-foreground">No activities found matching filters.</div>}
+      {sortedActivities.length > 0 && (
+        <Card className="border-2 border-primary/40 bg-muted/40">
+          <div className="flex items-center justify-between p-4">
+            <div className="flex items-center gap-4">
+              <div className="bg-primary text-primary-foreground font-bold w-12 h-12 flex items-center justify-center rounded-md text-xs uppercase shrink-0">
+                Total
+              </div>
+              <div>
+                <div className="font-bold text-lg">{formatWeight(totalWt)}</div>
+                <div className="text-xs text-muted-foreground">{totalMarks.toLocaleString()} marks across {sortedActivities.length} activities</div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
