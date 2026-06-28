@@ -131,7 +131,7 @@ function SummaryTile({ title, value, sub }: { title: string; value: string; sub?
     <Card className="shadow-sm">
       <CardContent className="p-4">
         <p className="text-[10px] sm:text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{title}</p>
-        <p className="text-base sm:text-lg font-semibold tracking-tight">{value}</p>
+        <p className="text-sm sm:text-base font-medium tracking-tight">{value}</p>
         {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
       </CardContent>
     </Card>

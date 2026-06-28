@@ -301,7 +301,7 @@ function KpiTile({ title, value }: { title: string, value: string | number }) {
     <Card className="shadow-sm border-border bg-card">
       <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full">
         <p className="text-[10px] sm:text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 line-clamp-1">{title}</p>
-        <p className="text-base sm:text-lg font-semibold tracking-tight text-foreground">{value}</p>
+        <p className="text-sm sm:text-base font-medium tracking-tight text-foreground">{value}</p>
       </CardContent>
     </Card>
   );

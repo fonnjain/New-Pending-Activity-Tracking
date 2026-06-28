@@ -317,7 +317,7 @@ function StatTile({ label, value }: { label: string; value: string }) {
     <Card>
       <CardContent className="p-4">
         <div className="text-xs uppercase text-muted-foreground">{label}</div>
-        <div className="text-base sm:text-lg font-semibold tabular-nums mt-1">{value}</div>
+        <div className="text-sm sm:text-base font-medium tabular-nums mt-1">{value}</div>
       </CardContent>
     </Card>
   );
