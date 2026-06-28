@@ -43,9 +43,11 @@ function ActivityContent() {
 
   return (
     <div className="space-y-4">
-      {sortedActivities.map(act => (
-        <ActivityCard key={act} activity={act} records={activities.get(act)!} />
-      ))}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        {sortedActivities.map(act => (
+          <ActivityCard key={act} activity={act} records={activities.get(act)!} />
+        ))}
+      </div>
       {sortedActivities.length === 0 && <div className="text-center p-8 text-muted-foreground">No activities found matching filters.</div>}
       {sortedActivities.length > 0 && (
         <Card className="border-2 border-primary/40 bg-muted/40">
