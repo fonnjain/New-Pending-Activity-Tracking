@@ -126,7 +126,7 @@ function ContractorContent() {
         name={selectedContractor}
         records={conMap.get(selectedContractor) ?? []}
         categoryInfo={contractorCategoryFor(selectedContractor, categoryMap)}
-        onBack={() => setSelectedContractor(null)}
+        onBack={handleBack}
       />
     );
   }
@@ -186,8 +186,7 @@ function ContractorContent() {
                       className="text-right align-top font-mono tabular-nums text-foreground text-base hover:text-primary hover:underline"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setFilter("activity", "bundle:TLT_FABRICATION");
-                        setSelectedContractor(s.name);
+                        drillWithActivity(s.name, "bundle:TLT_FABRICATION");
                       }}
                     >
                       {formatWeight(s.fabLoad)}
@@ -196,8 +195,7 @@ function ContractorContent() {
                       className="text-right align-top font-mono tabular-nums text-foreground text-base hover:text-primary hover:underline"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setFilter("activity", "bundle:GALVANIZING");
-                        setSelectedContractor(s.name);
+                        drillWithActivity(s.name, "bundle:GALVANIZING");
                       }}
                     >
                       {formatWeight(s.galvaLoad)}
