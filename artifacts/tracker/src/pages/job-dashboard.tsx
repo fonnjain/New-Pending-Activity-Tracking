@@ -432,9 +432,6 @@ function JobDashboardContent() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
-          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
-            By {primaryLabel}
-          </CardTitle>
           <div className="flex items-center gap-2">
             <label className="text-xs font-semibold text-muted-foreground uppercase whitespace-nowrap">
               Sort by
@@ -455,6 +452,15 @@ function JobDashboardContent() {
               </SelectContent>
             </Select>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-2"
+            onClick={handleExport}
+            disabled={byProject.length === 0}
+          >
+            <FileSpreadsheet className="h-4 w-4" /> Export Excel
+          </Button>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -624,18 +630,6 @@ function JobDashboardContent() {
           </div>
         </CardContent>
       </Card>
-
-      <div className="flex items-center justify-end">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-2"
-          onClick={handleExport}
-          disabled={byProject.length === 0}
-        >
-          <FileSpreadsheet className="h-4 w-4" /> Export Excel
-        </Button>
-      </div>
     </div>
   );
 }
