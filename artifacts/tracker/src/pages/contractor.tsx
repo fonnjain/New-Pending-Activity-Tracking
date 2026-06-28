@@ -184,13 +184,13 @@ function ContractorContent() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Contractor</TableHead>
-                  <TableHead className="text-right">Total Wt</TableHead>
-                  <TableHead className="text-right">Projects</TableHead>
-                  <TableHead className="text-right">Marks</TableHead>
-                  <TableHead className="text-right">Fabrication Load</TableHead>
-                  <TableHead className="text-right">Galvanizing Load</TableHead>
-                  <TableHead className="text-right">Yard Load</TableHead>
-                  <TableHead className="text-right">Avg Ageing</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal">Total Wt</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal">Projects</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal">Marks</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[5rem]">Fabrication Load</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[5rem]">Galvanizing Load</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4rem]">Yard Load</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4rem]">Avg Ageing</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -201,8 +201,8 @@ function ContractorContent() {
                     onClick={() => setSelectedContractor(s.name)}
                   >
                     <TableCell className="align-top">
-                      <div className="flex flex-col gap-1 min-w-[10rem] max-w-[16rem]">
-                        <span className="text-sm font-medium text-foreground leading-snug break-words whitespace-normal">{s.name}</span>
+                      <div className="flex flex-col gap-0.5 min-w-[9rem] max-w-[14rem]">
+                        <span className="text-sm font-medium text-foreground leading-tight break-words whitespace-normal">{s.name}</span>
                         <div>
                           <ContractorCategoryBadge info={contractorCategoryFor(s.name, categoryMap)} />
                         </div>
