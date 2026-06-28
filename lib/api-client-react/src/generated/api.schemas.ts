@@ -154,10 +154,50 @@ export interface StructuralRead {
   problems: string[];
 }
 
+/**
+ * Detected file type; routes the staged flow (WIP vs Order Review).
+ */
+export type StageResultFileType = typeof StageResultFileType[keyof typeof StageResultFileType];
+
+
+export const StageResultFileType = {
+  wip: 'wip',
+  'order-review': 'order-review',
+  unknown: 'unknown',
+} as const;
+
+/**
+ * Parse summary for an Order Review ingest.
+ */
+export interface OrderReviewSummary {
+  rowsRead: number;
+  rowsKept: number;
+  projectsFound: number;
+  totalWeightMt: number;
+  totalReleaseMt: number;
+  totalFileDespatchMt: number;
+  skippedTotals: number;
+  missingStructure: number;
+}
+
+/**
+ * Deterministic structural read of a staged Order Review file.
+ */
+export interface OrderReviewStageInfo {
+  /** @nullable */
+  asOnDate: string | null;
+  summary: OrderReviewSummary | null;
+}
+
 export interface StageResult {
   stagingId: string;
   sourceFilename: string;
-  structural: StructuralRead;
+  /** Detected file type; routes the staged flow (WIP vs Order Review). */
+  fileType: StageResultFileType;
+  /** Structural read for WIP files; null for Order Review files. */
+  structural: StructuralRead | null;
+  /** Deterministic read for Order Review files; null for WIP files. */
+  orderReview?: OrderReviewStageInfo | null;
 }
 
 export interface ValidateRequest {
@@ -196,6 +236,18 @@ export const ValidationResultVerdict = {
   reject: 'reject',
 } as const;
 
+/**
+ * Detected file type; present for Order Review and unknown files.
+ */
+export type ValidationResultFileType = typeof ValidationResultFileType[keyof typeof ValidationResultFileType];
+
+
+export const ValidationResultFileType = {
+  wip: 'wip',
+  'order-review': 'order-review',
+  unknown: 'unknown',
+} as const;
+
 export interface ValidationResult {
   /** False when ANTHROPIC_API_KEY is unset; UI then offers import as-is. */
   available: boolean;
@@ -213,6 +265,8 @@ export interface ValidationResult {
   expectedShape: string | null;
   /** Optional descriptive cleanups, present only when verdict is ok. */
   sanitize: StagedSanitizeSuggestion[];
+  /** Detected file type; present for Order Review and unknown files. */
+  fileType?: ValidationResultFileType;
 }
 
 export interface AcceptedSuggestion {
@@ -228,6 +282,55 @@ export interface CommitRequest {
   /** Descriptive cleanups the user accepted; applied before parse+merge. */
   acceptedSuggestions?: AcceptedSuggestion[];
 }
+
+export type WipCommitResultKind = typeof WipCommitResultKind[keyof typeof WipCommitResultKind];
+
+
+export const WipCommitResultKind = {
+  wip: 'wip',
+} as const;
+
+/**
+ * Commit result for a WIP balance/activity file.
+ */
+export interface WipCommitResult {
+  kind: WipCommitResultKind;
+  import: Import;
+  changeSet: ChangeSet;
+}
+
+export type OrderReviewCommitResultKind = typeof OrderReviewCommitResultKind[keyof typeof OrderReviewCommitResultKind];
+
+
+export const OrderReviewCommitResultKind = {
+  'order-review': 'order-review',
+} as const;
+
+/**
+ * One immutable Order Review file ingest.
+ */
+export interface OrderReviewImport {
+  id: number;
+  /** @nullable */
+  label: string | null;
+  sourceFilename: string;
+  /** @nullable */
+  asOnDate: string | null;
+  summary: OrderReviewSummary;
+  createdAt: string;
+}
+
+/**
+ * Commit result for an Order Review file.
+ */
+export interface OrderReviewCommitResult {
+  kind: OrderReviewCommitResultKind;
+  orderReviewImport: OrderReviewImport;
+  /** Number of newly seeded (project, structure) dispatch keys. */
+  seeded: number;
+}
+
+export type CommitResult = WipCommitResult | OrderReviewCommitResult;
 
 /**
  * How thicknessMm was derived (or "unset" when not yet resolved).
@@ -1018,6 +1121,81 @@ export interface ProjectMilestone {
 export interface MilestonesResponse {
   items: ProjectMilestone[];
   generatedAt: string;
+}
+
+/**
+ * One (project, structure) order row joined to computed dispatch.
+ */
+export interface OrderStatusRow {
+  project: string;
+  structure: string;
+  /** @nullable */
+  subType: string | null;
+  /** @nullable */
+  sets: number | null;
+  /** @nullable */
+  weightMt: number | null;
+  /** @nullable */
+  bomType: string | null;
+  /** @nullable */
+  releaseMt: number | null;
+  /**
+     * Despatch MT as stated in the Order Review file.
+     * @nullable
+     */
+  fileDespatchMt: number | null;
+  /** One-time dispatch baseline captured from the first Order Review file. */
+  seedMt: number;
+  /** Tonnes that left the Yard across WIP imports after the seed. */
+  accruedMt: number;
+  /** seedMt + accruedMt. */
+  computedDispatchMt: number;
+}
+
+export type DispatchReconciliationRowStatus = typeof DispatchReconciliationRowStatus[keyof typeof DispatchReconciliationRowStatus];
+
+
+export const DispatchReconciliationRowStatus = {
+  match: 'match',
+  mismatch: 'mismatch',
+  no_file: 'no_file',
+  no_computed: 'no_computed',
+} as const;
+
+/**
+ * File-vs-computed dispatch comparison for one (project, structure).
+ */
+export interface DispatchReconciliationRow {
+  project: string;
+  structure: string;
+  /** @nullable */
+  fileDespatchMt: number | null;
+  computedDispatchMt: number;
+  /** @nullable */
+  diffMt: number | null;
+  /** @nullable */
+  diffPct: number | null;
+  status: DispatchReconciliationRowStatus;
+}
+
+export interface DispatchReconciliation {
+  tolerancePct: number;
+  matched: number;
+  mismatched: number;
+  rows: DispatchReconciliationRow[];
+}
+
+/**
+ * Order Review overlay joined to computed dispatch.
+ */
+export interface OrderStatusResponse {
+  available: boolean;
+  /** @nullable */
+  asOnDate: string | null;
+  fileImport: OrderReviewImport | null;
+  rows: OrderStatusRow[];
+  reconciliation: DispatchReconciliation;
+  imports: OrderReviewImport[];
 }
 
 export interface ReviewRequest {

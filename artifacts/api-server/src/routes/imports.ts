@@ -9,6 +9,7 @@ import {
   recordPoolTable,
   importRowsTable,
   uploadStagingTable,
+  orderReviewImportsTable,
   settingsTable,
   contractorCategoriesTable,
   rsjThicknessTable,
@@ -50,6 +51,11 @@ import {
   type ThicknessLookups,
 } from "@workspace/domain";
 import { recomputeMilestones } from "../lib/milestones";
+import { recomputeDispatch, ingestOrderReview } from "../lib/dispatch";
+import {
+  detectFileType,
+  parseOrderReview,
+} from "../lib/parse-order-review";
 import {
   parseWorkbook,
   readStructural,
@@ -519,6 +525,12 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
   } catch (err) {
     req.log.warn({ err }, "Milestone recompute failed after import");
   }
+  // Refresh computed dispatch (Yard departures; best-effort).
+  try {
+    await recomputeDispatch();
+  } catch (err) {
+    req.log.warn({ err }, "Dispatch recompute failed after import");
+  }
 
   res.status(201).json(result);
 });
@@ -572,6 +584,31 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
     fileData: file.buffer,
   });
 
+  const fileType = detectFileType(file.buffer);
+
+  // Order Review (the second input file) gets a deterministic structural read of
+  // its own; it never goes through the WIP structural reader / AI gatekeeper.
+  if (fileType === "order-review") {
+    let orderReview;
+    try {
+      orderReview = parseOrderReview(file.buffer);
+    } catch (err) {
+      req.log.warn({ err }, "Order Review parse failed for staged upload");
+      orderReview = { asOnDate: null, rows: [], summary: null };
+    }
+    res.status(201).json({
+      stagingId,
+      sourceFilename: file.originalname,
+      fileType,
+      orderReview: {
+        asOnDate: orderReview.asOnDate,
+        summary: orderReview.summary,
+      },
+      structural: null,
+    });
+    return;
+  }
+
   let structural;
   try {
     structural = readStructural(file.buffer);
@@ -591,6 +628,7 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
   res.status(201).json({
     stagingId,
     sourceFilename: file.originalname,
+    fileType,
     structural,
   });
 });
@@ -624,8 +662,46 @@ router.post("/imports/validate", requireAuth, async (req, res): Promise<void> =>
     sanitize: [],
   };
 
+  // Order Review files are validated deterministically (no AI gatekeeper): a
+  // parseable file with at least one (project, structure) row is accepted.
+  const fileType = detectFileType(staged.fileData);
+  if (fileType === "order-review") {
+    let parsedOr;
+    try {
+      parsedOr = parseOrderReview(staged.fileData);
+    } catch {
+      parsedOr = null;
+    }
+    const ok = !!parsedOr && parsedOr.rows.length > 0;
+    res.json({
+      available: false,
+      fileType,
+      verdict: ok ? "ok" : "reject",
+      reason: ok
+        ? null
+        : "No order rows found. Expected a per-structure Order Review export with Tower Type Code and Despatch MT columns.",
+      expectedShape:
+        "An .xlsx Order Review export: a 'Project Code : NNN' banner with rows carrying Tower Type Code, Weight MT, and Despatch MT.",
+      sanitize: [],
+    });
+    return;
+  }
+  if (fileType === "unknown") {
+    res.json({
+      available: false,
+      fileType,
+      verdict: "reject",
+      reason:
+        "Unrecognised file. Upload either a WIP balance/activity report (Project Code + Mark No. + Activity) or an Order Review export.",
+      expectedShape:
+        "A WIP balance/activity .xlsx, or an Order Review .xlsx with Tower Type Code + Despatch MT.",
+      sanitize: [],
+    });
+    return;
+  }
+
   if (!isAiAvailable()) {
-    res.json(unavailable);
+    res.json({ ...unavailable, fileType });
     return;
   }
 
@@ -806,6 +882,109 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
+  // Reject unrecognised files explicitly (defense in depth: a caller may post
+  // straight to commit, bypassing /validate). Only WIP and Order Review commit.
+  if (detectFileType(staged.fileData) === "unknown") {
+    res.status(400).json({
+      error:
+        "Unrecognised file. Upload either a WIP balance/activity report (Project Code + Mark No. + Activity) or an Order Review export.",
+    });
+    return;
+  }
+
+  // Order Review files commit via a separate, deterministic ingest path: create
+  // an order_review_imports row, capture-once seed dispatch, recompute. Idempotent
+  // via committed_order_review_import_id (a retried commit returns the same one).
+  if (detectFileType(staged.fileData) === "order-review") {
+    if (staged.committedOrderReviewImportId != null) {
+      const [imp] = await db
+        .select()
+        .from(orderReviewImportsTable)
+        .where(eq(orderReviewImportsTable.id, staged.committedOrderReviewImportId));
+      if (imp) {
+        res
+          .status(200)
+          .json({ kind: "order-review", orderReviewImport: imp, seeded: 0 });
+        return;
+      }
+    }
+    // Atomically claim this staged row for an Order Review ingest. Only the first
+    // commit to reach here wins (committed_order_review_import_id IS NULL); a
+    // concurrent duplicate loses and replays the winner, so one ingest per file.
+    let ingest;
+    try {
+      ingest = await ingestOrderReview(staged.fileData, {
+        sourceFilename: staged.sourceFilename,
+        label: staged.label,
+      });
+    } catch (err) {
+      req.log.warn({ err, stagingId }, "Order Review ingest failed");
+      res.status(400).json({ error: "Could not ingest the Order Review file" });
+      return;
+    }
+    const claimedOr = await db
+      .update(uploadStagingTable)
+      .set({ committedOrderReviewImportId: ingest.importId })
+      .where(
+        and(
+          eq(uploadStagingTable.id, stagingId),
+          isNull(uploadStagingTable.committedOrderReviewImportId),
+        ),
+      )
+      .returning({ id: uploadStagingTable.id });
+
+    if (claimedOr.length === 0) {
+      // Lost the race: another concurrent commit already ingested this file.
+      // Resolve the winner first, then drop our orphan ingest.
+      const [winnerRow] = await db
+        .select({
+          committedOrderReviewImportId:
+            uploadStagingTable.committedOrderReviewImportId,
+        })
+        .from(uploadStagingTable)
+        .where(eq(uploadStagingTable.id, stagingId));
+      const winnerId = winnerRow?.committedOrderReviewImportId ?? null;
+      const [winner] =
+        winnerId != null && winnerId !== ingest.importId
+          ? await db
+              .select()
+              .from(orderReviewImportsTable)
+              .where(eq(orderReviewImportsTable.id, winnerId))
+          : [];
+      if (winner) {
+        // Roll back the duplicate ingest we just created (cascades its rows;
+        // WIP state and the record pool are untouched), then re-seed/recompute.
+        await db
+          .delete(orderReviewImportsTable)
+          .where(eq(orderReviewImportsTable.id, ingest.importId));
+        try {
+          await recomputeDispatch();
+        } catch (err) {
+          req.log.warn({ err }, "Dispatch recompute after dropping duplicate Order Review failed");
+        }
+        req.log.warn(
+          { stagingId, droppedImportId: ingest.importId, importId: winner.id },
+          "Concurrent commit detected: dropped duplicate Order Review ingest",
+        );
+        res
+          .status(200)
+          .json({ kind: "order-review", orderReviewImport: winner, seeded: 0 });
+        return;
+      }
+    }
+
+    const [imp] = await db
+      .select()
+      .from(orderReviewImportsTable)
+      .where(eq(orderReviewImportsTable.id, ingest.importId));
+    res.status(201).json({
+      kind: "order-review",
+      orderReviewImport: imp,
+      seeded: ingest.seeded,
+    });
+    return;
+  }
+
   // Idempotency: this staged file was already committed (e.g. a proxy/timeout
   // retry of a slow commit, or a double submit). Return the existing import
   // instead of re-merging or failing with a misleading error.
@@ -819,7 +998,9 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
         { stagingId, importId: imp.id },
         "Commit replayed: staged file already committed",
       );
-      res.status(200).json({ import: imp, changeSet: changeSetFromImport(imp) });
+      res
+        .status(200)
+        .json({ kind: "wip", import: imp, changeSet: changeSetFromImport(imp) });
       return;
     }
     // The committed import was later deleted; fall through and re-commit.
@@ -895,7 +1076,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
       );
       res
         .status(200)
-        .json({ import: winner, changeSet: changeSetFromImport(winner) });
+        .json({ kind: "wip", import: winner, changeSet: changeSetFromImport(winner) });
       return;
     }
     // Could not resolve a distinct winner (e.g. the row was discarded mid-flight
@@ -913,8 +1094,14 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   } catch (err) {
     req.log.warn({ err }, "Milestone recompute failed after commit");
   }
+  // Refresh computed dispatch (Yard departures; best-effort).
+  try {
+    await recomputeDispatch();
+  } catch (err) {
+    req.log.warn({ err }, "Dispatch recompute failed after commit");
+  }
 
-  res.status(201).json(result);
+  res.status(201).json({ kind: "wip", ...result });
 });
 
 // DELETE /imports/stage/:id — discard a staged upload without committing.
@@ -1018,6 +1205,12 @@ router.delete("/imports/:id", requireAuth, async (req, res): Promise<void> => {
     await recomputeMilestones();
   } catch (err) {
     req.log.warn({ err }, "Milestone recompute failed after import delete");
+  }
+  // Refresh computed dispatch after the deletion (best-effort).
+  try {
+    await recomputeDispatch();
+  } catch (err) {
+    req.log.warn({ err }, "Dispatch recompute failed after import delete");
   }
 
   res.sendStatus(204);

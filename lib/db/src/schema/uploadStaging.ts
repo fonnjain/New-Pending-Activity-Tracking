@@ -31,6 +31,10 @@ export const uploadStagingTable = pgTable("upload_staging", {
   // Set once this staged file has been committed into an import. Used to make
   // commit idempotent against duplicate/retried requests.
   committedImportId: integer("committed_import_id"),
+  // Set once this staged file has been committed as an Order Review ingest (the
+  // second file type). Separate id space from committedImportId so order-review
+  // commits are independently idempotent against duplicate/retried requests.
+  committedOrderReviewImportId: integer("committed_order_review_import_id"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

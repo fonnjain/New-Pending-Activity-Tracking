@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { StagedSanitizeSuggestion } from './stagedSanitizeSuggestion';
+import type { ValidationResultFileType } from './validationResultFileType';
 import type { ValidationResultVerdict } from './validationResultVerdict';
 
 export interface ValidationResult {
@@ -25,4 +26,6 @@ export interface ValidationResult {
   expectedShape: string | null;
   /** Optional descriptive cleanups, present only when verdict is ok. */
   sanitize: StagedSanitizeSuggestion[];
+  /** Detected file type; present for Order Review and unknown files. */
+  fileType?: ValidationResultFileType;
 }

@@ -25,6 +25,7 @@ import type {
   AuthStatus,
   ChangeSet,
   CommitRequest,
+  CommitResult,
   CompareImportsParams,
   ContractorCategory,
   ContractorCategoryInput,
@@ -44,6 +45,7 @@ import type {
   ManualThicknessInput,
   MilestonesResponse,
   MovementResponse,
+  OrderStatusResponse,
   Record,
   ReportRequest,
   ReportResult,
@@ -1850,9 +1852,9 @@ export const getCommitStagedImportUrl = () => {
 
  * @summary Commit a staged upload
  */
-export const commitStagedImport = async (commitRequest: CommitRequest, options?: RequestInit): Promise<UploadResult> => {
+export const commitStagedImport = async (commitRequest: CommitRequest, options?: RequestInit): Promise<CommitResult> => {
 
-  return customFetch<UploadResult>(getCommitStagedImportUrl(),
+  return customFetch<CommitResult>(getCommitStagedImportUrl(),
   {
     ...options,
     method: 'POST',
@@ -2594,6 +2596,85 @@ export function useGetMilestones<TData = Awaited<ReturnType<typeof getMilestones
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetMilestonesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetOrderStatusUrl = () => {
+
+
+
+
+  return `/api/order-status`
+}
+
+/**
+ * Returns the latest "Order Review" file ingest (the second input file) as per-(project, structure) rows, joined to the computed running Dispatch tonnage (seed baseline + Yard-departure accruals), plus a file-vs-computed dispatch reconciliation at a 1% tolerance. Fabrication / Galvanizing / Yard tonnages are computed client-side from the selected WIP import's records (ACTIVITY_BUNDLES) so header filters are honoured. Purely additive and read-only — never changes WIP parsing, activity, dedup, ageing, warning, velocity, or milestone state. available:false when no Order Review file has been ingested yet.
+
+ * @summary Get the latest Order Review rows joined to computed dispatch
+ */
+export const getOrderStatus = async ( options?: RequestInit): Promise<OrderStatusResponse> => {
+
+  return customFetch<OrderStatusResponse>(getGetOrderStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOrderStatusQueryKey = () => {
+    return [
+    `/api/order-status`
+    ] as const;
+    }
+
+
+export const getGetOrderStatusQueryOptions = <TData = Awaited<ReturnType<typeof getOrderStatus>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOrderStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOrderStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOrderStatus>>> = ({ signal }) => getOrderStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOrderStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOrderStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getOrderStatus>>>
+export type GetOrderStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the latest Order Review rows joined to computed dispatch
+ */
+
+export function useGetOrderStatus<TData = Awaited<ReturnType<typeof getOrderStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOrderStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOrderStatusQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

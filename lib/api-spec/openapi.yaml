@@ -534,12 +534,18 @@ paths:
             schema:
               $ref: "#/components/schemas/CommitRequest"
       responses:
-        "201":
-          description: Import created
+        "200":
+          description: Idempotent commit replay (WIP or Order Review)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UploadResult"
+                $ref: "#/components/schemas/CommitResult"
+        "201":
+          description: Import created (WIP or Order Review)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommitResult"
         "400":
           description: Invalid request
           content:
@@ -809,6 +815,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MilestonesResponse"
+  /order-status:
+    get:
+      operationId: getOrderStatus
+      tags: [orderStatus]
+      summary: Get the latest Order Review rows joined to computed dispatch
+      description: >
+        Returns the latest "Order Review" file ingest (the second input file) as
+        per-(project, structure) rows, joined to the computed running Dispatch
+        tonnage (seed baseline + Yard-departure accruals), plus a file-vs-computed
+        dispatch reconciliation at a 1% tolerance. Fabrication / Galvanizing / Yard
+        tonnages are computed client-side from the selected WIP import's records
+        (ACTIVITY_BUNDLES) so header filters are honoured. Purely additive and
+        read-only — never changes WIP parsing, activity, dedup, ageing, warning,
+        velocity, or milestone state. available:false when no Order Review file has
+        been ingested yet.
+      responses:
+        "200":
+          description: Order status overlay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderStatusResponse"
   /imports/{id}/changes:
     get:
       operationId: getImportChanges
@@ -1270,12 +1298,38 @@ components:
           type: string
         sourceFilename:
           type: string
+        fileType:
+          type: string
+          enum: [wip, order-review, unknown]
+          description: Detected file type; routes the staged flow (WIP vs Order Review).
         structural:
-          $ref: "#/components/schemas/StructuralRead"
+          oneOf:
+            - $ref: "#/components/schemas/StructuralRead"
+            - type: "null"
+          description: Structural read for WIP files; null for Order Review files.
+        orderReview:
+          oneOf:
+            - $ref: "#/components/schemas/OrderReviewStageInfo"
+            - type: "null"
+          description: Deterministic read for Order Review files; null for WIP files.
       required:
         - stagingId
         - sourceFilename
+        - fileType
         - structural
+    OrderReviewStageInfo:
+      type: object
+      description: Deterministic structural read of a staged Order Review file.
+      properties:
+        asOnDate:
+          type: ["string", "null"]
+        summary:
+          oneOf:
+            - $ref: "#/components/schemas/OrderReviewSummary"
+            - type: "null"
+      required:
+        - asOnDate
+        - summary
     ValidateRequest:
       type: object
       properties:
@@ -1327,6 +1381,10 @@ components:
           items:
             $ref: "#/components/schemas/StagedSanitizeSuggestion"
           description: Optional descriptive cleanups, present only when verdict is ok.
+        fileType:
+          type: string
+          enum: [wip, order-review, unknown]
+          description: Detected file type; present for Order Review and unknown files.
       required:
         - available
         - verdict
@@ -1358,6 +1416,46 @@ components:
           description: Descriptive cleanups the user accepted; applied before parse+merge.
       required:
         - stagingId
+    WipCommitResult:
+      type: object
+      description: Commit result for a WIP balance/activity file.
+      properties:
+        kind:
+          type: string
+          enum: [wip]
+        import:
+          $ref: "#/components/schemas/Import"
+        changeSet:
+          $ref: "#/components/schemas/ChangeSet"
+      required:
+        - kind
+        - import
+        - changeSet
+    OrderReviewCommitResult:
+      type: object
+      description: Commit result for an Order Review file.
+      properties:
+        kind:
+          type: string
+          enum: [order-review]
+        orderReviewImport:
+          $ref: "#/components/schemas/OrderReviewImport"
+        seeded:
+          type: integer
+          description: Number of newly seeded (project, structure) dispatch keys.
+      required:
+        - kind
+        - orderReviewImport
+        - seeded
+    CommitResult:
+      oneOf:
+        - $ref: "#/components/schemas/WipCommitResult"
+        - $ref: "#/components/schemas/OrderReviewCommitResult"
+      discriminator:
+        propertyName: kind
+        mapping:
+          wip: "#/components/schemas/WipCommitResult"
+          order-review: "#/components/schemas/OrderReviewCommitResult"
     Record:
       type: object
       properties:
@@ -2305,6 +2403,174 @@ components:
       required:
         - items
         - generatedAt
+    OrderReviewImport:
+      type: object
+      description: One immutable Order Review file ingest.
+      properties:
+        id:
+          type: integer
+        label:
+          type: ["string", "null"]
+        sourceFilename:
+          type: string
+        asOnDate:
+          type: ["string", "null"]
+        summary:
+          $ref: "#/components/schemas/OrderReviewSummary"
+        createdAt:
+          type: string
+      required:
+        - id
+        - label
+        - sourceFilename
+        - asOnDate
+        - summary
+        - createdAt
+    OrderReviewSummary:
+      type: object
+      description: Parse summary for an Order Review ingest.
+      properties:
+        rowsRead:
+          type: integer
+        rowsKept:
+          type: integer
+        projectsFound:
+          type: integer
+        totalWeightMt:
+          type: number
+        totalReleaseMt:
+          type: number
+        totalFileDespatchMt:
+          type: number
+        skippedTotals:
+          type: integer
+        missingStructure:
+          type: integer
+      required:
+        - rowsRead
+        - rowsKept
+        - projectsFound
+        - totalWeightMt
+        - totalReleaseMt
+        - totalFileDespatchMt
+        - skippedTotals
+        - missingStructure
+    OrderStatusRow:
+      type: object
+      description: One (project, structure) order row joined to computed dispatch.
+      properties:
+        project:
+          type: string
+        structure:
+          type: string
+        subType:
+          type: ["string", "null"]
+        sets:
+          type: ["integer", "null"]
+        weightMt:
+          type: ["number", "null"]
+        bomType:
+          type: ["string", "null"]
+        releaseMt:
+          type: ["number", "null"]
+        fileDespatchMt:
+          type: ["number", "null"]
+          description: Despatch MT as stated in the Order Review file.
+        seedMt:
+          type: number
+          description: One-time dispatch baseline captured from the first Order Review file.
+        accruedMt:
+          type: number
+          description: Tonnes that left the Yard across WIP imports after the seed.
+        computedDispatchMt:
+          type: number
+          description: seedMt + accruedMt.
+      required:
+        - project
+        - structure
+        - subType
+        - sets
+        - weightMt
+        - bomType
+        - releaseMt
+        - fileDespatchMt
+        - seedMt
+        - accruedMt
+        - computedDispatchMt
+    DispatchReconciliationRow:
+      type: object
+      description: File-vs-computed dispatch comparison for one (project, structure).
+      properties:
+        project:
+          type: string
+        structure:
+          type: string
+        fileDespatchMt:
+          type: ["number", "null"]
+        computedDispatchMt:
+          type: number
+        diffMt:
+          type: ["number", "null"]
+        diffPct:
+          type: ["number", "null"]
+        status:
+          type: string
+          enum: [match, mismatch, no_file, no_computed]
+      required:
+        - project
+        - structure
+        - fileDespatchMt
+        - computedDispatchMt
+        - diffMt
+        - diffPct
+        - status
+    DispatchReconciliation:
+      type: object
+      properties:
+        tolerancePct:
+          type: number
+        matched:
+          type: integer
+        mismatched:
+          type: integer
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/DispatchReconciliationRow"
+      required:
+        - tolerancePct
+        - matched
+        - mismatched
+        - rows
+    OrderStatusResponse:
+      type: object
+      description: Order Review overlay joined to computed dispatch.
+      properties:
+        available:
+          type: boolean
+        asOnDate:
+          type: ["string", "null"]
+        fileImport:
+          oneOf:
+            - $ref: "#/components/schemas/OrderReviewImport"
+            - type: "null"
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderStatusRow"
+        reconciliation:
+          $ref: "#/components/schemas/DispatchReconciliation"
+        imports:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderReviewImport"
+      required:
+        - available
+        - asOnDate
+        - fileImport
+        - rows
+        - reconciliation
+        - imports
     ReviewRequest:
       type: object
       properties:

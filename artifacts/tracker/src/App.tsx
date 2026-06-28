@@ -17,6 +17,7 @@ import ContractorView from "@/pages/contractor";
 import PlantOperationView from "@/pages/plant-operation";
 import DataView from "@/pages/data";
 import ReportsView from "@/pages/reports";
+import OrderStatusView from "@/pages/order-status";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,12 +39,14 @@ function Router() {
         <Route path="/turnaround" component={TurnaroundView} />
         <Route path="/stuck" component={StuckProjectsView} />
         <Route path="/completed" component={CompletedView} />
+        <Route path="/order-status" component={OrderStatusView} />
         <Route path="/jobs" component={JobDashboard} />
         <Route path="/activity" component={ActivityView} />
         <Route path="/contractor" component={ContractorView} />
         <Route path="/plant" component={PlantOperationView} />
         <Route path="/contractor-setup" component={DataView} />
         <Route path="/data" component={DataView} />
+        <Route path="/order-reconciliation" component={DataView} />
         <Route path="/reports" component={ReportsView} />
         <Route path="/thickness" component={DataView} />
         <Route path="/warning-parameters" component={DataView} />

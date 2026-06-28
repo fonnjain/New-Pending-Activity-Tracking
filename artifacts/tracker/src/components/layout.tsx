@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
-import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, CheckCircle2, Factory } from "lucide-react";
+import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, CheckCircle2, Factory, PackageCheck } from "lucide-react";
 import { useTracker, dateRangeWindow } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ const navItems: NavItem[] = [
   { href: "/turnaround", icon: Timer, label: "Turn Around Time", short: "Turnaround" },
   { href: "/stuck", icon: Gauge, label: "Stuck Projects", short: "Stuck" },
   { href: "/completed", icon: CheckCircle2, label: "Completed", short: "Completed" },
+  { href: "/order-status", icon: PackageCheck, label: "Order Status", short: "Orders" },
   { href: "/data", icon: Database, label: "Data", short: "Data" },
 ];
 
@@ -43,6 +44,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { selectedImportId } = useTracker();
   const showFilters =
     location !== "/data" &&
+    location !== "/order-reconciliation" &&
     location !== "/contractor-setup" &&
     location !== "/warning-parameters" &&
     location !== "/thickness" &&

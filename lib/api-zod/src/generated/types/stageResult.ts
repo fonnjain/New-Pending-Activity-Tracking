@@ -5,10 +5,17 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OrderReviewStageInfo } from './orderReviewStageInfo';
+import type { StageResultFileType } from './stageResultFileType';
 import type { StructuralRead } from './structuralRead';
 
 export interface StageResult {
   stagingId: string;
   sourceFilename: string;
-  structural: StructuralRead;
+  /** Detected file type; routes the staged flow (WIP vs Order Review). */
+  fileType: StageResultFileType;
+  /** Structural read for WIP files; null for Order Review files. */
+  structural: StructuralRead | null;
+  /** Deterministic read for Order Review files; null for WIP files. */
+  orderReview?: OrderReviewStageInfo | null;
 }

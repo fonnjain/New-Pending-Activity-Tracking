@@ -8,17 +8,24 @@ import {
   type StructuralRead,
   type ValidationResult,
   type StagedSanitizeSuggestion,
-  type UploadResult,
+  type CommitResult,
+  type OrderReviewStageInfo,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Upload, ShieldCheck, AlertTriangle, CheckCircle2 } from "lucide-react";
+import {
+  Upload,
+  ShieldCheck,
+  AlertTriangle,
+  CheckCircle2,
+  ClipboardList,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type Phase = "idle" | "staged" | "validating" | "validated";
 
 interface Props {
-  onCommitted: (res: UploadResult) => void;
+  onCommitted: (res: CommitResult) => void;
 }
 
 export function StagedUploadPanel({ onCommitted }: Props) {
@@ -45,6 +52,8 @@ export function StagedUploadPanel({ onCommitted }: Props) {
     setValidation(null);
     setAccepted(new Set());
   };
+
+  const isOrderReview = staged?.fileType === "order-review";
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -199,9 +208,35 @@ export function StagedUploadPanel({ onCommitted }: Props) {
               </Button>
             </div>
 
-            <StructuralSummary structural={staged.structural} />
+            {staged.structural && (
+              <StructuralSummary structural={staged.structural} />
+            )}
 
-            {phase === "staged" && (
+            {isOrderReview && staged.orderReview && (
+              <OrderReviewSummary info={staged.orderReview} />
+            )}
+
+            {phase === "staged" && isOrderReview && (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button
+                  onClick={doCommit}
+                  disabled={busy}
+                  className="gap-2 text-primary-foreground"
+                >
+                  <ClipboardList className="w-4 h-4" />
+                  {commit.isPending ? "Importing..." : "Import Order Review"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={doDiscard}
+                  disabled={busy}
+                >
+                  Discard
+                </Button>
+              </div>
+            )}
+
+            {phase === "staged" && !isOrderReview && (
               <div className="flex flex-col sm:flex-row gap-2">
                 <Button
                   onClick={runValidate}
@@ -277,6 +312,58 @@ function StructuralSummary({ structural }: { structural: StructuralRead }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+function OrderReviewSummary({ info }: { info: OrderReviewStageInfo }) {
+  const s = info.summary;
+  return (
+    <div className="rounded-md border bg-muted/20 p-3 space-y-2 text-sm">
+      <div className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground">
+        <ClipboardList className="w-3.5 h-3.5" />
+        Order Review file
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Stat label="As-on date" value={info.asOnDate ?? "—"} />
+        <Stat
+          label="Rows read"
+          value={s ? s.rowsRead.toLocaleString() : "—"}
+        />
+        <Stat label="Rows kept" value={s ? s.rowsKept.toLocaleString() : "—"} />
+        <Stat
+          label="Projects"
+          value={s ? s.projectsFound.toLocaleString() : "—"}
+        />
+        <Stat
+          label="Order wt (MT)"
+          value={s ? s.totalWeightMt.toLocaleString() : "—"}
+        />
+        <Stat
+          label="Released (MT)"
+          value={s ? s.totalReleaseMt.toLocaleString() : "—"}
+        />
+        <Stat
+          label="File despatch (MT)"
+          value={s ? s.totalFileDespatchMt.toLocaleString() : "—"}
+        />
+        <Stat
+          label="Skipped totals"
+          value={s ? s.skippedTotals.toLocaleString() : "—"}
+        />
+      </div>
+      {s && s.missingStructure > 0 && (
+        <div className="text-xs text-amber-600 dark:text-amber-400">
+          {s.missingStructure.toLocaleString()} row
+          {s.missingStructure === 1 ? "" : "s"} had no structure and will not
+          join to WIP marks.
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Order Review files are ingested deterministically. No AI check is
+        applied. Dispatch totals are seeded once, then accrued from WIP yard
+        departures.
+      </p>
     </div>
   );
 }

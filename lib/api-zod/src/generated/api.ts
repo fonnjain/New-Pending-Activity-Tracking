@@ -918,7 +918,8 @@ export const ValidateStagedImportResponse = zod.object({
   "to": zod.string().nullable().describe('Cleaned value to apply.'),
   "reason": zod.string(),
   "count": zod.number().describe('Number of staged rows whose field currently equals \"from\".')
-}).describe('A descriptive-only cleanup the user may accept before commit.')).describe('Optional descriptive cleanups, present only when verdict is ok.')
+}).describe('A descriptive-only cleanup the user may accept before commit.')).describe('Optional descriptive cleanups, present only when verdict is ok.'),
+  "fileType": zod.enum(['wip', 'order-review', 'unknown']).optional().describe('Detected file type; present for Order Review and unknown files.')
 })
 
 
@@ -935,6 +936,130 @@ export const CommitStagedImportBody = zod.object({
   "to": zod.string().nullable()
 })).optional().describe('Descriptive cleanups the user accepted; applied before parse+merge.')
 })
+
+export const CommitStagedImportResponse = zod.union([zod.object({
+  "kind": zod.enum(['wip']),
+  "import": zod.object({
+  "id": zod.number(),
+  "label": zod.string().nullable(),
+  "sourceFilename": zod.string(),
+  "reportDate": zod.string().nullable(),
+  "createdAt": zod.string(),
+  "summary": zod.object({
+  "rowsRead": zod.number(),
+  "rowsKept": zod.number(),
+  "distinctRows": zod.number(),
+  "duplicateRowCopies": zod.number(),
+  "projectsFound": zod.number(),
+  "missingContractor": zod.number(),
+  "missingDate": zod.number(),
+  "notStarted": zod.number().describe('Blank Last Production Entry Date AND activity == C (production not begun).'),
+  "noProductionDate": zod.number().describe('Blank Last Production Entry Date AND activity != C (progressed past cutting; data-quality flag).'),
+  "futureProductionDate": zod.number().describe('Last Production Entry Date later than today (clamped to today for ageing).')
+}),
+  "changeSummary": zod.union([zod.object({
+  "prevImportId": zod.number().nullable(),
+  "addedRows": zod.number(),
+  "unchangedRows": zod.number(),
+  "movedActivity": zod.number(),
+  "qtyChanged": zod.number(),
+  "newMarks": zod.number(),
+  "completed": zod.number(),
+  "netPendingQtyChange": zod.number(),
+  "netPendingWtChange": zod.number(),
+  "flags": zod.array(zod.string())
+}),zod.null()])
+}),
+  "changeSet": zod.object({
+  "fromImportId": zod.number().nullable(),
+  "toImportId": zod.number(),
+  "fromLabel": zod.string().nullable(),
+  "toLabel": zod.string().nullable(),
+  "counts": zod.object({
+  "addedRows": zod.number(),
+  "unchangedRows": zod.number(),
+  "movedActivity": zod.number(),
+  "qtyChanged": zod.number(),
+  "newMarks": zod.number(),
+  "completed": zod.number()
+}),
+  "netPendingQtyChange": zod.number(),
+  "netPendingWtChange": zod.number(),
+  "movedActivity": zod.array(zod.object({
+  "markId": zod.string(),
+  "job": zod.string(),
+  "structure": zod.string(),
+  "markTail": zod.string(),
+  "contractor": zod.string().nullable(),
+  "activityFrom": zod.string().nullable(),
+  "activityTo": zod.string().nullable(),
+  "qtyFrom": zod.number().nullable(),
+  "qtyTo": zod.number().nullable(),
+  "wtFrom": zod.number().nullable(),
+  "wtTo": zod.number().nullable()
+})),
+  "qtyChanged": zod.array(zod.object({
+  "markId": zod.string(),
+  "job": zod.string(),
+  "structure": zod.string(),
+  "markTail": zod.string(),
+  "contractor": zod.string().nullable(),
+  "activityFrom": zod.string().nullable(),
+  "activityTo": zod.string().nullable(),
+  "qtyFrom": zod.number().nullable(),
+  "qtyTo": zod.number().nullable(),
+  "wtFrom": zod.number().nullable(),
+  "wtTo": zod.number().nullable()
+})),
+  "newMarks": zod.array(zod.object({
+  "markId": zod.string(),
+  "job": zod.string(),
+  "structure": zod.string(),
+  "markTail": zod.string(),
+  "contractor": zod.string().nullable(),
+  "activityFrom": zod.string().nullable(),
+  "activityTo": zod.string().nullable(),
+  "qtyFrom": zod.number().nullable(),
+  "qtyTo": zod.number().nullable(),
+  "wtFrom": zod.number().nullable(),
+  "wtTo": zod.number().nullable()
+})),
+  "completed": zod.array(zod.object({
+  "markId": zod.string(),
+  "job": zod.string(),
+  "structure": zod.string(),
+  "markTail": zod.string(),
+  "contractor": zod.string().nullable(),
+  "activityFrom": zod.string().nullable(),
+  "activityTo": zod.string().nullable(),
+  "qtyFrom": zod.number().nullable(),
+  "qtyTo": zod.number().nullable(),
+  "wtFrom": zod.number().nullable(),
+  "wtTo": zod.number().nullable()
+})),
+  "flags": zod.array(zod.string())
+})
+}).describe('Commit result for a WIP balance\/activity file.'),zod.object({
+  "kind": zod.enum(['order-review']),
+  "orderReviewImport": zod.object({
+  "id": zod.number(),
+  "label": zod.string().nullable(),
+  "sourceFilename": zod.string(),
+  "asOnDate": zod.string().nullable(),
+  "summary": zod.object({
+  "rowsRead": zod.number(),
+  "rowsKept": zod.number(),
+  "projectsFound": zod.number(),
+  "totalWeightMt": zod.number(),
+  "totalReleaseMt": zod.number(),
+  "totalFileDespatchMt": zod.number(),
+  "skippedTotals": zod.number(),
+  "missingStructure": zod.number()
+}).describe('Parse summary for an Order Review ingest.'),
+  "createdAt": zod.string()
+}).describe('One immutable Order Review file ingest.'),
+  "seeded": zod.number().describe('Number of newly seeded (project, structure) dispatch keys.')
+}).describe('Commit result for an Order Review file.')])
 
 
 /**
@@ -1300,6 +1425,78 @@ export const GetMilestonesResponse = zod.object({
 }).describe('Permanent turnaround milestones for one project.')),
   "generatedAt": zod.string()
 }).describe('Permanent per-project turnaround milestones.')
+
+
+/**
+ * Returns the latest "Order Review" file ingest (the second input file) as per-(project, structure) rows, joined to the computed running Dispatch tonnage (seed baseline + Yard-departure accruals), plus a file-vs-computed dispatch reconciliation at a 1% tolerance. Fabrication / Galvanizing / Yard tonnages are computed client-side from the selected WIP import's records (ACTIVITY_BUNDLES) so header filters are honoured. Purely additive and read-only — never changes WIP parsing, activity, dedup, ageing, warning, velocity, or milestone state. available:false when no Order Review file has been ingested yet.
+
+ * @summary Get the latest Order Review rows joined to computed dispatch
+ */
+export const GetOrderStatusResponse = zod.object({
+  "available": zod.boolean(),
+  "asOnDate": zod.string().nullable(),
+  "fileImport": zod.union([zod.object({
+  "id": zod.number(),
+  "label": zod.string().nullable(),
+  "sourceFilename": zod.string(),
+  "asOnDate": zod.string().nullable(),
+  "summary": zod.object({
+  "rowsRead": zod.number(),
+  "rowsKept": zod.number(),
+  "projectsFound": zod.number(),
+  "totalWeightMt": zod.number(),
+  "totalReleaseMt": zod.number(),
+  "totalFileDespatchMt": zod.number(),
+  "skippedTotals": zod.number(),
+  "missingStructure": zod.number()
+}).describe('Parse summary for an Order Review ingest.'),
+  "createdAt": zod.string()
+}).describe('One immutable Order Review file ingest.'),zod.null()]),
+  "rows": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string(),
+  "subType": zod.string().nullable(),
+  "sets": zod.number().nullable(),
+  "weightMt": zod.number().nullable(),
+  "bomType": zod.string().nullable(),
+  "releaseMt": zod.number().nullable(),
+  "fileDespatchMt": zod.number().nullable().describe('Despatch MT as stated in the Order Review file.'),
+  "seedMt": zod.number().describe('One-time dispatch baseline captured from the first Order Review file.'),
+  "accruedMt": zod.number().describe('Tonnes that left the Yard across WIP imports after the seed.'),
+  "computedDispatchMt": zod.number().describe('seedMt + accruedMt.')
+}).describe('One (project, structure) order row joined to computed dispatch.')),
+  "reconciliation": zod.object({
+  "tolerancePct": zod.number(),
+  "matched": zod.number(),
+  "mismatched": zod.number(),
+  "rows": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string(),
+  "fileDespatchMt": zod.number().nullable(),
+  "computedDispatchMt": zod.number(),
+  "diffMt": zod.number().nullable(),
+  "diffPct": zod.number().nullable(),
+  "status": zod.enum(['match', 'mismatch', 'no_file', 'no_computed'])
+}).describe('File-vs-computed dispatch comparison for one (project, structure).'))
+}),
+  "imports": zod.array(zod.object({
+  "id": zod.number(),
+  "label": zod.string().nullable(),
+  "sourceFilename": zod.string(),
+  "asOnDate": zod.string().nullable(),
+  "summary": zod.object({
+  "rowsRead": zod.number(),
+  "rowsKept": zod.number(),
+  "projectsFound": zod.number(),
+  "totalWeightMt": zod.number(),
+  "totalReleaseMt": zod.number(),
+  "totalFileDespatchMt": zod.number(),
+  "skippedTotals": zod.number(),
+  "missingStructure": zod.number()
+}).describe('Parse summary for an Order Review ingest.'),
+  "createdAt": zod.string()
+}).describe('One immutable Order Review file ingest.'))
+}).describe('Order Review overlay joined to computed dispatch.')
 
 
 /**
