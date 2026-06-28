@@ -5,7 +5,6 @@ import { useTracker, dateRangeWindow } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { DateRangeSelect } from "@/components/date-range-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Segmented } from "@/components/ui/segmented";
 import { sortActivities, ACTIVITY_BUNDLES, CONTRACTOR_CATEGORIES, OUT_VENDOR_TYPES } from "@workspace/domain";
@@ -245,7 +244,7 @@ function FilterBar() {
   return (
     <div className="sticky top-0 md:top-14 z-30 bg-card border-b shadow-sm">
       <Collapsible open={isOpen} onOpenChange={setIsOpen} className="w-full">
-        <div className="flex items-center gap-2 p-3 md:px-6 pb-0 flex-wrap">
+        <div className="flex items-center gap-2 p-3 md:px-6 flex-wrap">
           <span className="text-xs font-semibold text-muted-foreground uppercase mr-1">
             Order Type
           </span>
@@ -270,67 +269,62 @@ function FilterBar() {
               ]}
             />
           )}
-        </div>
-        <div className="flex items-center justify-between p-3 md:px-6">
-          <div className="flex items-center gap-2 flex-1 mr-4 flex-wrap">
-            {/* In ALL mode isNtlt is false, so this defaults to the Job picker —
-               the primary TLT dimension — which is what users expect when "All"
-               order types are shown. NTLT mode swaps it for the Section picker. */}
-            <div className="w-full sm:w-[260px]">
-              {isNtlt ? (
-                <SearchableSelect
-                  value={filters.section}
-                  onChange={(v) => setFilter("section", v)}
-                  options={sections}
-                  allLabel="All Sections"
-                  searchPlaceholder="Search sections..."
-                />
-              ) : (
-                <SearchableSelect
-                  value={filters.job}
-                  onChange={(v) => setFilter("job", v)}
-                  options={jobs}
-                  allLabel="All Jobs"
-                  searchPlaceholder="Search jobs..."
-                />
-              )}
-            </div>
-            <div className="w-[200px]">
+          {/* In ALL mode isNtlt is false, so this defaults to the Job picker —
+             the primary TLT dimension — which is what users expect when "All"
+             order types are shown. NTLT mode swaps it for the Section picker. */}
+          <div className="w-full sm:w-[220px]">
+            {isNtlt ? (
               <SearchableSelect
-                value={filters.activity}
-                onChange={(v) => setFilter("activity", v)}
-                groups={activityGroups}
-                allLabel="All Activities"
-                searchPlaceholder="Search activities or bundles..."
+                value={filters.section}
+                onChange={(v) => setFilter("section", v)}
+                options={sections}
+                allLabel="All Sections"
+                searchPlaceholder="Search sections..."
               />
-            </div>
-            <div className="flex-1 min-w-[200px] max-w-[360px]">
+            ) : (
               <SearchableSelect
-                value={filters.contractor ?? filters.contractorCategory}
-                onChange={(v) => {
-                  if (v !== null && CONTRACTOR_CATEGORY_VALUES.has(v)) {
-                    // A classification was picked: drive the category filter and
-                    // clear any specific-contractor selection.
-                    setFilter("contractor", null);
-                    setFilter("contractorCategory", v);
-                  } else {
-                    // A specific contractor (or "All") was picked: clear the
-                    // classification so the two never stack.
-                    setFilter("contractorCategory", null);
-                    setFilter("contractor", v);
-                  }
-                }}
-                groups={[
-                  { heading: "Classification", options: CONTRACTOR_CLASSIFICATIONS },
-                  { heading: "Contractors", options: contractors.map((c) => ({ value: c, label: c })) },
-                ]}
-                allLabel="All Contractors"
-                searchPlaceholder="Search contractors or types..."
+                value={filters.job}
+                onChange={(v) => setFilter("job", v)}
+                options={jobs}
+                allLabel="All Jobs"
+                searchPlaceholder="Search jobs..."
               />
-            </div>
-            <DateRangeSelect className="h-9 w-[170px]" />
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="w-[180px]">
+            <SearchableSelect
+              value={filters.activity}
+              onChange={(v) => setFilter("activity", v)}
+              groups={activityGroups}
+              allLabel="All Activities"
+              searchPlaceholder="Search activities or bundles..."
+            />
+          </div>
+          <div className="flex-1 min-w-[180px] max-w-[340px]">
+            <SearchableSelect
+              value={filters.contractor ?? filters.contractorCategory}
+              onChange={(v) => {
+                if (v !== null && CONTRACTOR_CATEGORY_VALUES.has(v)) {
+                  // A classification was picked: drive the category filter and
+                  // clear any specific-contractor selection.
+                  setFilter("contractor", null);
+                  setFilter("contractorCategory", v);
+                } else {
+                  // A specific contractor (or "All") was picked: clear the
+                  // classification so the two never stack.
+                  setFilter("contractorCategory", null);
+                  setFilter("contractor", v);
+                }
+              }}
+              groups={[
+                { heading: "Classification", options: CONTRACTOR_CLASSIFICATIONS },
+                { heading: "Contractors", options: contractors.map((c) => ({ value: c, label: c })) },
+              ]}
+              allLabel="All Contractors"
+              searchPlaceholder="Search contractors or types..."
+            />
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
             {activeFilterCount > 0 && (
               <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 px-2 text-muted-foreground">
                 Clear
