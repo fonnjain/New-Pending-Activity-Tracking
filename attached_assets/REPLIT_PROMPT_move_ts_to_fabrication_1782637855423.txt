@@ -1,0 +1,55 @@
+REPLIT AGENT PROMPT — MOVE TS INTO FABRICATION BUNDLES; GALVANIZING = G, GB ONLY
+================================================================================
+Update the activity bundle definitions: TS (Tee Stock) moves OUT of the Galvanizing bundle
+and INTO the two TLT fabrication bundles as their last step. Galvanizing becomes G and GB
+only. Yard unchanged. Display/filter change to bundle membership only; do not change parsing,
+sequences, ageing, dedup, classification, the warning math, or the fabrication-load report
+rules (those reference specific activities, not the Galvanizing bundle).
+
+TLT SEQUENCE (reference, unchanged): C, RFI, NH, B, HAB, HG, W, Q, TS, G, GB, Y.
+
+NEW BUNDLE DEFINITIONS
+  id "TLT_FABRICATION"          label "Fabrication (TLT)"
+      activities = [C, RFI, NH, B, HAB, HG, W, Q, TS]      (C -> TS; now INCLUDES TS)
+  id "TLT_FAB_PENDING_QUALITY"  label "Fab - Pending Quality (TLT)"
+      activities = [RFI, NH, B, HAB, HG, W, Q, TS]         (RFI -> TS; now INCLUDES TS)
+  id "GALVANIZING"  label "Galvanizing"   activities = [G, GB]    (TS REMOVED; G, GB only)
+  id "YARD"         label "Yard"          activities = [Y]        (unchanged)
+
+So the contiguous boundary between fabrication and galvanizing moves one step later:
+fabrication now ends at TS; galvanizing starts at G.
+
+SCOPE / NTLT HANDLING
+  - Fabrication bundles remain TLT only (namespaced with "TLT").
+  - GALVANIZING (now G, GB) and YARD remain ALL order types (shared).
+  - NTLT: since the fabrication bundles are TLT-only and TS is no longer in Galvanizing,
+    TS becomes a STANDALONE activity for NTLT — it belongs to NO bundle in NTLT mode.
+    In NTLT mode the activity dropdown shows: Galvanizing (G, GB) and Yard (Y) bundles, then
+    the NTLT individual activities (NTF, NTFSW, NTFW, TS, G, GB, Y) in sequence order, with
+    TS selectable on its own (no bundle).
+  - In TLT mode the dropdown shows: Fabrication (TLT) [C..TS], Fab - Pending Quality (TLT)
+    [RFI..TS], Galvanizing [G, GB], Yard [Y], then individual TLT activities.
+
+UPDATE EVERYWHERE THE BUNDLES ARE USED
+  - The single bundles constants module (keyed by id) — change the activity sets as above.
+    Everything importing it updates automatically.
+  - Plant Operation Wise -> Fabrication tab (TLT): its scope is the Fabrication bundle, so it
+    now INCLUDES TS marks. The Galvanization tab scope is now G, GB only (TS no longer here).
+    Confirm the tab scopes follow the new bundle sets.
+  - Any activity-bundle filter/dropdown reflects the new membership.
+
+DO NOT CHANGE (guard against over-reach)
+  - The TLT sequence order itself (TS still sits between Q and G in the sequence).
+  - The "Fabrication Load for TLT" report/dashboard column rules — they key off SPECIFIC
+    activities (W, B, RFI, C) and section/hole rules, NOT the Galvanizing bundle, so they are
+    unaffected. Leave them as-is.
+  - Ageing, warning thresholds, velocity, milestones, thickness, classification.
+
+ACCEPTANCE CHECK
+  - Fabrication (TLT) bundle = C,RFI,NH,B,HAB,HG,W,Q,TS (includes TS).
+  - Fab - Pending Quality (TLT) = RFI,NH,B,HAB,HG,W,Q,TS (includes TS).
+  - Galvanizing bundle = G, GB only (TS removed). Yard = Y.
+  - TLT mode dropdown shows all four bundles with the new sets; NTLT mode shows Galvanizing
+    (G,GB) + Yard, with TS as a standalone activity in no bundle.
+  - Plant Operation Wise Fabrication tab now includes TS marks; Galvanization tab = G,GB.
+  - Fabrication-load report unchanged; sequence, ageing, warnings, etc. unchanged.

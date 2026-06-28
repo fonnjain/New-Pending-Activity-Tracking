@@ -158,27 +158,34 @@ export interface ActivityBundle {
   activities: readonly string[];
 }
 
+// Bundle boundary between fabrication and galvanising. TS (Tee Stock) belongs to
+// the FABRICATION bundles (its last step), so the Galvanizing bundle starts at G.
+// This is intentionally DISTINCT from GALV_START_INDEX (= indexOf("TS")), which
+// drives the Project-Wise PROCESS_PHASES stage buckets — those keep TS in the
+// Galvanising phase and must not change.
+const BUNDLE_GALV_START_INDEX = PROCESS_SEQUENCE.indexOf("G");
+
 export const ACTIVITY_BUNDLES: readonly ActivityBundle[] = [
   {
     id: "TLT_FABRICATION",
     label: "Fabrication (TLT)",
     scope: "TLT",
-    // C -> Q (everything before galvanising).
-    activities: PROCESS_SEQUENCE.slice(0, GALV_START_INDEX),
+    // C -> TS (everything up to and including TS, before galvanising).
+    activities: PROCESS_SEQUENCE.slice(0, BUNDLE_GALV_START_INDEX),
   },
   {
     id: "TLT_FAB_PENDING_QUALITY",
     label: "Fab - Pending Quality (TLT)",
     scope: "TLT",
-    // RFI -> Q (fabrication minus cutting).
-    activities: PROCESS_SEQUENCE.slice(1, GALV_START_INDEX),
+    // RFI -> TS (fabrication minus cutting).
+    activities: PROCESS_SEQUENCE.slice(1, BUNDLE_GALV_START_INDEX),
   },
   {
     id: "GALVANIZING",
     label: "Galvanizing",
     scope: "ALL",
-    // TS, G, GB.
-    activities: PROCESS_SEQUENCE.slice(GALV_START_INDEX, DISPATCH_INDEX),
+    // G, GB (TS excluded — it now lives in the fabrication bundles).
+    activities: PROCESS_SEQUENCE.slice(BUNDLE_GALV_START_INDEX, DISPATCH_INDEX),
   },
   {
     id: "YARD",

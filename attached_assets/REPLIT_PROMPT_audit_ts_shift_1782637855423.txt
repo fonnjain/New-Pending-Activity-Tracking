@@ -1,0 +1,68 @@
+REPLIT AGENT PROMPT — AUDIT THE TS SHIFT ACROSS FABRICATION / FAB-PENDING-QUALITY / GALVANIZING
+================================================================================================
+Do NOT add features. AUDIT every place that uses the Fabrication, Fab-Pending Quality, or
+Galvanizing bundles (or references the TS stage in a fabrication/galvanizing context) and
+verify each calculation reflects the recent change: TS now belongs to FABRICATION (and
+Fab-Pending Quality), and Galvanizing is G + GB only. Produce a PASS/FAIL report of every
+usage site with the numbers. Fix only deviations from this rule; do not change the agreed
+business logic otherwise.
+
+THE RULE TO ENFORCE (post-change)
+  TLT sequence (unchanged order): C, RFI, NH, B, HAB, HG, W, Q, TS, G, GB, Y.
+  Bundles:
+    TLT_FABRICATION          = C, RFI, NH, B, HAB, HG, W, Q, TS     (TS INCLUDED, last step)
+    TLT_FAB_PENDING_QUALITY  = RFI, NH, B, HAB, HG, W, Q, TS         (TS INCLUDED)
+    GALVANIZING              = G, GB                                  (TS REMOVED)
+    YARD                     = Y
+  NTLT: fabrication bundles are TLT-only; GALVANIZING (G,GB) + YARD shared; for NTLT, TS is a
+  STANDALONE activity in NO bundle.
+
+STEP 1 — FIND EVERY USAGE SITE (grep the codebase + list them)
+  Search for all references to: the bundle ids/labels (TLT_FABRICATION, TLT_FAB_PENDING_QUALITY,
+  GALVANIZING), the bundle membership constant, and any hard-coded activity lists that include
+  "TS","G","GB" in a fabrication/galvanizing grouping. List each file/function that:
+    - filters or scopes by Fabrication / Fab-Pending Quality / Galvanizing,
+    - sums marks/qty/weight by these bundles,
+    - drives a page/tab/report/chart/KPI/export using them.
+  Produce the list so nothing is missed (Overview snapshot, Activity, Ageing, Job-wise/
+  Section-wise, Contractor, Plant Operation Wise tabs, Reports, exports, any bundle dropdown).
+
+STEP 2 — VERIFY EACH SITE USES THE NEW MEMBERSHIP (single source of truth)
+  - Confirm every site reads the SHARED bundles constant, not a stale hard-coded list. Any
+    place still listing TS under Galvanizing, or excluding TS from Fabrication, is a FAIL ->
+    fix to use the shared constant.
+  - Confirm Galvanizing-scoped sums now EXCLUDE TS, and Fabrication / Fab-Pending sums now
+    INCLUDE TS.
+
+STEP 3 — NUMERIC CHECKS (before/after the boundary; print numbers)
+  - TS marks count & weight (TLT): show total TS (TLT) marks/weight. These must now appear in
+    Fabrication and Fab-Pending Quality scopes and NOT in Galvanizing.
+  - Plant Operation Wise: Fabrication tab now INCLUDES TS marks; Galvanization tab = G,GB only
+    (TS absent). Print each tab's mark/weight totals and confirm TS moved.
+  - Galvanizing KPI/snapshot counts dropped by exactly the TS amount; Fabrication counts rose
+    by exactly the TS amount (conservation: nothing lost, only reassigned).
+  - NTLT: TS marks appear as a standalone activity, in NO bundle; Galvanizing (NTLT) = G,GB.
+
+STEP 4 — THE "FABRICATION LOAD FOR TLT" REPORT (special check — should be UNCHANGED)
+  - Its 5 columns key off SPECIFIC activities (W, B, RFI, C) + section/hole rules, NOT the
+    Galvanizing bundle, so the TS shift must NOT change its numbers. Confirm the 10 G. Totals
+    are identical to before the TS change. If any column secretly used the Galvanizing bundle
+    or TS, that is a FAIL -> fix so the report keys off the explicit activities only.
+  - (No TS column is being added unless separately requested; just confirm no unintended change.)
+
+STEP 5 — REPORT
+  - Output a table: Usage site | uses shared constant? | TS on correct side? | numbers
+    (before vs after where relevant) | PASS/FAIL.
+  - Conservation check: total marks unchanged overall; TS simply moved from Galvanizing to
+    Fabrication scope (TLT). Fabrication-load report totals unchanged.
+  - For any FAIL: state the file/function, the cause (stale list / wrong bundle), apply the
+    minimal fix to use the new membership, and re-run until all PASS.
+
+ACCEPTANCE
+  - Every Fabrication / Fab-Pending / Galvanizing usage reads the shared bundle constant with
+    TS in Fabrication & Fab-Pending, and Galvanizing = G,GB.
+  - Plant Operation Wise tabs reflect the move; Galvanizing KPIs dropped exactly by TS,
+    Fabrication rose exactly by TS (conservation holds).
+  - NTLT: TS standalone, Galvanizing G,GB.
+  - Fabrication-load report numbers unchanged (keys off explicit activities, not the bundle).
+  - No business logic changed beyond the TS membership; PASS/FAIL table provided with numbers.
