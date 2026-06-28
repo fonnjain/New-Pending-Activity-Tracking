@@ -8,7 +8,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import { Input } from "@/components/ui/input";
 import { formatWeight } from "@/lib/utils";
 import { ChevronDown, ChevronLeft, Search, Building2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { compareActivity, contractorCategoryLabel, outVendorTypeLabel, bundleActivitySet } from "@workspace/domain";
 
 // Activity scopes for the per-contractor load split, sliced from the canonical
@@ -53,7 +53,7 @@ export default function ContractorView() {
 }
 
 function ContractorContent() {
-  const { selectedImportId } = useTracker();
+  const { selectedImportId, setFilter, filters } = useTracker();
   const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
@@ -61,6 +61,23 @@ function ContractorContent() {
   const categoryMap = useContractorCategoryMap();
 
   const [selectedContractor, setSelectedContractor] = useState<string | null>(null);
+  // When a load cell drills in with a bundle filter, remember the prior activity
+  // filter so Back can restore it (and never clobber a manual filter).
+  const restoreActivity = useRef<{ active: boolean; value: string | null }>({ active: false, value: null });
+
+  const drillWithActivity = (name: string, bundle: string) => {
+    restoreActivity.current = { active: true, value: filters.activity };
+    setFilter("activity", bundle);
+    setSelectedContractor(name);
+  };
+
+  const handleBack = () => {
+    if (restoreActivity.current.active) {
+      setFilter("activity", restoreActivity.current.value);
+      restoreActivity.current = { active: false, value: null };
+    }
+    setSelectedContractor(null);
+  };
 
   const { conMap, sortedStats, unassignedCount, busiest, mostAged } = useMemo(() => {
     const conMap = new Map<string, any[]>();
@@ -165,10 +182,24 @@ function ContractorContent() {
                     <TableCell className="text-right align-top tabular-nums text-foreground text-base">
                       {s.marks.toLocaleString()}
                     </TableCell>
-                    <TableCell className="text-right align-top font-mono tabular-nums text-foreground text-base">
+                    <TableCell
+                      className="text-right align-top font-mono tabular-nums text-foreground text-base hover:text-primary hover:underline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFilter("activity", "bundle:TLT_FABRICATION");
+                        setSelectedContractor(s.name);
+                      }}
+                    >
                       {formatWeight(s.fabLoad)}
                     </TableCell>
-                    <TableCell className="text-right align-top font-mono tabular-nums text-foreground text-base">
+                    <TableCell
+                      className="text-right align-top font-mono tabular-nums text-foreground text-base hover:text-primary hover:underline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFilter("activity", "bundle:GALVANIZING");
+                        setSelectedContractor(s.name);
+                      }}
+                    >
                       {formatWeight(s.galvaLoad)}
                     </TableCell>
                     <TableCell className={`text-right align-top font-semibold tabular-nums text-base ${getAgeingColor(s.avgAge)}`}>
