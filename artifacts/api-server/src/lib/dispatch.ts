@@ -449,6 +449,8 @@ const ORDER_REVIEW_VALUE_FIELDS = [
   "weightMt",
   "bomType",
   "releaseMt",
+  "fabMt",
+  "galvMt",
   "fileDespatchMt",
 ] as const;
 type OrderReviewValues = Pick<
@@ -485,6 +487,8 @@ function collapseOrderRows(
     prev.sets = addNum(prev.sets, r.sets);
     prev.weightMt = addNum(prev.weightMt, r.weightMt);
     prev.releaseMt = addNum(prev.releaseMt, r.releaseMt);
+    prev.fabMt = addNum(prev.fabMt, r.fabMt);
+    prev.galvMt = addNum(prev.galvMt, r.galvMt);
     prev.fileDespatchMt = addNum(prev.fileDespatchMt, r.fileDespatchMt);
   }
   return byKey;
@@ -562,6 +566,8 @@ export async function ingestOrderReview(
           weightMt: r.weightMt,
           bomType: r.bomType,
           releaseMt: r.releaseMt,
+          fabMt: r.fabMt,
+          galvMt: r.galvMt,
           fileDespatchMt: r.fileDespatchMt,
         });
         changeLog.inserted.push({ project: r.project, structure: r.structure });
@@ -584,6 +590,8 @@ export async function ingestOrderReview(
           weightMt: r.weightMt,
           bomType: r.bomType,
           releaseMt: r.releaseMt,
+          fabMt: r.fabMt,
+          galvMt: r.galvMt,
           fileDespatchMt: r.fileDespatchMt,
         })
         .where(eq(orderReviewRowsTable.id, prior.id));

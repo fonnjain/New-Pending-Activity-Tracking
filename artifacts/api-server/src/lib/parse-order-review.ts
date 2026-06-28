@@ -24,6 +24,8 @@ export interface ParsedOrderReviewRow {
   weightMt: number | null;
   bomType: string | null;
   releaseMt: number | null;
+  fabMt: number | null;
+  galvMt: number | null;
   fileDespatchMt: number | null;
 }
 
@@ -175,6 +177,8 @@ interface ColumnIndex {
   weightMt: number;
   bomType: number;
   releaseMt: number;
+  fabMt: number;
+  galvMt: number;
   fileDespatchMt: number;
 }
 
@@ -204,6 +208,8 @@ const HEADER_SPECS: HeaderSpec[] = [
   { key: "weightMt", include: [["order qty", "weight"], ["weight (mt)"], ["weight"]], exclude: ["wo", "work order", "/ set", "per set", "balance"], fallback: 6 },
   { key: "bomType", include: [["bom"]], fallback: 10 },
   { key: "releaseMt", include: [["progress", "release"], ["release"]], exclude: ["balance"], fallback: 11 },
+  { key: "fabMt", include: [["progress", "fabrication"], ["fabrication (mt)"], ["fabrication"]], exclude: ["balance", "work order", "wo"], fallback: 12 },
+  { key: "galvMt", include: [["progress", "galvanis"], ["galvanising (mt)"], ["galvanizing (mt)"], ["galvanis"]], exclude: ["balance", "work order", "wo"], fallback: 13 },
   { key: "fileDespatchMt", include: [["progress", "despatch"], ["progress", "dispatch"], ["despatch"], ["dispatch"]], exclude: ["balance"], fallback: 16 },
 ];
 
@@ -373,6 +379,8 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     rowsRead++;
     const weightMt = toNumber(cells[cols.weightMt] as Cell);
     const releaseMt = toNumber(cells[cols.releaseMt] as Cell);
+    const fabMt = toNumber(cells[cols.fabMt] as Cell);
+    const galvMt = toNumber(cells[cols.galvMt] as Cell);
     const fileDespatchMt = toNumber(cells[cols.fileDespatchMt] as Cell);
     if (weightMt != null) totalWeightMt += weightMt;
     if (releaseMt != null) totalReleaseMt += releaseMt;
@@ -387,6 +395,8 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
       weightMt,
       bomType: cellStr(cells[cols.bomType] as Cell) || null,
       releaseMt,
+      fabMt,
+      galvMt,
       fileDespatchMt,
     });
   }

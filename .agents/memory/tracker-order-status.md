@@ -86,4 +86,20 @@ Letter fallbacks C/D/F/G/K/L/Q. After a parser column fix, RE-INGEST the stored 
 is idempotent; dispatch seed is capture-once so seeded=0) — old committed rows keep the wrong values.
 **Join reality:** WIP `structure` (=alias_corrected) is the best join field (715/2039 OR keys match;
 raw alias 647; tower_type 0). "0 everywhere" is usually WIP coverage (one WIP file covered only 56 of
-153 OR projects), NOT a join bug. Fab/Galv/Yard are computed from WIP, never from the file's M/N/O.
+153 OR projects), NOT a join bug.
+
+## Fab/Galv fallback for structures absent from WIP (the standing rule)
+**Rule:** when a structure is present in the Order Review file but ABSENT from the WIP report, its
+Fabrication & Galvanizing tonnage falls back to the file's Progress block (cols M=Fabrication,
+N=Galvanising), instead of reading 0. Yard stays BLANK (the file has no Yard column). In-WIP
+structures always keep their live WIP-computed buckets; the file figures are cumulative-done, not
+live balances, so file-sourced rows are tagged in the UI.
+**Why:** the WIP file only covers a fraction of order-book projects; without this, every order-only
+structure read 0 Fab/Galv even though the order sheet records real progress.
+**How to apply (the trap):** "absent from WIP" must be CATEGORY-INDEPENDENT. computedByKey is scoped
+by the order-type (TLT/NTLT/ALL) mode toggle and in TLT mode ntltKeys is empty, so `!comp` is NOT a
+valid absence test — a present structure hidden by the active mode would wrongly trigger the fallback.
+Gate the fallback on a separate presence set built from ALL active WIP records (filtered only by
+job/structure, never by category). The file's M/N are now persisted on `order_review_rows`
+(fab_mt/galv_mt) and summed in collapse/upsert/diff, so the fallback is durable for all future
+uploads. After any parser/column change, RE-INGEST the stored file (idempotent).

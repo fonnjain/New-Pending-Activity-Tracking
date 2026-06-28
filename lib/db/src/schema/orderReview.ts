@@ -101,6 +101,12 @@ export const orderReviewRowsTable = pgTable(
     weightMt: doublePrecision("weight_mt"),
     bomType: text("bom_type"),
     releaseMt: doublePrecision("release_mt"),
+    // Progress Fabrication / Galvanising (MT) from the file's "Progress" block.
+    // Used ONLY as a display fallback on the Order Status page for structures
+    // absent from the WIP report (file-sourced, tagged distinctly). Never feeds
+    // WIP parsing / activity / dedup / ageing / dispatch math.
+    fabMt: doublePrecision("fab_mt"),
+    galvMt: doublePrecision("galv_mt"),
     // Despatch MT as stated in the file (cross-checked vs computed dispatch).
     fileDespatchMt: doublePrecision("file_despatch_mt"),
   },

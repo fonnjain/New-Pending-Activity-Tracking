@@ -23,6 +23,16 @@ export interface OrderStatusRow {
   /** @nullable */
   releaseMt: number | null;
   /**
+     * Progress Fabrication MT from the Order Review file (display fallback for structures absent from WIP).
+     * @nullable
+     */
+  fileFabMt: number | null;
+  /**
+     * Progress Galvanising MT from the Order Review file (display fallback for structures absent from WIP).
+     * @nullable
+     */
+  fileGalvMt: number | null;
+  /**
      * Despatch MT as stated in the Order Review file.
      * @nullable
      */

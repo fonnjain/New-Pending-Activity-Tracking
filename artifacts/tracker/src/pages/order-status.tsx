@@ -61,6 +61,10 @@ interface DisplayRow {
   inWip: boolean;
   // The structure has NTLT marks whose bundle math is intentionally suppressed.
   outOfScope: boolean;
+  // Fab/Galv shown for this row come from the Order Review file's Progress block
+  // (the structure is absent from WIP), not from live WIP marks. Tagged in the UI
+  // because file figures are cumulative-done, not current-at-stage like WIP.
+  bundleFromFile: boolean;
   // The order row exists in the order book but was absent from the latest Order
   // Review upload (kept, never deleted — flagged for review).
   notInLatest: boolean;
@@ -130,6 +134,23 @@ export default function OrderStatusView() {
     return { computedByKey: m, ntltKeys: ntlt };
   }, [scopedRecords]);
 
+  // Category-INDEPENDENT WIP presence: a structure counts as "in the WIP report"
+  // if it has ANY active WIP mark (any order-type), respecting only the job /
+  // structure display filters. computedByKey is order-type-mode scoped, so it
+  // cannot decide true WIP absence (a present structure hidden by the current
+  // mode would look absent). The file Fab/Galv fallback is gated on THIS set so
+  // toggling the order-type mode never mistakes a present structure for absent.
+  const wipKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of records as WipRecord[]) {
+      if (r.active === false) continue;
+      if (filters.job && r.job !== filters.job) continue;
+      if (filters.structure && r.structure !== filters.structure) continue;
+      s.add(keyOf(r.job, r.structure));
+    }
+    return s;
+  }, [records, filters.job, filters.structure]);
+
   const dispatchByKey = useMemo(() => {
     const m = new Map<string, OrderStatusRow>();
     for (const r of order?.rows ?? []) m.set(keyOf(r.project, r.structure), r);
@@ -154,6 +175,19 @@ export default function OrderStatusView() {
       // A structure is out of scope when it has NTLT marks but no TLT bundle
       // tonnage (NTLT-only). Its Fab/Galv/Yard are not computed -> null (n/a).
       const outOfScope = ntltKeys.has(k) && !comp;
+      // TRUE WIP absence (any order-type), not just "absent from the current
+      // mode's computed buckets". A structure present in WIP must never use the
+      // file fallback even when the active mode hides its marks.
+      const inWipReport = wipKeys.has(k);
+      // When a structure is genuinely absent from WIP, fall back to the order
+      // file's Progress Fabrication / Galvanising so it no longer reads 0. Yard
+      // is intentionally left blank (the file has no Yard column). Tagged so the
+      // file-sourced (cumulative-done) figures aren't read as live WIP balances.
+      const bundleFromFile =
+        !outOfScope &&
+        !inWipReport &&
+        !!file &&
+        (file.fileFabMt != null || file.fileGalvMt != null);
       out.push({
         project,
         structure,
@@ -164,12 +198,27 @@ export default function OrderStatusView() {
         releaseMt: file?.releaseMt ?? null,
         fileDespatchMt: file?.fileDespatchMt ?? null,
         computedDispatchMt: file?.computedDispatchMt ?? 0,
-        fabMt: outOfScope ? null : comp?.fabMt ?? 0,
-        galvMt: outOfScope ? null : comp?.galvMt ?? 0,
-        yardMt: outOfScope ? null : comp?.yardMt ?? 0,
+        // comp -> live WIP buckets; else in-WIP-but-mode-hidden -> 0; else truly
+        // absent -> file Progress (Yard always blank for file-sourced rows).
+        fabMt: outOfScope
+          ? null
+          : comp
+            ? comp.fabMt
+            : inWipReport
+              ? 0
+              : file?.fileFabMt ?? null,
+        galvMt: outOfScope
+          ? null
+          : comp
+            ? comp.galvMt
+            : inWipReport
+              ? 0
+              : file?.fileGalvMt ?? null,
+        yardMt: outOfScope ? null : comp ? comp.yardMt : inWipReport ? 0 : null,
         inFile: !!file,
         inWip: !!comp,
         outOfScope,
+        bundleFromFile,
         notInLatest: file?.notInLatest ?? false,
       });
     }
@@ -179,7 +228,14 @@ export default function OrderStatusView() {
         a.structure.localeCompare(b.structure),
     );
     return out;
-  }, [dispatchByKey, computedByKey, ntltKeys, filters.job, filters.structure]);
+  }, [
+    dispatchByKey,
+    computedByKey,
+    ntltKeys,
+    wipKeys,
+    filters.job,
+    filters.structure,
+  ]);
 
   // Per-project subtotals for the grouped table.
   const groups = useMemo(() => {
@@ -501,6 +557,9 @@ function ProjectGroup({
               )}
               {r.notInLatest && (
                 <span className="ml-2 text-[10px] uppercase text-rose-600 dark:text-rose-400">not in latest file</span>
+              )}
+              {r.bundleFromFile && (
+                <span className="ml-2 text-[10px] uppercase text-sky-600 dark:text-sky-400">fab/galv from order sheet</span>
               )}
             </td>
             <td className="px-3 py-2">{r.subType ?? "-"}</td>

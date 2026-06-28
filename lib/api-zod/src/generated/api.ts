@@ -1506,6 +1506,8 @@ export const GetOrderStatusResponse = zod.object({
   "weightMt": zod.number().nullable(),
   "bomType": zod.string().nullable(),
   "releaseMt": zod.number().nullable(),
+  "fileFabMt": zod.number().nullable().describe('Progress Fabrication MT from the Order Review file (display fallback for structures absent from WIP).'),
+  "fileGalvMt": zod.number().nullable().describe('Progress Galvanising MT from the Order Review file (display fallback for structures absent from WIP).'),
   "fileDespatchMt": zod.number().nullable().describe('Despatch MT as stated in the Order Review file.'),
   "seedMt": zod.number().describe('One-time dispatch baseline captured from the first Order Review file.'),
   "accruedMt": zod.number().describe('Tonnes that left the Yard across WIP imports after the seed.'),

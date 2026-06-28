@@ -2591,6 +2591,12 @@ components:
           type: ["string", "null"]
         releaseMt:
           type: ["number", "null"]
+        fileFabMt:
+          type: ["number", "null"]
+          description: Progress Fabrication MT from the Order Review file (display fallback for structures absent from WIP).
+        fileGalvMt:
+          type: ["number", "null"]
+          description: Progress Galvanising MT from the Order Review file (display fallback for structures absent from WIP).
         fileDespatchMt:
           type: ["number", "null"]
           description: Despatch MT as stated in the Order Review file.
@@ -2614,6 +2620,8 @@ components:
         - weightMt
         - bomType
         - releaseMt
+        - fileFabMt
+        - fileGalvMt
         - fileDespatchMt
         - seedMt
         - accruedMt
