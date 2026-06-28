@@ -86,12 +86,14 @@ export const PROCESS_STEP_LABELS: Record<ProcessStep, string> = {
 // so they can never drift from the canonical ordering). Display/roll-up only —
 // never changes parsing, Activity values, qty, ageing, or dedup.
 //   Cutting            = first step (C)
-//   Quality Check      = everything between cutting and galvanising (RFI..Q)
-//   Galvanising        = TS..GB
+//   Quality Check      = everything between cutting and galvanising (RFI..Q, TS)
+//   Galvanising        = G..GB
 //   Ready for Dispatch = terminal step (Y)
+// TS (Tee Stock) is the last fabrication step and belongs to Quality Check, so
+// the galvanising phase starts at G.
 export type ProcessPhaseKey = "cutting" | "quality" | "galvanising" | "dispatch";
 
-const GALV_START_INDEX = PROCESS_SEQUENCE.indexOf("TS");
+const GALV_START_INDEX = PROCESS_SEQUENCE.indexOf("G");
 const DISPATCH_INDEX = PROCESS_SEQUENCE.length - 1;
 
 // NTLT-only pre-galvanising fabrication codes (e.g. NTF/NTFSW/NTFW): they appear
@@ -158,11 +160,11 @@ export interface ActivityBundle {
   activities: readonly string[];
 }
 
-// Bundle boundary between fabrication and galvanising. TS (Tee Stock) belongs to
-// the FABRICATION bundles (its last step), so the Galvanizing bundle starts at G.
-// This is intentionally DISTINCT from GALV_START_INDEX (= indexOf("TS")), which
-// drives the Project-Wise PROCESS_PHASES stage buckets — those keep TS in the
-// Galvanising phase and must not change.
+// Bundle boundary between fabrication and galvanising. TS (Tee Stock) is the last
+// fabrication step, so it belongs to the FABRICATION bundles (and to the Quality
+// Check phase) and the Galvanizing bundle starts at G. This matches
+// GALV_START_INDEX (= indexOf("G")), which drives the Project-Wise PROCESS_PHASES
+// stage buckets — both keep TS out of Galvanising.
 const BUNDLE_GALV_START_INDEX = PROCESS_SEQUENCE.indexOf("G");
 
 export const ACTIVITY_BUNDLES: readonly ActivityBundle[] = [

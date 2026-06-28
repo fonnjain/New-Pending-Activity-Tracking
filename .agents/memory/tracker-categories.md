@@ -41,7 +41,10 @@ NTLT activities missing from `settings` fall back to `DEFAULT_ACTIVITY_CONFIG`
 ## Process phases (coarse 4-stage roll-up)
 `PROCESS_PHASES` + `processPhase(activity)` group the fine activities into the
 four stages the workshop reports against: **Cutting** (C), **Quality Check**
-(RFI..Q), **Galvanising** (TS,G,GB), **Ready for Dispatch** (Y). Used by the
+(RFI..Q,TS), **Galvanising** (G,GB), **Ready for Dispatch** (Y). TS (last fab
+step) lives in Quality Check, NOT Galvanising — the galv boundary is
+`indexOf("G")` for BOTH `GALV_START_INDEX` (phases) and `BUNDLE_GALV_START_INDEX`
+(bundles). Used by the
 Job-wise "By Project/Section" table (marks + balance wt per phase) instead of the
 old structures/qty columns.
 
