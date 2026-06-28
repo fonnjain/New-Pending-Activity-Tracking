@@ -10,6 +10,14 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Segmented } from "@/components/ui/segmented";
 import { sortActivities, ACTIVITY_BUNDLES, CONTRACTOR_CATEGORIES, OUT_VENDOR_TYPES } from "@workspace/domain";
 
+// The three contractor classifications surfaced at the TOP of the contractor
+// filter (Unclassified is omitted — it is the implicit "everything else").
+// Selecting one drives `contractorCategory`; selecting a name drives `contractor`.
+const CONTRACTOR_CLASSIFICATIONS = CONTRACTOR_CATEGORIES.filter(
+  (c) => c.value !== "UNCLASSIFIED",
+).map((c) => ({ value: c.value, label: c.label }));
+const CONTRACTOR_CATEGORY_VALUES = new Set<string>(CONTRACTOR_CATEGORIES.map((c) => c.value));
+
 type NavItem = {
   href: string;
   icon: typeof BarChart3;
@@ -298,11 +306,26 @@ function FilterBar() {
             </div>
             <div className="flex-1 min-w-[200px] max-w-[360px]">
               <SearchableSelect
-                value={filters.contractor}
-                onChange={(v) => setFilter("contractor", v)}
-                options={contractors}
+                value={filters.contractor ?? filters.contractorCategory}
+                onChange={(v) => {
+                  if (v !== null && CONTRACTOR_CATEGORY_VALUES.has(v)) {
+                    // A classification was picked: drive the category filter and
+                    // clear any specific-contractor selection.
+                    setFilter("contractor", null);
+                    setFilter("contractorCategory", v);
+                  } else {
+                    // A specific contractor (or "All") was picked: clear the
+                    // classification so the two never stack.
+                    setFilter("contractorCategory", null);
+                    setFilter("contractor", v);
+                  }
+                }}
+                groups={[
+                  { heading: "Classification", options: CONTRACTOR_CLASSIFICATIONS },
+                  { heading: "Contractors", options: contractors.map((c) => ({ value: c, label: c })) },
+                ]}
                 allLabel="All Contractors"
-                searchPlaceholder="Search contractors..."
+                searchPlaceholder="Search contractors or types..."
               />
             </div>
             <DateRangeSelect className="h-9 w-[170px]" />
@@ -351,16 +374,6 @@ function FilterBar() {
                 allLabel="All Marks"
                 searchPlaceholder="Search marks..."
                 disabled={marks.length === 0}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">Contractor Type</label>
-              <SearchableSelect
-                value={filters.contractorCategory}
-                onChange={(v) => setFilter("contractorCategory", v)}
-                groups={[{ options: CONTRACTOR_CATEGORIES.map((c) => ({ value: c.value, label: c.label })) }]}
-                allLabel="All Contractor Types"
-                searchPlaceholder="Search contractor types..."
               />
             </div>
             <div className="space-y-1">
