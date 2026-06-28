@@ -75,6 +75,14 @@ function toNumber(value: Cell): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// "sets" is a whole-number count stored in an integer column. Some exports carry
+// a decimal in that cell (e.g. a stray weight), which Postgres rejects for an
+// integer column. Round to the nearest whole number so ingest never crashes.
+function toInt(value: Cell): number | null {
+  const n = toNumber(value);
+  return n == null ? null : Math.round(n);
+}
+
 // Project normalization, mirroring parse.ts: "920.0" -> "920", "794." -> "794".
 function normalizeProject(value: string): string {
   let s = value.trim();
@@ -316,7 +324,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
       project: currentProject,
       structure,
       subType: cellStr(cells[cols.subType] as Cell) || null,
-      sets: toNumber(cells[cols.sets] as Cell),
+      sets: toInt(cells[cols.sets] as Cell),
       weightMt,
       bomType: cellStr(cells[cols.bomType] as Cell) || null,
       releaseMt,

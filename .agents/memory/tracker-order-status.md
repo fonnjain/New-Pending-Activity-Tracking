@@ -42,6 +42,14 @@ so the original WIP-only contract crashed on them. The fix:
   places: frontend slot gate (no preview/commit on mismatch), `/imports/validate` (early reject),
   and `/imports/commit` (400 — the guarantee that a wrong-slot file can never commit). `expectedType`
   is OPTIONAL on the validate/commit requests, so legacy single-slot callers stay valid.
+## `sets` is an integer column — coerce decimals at parse
+**Why:** an Order Review export carried a decimal in the sets cell (e.g. "1.122",
+usually a misaligned/stray value); the `order_review_rows.sets` column is `integer`,
+so the insert threw `invalid input syntax for type integer` and the whole commit
+404'd as "Could not ingest the Order Review file". Fix: parse `sets` via a `toInt`
+(round) helper, NOT `toNumber`, so every downstream path (seed aggregation, upsert,
+diff) gets a whole number. Any new integer-typed order columns need the same care.
+
 ## Order Review rows are UPSERTED (idempotent daily snapshot), NOT appended
 **Why:** the Order Review file is a daily snapshot of the same order book; appending a fresh row set
 per upload duplicated every structure. The intake is now idempotent: ONE current row per
