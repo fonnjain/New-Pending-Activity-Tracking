@@ -194,6 +194,28 @@ export const ACTIVITY_BUNDLES: readonly ActivityBundle[] = [
     // Y (terminal).
     activities: [PROCESS_SEQUENCE[DISPATCH_INDEX]],
   },
+  // Operation sub-bundles (TLT-only). These overlap the broad Fabrication /
+  // Fab-Pending bundles by design — a mark can match more than one bundle;
+  // bundles are filter shortcuts, not exclusive partitions. HG (Grinding) is
+  // intentionally in none of these three.
+  {
+    id: "TLT_STANDARD_OPERATIONS",
+    label: "Standard Operations (TLT)",
+    scope: "TLT",
+    activities: ["C", "RFI", "NH"],
+  },
+  {
+    id: "TLT_SPECIAL_OPERATIONS",
+    label: "Special Operations (TLT)",
+    scope: "TLT",
+    activities: ["B", "HAB", "W"],
+  },
+  {
+    id: "TLT_QUALITY",
+    label: "Quality (TLT)",
+    scope: "TLT",
+    activities: ["Q", "TS"],
+  },
 ];
 
 const BUNDLE_BY_ID = new Map(ACTIVITY_BUNDLES.map((b) => [b.id, b]));

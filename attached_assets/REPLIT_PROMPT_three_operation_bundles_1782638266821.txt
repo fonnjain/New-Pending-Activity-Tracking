@@ -1,0 +1,50 @@
+REPLIT AGENT PROMPT — ADD THREE TLT ACTIVITY BUNDLES (Standard / Special Operations / Quality)
+==============================================================================================
+Add three more activity bundles (filter shortcuts) to the activity bundling system, TLT-only
+and TLT-namespaced. These are ADDITIONAL to the existing bundles (Fabrication, Fab-Pending
+Quality, Galvanizing, Yard) and may overlap them — bundles are just selectable groupings.
+Display/filter change only; do not change parsing, sequences, ageing, dedup, classification,
+the warning math, or the fabrication-load report.
+
+TLT SEQUENCE (reference, unchanged): C, RFI, NH, B, HAB, HG, W, Q, TS, G, GB, Y.
+
+NEW BUNDLES (add to the single bundles constants module, keyed by id)
+  id "TLT_STANDARD_OPERATIONS"  label "Standard Operations (TLT)"
+      activities = [C, RFI, NH]
+  id "TLT_SPECIAL_OPERATIONS"   label "Special Operations (TLT)"
+      activities = [B, HAB, W]
+  id "TLT_QUALITY"              label "Quality (TLT)"
+      activities = [Q, TS]
+Notes:
+  - HG (Grinding) is intentionally NOT in any of these three (left out by design).
+  - These overlap the existing Fabrication / Fab-Pending bundles — that is fine; a mark can
+    match more than one bundle. Bundles are filter shortcuts, not exclusive partitions.
+  - Scope = TLT ONLY, namespaced with "TLT" in id+label (so NTLT equivalents can be added
+    later without collision), consistent with TLT_FABRICATION / TLT_FAB_PENDING_QUALITY.
+
+DROPDOWN / FILTER BEHAVIOUR
+  - In TLT mode, the activity dropdown's "Bundles" group now also shows: Standard Operations
+    (TLT), Special Operations (TLT), Quality (TLT) — alongside the existing bundles. Keep a
+    sensible order (e.g. group the broad bundles first, then these three operation
+    sub-bundles), then individual activities in TLT sequence order below.
+  - In NTLT mode: do NOT show these three (TLT-only), same as the other TLT bundles.
+  - Selecting a bundle filters to marks whose CURRENT activity is in its set; individual
+    activities remain selectable.
+  - Define each with {label, activities[], scope:"TLT"} in the shared constants module so
+    every activity-filter UI and any bundle-based aggregation picks them up automatically.
+
+APPLIES WHEREVER THE ACTIVITY BUNDLE FILTER EXISTS
+  - Overview/Activity/Ageing/Job-wise/Contractor/Reports activity filters reflect the three
+    new bundles in TLT mode.
+  - No change to the Fabrication Load report columns (they key off explicit activities, not
+    these bundles) and no change to Plant Operation Wise tab scopes (those use the
+    Fabrication/Galvanizing bundles, unchanged here).
+
+ACCEPTANCE CHECK
+  - Three new bundles exist: Standard Operations (TLT) = C,RFI,NH; Special Operations (TLT) =
+    B,HAB,W; Quality (TLT) = Q,TS. HG is in none of them.
+  - They appear in the TLT activity dropdown (not in NTLT), namespaced with "TLT".
+  - Selecting each filters to marks whose current activity is in its set; overlap with other
+    bundles is allowed.
+  - Defined in the shared bundles constant; no change to sequences, ageing, warnings,
+    fabrication-load report, or Plant Operation Wise scopes.
