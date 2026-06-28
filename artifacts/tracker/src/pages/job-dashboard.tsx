@@ -35,9 +35,11 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { formatWeight } from "@/lib/utils";
 import { sortRecords, type RecordSortKey } from "@/lib/sort";
-import { ChevronLeft, Search } from "lucide-react";
+import { ChevronLeft, Search, FileSpreadsheet } from "lucide-react";
+import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 
 const ROW_CAP = 300;
 
@@ -292,6 +294,60 @@ function JobDashboardContent() {
     return arr;
   }, [byProject, projectSort]);
 
+  const handleExport = () => {
+    const groupLabel = isAll ? "Group" : isNtlt ? "Section" : "Project";
+    const sheets: XlsxSheet[] = [
+      {
+        name: `By ${groupLabel}`,
+        columns: [
+          { label: groupLabel, field: "job" },
+          { label: "Structures", field: "structures", numeric: true, decimals: 0 },
+          { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
+          { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
+          { label: "Balance Wt", field: "weight", numeric: true, decimals: 2, total: true },
+          { label: "Avg Ageing", field: "avgAge", numeric: true, decimals: 0 },
+          { label: "First Assign", field: "firstAssign" },
+          { label: "0-30d", field: "c0to30", numeric: true, decimals: 0 },
+          { label: "31-60d", field: "c31to60", numeric: true, decimals: 0 },
+          { label: "60d+", field: "c60Plus", numeric: true, decimals: 0 },
+        ],
+        rows: sortedProjects.map((p) => ({
+          job: p.job,
+          structures: p.structures,
+          marks: p.marks,
+          qty: p.qty,
+          weight: p.weight,
+          avgAge: p.avgAge,
+          firstAssign: p.firstAssign ?? "",
+          c0to30: p.c0to30,
+          c31to60: p.c31to60,
+          c60Plus: p.c60Plus,
+        })),
+      },
+      {
+        name: "By Activity",
+        columns: [
+          { label: "Activity", field: "activity" },
+          { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
+          { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
+          { label: "Balance Wt", field: "weight", numeric: true, decimals: 2, total: true },
+          { label: "Avg Ageing", field: "avgAge", numeric: true, decimals: 0 },
+        ],
+        rows: byActivity.map((a) => ({
+          activity: a.activity,
+          marks: a.marks,
+          qty: a.qty,
+          weight: a.weight,
+          avgAge: a.avgAge,
+        })),
+      },
+    ];
+    void exportToXlsxSheets(
+      `project_wise_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      sheets,
+    );
+  };
+
   if (selectedJob) {
     return (
       <JobDetail
@@ -305,6 +361,17 @@ function JobDashboardContent() {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-2"
+          onClick={handleExport}
+          disabled={byProject.length === 0}
+        >
+          <FileSpreadsheet className="h-4 w-4" /> Export Excel
+        </Button>
+      </div>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-3">
           <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">

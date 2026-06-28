@@ -17,7 +17,9 @@ import {
 } from "@/lib/velocity";
 import { compareActivity } from "@workspace/domain";
 import { EmptyState } from "./overview";
-import { AlertTriangle, ChevronRight } from "lucide-react";
+import { AlertTriangle, ChevronRight, FileSpreadsheet } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 
 type View = "projects" | "contractors" | "stages";
 
@@ -149,6 +151,50 @@ function StuckContent({ importId }: { importId: number }) {
   const totalMoving = items.filter((v) => v.status === "moving").length;
   const totalInsufficient = items.filter((v) => v.status === "insufficient").length;
 
+  const handleExport = () => {
+    const sheets: XlsxSheet[] = [
+      {
+        name: "Projects",
+        columns: [
+          { label: "Project", field: "project" },
+          { label: "Marks", field: "markCount", numeric: true, decimals: 0, total: true },
+          { label: "Stalled", field: "stalled", numeric: true, decimals: 0, total: true },
+          { label: "Slow", field: "slow", numeric: true, decimals: 0, total: true },
+          { label: "Avg ETA Gap", field: "avgEtaGap", numeric: true, decimals: 1 },
+          { label: "Stuck Score", field: "stuckScore", numeric: true, decimals: 2 },
+        ],
+        rows: projects,
+      },
+      {
+        name: "Contractors",
+        columns: [
+          { label: "Contractor", field: "contractor" },
+          { label: "Marks", field: "markCount", numeric: true, decimals: 0, total: true },
+          { label: "Stalled", field: "stalled", numeric: true, decimals: 0, total: true },
+          { label: "Slow", field: "slow", numeric: true, decimals: 0, total: true },
+          { label: "Avg ETA Gap", field: "avgEtaGap", numeric: true, decimals: 1 },
+          { label: "Stuck Score", field: "stuckScore", numeric: true, decimals: 2 },
+        ],
+        rows: contractors,
+      },
+      {
+        name: "Stages",
+        columns: [
+          { label: "Activity", field: "activity" },
+          { label: "Marks", field: "markCount", numeric: true, decimals: 0, total: true },
+          { label: "Stalled", field: "stalled", numeric: true, decimals: 0, total: true },
+          { label: "Slow", field: "slow", numeric: true, decimals: 0, total: true },
+          { label: "Avg Days/Stage", field: "avgDaysPerStage", numeric: true, decimals: 1 },
+        ],
+        rows: stages,
+      },
+    ];
+    void exportToXlsxSheets(
+      `stuck_projects_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      sheets,
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -177,20 +223,31 @@ function StuckContent({ importId }: { importId: number }) {
         <SummaryTile label="No history" value={totalInsufficient} cls="bg-slate-300" />
       </div>
 
-      <div className="flex items-center gap-2">
-        {VIEW_OPTIONS.map((o) => (
-          <button
-            key={o.id}
-            onClick={() => setView(o.id)}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              view === o.id
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-muted/70"
-            }`}
-          >
-            {o.name}
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {VIEW_OPTIONS.map((o) => (
+            <button
+              key={o.id}
+              onClick={() => setView(o.id)}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                view === o.id
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/70"
+              }`}
+            >
+              {o.name}
+            </button>
+          ))}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-2"
+          onClick={handleExport}
+          disabled={projects.length === 0}
+        >
+          <FileSpreadsheet className="h-4 w-4" /> Export Excel
+        </Button>
       </div>
 
       {view === "projects" && (

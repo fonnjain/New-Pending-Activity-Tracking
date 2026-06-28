@@ -6,7 +6,9 @@ import { StatusDot } from "@/components/status-dot";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, FileSpreadsheet } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { compareActivity } from "@workspace/domain";
@@ -41,8 +43,87 @@ function ActivityContent() {
     return { activities, sortedActivities, totalWt, totalMarks: records.length };
   }, [records]);
 
+  const handleExport = () => {
+    const avg = (recs: any[]) => {
+      const a = recs.filter((r) => r.ageingDays !== null);
+      return a.length
+        ? Math.round(a.reduce((s, r) => s + (r.ageingDays || 0), 0) / a.length)
+        : null;
+    };
+    const summaryRows = sortedActivities.map((act) => {
+      const recs = activities.get(act)!;
+      return {
+        activity: act,
+        marks: recs.length,
+        qty: recs.reduce((s, r) => s + (r.balanceQty ?? 0), 0),
+        weight: recs.reduce((s, r) => s + (r.balanceWt ?? 0), 0),
+        avgAge: avg(recs),
+      };
+    });
+    const markRows = sortedActivities.flatMap((act) =>
+      activities.get(act)!.map((r) => ({
+        activity: act,
+        job: r.job,
+        structure: r.structure,
+        markId: r.markId,
+        section: r.section,
+        contractor: r.contractor,
+        balanceQty: r.balanceQty,
+        balanceWt: r.balanceWt,
+        assignDate: r.assignDate ?? "",
+        lastProductionDate: r.lastProductionDate ?? "",
+        ageingDays: r.ageingDays,
+      })),
+    );
+    const sheets: XlsxSheet[] = [
+      {
+        name: "Activities",
+        columns: [
+          { label: "Activity", field: "activity" },
+          { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
+          { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
+          { label: "Balance Wt", field: "weight", numeric: true, decimals: 2, total: true },
+          { label: "Avg Ageing", field: "avgAge", numeric: true, decimals: 0 },
+        ],
+        rows: summaryRows,
+      },
+      {
+        name: "Marks",
+        columns: [
+          { label: "Activity", field: "activity" },
+          { label: "Project", field: "job" },
+          { label: "Structure", field: "structure" },
+          { label: "Mark", field: "markId" },
+          { label: "Section", field: "section" },
+          { label: "Contractor", field: "contractor" },
+          { label: "Balance Qty", field: "balanceQty", numeric: true, decimals: 0, total: true },
+          { label: "Balance Wt", field: "balanceWt", numeric: true, decimals: 2, total: true },
+          { label: "Assign Date", field: "assignDate" },
+          { label: "Last Production", field: "lastProductionDate" },
+          { label: "Ageing (days)", field: "ageingDays", numeric: true, decimals: 0 },
+        ],
+        rows: markRows,
+      },
+    ];
+    void exportToXlsxSheets(
+      `activity_wise_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      sheets,
+    );
+  };
+
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-2"
+          onClick={handleExport}
+          disabled={sortedActivities.length === 0}
+        >
+          <FileSpreadsheet className="h-4 w-4" /> Export Excel
+        </Button>
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         {sortedActivities.map(act => (
           <ActivityCard key={act} activity={act} records={activities.get(act)!} />

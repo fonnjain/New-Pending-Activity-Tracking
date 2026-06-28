@@ -15,8 +15,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { fmtDays } from "@/lib/velocity";
-import { exportToCsv } from "@/lib/export";
-import { Download, AlertTriangle, RotateCcw } from "lucide-react";
+import { exportToXlsx, type XlsxColumn } from "@/lib/export";
+import { FileSpreadsheet, AlertTriangle, RotateCcw } from "lucide-react";
 
 type Status = "dispatched" | "ready" | "progress";
 
@@ -139,23 +139,41 @@ export default function CompletedView() {
   }, [rows]);
 
   function onExport() {
-    exportToCsv(
-      `turnaround_milestones_${new Date().toISOString().slice(0, 10)}.csv`,
-      rows.map((m) => ({
-        project: m.project,
-        status: STATUS_META[statusOf(m)].label,
-        projectStart: m.projectStart ?? "",
-        readyDate: m.readyDate ?? "",
-        readyTurnaroundDays: m.readyTurnaroundDays ?? "",
-        plannedReadyDays: m.plannedReadyDays ?? "",
-        varianceReadyDays: m.varianceReadyDays ?? "",
-        dispatchedDate: m.dispatchedDate ?? "",
-        dispatchedTurnaroundDays: m.dispatchedTurnaroundDays ?? "",
-        dispatchLagDays: m.dispatchLagDays ?? "",
-        marksTotal: m.marksTotal,
-        limitedHistory: m.limitedHistory ? "yes" : "",
-        reopened: m.reopened ? "yes" : "",
-      })),
+    const cols: XlsxColumn[] = [
+      { label: "Project", field: "project" },
+      { label: "Status", field: "status" },
+      { label: "Start", field: "projectStart" },
+      { label: "Ready", field: "readyDate" },
+      { label: "Ready days", field: "readyTurnaroundDays", numeric: true, decimals: 0 },
+      { label: "Planned", field: "plannedReadyDays", numeric: true, decimals: 0 },
+      { label: "Variance", field: "varianceReadyDays", numeric: true, decimals: 1 },
+      { label: "Dispatched", field: "dispatchedDate" },
+      { label: "Dispatch days", field: "dispatchedTurnaroundDays", numeric: true, decimals: 0 },
+      { label: "Lag", field: "dispatchLagDays", numeric: true, decimals: 0 },
+      { label: "Marks", field: "marksTotal", numeric: true, decimals: 0, total: true },
+      { label: "Limited history", field: "limitedHistory" },
+      { label: "Reopened", field: "reopened" },
+    ];
+    const out = rows.map((m) => ({
+      project: m.project,
+      status: STATUS_META[statusOf(m)].label,
+      projectStart: m.projectStart ?? "",
+      readyDate: m.readyDate ?? "",
+      readyTurnaroundDays: m.readyTurnaroundDays ?? "",
+      plannedReadyDays: m.plannedReadyDays ?? "",
+      varianceReadyDays: m.varianceReadyDays ?? "",
+      dispatchedDate: m.dispatchedDate ?? "",
+      dispatchedTurnaroundDays: m.dispatchedTurnaroundDays ?? "",
+      dispatchLagDays: m.dispatchLagDays ?? "",
+      marksTotal: m.marksTotal,
+      limitedHistory: m.limitedHistory ? "yes" : "",
+      reopened: m.reopened ? "yes" : "",
+    }));
+    void exportToXlsx(
+      `turnaround_milestones_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      cols,
+      out,
+      { sheetName: "Milestones" },
     );
   }
 
@@ -195,8 +213,8 @@ export default function CompletedView() {
             disabled={rows.length === 0}
             className="gap-2"
           >
-            <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Export CSV</span>
+            <FileSpreadsheet className="h-4 w-4" />
+            <span className="hidden sm:inline">Export Excel</span>
           </Button>
         </div>
       </div>

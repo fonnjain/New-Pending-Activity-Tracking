@@ -7,7 +7,9 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { formatWeight } from "@/lib/utils";
-import { ChevronDown, ChevronLeft, Search, Building2 } from "lucide-react";
+import { ChevronDown, ChevronLeft, Search, Building2, FileSpreadsheet } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { exportToXlsx, type XlsxColumn } from "@/lib/export";
 import { useMemo, useRef, useState } from "react";
 import { compareActivity, contractorCategoryLabel, outVendorTypeLabel, bundleActivitySet } from "@workspace/domain";
 
@@ -124,6 +126,25 @@ function ContractorContent() {
     };
   }, [records]);
 
+  const handleExport = () => {
+    const cols: XlsxColumn[] = [
+      { label: "Contractor", field: "name" },
+      { label: "Total Wt", field: "weight", numeric: true, decimals: 2, total: true },
+      { label: "Projects", field: "projects", numeric: true, decimals: 0 },
+      { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
+      { label: "Fabrication Load", field: "fabLoad", numeric: true, decimals: 2, total: true },
+      { label: "Galvanizing Load", field: "galvaLoad", numeric: true, decimals: 2, total: true },
+      { label: "Yard Load", field: "yardLoad", numeric: true, decimals: 2, total: true },
+      { label: "Avg Ageing", field: "avgAge", numeric: true, decimals: 0 },
+    ];
+    void exportToXlsx(
+      `contractor_wise_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      cols,
+      sortedStats,
+      { sheetName: "Workload" },
+    );
+  };
+
   if (selectedContractor) {
     return (
       <ContractorDetail
@@ -145,8 +166,17 @@ function ContractorContent() {
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
           <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Workload</CardTitle>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-2"
+            onClick={handleExport}
+            disabled={sortedStats.length === 0}
+          >
+            <FileSpreadsheet className="h-4 w-4" /> Export Excel
+          </Button>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">

@@ -22,7 +22,8 @@ import { LIFECYCLE_LABELS, lifecycleBgColor, lifecycleTextColor } from "@/lib/tu
 import { TurnaroundWarnings } from "@/components/turnaround-warnings";
 import { AiTurnaroundReport } from "@/components/ai-turnaround-report";
 import { EmptyState } from "./overview";
-import { SlidersHorizontal, Clock, ChevronRight } from "lucide-react";
+import { SlidersHorizontal, Clock, ChevronRight, FileSpreadsheet } from "lucide-react";
+import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 
 export default function TurnaroundView() {
   const { selectedImportId } = useTracker();
@@ -190,22 +191,77 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
       .sort((a, b) => compareActivity(a.activity, b.activity));
   }, [classified]);
 
+  const handleExport = () => {
+    const sheets: XlsxSheet[] = [
+      {
+        name: "Projects",
+        columns: [
+          { label: "Project", field: "project" },
+          { label: "Marks", field: "markCount", numeric: true, decimals: 0, total: true },
+          { label: "Breached", field: "breached", numeric: true, decimals: 0, total: true },
+          { label: "Pre-warn", field: "prewarn", numeric: true, decimals: 0, total: true },
+          { label: "Avg Overrun", field: "avgOverrun", numeric: true, decimals: 1 },
+          { label: "Score", field: "score", numeric: true, decimals: 2 },
+        ],
+        rows: projects,
+      },
+      {
+        name: "Contractors",
+        columns: [
+          { label: "Contractor", field: "contractor" },
+          { label: "Marks", field: "markCount", numeric: true, decimals: 0, total: true },
+          { label: "Breached", field: "breached", numeric: true, decimals: 0, total: true },
+          { label: "Pre-warn", field: "prewarn", numeric: true, decimals: 0, total: true },
+          { label: "Avg Overrun", field: "avgOverrun", numeric: true, decimals: 1 },
+          { label: "Score", field: "score", numeric: true, decimals: 2 },
+        ],
+        rows: contractors,
+      },
+      {
+        name: "Stages",
+        columns: [
+          { label: "Activity", field: "activity" },
+          { label: "Marks", field: "markCount", numeric: true, decimals: 0, total: true },
+          { label: "Breached", field: "breached", numeric: true, decimals: 0, total: true },
+          { label: "Pre-warn", field: "prewarn", numeric: true, decimals: 0, total: true },
+          { label: "Avg Overrun", field: "avgOverrun", numeric: true, decimals: 1 },
+        ],
+        rows: stages,
+      },
+    ];
+    void exportToXlsxSheets(
+      `turnaround_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      sheets,
+    );
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        {VIEW_OPTIONS.map((o) => (
-          <button
-            key={o.id}
-            onClick={() => setView(o.id)}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              view === o.id
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-muted/70"
-            }`}
-          >
-            {o.name}
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {VIEW_OPTIONS.map((o) => (
+            <button
+              key={o.id}
+              onClick={() => setView(o.id)}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                view === o.id
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/70"
+              }`}
+            >
+              {o.name}
+            </button>
+          ))}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-2"
+          onClick={handleExport}
+          disabled={projects.length === 0}
+        >
+          <FileSpreadsheet className="h-4 w-4" /> Export Excel
+        </Button>
       </div>
 
       {view === "projects" && (

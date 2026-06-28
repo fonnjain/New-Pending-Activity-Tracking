@@ -3,9 +3,9 @@ import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCat
 import { contractorCategoryLabel } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileDown, CheckCircle2, Trash2, DownloadCloud, AlertTriangle } from "lucide-react";
+import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { exportToCsv, exportToJson } from "@/lib/export";
+import { exportToXlsx, exportToJson, type XlsxColumn } from "@/lib/export";
 import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { AiReviewPanel } from "@/components/ai-review-panel";
 import { StagedUploadPanel } from "@/components/staged-upload-panel";
@@ -119,7 +119,7 @@ function DataViewContent() {
     });
   };
 
-  const doExportCsv = () => {
+  const doExportExcel = () => {
     if (!filteredRecords?.length) {
       toast({ variant: "destructive", title: "No data to export" });
       return;
@@ -132,7 +132,27 @@ function DataViewContent() {
         out_vendor_type: info.outVendorType.join(";"),
       };
     });
-    exportToCsv(`tracker_export_${new Date().toISOString().slice(0,10)}.csv`, enriched);
+    const cols: XlsxColumn[] = [
+      { label: "Project", field: "job" },
+      { label: "Structure", field: "structure" },
+      { label: "Mark", field: "markId" },
+      { label: "Section", field: "section" },
+      { label: "Activity", field: "activity" },
+      { label: "Contractor", field: "contractor" },
+      { label: "Contractor Type", field: "contractor_category" },
+      { label: "Out-vendor Type", field: "out_vendor_type" },
+      { label: "Balance Qty", field: "balanceQty", numeric: true, decimals: 0, total: true },
+      { label: "Balance Wt", field: "balanceWt", numeric: true, decimals: 2, total: true },
+      { label: "Assign Date", field: "assignDate" },
+      { label: "Last Production", field: "lastProductionDate" },
+      { label: "Ageing (days)", field: "ageingDays", numeric: true, decimals: 0 },
+    ];
+    void exportToXlsx(
+      `tracker_export_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      cols,
+      enriched,
+      { sheetName: "Records" },
+    );
   };
 
   const doExportJson = () => {
@@ -180,8 +200,8 @@ function DataViewContent() {
             <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex flex-col sm:flex-row gap-4 sm:justify-between sm:items-center">
               Current Parse Summary
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={doExportCsv} className="h-8 gap-2">
-                  <DownloadCloud className="w-4 h-4" /> CSV (Filtered)
+                <Button variant="outline" size="sm" onClick={doExportExcel} className="h-8 gap-2">
+                  <FileSpreadsheet className="w-4 h-4" /> Excel (Filtered)
                 </Button>
                 <Button variant="outline" size="sm" onClick={doExportJson} className="h-8 gap-2">
                   <FileDown className="w-4 h-4" /> JSON (Raw)

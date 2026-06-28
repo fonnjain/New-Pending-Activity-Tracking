@@ -53,7 +53,6 @@ import {
 import {
   exportToXlsxSheets,
   exportToXlsxBlockGrid,
-  exportToCsvRaw,
   type XlsxColumn,
   type XlsxSummaryRow,
   type XlsxGridSheet,
@@ -824,55 +823,6 @@ function FabricationLoadReport() {
     exportToXlsxBlockGrid(`fabrication_load_tlt_${date}.xlsx`, sheets);
   };
 
-  const exportCsv = () => {
-    const date = new Date().toISOString().slice(0, 10);
-    const aoa: (string | number)[][] = [];
-    // A blank cell after each block's 3 columns mirrors the spacer column in the
-    // Excel grid (no spacer trails the last block).
-    const withSpacers = (
-      cells: (string | number)[][],
-    ): (string | number)[] => {
-      const out: (string | number)[] = [];
-      cells.forEach((triplet, idx) => {
-        out.push(...triplet);
-        if (idx < cells.length - 1) out.push("");
-      });
-      return out;
-    };
-    for (const s of FAB_LOAD_SECTIONS) {
-      const { blocks, maxLen } = buildSectionGrid(s.value);
-      aoa.push([s.label]);
-      aoa.push(withSpacers(blocks.map(({ c }) => [c.label, "", ""])));
-      aoa.push(withSpacers(blocks.map(() => ["Project", "Wt (t)", "Priority"])));
-      for (let i = 0; i < maxLen; i++) {
-        aoa.push(
-          withSpacers(
-            blocks.map(({ c, rows: rs }) => {
-              const r = rs[i];
-              return r
-                ? [
-                    r.project,
-                    toTonnes(r.weightKg).toFixed(3),
-                    priorityMap.get(priKey(s.value, c.value, r.project)) ?? "",
-                  ]
-                : ["", "", ""];
-            }),
-          ),
-        );
-      }
-      aoa.push(
-        withSpacers(
-          blocks.map(({ cell }) => [
-            "G. Total",
-            toTonnes(cell.totalKg).toFixed(3),
-            "",
-          ]),
-        ),
-      );
-      aoa.push([]);
-    }
-    exportToCsvRaw(`fabrication_load_tlt_${date}.csv`, aoa);
-  };
 
   if (selectedImportId == null) {
     return (
@@ -910,14 +860,6 @@ function FabricationLoadReport() {
             onClick={() => setSortByPriority((v) => !v)}
           >
             Sort: {sortByPriority ? "Priority" : "Weight"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-2"
-            onClick={exportCsv}
-          >
-            <FileSpreadsheet className="w-4 h-4" /> Export CSV
           </Button>
           <Button size="sm" className="h-8 gap-2" onClick={exportExcel}>
             <FileSpreadsheet className="w-4 h-4" /> Export Excel
