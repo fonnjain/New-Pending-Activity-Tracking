@@ -6,7 +6,7 @@ import {
   PROCESS_PHASES,
   type ProcessPhaseKey,
 } from "@workspace/domain";
-import { useTracker, isWithinDateRange } from "@/lib/store";
+import { useTracker } from "@/lib/store";
 import {
   useGetImportRecords,
   getGetImportRecordsQueryKey,
@@ -25,7 +25,6 @@ import {
 } from "@/components/ui/table";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Segmented } from "@/components/ui/segmented";
-import { DateRangeSelect } from "@/components/date-range-select";
 import { SortControl } from "@/components/sort-control";
 import {
   Select,
@@ -77,18 +76,16 @@ function JobDashboardContent() {
     },
   });
 
-  // Scope to the current Order Type mode, then apply the date range. The toggle
-  // drives both the primary dimension (Project for TLT, Section for NTLT) and the
-  // grouping below.
+  // Scope to the current Order Type mode. The toggle drives both the primary
+  // dimension (Project for TLT, Section for NTLT) and the grouping below.
   const records = useMemo(
     () =>
       rawRecords.filter(
         (r) =>
           (isAll || (r.category || "TLT") === filters.category) &&
-          r.active !== false &&
-          isWithinDateRange(r.assignDate, filters.dateRange),
+          r.active !== false,
       ),
-    [rawRecords, filters.category, isAll, filters.dateRange],
+    [rawRecords, filters.category, isAll],
   );
 
   // Resolve a row's primary key (Project in TLT, Section group_key in NTLT) and
@@ -393,13 +390,7 @@ function JobDashboardContent() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">
-                Date Range
-              </label>
-              <DateRangeSelect />
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">
                 {primaryLabel}
