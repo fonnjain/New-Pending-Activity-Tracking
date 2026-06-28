@@ -1054,7 +1054,9 @@ export const CommitStagedImportResponse = zod.union([zod.object({
   "totalReleaseMt": zod.number(),
   "totalFileDespatchMt": zod.number(),
   "skippedTotals": zod.number(),
-  "missingStructure": zod.number()
+  "missingStructure": zod.number(),
+  "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
+  "unmatchedToWip": zod.number().describe('File structures with no matching structure in the newest WIP import.')
 }).describe('Parse summary for an Order Review ingest.'),
   "createdAt": zod.string()
 }).describe('One immutable Order Review file ingest.'),
@@ -1448,7 +1450,9 @@ export const GetOrderStatusResponse = zod.object({
   "totalReleaseMt": zod.number(),
   "totalFileDespatchMt": zod.number(),
   "skippedTotals": zod.number(),
-  "missingStructure": zod.number()
+  "missingStructure": zod.number(),
+  "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
+  "unmatchedToWip": zod.number().describe('File structures with no matching structure in the newest WIP import.')
 }).describe('Parse summary for an Order Review ingest.'),
   "createdAt": zod.string()
 }).describe('One immutable Order Review file ingest.'),zod.null()]),
@@ -1492,7 +1496,9 @@ export const GetOrderStatusResponse = zod.object({
   "totalReleaseMt": zod.number(),
   "totalFileDespatchMt": zod.number(),
   "skippedTotals": zod.number(),
-  "missingStructure": zod.number()
+  "missingStructure": zod.number(),
+  "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
+  "unmatchedToWip": zod.number().describe('File structures with no matching structure in the newest WIP import.')
 }).describe('Parse summary for an Order Review ingest.'),
   "createdAt": zod.string()
 }).describe('One immutable Order Review file ingest.'))

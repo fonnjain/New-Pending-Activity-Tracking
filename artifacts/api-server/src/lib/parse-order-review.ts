@@ -324,6 +324,10 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     totalFileDespatchMt,
     skippedTotals,
     missingStructure,
+    // WIP join coverage needs DB context; enriched by computeWipCoverage at
+    // stage/ingest time. A bare parse reports 0/0.
+    matchedToWip: 0,
+    unmatchedToWip: 0,
   };
 
   return { asOnDate, rows, summary };

@@ -21,6 +21,11 @@ export interface OrderReviewSummary {
   totalFileDespatchMt: number;
   skippedTotals: number;
   missingStructure: number;
+  // Join coverage of this file's (project, structure) keys against the newest
+  // WIP import's structures. Computed where WIP context is available (stage +
+  // ingest); 0 from a bare parse with no DB context.
+  matchedToWip: number;
+  unmatchedToWip: number;
 }
 
 // One immutable ingest of an "Order Review" export (the second input file, a

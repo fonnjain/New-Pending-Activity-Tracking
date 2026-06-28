@@ -375,6 +375,45 @@ export function crossCheckDispatch(
   return { tolerancePct, matched, mismatched, rows };
 }
 
+// Distinct (project, structure) keys present in the NEWEST WIP import — the same
+// import the Order Status page joins against. Empty when no WIP import exists.
+async function loadNewestWipStructureKeys(): Promise<Set<string>> {
+  const [newest] = await db
+    .select({ id: importsTable.id })
+    .from(importsTable)
+    .orderBy(desc(importsTable.id))
+    .limit(1);
+  const keys = new Set<string>();
+  if (!newest) return keys;
+  const rows = await db
+    .select({
+      job: recordPoolTable.job,
+      structure: recordPoolTable.structure,
+    })
+    .from(importRowsTable)
+    .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+    .where(eq(importRowsTable.importId, newest.id));
+  for (const r of rows) keys.add(dispatchKey(r.job, r.structure));
+  return keys;
+}
+
+// Count how many of a file's distinct (project, structure) keys match a WIP
+// structure in the newest import vs not. Join-coverage metric, surfaced in the
+// intake summary so users can see how much of the file actually maps to WIP.
+export async function computeWipCoverage(
+  rows: ParsedOrderReviewRow[],
+): Promise<{ matchedToWip: number; unmatchedToWip: number }> {
+  const wipKeys = await loadNewestWipStructureKeys();
+  const fileKeys = new Set<string>();
+  for (const r of rows) {
+    if (!r.structure) continue;
+    fileKeys.add(dispatchKey(r.project, r.structure));
+  }
+  let matched = 0;
+  for (const k of fileKeys) if (wipKeys.has(k)) matched++;
+  return { matchedToWip: matched, unmatchedToWip: fileKeys.size - matched };
+}
+
 // The latest Order Review ingest (newest wins), with its rows. Null when none.
 export async function loadLatestOrderReview(): Promise<{
   import: typeof orderReviewImportsTable.$inferSelect;
@@ -409,6 +448,8 @@ export async function ingestOrderReview(
   meta: { sourceFilename: string; label: string | null },
 ): Promise<IngestOrderReviewResult> {
   const parsed = parseOrderReview(buffer);
+  const coverage = await computeWipCoverage(parsed.rows);
+  const summary = { ...parsed.summary, ...coverage };
 
   const [imp] = await db
     .insert(orderReviewImportsTable)
@@ -416,7 +457,7 @@ export async function ingestOrderReview(
       label: meta.label,
       sourceFilename: meta.sourceFilename,
       asOnDate: parsed.asOnDate,
-      summary: parsed.summary,
+      summary,
     })
     .returning({ id: orderReviewImportsTable.id });
 
@@ -442,7 +483,7 @@ export async function ingestOrderReview(
   return {
     importId: imp.id,
     asOnDate: parsed.asOnDate,
-    summary: parsed.summary,
+    summary,
     seeded,
   };
 }

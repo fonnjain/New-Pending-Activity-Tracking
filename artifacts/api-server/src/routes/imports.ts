@@ -51,7 +51,11 @@ import {
   type ThicknessLookups,
 } from "@workspace/domain";
 import { recomputeMilestones } from "../lib/milestones";
-import { recomputeDispatch, ingestOrderReview } from "../lib/dispatch";
+import {
+  recomputeDispatch,
+  ingestOrderReview,
+  computeWipCoverage,
+} from "../lib/dispatch";
 import {
   detectFileType,
   parseOrderReview,
@@ -592,6 +596,11 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
     let orderReview;
     try {
       orderReview = parseOrderReview(file.buffer);
+      const coverage = await computeWipCoverage(orderReview.rows);
+      orderReview = {
+        ...orderReview,
+        summary: { ...orderReview.summary, ...coverage },
+      };
     } catch (err) {
       req.log.warn({ err }, "Order Review parse failed for staged upload");
       orderReview = { asOnDate: null, rows: [], summary: null };

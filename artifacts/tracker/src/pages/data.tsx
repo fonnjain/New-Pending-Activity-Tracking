@@ -407,6 +407,14 @@ function OrderReconciliationContent() {
                     <span className="block text-muted-foreground text-xs uppercase mb-1">File Dispatch (MT)</span>
                     <span className="font-bold text-lg tabular-nums">{mt3(order.fileImport.summary.totalFileDespatchMt)}</span>
                   </div>
+                  <div>
+                    <span className="block text-muted-foreground text-xs uppercase mb-1">Matched to WIP</span>
+                    <span className="font-bold text-lg tabular-nums">{order.fileImport.summary.matchedToWip.toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="block text-muted-foreground text-xs uppercase mb-1">Unmatched to WIP</span>
+                    <span className="font-bold text-lg tabular-nums">{order.fileImport.summary.unmatchedToWip.toLocaleString()}</span>
+                  </div>
                 </div>
               </CardContent>
             </Card>

@@ -18,4 +18,8 @@ export interface OrderReviewSummary {
   totalFileDespatchMt: number;
   skippedTotals: number;
   missingStructure: number;
+  /** File structures that match a structure in the newest WIP import. */
+  matchedToWip: number;
+  /** File structures with no matching structure in the newest WIP import. */
+  unmatchedToWip: number;
 }

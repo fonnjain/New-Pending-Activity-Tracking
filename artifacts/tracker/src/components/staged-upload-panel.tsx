@@ -348,6 +348,14 @@ function OrderReviewSummary({ info }: { info: OrderReviewStageInfo }) {
           value={s ? s.totalFileDespatchMt.toLocaleString() : "—"}
         />
         <Stat
+          label="Matched to WIP"
+          value={s ? s.matchedToWip.toLocaleString() : "—"}
+        />
+        <Stat
+          label="Unmatched to WIP"
+          value={s ? s.unmatchedToWip.toLocaleString() : "—"}
+        />
+        <Stat
           label="Skipped totals"
           value={s ? s.skippedTotals.toLocaleString() : "—"}
         />

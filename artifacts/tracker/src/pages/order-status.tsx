@@ -36,17 +36,25 @@ interface ComputedBuckets {
   yardMt: number;
 }
 
-interface DisplayRow extends ComputedBuckets {
+interface DisplayRow {
   project: string;
   structure: string;
   subType: string | null;
+  bomType: string | null;
   sets: number | null;
   weightMt: number | null;
   releaseMt: number | null;
   fileDespatchMt: number | null;
   computedDispatchMt: number;
+  // Bundle tonnage is TLT-only. For an out-of-scope (NTLT) structure these are
+  // null and rendered "n/a" — NTLT marks never contribute Fab/Galv/Yard math.
+  fabMt: number | null;
+  galvMt: number | null;
+  yardMt: number | null;
   inFile: boolean;
   inWip: boolean;
+  // The structure has NTLT marks whose bundle math is intentionally suppressed.
+  outOfScope: boolean;
 }
 
 export default function OrderStatusView() {
@@ -84,11 +92,21 @@ export default function OrderStatusView() {
   }, [records, isAll, filters.category, filters.job, filters.structure]);
 
   // Roll WIP marks into per (project, structure) Fab / Galv / Yard tonnages
-  // (balanceWt is kilograms; /1000 -> metric tonnes).
-  const computedByKey = useMemo(() => {
+  // (balanceWt is kilograms; /1000 -> metric tonnes). Bundle math is TLT-only:
+  // NTLT marks are OUT OF SCOPE for Order Status — they never contribute to the
+  // Fab/Galv/Yard buckets. We still record their key so the structure can be
+  // flagged "out of scope" in the table.
+  const { computedByKey, ntltKeys } = useMemo(() => {
     const m = new Map<string, ComputedBuckets>();
+    const ntlt = new Set<string>();
     for (const r of scopedRecords) {
       const k = keyOf(r.job, r.structure);
+      const cat = (r.category || "TLT").toUpperCase();
+      if (cat === "NTLT") {
+        // Out of scope: suppress all bundle tonnage for NTLT marks.
+        ntlt.add(k);
+        continue;
+      }
       let agg = m.get(k);
       if (!agg) {
         agg = { fabMt: 0, galvMt: 0, yardMt: 0 };
@@ -100,7 +118,7 @@ export default function OrderStatusView() {
       else if (GALV_SET.has(act)) agg.galvMt += tonnes;
       else agg.fabMt += tonnes;
     }
-    return m;
+    return { computedByKey: m, ntltKeys: ntlt };
   }, [scopedRecords]);
 
   const dispatchByKey = useMemo(() => {
@@ -115,6 +133,7 @@ export default function OrderStatusView() {
     const keys = new Set<string>([
       ...dispatchByKey.keys(),
       ...computedByKey.keys(),
+      ...ntltKeys,
     ]);
     const out: DisplayRow[] = [];
     for (const k of keys) {
@@ -123,20 +142,25 @@ export default function OrderStatusView() {
       const [project, structure] = k.split(KEY_SEP);
       if (filters.job && project !== filters.job) continue;
       if (filters.structure && structure !== filters.structure) continue;
+      // A structure is out of scope when it has NTLT marks but no TLT bundle
+      // tonnage (NTLT-only). Its Fab/Galv/Yard are not computed -> null (n/a).
+      const outOfScope = ntltKeys.has(k) && !comp;
       out.push({
         project,
         structure,
         subType: file?.subType ?? null,
+        bomType: file?.bomType ?? null,
         sets: file?.sets ?? null,
         weightMt: file?.weightMt ?? null,
         releaseMt: file?.releaseMt ?? null,
         fileDespatchMt: file?.fileDespatchMt ?? null,
         computedDispatchMt: file?.computedDispatchMt ?? 0,
-        fabMt: comp?.fabMt ?? 0,
-        galvMt: comp?.galvMt ?? 0,
-        yardMt: comp?.yardMt ?? 0,
+        fabMt: outOfScope ? null : comp?.fabMt ?? 0,
+        galvMt: outOfScope ? null : comp?.galvMt ?? 0,
+        yardMt: outOfScope ? null : comp?.yardMt ?? 0,
         inFile: !!file,
         inWip: !!comp,
+        outOfScope,
       });
     }
     out.sort(
@@ -145,7 +169,7 @@ export default function OrderStatusView() {
         a.structure.localeCompare(b.structure),
     );
     return out;
-  }, [dispatchByKey, computedByKey, filters.job, filters.structure]);
+  }, [dispatchByKey, computedByKey, ntltKeys, filters.job, filters.structure]);
 
   // Per-project subtotals for the grouped table.
   const groups = useMemo(() => {
@@ -159,9 +183,9 @@ export default function OrderStatusView() {
       const subtotal = list.reduce(
         (acc, r) => {
           acc.weightMt += r.weightMt ?? 0;
-          acc.fabMt += r.fabMt;
-          acc.galvMt += r.galvMt;
-          acc.yardMt += r.yardMt;
+          acc.fabMt += r.fabMt ?? 0;
+          acc.galvMt += r.galvMt ?? 0;
+          acc.yardMt += r.yardMt ?? 0;
           acc.fileDespatchMt += r.fileDespatchMt ?? 0;
           acc.computedDispatchMt += r.computedDispatchMt;
           return acc;
@@ -183,9 +207,9 @@ export default function OrderStatusView() {
     return rows.reduce(
       (acc, r) => {
         acc.weightMt += r.weightMt ?? 0;
-        acc.fabMt += r.fabMt;
-        acc.galvMt += r.galvMt;
-        acc.yardMt += r.yardMt;
+        acc.fabMt += r.fabMt ?? 0;
+        acc.galvMt += r.galvMt ?? 0;
+        acc.yardMt += r.yardMt ?? 0;
         acc.fileDespatchMt += r.fileDespatchMt ?? 0;
         acc.computedDispatchMt += r.computedDispatchMt;
         return acc;
@@ -203,12 +227,14 @@ export default function OrderStatusView() {
 
   function onExport() {
     const cols: XlsxColumn[] = [
-      { label: "Project", field: "project" },
-      { label: "Structure", field: "structure" },
-      { label: "Sub-type", field: "subType" },
+      { label: "Project Code", field: "project" },
+      { label: "Structure Type", field: "structure" },
+      { label: "Sub Type", field: "subType" },
       { label: "Sets", field: "sets", numeric: true, decimals: 0 },
-      { label: "Order Wt (MT)", field: "weightMt", numeric: true, decimals: 3, total: true },
+      { label: "Weight (MT)", field: "weightMt", numeric: true, decimals: 3, total: true },
+      { label: "BOM Type", field: "bomType" },
       { label: "Release (MT)", field: "releaseMt", numeric: true, decimals: 3 },
+      { label: "Scope", field: "scope" },
       { label: "Fabrication (MT)", field: "fabMt", numeric: true, decimals: 3, total: true },
       { label: "Galvanizing (MT)", field: "galvMt", numeric: true, decimals: 3, total: true },
       { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
@@ -221,10 +247,12 @@ export default function OrderStatusView() {
       subType: r.subType ?? "",
       sets: r.sets ?? "",
       weightMt: r.weightMt ?? "",
+      bomType: r.bomType ?? "",
       releaseMt: r.releaseMt ?? "",
-      fabMt: r.fabMt,
-      galvMt: r.galvMt,
-      yardMt: r.yardMt,
+      scope: r.outOfScope ? "NTLT (out of scope)" : "TLT",
+      fabMt: r.fabMt ?? "",
+      galvMt: r.galvMt ?? "",
+      yardMt: r.yardMt ?? "",
       fileDespatchMt: r.fileDespatchMt ?? "",
       computedDispatchMt: r.computedDispatchMt,
     }));
@@ -276,6 +304,19 @@ export default function OrderStatusView() {
         </Card>
       )}
 
+      {isNtlt && (
+        <Card className="border-amber-500/40">
+          <CardContent className="py-3 flex items-center gap-2 text-sm">
+            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+            <span>
+              Order Status is a TLT view. NTLT marks are out of scope: their
+              Fabrication / Galvanizing / Yard tonnage is not computed and shows
+              as "n/a". Switch the Order Type to TLT or All for bundle math.
+            </span>
+          </CardContent>
+        </Card>
+      )}
+
       {available && order?.fileImport && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KpiTile label="Order Wt (MT)" value={mt(totals.weightMt)} />
@@ -321,9 +362,11 @@ export default function OrderStatusView() {
               <table className="w-full text-sm">
                 <thead className="border-b bg-muted/40">
                   <tr className="text-left">
-                    <th className="px-3 py-2 font-semibold">Structure</th>
+                    <th className="px-3 py-2 font-semibold">Structure Type</th>
+                    <th className="px-3 py-2 font-semibold">Sub Type</th>
                     <th className="px-3 py-2 font-semibold text-right">Sets</th>
-                    <th className="px-3 py-2 font-semibold text-right">Order Wt</th>
+                    <th className="px-3 py-2 font-semibold text-right">Weight</th>
+                    <th className="px-3 py-2 font-semibold">BOM Type</th>
                     <th className="px-3 py-2 font-semibold text-right">Release</th>
                     <th className="px-3 py-2 font-semibold text-right">Fabrication</th>
                     <th className="px-3 py-2 font-semibold text-right">Galvanizing</th>
@@ -341,7 +384,9 @@ export default function OrderStatusView() {
                   <tr>
                     <td className="px-3 py-2">Total ({rows.length})</td>
                     <td className="px-3 py-2" />
+                    <td className="px-3 py-2" />
                     <td className="px-3 py-2 text-right tabular-nums">{mt(totals.weightMt)}</td>
+                    <td className="px-3 py-2" />
                     <td className="px-3 py-2" />
                     <td className="px-3 py-2 text-right tabular-nums">{mt(totals.fabMt)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{mt(totals.galvMt)}</td>
@@ -392,7 +437,7 @@ function ProjectGroup({
   return (
     <>
       <tr className="bg-muted/20 border-b">
-        <td colSpan={9} className="px-3 py-1.5 font-semibold text-xs uppercase tracking-wide text-muted-foreground">
+        <td colSpan={11} className="px-3 py-1.5 font-semibold text-xs uppercase tracking-wide text-muted-foreground">
           {project}
         </td>
       </tr>
@@ -406,16 +451,18 @@ function ProjectGroup({
             {!r.inWip && (
               <span className="ml-2 text-[10px] uppercase text-muted-foreground">file only</span>
             )}
-            {r.subType && (
-              <span className="ml-2 text-[10px] uppercase text-sky-600 dark:text-sky-400">{r.subType}</span>
+            {r.outOfScope && (
+              <span className="ml-2 text-[10px] uppercase text-amber-600 dark:text-amber-400">NTLT - out of scope</span>
             )}
           </td>
+          <td className="px-3 py-2">{r.subType ?? "-"}</td>
           <td className="px-3 py-2 text-right tabular-nums">{r.sets ?? "-"}</td>
           <td className="px-3 py-2 text-right tabular-nums">{mt(r.weightMt)}</td>
+          <td className="px-3 py-2">{r.bomType ?? "-"}</td>
           <td className="px-3 py-2 text-right tabular-nums">{mt(r.releaseMt)}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{mt(r.fabMt)}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{mt(r.galvMt)}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{mt(r.yardMt)}</td>
+          <td className="px-3 py-2 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.fabMt)}</td>
+          <td className="px-3 py-2 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.galvMt)}</td>
+          <td className="px-3 py-2 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.yardMt)}</td>
           <td className="px-3 py-2 text-right tabular-nums">{mt(r.fileDespatchMt)}</td>
           <td className="px-3 py-2 text-right tabular-nums">{mt(r.computedDispatchMt)}</td>
         </tr>
@@ -423,7 +470,9 @@ function ProjectGroup({
       <tr className="border-b bg-muted/10 text-xs">
         <td className="px-3 py-1.5 font-medium text-muted-foreground">Subtotal</td>
         <td className="px-3 py-1.5" />
+        <td className="px-3 py-1.5" />
         <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.weightMt)}</td>
+        <td className="px-3 py-1.5" />
         <td className="px-3 py-1.5" />
         <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.fabMt)}</td>
         <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.galvMt)}</td>

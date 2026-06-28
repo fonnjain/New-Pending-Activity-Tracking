@@ -2446,6 +2446,12 @@ components:
           type: integer
         missingStructure:
           type: integer
+        matchedToWip:
+          type: integer
+          description: File structures that match a structure in the newest WIP import.
+        unmatchedToWip:
+          type: integer
+          description: File structures with no matching structure in the newest WIP import.
       required:
         - rowsRead
         - rowsKept
@@ -2455,6 +2461,8 @@ components:
         - totalFileDespatchMt
         - skippedTotals
         - missingStructure
+        - matchedToWip
+        - unmatchedToWip
     OrderStatusRow:
       type: object
       description: One (project, structure) order row joined to computed dispatch.
