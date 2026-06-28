@@ -62,7 +62,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 key={item.href}
                 title={`${item.label} (disabled)`}
                 aria-disabled="true"
-                className="px-2.5 py-1.5 rounded-md text-sm font-medium whitespace-nowrap text-sidebar-foreground/40 cursor-not-allowed select-none"
+                className="px-2 py-1 rounded-md text-xs font-medium whitespace-nowrap text-sidebar-foreground/40 cursor-not-allowed select-none"
               >
                 {item.label}
               </div>
@@ -70,7 +70,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <Link key={item.href} href={item.href}>
                 <div
                   title={item.label}
-                  className={`px-2.5 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                  className={`px-2 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
                     location === item.href
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "text-sidebar-foreground hover:bg-sidebar-accent/50"
