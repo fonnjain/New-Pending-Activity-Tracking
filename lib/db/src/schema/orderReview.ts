@@ -8,6 +8,7 @@ import {
   timestamp,
   jsonb,
   primaryKey,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -28,9 +29,36 @@ export interface OrderReviewSummary {
   unmatchedToWip: number;
 }
 
-// One immutable ingest of an "Order Review" export (the second input file, a
-// per-structure order/dispatch summary). Append-only like WIP imports; newest
-// wins for display. Additive — never feeds WIP parsing/dedup/ageing.
+// Per-import change log for the idempotent UPSERT intake. The Order Review file
+// is a DAILY SNAPSHOT keyed on (project, structure); each upload updates the one
+// current row per key in place. This records what the upload changed so the user
+// sees the daily delta (mirrors the WIP change-log), without per-day duplication.
+export interface OrderReviewFieldChange {
+  field: string;
+  from: string | number | null;
+  to: string | number | null;
+}
+export interface OrderReviewRowChange {
+  project: string;
+  structure: string;
+  changes: OrderReviewFieldChange[];
+}
+export interface OrderReviewChangeLog {
+  // New (project, structure) keys not seen before.
+  inserted: { project: string; structure: string }[];
+  // Existing keys whose values changed, with field-level from -> to.
+  updated: OrderReviewRowChange[];
+  // Count of keys present and identical (no value change).
+  unchanged: number;
+  // Keys present in a prior file but ABSENT from this one. Kept (never deleted),
+  // flagged as "not in latest order review".
+  flagged: { project: string; structure: string }[];
+}
+
+// One ingest of an "Order Review" export (the second input file, a per-structure
+// order/dispatch summary). Each upload is logged here with its change log, but the
+// order rows themselves are UPSERTED (one current row per project+structure), not
+// appended per import. Additive — never feeds WIP parsing/dedup/ageing.
 export const orderReviewImportsTable = pgTable("order_review_imports", {
   id: serial("id").primaryKey(),
   label: text("label"),
@@ -38,6 +66,10 @@ export const orderReviewImportsTable = pgTable("order_review_imports", {
   // "As on" date read from the file banner (best-effort; null if not found).
   asOnDate: date("as_on_date", { mode: "string" }),
   summary: jsonb("summary").$type<OrderReviewSummary>().notNull(),
+  // What this upload changed vs the current rows (inserted/updated/unchanged/
+  // flagged). Null for the very first ingest before any prior rows existed is
+  // still populated (all inserted); nullable only for forward-compat.
+  changeLog: jsonb("change_log").$type<OrderReviewChangeLog>(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -51,22 +83,34 @@ export type InsertOrderReviewImport = z.infer<
 >;
 export type OrderReviewImportRow = typeof orderReviewImportsTable.$inferSelect;
 
-// One row per (project, structure) within an Order Review ingest. The join key
-// to WIP marks is (project, structure) — structure = the file's Tower Type Code,
-// matched to a WIP mark's derived structure (alias).
-export const orderReviewRowsTable = pgTable("order_review_rows", {
-  id: serial("id").primaryKey(),
-  importId: integer("import_id").notNull(),
-  project: text("project").notNull(),
-  structure: text("structure").notNull(),
-  subType: text("sub_type"),
-  sets: integer("sets"),
-  weightMt: doublePrecision("weight_mt"),
-  bomType: text("bom_type"),
-  releaseMt: doublePrecision("release_mt"),
-  // Despatch MT as stated in the file (used for cross-check vs computed dispatch).
-  fileDespatchMt: doublePrecision("file_despatch_mt"),
-});
+// ONE CURRENT row per (project, structure) — the live order-book snapshot. The
+// Order Review file is a daily snapshot, so each upload UPSERTS this row in place
+// (no per-day append). The join key to WIP marks is (project, structure) —
+// structure = the file's Tower Type Code, matched to a WIP mark's derived
+// structure (alias). importId = the import in which this key was LAST SEEN (used
+// to flag rows absent from the latest file: row.importId !== latest import id).
+export const orderReviewRowsTable = pgTable(
+  "order_review_rows",
+  {
+    id: serial("id").primaryKey(),
+    importId: integer("import_id").notNull(),
+    project: text("project").notNull(),
+    structure: text("structure").notNull(),
+    subType: text("sub_type"),
+    sets: integer("sets"),
+    weightMt: doublePrecision("weight_mt"),
+    bomType: text("bom_type"),
+    releaseMt: doublePrecision("release_mt"),
+    // Despatch MT as stated in the file (cross-checked vs computed dispatch).
+    fileDespatchMt: doublePrecision("file_despatch_mt"),
+  },
+  (t) => [
+    uniqueIndex("order_review_rows_project_structure_uq").on(
+      t.project,
+      t.structure,
+    ),
+  ],
+);
 
 export const insertOrderReviewRowSchema = createInsertSchema(
   orderReviewRowsTable,

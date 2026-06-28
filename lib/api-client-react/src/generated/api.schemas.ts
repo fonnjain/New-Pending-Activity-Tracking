@@ -311,7 +311,46 @@ export const OrderReviewCommitResultKind = {
 } as const;
 
 /**
- * One immutable Order Review file ingest.
+ * A (project, structure) order-row reference.
+ */
+export interface OrderReviewKeyRef {
+  project: string;
+  structure: string;
+}
+
+/**
+ * One field's value change for an updated order row.
+ */
+export interface OrderReviewFieldChange {
+  field: string;
+  /** @nullable */
+  from: string | number | null;
+  /** @nullable */
+  to: string | number | null;
+}
+
+/**
+ * One updated (project, structure) order row with its field changes.
+ */
+export interface OrderReviewRowChange {
+  project: string;
+  structure: string;
+  changes: OrderReviewFieldChange[];
+}
+
+/**
+ * What one Order Review upload changed vs the current order rows.
+ */
+export interface OrderReviewChangeLog {
+  inserted: OrderReviewKeyRef[];
+  updated: OrderReviewRowChange[];
+  unchanged: number;
+  /** Current rows absent from this upload (kept, not deleted). */
+  flagged: OrderReviewKeyRef[];
+}
+
+/**
+ * One Order Review file upload (rows are upserted, not appended).
  */
 export interface OrderReviewImport {
   id: number;
@@ -321,6 +360,7 @@ export interface OrderReviewImport {
   /** @nullable */
   asOnDate: string | null;
   summary: OrderReviewSummary;
+  changeLog: OrderReviewChangeLog | null;
   createdAt: string;
 }
 
@@ -1154,6 +1194,8 @@ export interface OrderStatusRow {
   accruedMt: number;
   /** seedMt + accruedMt. */
   computedDispatchMt: number;
+  /** Current order row absent from the latest Order Review file (kept, not deleted). */
+  notInLatest: boolean;
 }
 
 export type DispatchReconciliationRowStatus = typeof DispatchReconciliationRowStatus[keyof typeof DispatchReconciliationRowStatus];

@@ -84,6 +84,15 @@ function normalizeProject(value: string): string {
   return s.trim();
 }
 
+// Structure (Tower Type Code / col C) canonicalization: trim + collapse internal
+// whitespace runs to a single space. Case is PRESERVED — the structure is the
+// join key to a WIP mark's derived structure (alias), which is case-sensitive, so
+// upper-casing here would break the WIP join. Collapsing whitespace prevents
+// phantom duplicate keys from spacing variants across daily files.
+export function normalizeStructure(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
 function getGrid(buffer: Buffer): unknown[][] {
   const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
   const sheetName = wb.SheetNames.includes("Sheet1")
@@ -285,7 +294,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     }
     if (bannerHit) continue;
 
-    const structure = cellStr(cells[cols.structure] as Cell);
+    const structure = normalizeStructure(cellStr(cells[cols.structure] as Cell));
     if (!structure) {
       // A row with measures but no structure is a data-quality miss; a fully
       // blank row is silently skipped.

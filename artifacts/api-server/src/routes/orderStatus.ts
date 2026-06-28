@@ -58,6 +58,9 @@ router.get("/order-status", async (_req, res): Promise<void> => {
       seedMt,
       accruedMt,
       computedDispatchMt: seedMt + accruedMt,
+      // A current order row whose last-seen import is older than the latest
+      // ingest was absent from the latest file (kept, never deleted).
+      notInLatest: r.importId !== latest.import.id,
     };
   });
 

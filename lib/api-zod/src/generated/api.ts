@@ -1058,8 +1058,28 @@ export const CommitStagedImportResponse = zod.union([zod.object({
   "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
   "unmatchedToWip": zod.number().describe('File structures with no matching structure in the newest WIP import.')
 }).describe('Parse summary for an Order Review ingest.'),
+  "changeLog": zod.union([zod.object({
+  "inserted": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string()
+}).describe('A (project, structure) order-row reference.')),
+  "updated": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string(),
+  "changes": zod.array(zod.object({
+  "field": zod.string(),
+  "from": zod.union([zod.string(),zod.number()]).nullable(),
+  "to": zod.union([zod.string(),zod.number()]).nullable()
+}).describe('One field\'s value change for an updated order row.'))
+}).describe('One updated (project, structure) order row with its field changes.')),
+  "unchanged": zod.number(),
+  "flagged": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string()
+}).describe('A (project, structure) order-row reference.')).describe('Current rows absent from this upload (kept, not deleted).')
+}).describe('What one Order Review upload changed vs the current order rows.'),zod.null()]),
   "createdAt": zod.string()
-}).describe('One immutable Order Review file ingest.'),
+}).describe('One Order Review file upload (rows are upserted, not appended).'),
   "seeded": zod.number().describe('Number of newly seeded (project, structure) dispatch keys.')
 }).describe('Commit result for an Order Review file.')])
 
@@ -1454,8 +1474,28 @@ export const GetOrderStatusResponse = zod.object({
   "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
   "unmatchedToWip": zod.number().describe('File structures with no matching structure in the newest WIP import.')
 }).describe('Parse summary for an Order Review ingest.'),
+  "changeLog": zod.union([zod.object({
+  "inserted": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string()
+}).describe('A (project, structure) order-row reference.')),
+  "updated": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string(),
+  "changes": zod.array(zod.object({
+  "field": zod.string(),
+  "from": zod.union([zod.string(),zod.number()]).nullable(),
+  "to": zod.union([zod.string(),zod.number()]).nullable()
+}).describe('One field\'s value change for an updated order row.'))
+}).describe('One updated (project, structure) order row with its field changes.')),
+  "unchanged": zod.number(),
+  "flagged": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string()
+}).describe('A (project, structure) order-row reference.')).describe('Current rows absent from this upload (kept, not deleted).')
+}).describe('What one Order Review upload changed vs the current order rows.'),zod.null()]),
   "createdAt": zod.string()
-}).describe('One immutable Order Review file ingest.'),zod.null()]),
+}).describe('One Order Review file upload (rows are upserted, not appended).'),zod.null()]),
   "rows": zod.array(zod.object({
   "project": zod.string(),
   "structure": zod.string(),
@@ -1467,7 +1507,8 @@ export const GetOrderStatusResponse = zod.object({
   "fileDespatchMt": zod.number().nullable().describe('Despatch MT as stated in the Order Review file.'),
   "seedMt": zod.number().describe('One-time dispatch baseline captured from the first Order Review file.'),
   "accruedMt": zod.number().describe('Tonnes that left the Yard across WIP imports after the seed.'),
-  "computedDispatchMt": zod.number().describe('seedMt + accruedMt.')
+  "computedDispatchMt": zod.number().describe('seedMt + accruedMt.'),
+  "notInLatest": zod.boolean().describe('Current order row absent from the latest Order Review file (kept, not deleted).')
 }).describe('One (project, structure) order row joined to computed dispatch.')),
   "reconciliation": zod.object({
   "tolerancePct": zod.number(),
@@ -1500,8 +1541,28 @@ export const GetOrderStatusResponse = zod.object({
   "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
   "unmatchedToWip": zod.number().describe('File structures with no matching structure in the newest WIP import.')
 }).describe('Parse summary for an Order Review ingest.'),
+  "changeLog": zod.union([zod.object({
+  "inserted": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string()
+}).describe('A (project, structure) order-row reference.')),
+  "updated": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string(),
+  "changes": zod.array(zod.object({
+  "field": zod.string(),
+  "from": zod.union([zod.string(),zod.number()]).nullable(),
+  "to": zod.union([zod.string(),zod.number()]).nullable()
+}).describe('One field\'s value change for an updated order row.'))
+}).describe('One updated (project, structure) order row with its field changes.')),
+  "unchanged": zod.number(),
+  "flagged": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string()
+}).describe('A (project, structure) order-row reference.')).describe('Current rows absent from this upload (kept, not deleted).')
+}).describe('What one Order Review upload changed vs the current order rows.'),zod.null()]),
   "createdAt": zod.string()
-}).describe('One immutable Order Review file ingest.'))
+}).describe('One Order Review file upload (rows are upserted, not appended).'))
 }).describe('Order Review overlay joined to computed dispatch.')
 
 

@@ -78,13 +78,14 @@ function DataViewContent() {
 
   const handleCommitted = (res: CommitResult) => {
     if (res.kind === "order-review") {
+      const cl = res.orderReviewImport.changeLog;
       const s = res.orderReviewImport.summary;
-      toast({
-        title: "Order Review imported",
-        description: s
+      const description = cl
+        ? `${cl.inserted.length.toLocaleString()} new, ${cl.updated.length.toLocaleString()} updated, ${cl.unchanged.toLocaleString()} unchanged${cl.flagged.length > 0 ? `, ${cl.flagged.length.toLocaleString()} not in this file` : ""}.${res.seeded > 0 ? ` ${res.seeded.toLocaleString()} dispatch keys seeded.` : ""}`
+        : s
           ? `${s.rowsKept.toLocaleString()} order rows kept across ${s.projectsFound.toLocaleString()} projects.${res.seeded > 0 ? ` ${res.seeded.toLocaleString()} dispatch keys seeded.` : ""}`
-          : "Order Review ingested.",
-      });
+          : "Order Review ingested.";
+      toast({ title: "Order Review imported", description });
       queryClient.invalidateQueries({ queryKey: getGetOrderStatusQueryKey() });
       return;
     }
@@ -339,6 +340,12 @@ function pct1(n: number | null | undefined): string {
   return `${n.toFixed(1)}%`;
 }
 
+function fmtChangeVal(v: string | number | null): string {
+  if (v == null) return "-";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(3);
+  return v;
+}
+
 const RECON_STATUS_META: Record<
   DispatchReconciliationRow["status"],
   { label: string; cls: string }
@@ -416,6 +423,67 @@ function OrderReconciliationContent() {
                     <span className="font-bold text-lg tabular-nums">{order.fileImport.summary.unmatchedToWip.toLocaleString()}</span>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {order.fileImport?.changeLog && (
+            <Card className="border-border">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+                  Latest Upload Changes
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <span className="block text-muted-foreground text-xs uppercase mb-1">Inserted</span>
+                    <span className="font-bold text-lg tabular-nums text-emerald-600 dark:text-emerald-400">{order.fileImport.changeLog.inserted.length.toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="block text-muted-foreground text-xs uppercase mb-1">Updated</span>
+                    <span className="font-bold text-lg tabular-nums text-blue-600 dark:text-blue-400">{order.fileImport.changeLog.updated.length.toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="block text-muted-foreground text-xs uppercase mb-1">Unchanged</span>
+                    <span className="font-bold text-lg tabular-nums">{order.fileImport.changeLog.unchanged.toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="block text-muted-foreground text-xs uppercase mb-1">Not in this file</span>
+                    <span className="font-bold text-lg tabular-nums text-rose-600 dark:text-rose-400">{order.fileImport.changeLog.flagged.length.toLocaleString()}</span>
+                  </div>
+                </div>
+                {order.fileImport.changeLog.updated.length > 0 && (
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="border-b bg-muted/40">
+                        <tr className="text-left">
+                          <th className="px-3 py-2 font-semibold">Project</th>
+                          <th className="px-3 py-2 font-semibold">Structure</th>
+                          <th className="px-3 py-2 font-semibold">Changed Fields</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.fileImport.changeLog.updated.map((u) => (
+                          <tr key={`${u.project}-${u.structure}`} className="border-b last:border-0 hover:bg-muted/30 align-top">
+                            <td className="px-3 py-2">{u.project}</td>
+                            <td className="px-3 py-2">{u.structure}</td>
+                            <td className="px-3 py-2">
+                              <div className="flex flex-col gap-0.5">
+                                {u.changes.map((c) => (
+                                  <span key={c.field} className="text-xs">
+                                    <span className="font-medium">{c.field}</span>
+                                    <span className="text-muted-foreground">: {fmtChangeVal(c.from)} &rarr; {fmtChangeVal(c.to)}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}

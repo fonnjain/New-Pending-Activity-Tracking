@@ -55,6 +55,9 @@ interface DisplayRow {
   inWip: boolean;
   // The structure has NTLT marks whose bundle math is intentionally suppressed.
   outOfScope: boolean;
+  // The order row exists in the order book but was absent from the latest Order
+  // Review upload (kept, never deleted — flagged for review).
+  notInLatest: boolean;
 }
 
 export default function OrderStatusView() {
@@ -161,6 +164,7 @@ export default function OrderStatusView() {
         inFile: !!file,
         inWip: !!comp,
         outOfScope,
+        notInLatest: file?.notInLatest ?? false,
       });
     }
     out.sort(
@@ -453,6 +457,9 @@ function ProjectGroup({
             )}
             {r.outOfScope && (
               <span className="ml-2 text-[10px] uppercase text-amber-600 dark:text-amber-400">NTLT - out of scope</span>
+            )}
+            {r.notInLatest && (
+              <span className="ml-2 text-[10px] uppercase text-rose-600 dark:text-rose-400">not in latest file</span>
             )}
           </td>
           <td className="px-3 py-2">{r.subType ?? "-"}</td>

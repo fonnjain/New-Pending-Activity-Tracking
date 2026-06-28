@@ -36,9 +36,24 @@ so the original WIP-only contract crashed on them. The fix:
   `kind`. Frontend `onCommitted` discriminates on `kind`.
 - Order-review files **skip the AI gatekeeper** (direct commit). Unknown files are rejected with 400
   at commit too (defense-in-depth), not only in the validate UI.
-- Order-review commit has its own **atomic race-claim** mirroring WIP's `committed_import_id` pattern:
-  `UPDATE ... WHERE committed_order_review_import_id IS NULL RETURNING`; the loser deletes its
-  duplicate order_review_imports row + re-runs `recomputeDispatch()`, then replays the winner.
+## Order Review rows are UPSERTED (idempotent daily snapshot), NOT appended
+**Why:** the Order Review file is a daily snapshot of the same order book; appending a fresh row set
+per upload duplicated every structure. The intake is now idempotent: ONE current row per
+(project, structure) with a DB unique index; each upload upserts in place + writes a per-import
+change log (inserted / updated field-level from→to / unchanged / flagged-absent).
+- Match key is **case-insensitive on structure** (`project \u0001 structure.toUpperCase()`) but the
+  STORED structure preserves case — the WIP join is case-sensitive, so never upper-case the stored value.
+- A row's `importId` = the import it was **last seen** in. `notInLatest = row.importId !== latestImportId`
+  flags rows absent from the newest file — they are KEPT, never deleted.
+- `loadLatestOrderReview()` returns the latest import (for as-on/summary/changeLog) + ALL current rows.
+
+**Concurrency lesson (the trap):** because the upsert mutates SHARED current rows, the old
+append-era "ingest-then-race-claim, loser deletes its import" pattern is WRONG — deleting the loser
+import leaves shared rows pointing at a dropped import (wrongly `notInLatest`). Fix: serialize the
+whole order-review commit under the shared dispatch advisory lock `pg_advisory_xact_lock(728041)`
+(same one WIP merge takes) inside one tx, and **re-check the idempotency guard
+`committed_order_review_import_id` UNDER the lock** so a duplicate commit replays the winner without
+ever ingesting. Any future shared-state UPSERT under a retry-guard must recheck the guard inside the lock.
 
 **How to apply:** any new file type added to the staging flow must extend `detectFileType`, the
 `StageResult.fileType` enum, and the `CommitResult` union — do not assume a single file shape.

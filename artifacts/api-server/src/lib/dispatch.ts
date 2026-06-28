@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
   db,
   importsTable,
@@ -10,6 +10,8 @@ import {
   dispatchLedgerTable,
   type OrderDispatchRow,
   type DispatchLedgerRow,
+  type OrderReviewChangeLog,
+  type OrderReviewFieldChange,
 } from "@workspace/db";
 import { bundleActivitySet } from "@workspace/domain";
 import {
@@ -414,7 +416,10 @@ export async function computeWipCoverage(
   return { matchedToWip: matched, unmatchedToWip: fileKeys.size - matched };
 }
 
-// The latest Order Review ingest (newest wins), with its rows. Null when none.
+// The latest Order Review ingest (for as-on date / summary / change log) plus the
+// FULL set of current order rows (one per project+structure, UPSERTed across all
+// uploads). Each row carries importId = the import it was last seen in, so callers
+// can flag rows absent from the latest file. Null when no ingest has happened.
 export async function loadLatestOrderReview(): Promise<{
   import: typeof orderReviewImportsTable.$inferSelect;
   rows: (typeof orderReviewRowsTable.$inferSelect)[];
@@ -425,10 +430,7 @@ export async function loadLatestOrderReview(): Promise<{
     .orderBy(desc(orderReviewImportsTable.id))
     .limit(1);
   if (!latest) return null;
-  const rows = await db
-    .select()
-    .from(orderReviewRowsTable)
-    .where(eq(orderReviewRowsTable.importId, latest.id));
+  const rows = await db.select().from(orderReviewRowsTable);
   return { import: latest, rows };
 }
 
@@ -439,10 +441,77 @@ export interface IngestOrderReviewResult {
   seeded: number;
 }
 
-// Ingest one Order Review file: create an immutable order_review_imports row +
-// its per-(project, structure) rows, capture-once seed any new dispatch keys,
-// then deterministically recompute accrued dispatch + ledger. Newest ingest wins
-// for display. Purely additive — never touches WIP state.
+// The order-book value fields compared for idempotency / change detection. As-on
+// date is an import-level (not per-key) field, reported in the change-log header.
+const ORDER_REVIEW_VALUE_FIELDS = [
+  "subType",
+  "sets",
+  "weightMt",
+  "bomType",
+  "releaseMt",
+  "fileDespatchMt",
+] as const;
+type OrderReviewValues = Pick<
+  ParsedOrderReviewRow,
+  (typeof ORDER_REVIEW_VALUE_FIELDS)[number]
+>;
+
+// Case-insensitive structure match key (project is already normalized). Structure
+// CASE is preserved in storage for the WIP join; only the dedup KEY upper-cases so
+// daily files with case drift resolve to the same current row.
+function matchKey(project: string, structure: string): string {
+  return `${project}\u0001${structure.toUpperCase()}`;
+}
+
+// Collapse parsed rows to ONE value set per (project, structure) match key. The
+// Order Review file is unique per key, but defensively sum numeric measures and
+// take the first non-null text if a key repeats — mirrors the dispatch-seed sum.
+function collapseOrderRows(
+  rows: ParsedOrderReviewRow[],
+): Map<string, ParsedOrderReviewRow> {
+  const byKey = new Map<string, ParsedOrderReviewRow>();
+  for (const r of rows) {
+    if (!r.structure) continue;
+    const key = matchKey(r.project, r.structure);
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, { ...r });
+      continue;
+    }
+    prev.subType = prev.subType ?? r.subType;
+    prev.bomType = prev.bomType ?? r.bomType;
+    const addNum = (a: number | null, b: number | null): number | null =>
+      a == null && b == null ? null : (a ?? 0) + (b ?? 0);
+    prev.sets = addNum(prev.sets, r.sets);
+    prev.weightMt = addNum(prev.weightMt, r.weightMt);
+    prev.releaseMt = addNum(prev.releaseMt, r.releaseMt);
+    prev.fileDespatchMt = addNum(prev.fileDespatchMt, r.fileDespatchMt);
+  }
+  return byKey;
+}
+
+// Field-level diff of stored vs incoming values; empty = identical (no value change).
+function diffOrderValues(
+  before: OrderReviewValues,
+  after: OrderReviewValues,
+): OrderReviewFieldChange[] {
+  const changes: OrderReviewFieldChange[] = [];
+  for (const field of ORDER_REVIEW_VALUE_FIELDS) {
+    const a = before[field] ?? null;
+    const b = after[field] ?? null;
+    if (a !== b) changes.push({ field, from: a, to: b });
+  }
+  return changes;
+}
+
+// Ingest one Order Review file as an idempotent daily snapshot: log the upload in
+// order_review_imports (with its change log), then UPSERT the one current row per
+// (project, structure) — insert new keys, update changed values IN PLACE, leave
+// identical rows untouched (only bump last-seen importId), and FLAG (keep, never
+// delete) keys absent from this file. Then capture-once seed any new dispatch keys
+// and deterministically recompute accrued dispatch + ledger. Purely additive —
+// never touches WIP state, and never mutates the append-only dispatch ledger
+// logic (it is rebuilt from WIP yard-departures, unaffected by order-book edits).
 export async function ingestOrderReview(
   buffer: Buffer,
   meta: { sourceFilename: string; label: string | null },
@@ -461,21 +530,99 @@ export async function ingestOrderReview(
     })
     .returning({ id: orderReviewImportsTable.id });
 
-  const rowValues = parsed.rows.map((r) => ({
-    importId: imp.id,
-    project: r.project,
-    structure: r.structure,
-    subType: r.subType,
-    sets: r.sets,
-    weightMt: r.weightMt,
-    bomType: r.bomType,
-    releaseMt: r.releaseMt,
-    fileDespatchMt: r.fileDespatchMt,
-  }));
-  const chunk = 500;
-  for (let i = 0; i < rowValues.length; i += chunk) {
-    await db.insert(orderReviewRowsTable).values(rowValues.slice(i, i + chunk));
-  }
+  const incoming = collapseOrderRows(parsed.rows);
+
+  const changeLog: OrderReviewChangeLog = {
+    inserted: [],
+    updated: [],
+    unchanged: 0,
+    flagged: [],
+  };
+
+  await db.transaction(async (tx) => {
+    const existing = await tx.select().from(orderReviewRowsTable);
+    const existingByKey = new Map(
+      existing.map((row) => [matchKey(row.project, row.structure), row]),
+    );
+
+    const toInsert: (typeof orderReviewRowsTable.$inferInsert)[] = [];
+    // Keys present + identical -> only bump last-seen importId (a presence write,
+    // not a value change, so it is NOT counted as "updated").
+    const unchangedRowIds: number[] = [];
+
+    for (const [key, r] of incoming) {
+      const prior = existingByKey.get(key);
+      if (!prior) {
+        toInsert.push({
+          importId: imp.id,
+          project: r.project,
+          structure: r.structure,
+          subType: r.subType,
+          sets: r.sets,
+          weightMt: r.weightMt,
+          bomType: r.bomType,
+          releaseMt: r.releaseMt,
+          fileDespatchMt: r.fileDespatchMt,
+        });
+        changeLog.inserted.push({ project: r.project, structure: r.structure });
+        continue;
+      }
+      const changes = diffOrderValues(prior, r);
+      if (changes.length === 0) {
+        changeLog.unchanged++;
+        if (prior.importId !== imp.id) unchangedRowIds.push(prior.id);
+        continue;
+      }
+      // Update values IN PLACE (one current row per key); structure case is left
+      // as first stored to keep the WIP join key stable.
+      await tx
+        .update(orderReviewRowsTable)
+        .set({
+          importId: imp.id,
+          subType: r.subType,
+          sets: r.sets,
+          weightMt: r.weightMt,
+          bomType: r.bomType,
+          releaseMt: r.releaseMt,
+          fileDespatchMt: r.fileDespatchMt,
+        })
+        .where(eq(orderReviewRowsTable.id, prior.id));
+      changeLog.updated.push({
+        project: prior.project,
+        structure: prior.structure,
+        changes,
+      });
+    }
+
+    // Insert genuinely new keys.
+    const chunk = 500;
+    for (let i = 0; i < toInsert.length; i += chunk) {
+      await tx
+        .insert(orderReviewRowsTable)
+        .values(toInsert.slice(i, i + chunk));
+    }
+
+    // Bump last-seen importId for present-but-unchanged rows so they are not
+    // wrongly flagged as absent from the latest file.
+    for (let i = 0; i < unchangedRowIds.length; i += chunk) {
+      await tx
+        .update(orderReviewRowsTable)
+        .set({ importId: imp.id })
+        .where(inArray(orderReviewRowsTable.id, unchangedRowIds.slice(i, i + chunk)));
+    }
+
+    // Flag (keep, never delete) keys present before but absent from this file.
+    for (const [key, row] of existingByKey) {
+      if (!incoming.has(key)) {
+        changeLog.flagged.push({ project: row.project, structure: row.structure });
+      }
+    }
+  });
+
+  await db
+    .update(orderReviewImportsTable)
+    .set({ changeLog })
+    .where(eq(orderReviewImportsTable.id, imp.id));
 
   const seeded = await seedDispatchFromOrderReview(parsed.rows, parsed.asOnDate);
   await recomputeDispatch();

@@ -917,79 +917,65 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
         return;
       }
     }
-    // Atomically claim this staged row for an Order Review ingest. Only the first
-    // commit to reach here wins (committed_order_review_import_id IS NULL); a
-    // concurrent duplicate loses and replays the winner, so one ingest per file.
-    let ingest;
+    // Serialize the whole Order Review commit under the shared dispatch advisory
+    // lock (the same one WIP merges take). The ingest now UPSERTS shared current
+    // rows in place, so two concurrent commits of the same staged file must NOT
+    // interleave — that would create duplicate imports and leave rows pointing at
+    // a dropped import (wrongly flagged "not in latest"). Holding the lock for
+    // this transaction's lifetime forces concurrent commits to wait, then observe
+    // the idempotency guard already set and replay the winner without re-ingesting.
+    let outcome: {
+      importRow: typeof orderReviewImportsTable.$inferSelect;
+      seeded: number;
+      created: boolean;
+    };
     try {
-      ingest = await ingestOrderReview(staged.fileData, {
-        sourceFilename: staged.sourceFilename,
-        label: staged.label,
+      outcome = await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(728041)`);
+        // Re-check the idempotency guard under the lock: a concurrent commit may
+        // have ingested this exact staged file while we were waiting.
+        const [fresh] = await tx
+          .select({
+            committedOrderReviewImportId:
+              uploadStagingTable.committedOrderReviewImportId,
+          })
+          .from(uploadStagingTable)
+          .where(eq(uploadStagingTable.id, stagingId));
+        const winnerId = fresh?.committedOrderReviewImportId ?? null;
+        if (winnerId != null) {
+          const [winner] = await tx
+            .select()
+            .from(orderReviewImportsTable)
+            .where(eq(orderReviewImportsTable.id, winnerId));
+          if (winner) return { importRow: winner, seeded: 0, created: false };
+        }
+        // We hold the lock and the file is unclaimed: this transaction owns the
+        // ingest. ingestOrderReview runs its own writes via the pool, serialized
+        // by the lock we hold here.
+        const ingest = await ingestOrderReview(staged.fileData, {
+          sourceFilename: staged.sourceFilename,
+          label: staged.label,
+        });
+        await tx
+          .update(uploadStagingTable)
+          .set({ committedOrderReviewImportId: ingest.importId })
+          .where(eq(uploadStagingTable.id, stagingId));
+        const [imp] = await tx
+          .select()
+          .from(orderReviewImportsTable)
+          .where(eq(orderReviewImportsTable.id, ingest.importId));
+        return { importRow: imp, seeded: ingest.seeded, created: true };
       });
     } catch (err) {
       req.log.warn({ err, stagingId }, "Order Review ingest failed");
       res.status(400).json({ error: "Could not ingest the Order Review file" });
       return;
     }
-    const claimedOr = await db
-      .update(uploadStagingTable)
-      .set({ committedOrderReviewImportId: ingest.importId })
-      .where(
-        and(
-          eq(uploadStagingTable.id, stagingId),
-          isNull(uploadStagingTable.committedOrderReviewImportId),
-        ),
-      )
-      .returning({ id: uploadStagingTable.id });
 
-    if (claimedOr.length === 0) {
-      // Lost the race: another concurrent commit already ingested this file.
-      // Resolve the winner first, then drop our orphan ingest.
-      const [winnerRow] = await db
-        .select({
-          committedOrderReviewImportId:
-            uploadStagingTable.committedOrderReviewImportId,
-        })
-        .from(uploadStagingTable)
-        .where(eq(uploadStagingTable.id, stagingId));
-      const winnerId = winnerRow?.committedOrderReviewImportId ?? null;
-      const [winner] =
-        winnerId != null && winnerId !== ingest.importId
-          ? await db
-              .select()
-              .from(orderReviewImportsTable)
-              .where(eq(orderReviewImportsTable.id, winnerId))
-          : [];
-      if (winner) {
-        // Roll back the duplicate ingest we just created (cascades its rows;
-        // WIP state and the record pool are untouched), then re-seed/recompute.
-        await db
-          .delete(orderReviewImportsTable)
-          .where(eq(orderReviewImportsTable.id, ingest.importId));
-        try {
-          await recomputeDispatch();
-        } catch (err) {
-          req.log.warn({ err }, "Dispatch recompute after dropping duplicate Order Review failed");
-        }
-        req.log.warn(
-          { stagingId, droppedImportId: ingest.importId, importId: winner.id },
-          "Concurrent commit detected: dropped duplicate Order Review ingest",
-        );
-        res
-          .status(200)
-          .json({ kind: "order-review", orderReviewImport: winner, seeded: 0 });
-        return;
-      }
-    }
-
-    const [imp] = await db
-      .select()
-      .from(orderReviewImportsTable)
-      .where(eq(orderReviewImportsTable.id, ingest.importId));
-    res.status(201).json({
+    res.status(outcome.created ? 201 : 200).json({
       kind: "order-review",
-      orderReviewImport: imp,
-      seeded: ingest.seeded,
+      orderReviewImport: outcome.importRow,
+      seeded: outcome.seeded,
     });
     return;
   }

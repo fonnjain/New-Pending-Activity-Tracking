@@ -1,0 +1,67 @@
+REPLIT AGENT PROMPT — ORDER REVIEW FILE: IDEMPOTENT UPSERT (no duplicate rows on re-upload)
+===========================================================================================
+Make the Order Review file intake idempotent and non-duplicating: re-uploading the same file
+changes nothing; the next day's file UPDATES values in place (one current row per
+Project+Structure), never appending duplicates. Deterministic; do not change WIP parsing,
+ageing, dedup, classification, or the dispatch-ledger logic.
+
+MODEL — ONE CURRENT ROW PER (Project + Structure)
+Unlike the WIP file (multiset append of marks), the Order Review file is a DAILY SNAPSHOT at
+the Project+Structure level where values change over time (Release, Despatch, Sets, Weight,
+as-on date). So dedup is an UPSERT keyed on the join key, NOT an append:
+  KEY = (normalized Project Code, Structure[=Col C alias]).
+  (Project+Structure is unique in the Order Review file — verified.)
+
+UPSERT RULES (on each Order Review upload)
+  - For each parsed structure row:
+      * KEY not in order_review_rows -> INSERT it (new structure).
+      * KEY exists -> UPDATE the existing row's fields IN PLACE (sub_type, sets, weight_mt,
+        bom_type, release_mt, file_despatch_mt, as_on_date, import_id). Do NOT insert a
+        second row.
+  - Keep exactly ONE current row per (Project, Structure). Overwrite-to-latest (option a):
+    no per-day history table for the order-book values. (The dispatch_ledger already records
+    dispatch movement over time, so the dispatch trail is preserved separately.)
+  - IDEMPOTENT: re-uploading the IDENTICAL file results in 0 inserts and 0 value changes
+    (every field already equals the incoming value -> no-op update / skip).
+  - Use a content check so an unchanged row is not counted as "updated": compare incoming
+    values to stored; only write if something actually differs.
+
+NORMALIZATION (so keys match across days)
+  - Project Code: trim + strip trailing dot/period and ".0" (same rule as WIP), so "898." and
+    "898" are the SAME key.
+  - Structure (Col C / alias): trim + collapse internal whitespace; match case-insensitively
+    (store canonical form). Do NOT merge structures that genuinely differ.
+  - This prevents phantom "new row" duplicates caused by trailing dots or spacing.
+
+CHANGE LOG (per Order Review import) — mirror the WIP change-log
+  Report, for each upload:
+    - inserted: new (Project, Structure) rows.
+    - updated: rows whose values changed, with field-level from -> to (e.g. Despatch
+      12.500 -> 18.250, Release ..., as_on_date ...).
+    - unchanged: count.
+    - removed (optional): structures present before but absent in the new file — do NOT
+      delete by default (a structure may be omitted from one export); flag them as
+      "not in latest order review" rather than dropping. (Confirm behaviour; default = keep +
+      flag.)
+  Show this on the Data page (and the Order Status tab) so the user sees what the daily file
+  changed.
+
+INTERACTION WITH DISPATCH / CROSS-CHECK
+  - The upsert updates file_despatch_mt (the file's Despatch). The app's COMPUTED dispatch
+    (from marks leaving Yard) is separate and unchanged by this. The 1% cross-check compares
+    the (now-updated) file_despatch_mt to the computed dispatch_mt, as already specified.
+  - Updating order-book values must NOT retroactively change the dispatch ledger; the ledger
+    is append-only from WIP yard-departures.
+
+ACCEPTANCE CHECK
+  - Uploading the same Order Review file twice: second upload = 0 inserts, 0 updates
+    (idempotent); no duplicate rows.
+  - Next day's file with changed values: existing (Project, Structure) rows are UPDATED in
+    place (one row each); only genuinely new structures are inserted; change-log shows
+    field-level updates.
+  - "898." vs "898" (and spacing variants) resolve to the SAME row — no phantom duplicates.
+  - One current row per (Project, Structure) always; no per-day duplication.
+  - Structures missing from a later file are flagged (kept), not silently deleted.
+  - Dispatch ledger and computed dispatch unaffected; 1% cross-check uses the updated file
+    value.
+  - No change to WIP parsing, ageing, dedup, classification, or warnings.

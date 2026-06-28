@@ -5,10 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OrderReviewChangeLog } from './orderReviewChangeLog';
 import type { OrderReviewSummary } from './orderReviewSummary';
 
 /**
- * One immutable Order Review file ingest.
+ * One Order Review file upload (rows are upserted, not appended).
  */
 export interface OrderReviewImport {
   id: number;
@@ -18,5 +19,6 @@ export interface OrderReviewImport {
   /** @nullable */
   asOnDate: string | null;
   summary: OrderReviewSummary;
+  changeLog: OrderReviewChangeLog | null;
   createdAt: string;
 }

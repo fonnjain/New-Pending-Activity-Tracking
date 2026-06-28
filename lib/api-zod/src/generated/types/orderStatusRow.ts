@@ -33,4 +33,6 @@ export interface OrderStatusRow {
   accruedMt: number;
   /** seedMt + accruedMt. */
   computedDispatchMt: number;
+  /** Current order row absent from the latest Order Review file (kept, not deleted). */
+  notInLatest: boolean;
 }

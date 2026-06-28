@@ -1,0 +1,83 @@
+REPLIT AGENT PROMPT — SEPARATE UPLOAD PATHS FOR THE TWO FILE TYPES (WIP vs Order Review)
+========================================================================================
+The Data page currently has ONE generic "Upload Report / Select File" control, which is now
+ambiguous because there are TWO different input files. Provide TWO clearly-labelled, separate
+upload paths, and make the sanity check validate each file against the EXPECTED type for the
+slot it was uploaded to (not just auto-detect). Deterministic; do not change the underlying
+parse/merge/dispatch logic — only the upload UX and the type-matched validation.
+
+============================================================
+1. TWO LABELLED UPLOAD SLOTS ON THE DATA PAGE
+============================================================
+Replace the single uploader with two distinct, clearly-labelled cards/buttons:
+  A) "WIP / Balance & Activity Report"  (the mark-level WIP file)
+        helper: "The daily WIP balance/activity export (marks, activities, weights).
+                 Staged and checked first; nothing imports until you accept. Re-uploading the
+                 same file is safe and registers zero changes."
+  B) "Order Review File"  (the order-book / dispatch file)
+        helper: "The Order Review export (per project & structure: sets, weight, release,
+                 dispatch). Updates the Order Status page; re-uploading is safe (idempotent
+                 upsert, one row per project+structure)."
+  - Each slot has its own Select File button and its own staged-preview/accept flow.
+  - Make the two visually distinct and unambiguous so a user never wonders which file goes
+    where.
+
+============================================================
+2. TYPE-MATCHED VALIDATION (expected type per slot)
+============================================================
+Each slot tells the validator which type to EXPECT, so a wrong file in the wrong slot is
+caught clearly:
+  - File uploaded to slot A is validated as a WIP file; to slot B as an Order Review file.
+  - On VALIDATE, run the deterministic structural check for the EXPECTED type:
+      WIP expects: header with Project Code / Order Nature / Contractor / Mark No. / Activity
+                   / ... (18/19 cols), activity codes, etc.
+      Order Review expects: "Order Review" banner, multi-row header, "BOM Label",
+                   "Despatch (MT)", structure rows keyed by Col C (=alias), project-header rows.
+  - If the file does NOT match the slot's expected type:
+      * If it clearly matches the OTHER known type -> reject with a helpful message:
+        "This looks like a <other type> file — please use the <correct slot> uploader."
+        (Optionally offer a one-click 'switch to the correct slot'.)
+      * If it matches neither -> reject: "This doesn't look like a valid WIP or Order Review
+        file."
+  - Only on a correct-type + valid file does the staged preview + Accept appear, then commit
+    routes to that type's intake (WIP -> parse/merge; Order Review -> idempotent upsert +
+    dispatch cross-check).
+  - Keep auto-detect as a SECONDARY safety net (to power the "looks like the other type"
+    message), but the SLOT defines the expected type — no silent mis-routing.
+
+============================================================
+3. SANITY CHECK COVERS BOTH (per type)
+============================================================
+Extend the gatekeeper so its checks run per file type:
+  WIP file checks (existing): header auto-detect, required columns, Mark No. parse cases,
+    TLT/NTLT classification non-null, forward-fill rule, ageing/date splits, idempotent
+    multiset merge, unknown activity codes, etc.
+  Order Review file checks (new): "Order Review" structure detected; project codes normalized
+    (trailing dot/.0 stripped); Col C (alias/structure) present and joinable to WIP (report
+    matched vs unmatched count); Sets/Weight/Release/Despatch numeric; as-on date parsed;
+    idempotent upsert (same file -> 0 inserts/0 updates); 1% dispatch cross-check produces the
+    mismatch list.
+  Sanitisation stays descriptive-only for BOTH (formatting/dates only; never alter
+    quantities, dispatch, alias, project, activity; blanks stay blank; distinct names not
+    merged).
+  Each upload returns a type-appropriate intake summary (WIP: added/updated/completed,
+    TLT/NTLT split; Order Review: inserted/updated/unchanged structures, WIP-match count,
+    dispatch mismatches).
+
+============================================================
+4. NO-KEY / OFFLINE
+============================================================
+  - Both slots still work with no AI key/network via "Skip check & import as-is" (the
+    deterministic structural validation for the slot's expected type still runs; only the AI
+    review is skipped).
+
+ACCEPTANCE CHECK
+  - Data page shows TWO clearly-labelled uploaders: WIP/Balance & Activity, and Order Review.
+  - A WIP file in the WIP slot validates and imports via parse/merge; an Order Review file in
+    the Order Review slot validates and upserts + cross-checks dispatch.
+  - A WIP file dropped into the Order Review slot (or vice-versa) is rejected with a clear
+    "looks like the other type — use the correct uploader" message; neither commits.
+  - A file matching neither type is rejected.
+  - Sanity check runs the correct checks per type; each returns its own intake summary;
+    sanitisation stays descriptive-only.
+  - Both slots work offline via skip-check. No change to parse/merge/dispatch logic itself.

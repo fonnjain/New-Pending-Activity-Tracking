@@ -2403,9 +2403,74 @@ components:
       required:
         - items
         - generatedAt
+    OrderReviewFieldChange:
+      type: object
+      description: One field's value change for an updated order row.
+      properties:
+        field:
+          type: string
+        from:
+          type: ["string", "number", "null"]
+        to:
+          type: ["string", "number", "null"]
+      required:
+        - field
+        - from
+        - to
+    OrderReviewRowChange:
+      type: object
+      description: One updated (project, structure) order row with its field changes.
+      properties:
+        project:
+          type: string
+        structure:
+          type: string
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderReviewFieldChange"
+      required:
+        - project
+        - structure
+        - changes
+    OrderReviewKeyRef:
+      type: object
+      description: A (project, structure) order-row reference.
+      properties:
+        project:
+          type: string
+        structure:
+          type: string
+      required:
+        - project
+        - structure
+    OrderReviewChangeLog:
+      type: object
+      description: What one Order Review upload changed vs the current order rows.
+      properties:
+        inserted:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderReviewKeyRef"
+        updated:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderReviewRowChange"
+        unchanged:
+          type: integer
+        flagged:
+          type: array
+          description: Current rows absent from this upload (kept, not deleted).
+          items:
+            $ref: "#/components/schemas/OrderReviewKeyRef"
+      required:
+        - inserted
+        - updated
+        - unchanged
+        - flagged
     OrderReviewImport:
       type: object
-      description: One immutable Order Review file ingest.
+      description: One Order Review file upload (rows are upserted, not appended).
       properties:
         id:
           type: integer
@@ -2417,6 +2482,10 @@ components:
           type: ["string", "null"]
         summary:
           $ref: "#/components/schemas/OrderReviewSummary"
+        changeLog:
+          oneOf:
+            - $ref: "#/components/schemas/OrderReviewChangeLog"
+            - type: "null"
         createdAt:
           type: string
       required:
@@ -2425,6 +2494,7 @@ components:
         - sourceFilename
         - asOnDate
         - summary
+        - changeLog
         - createdAt
     OrderReviewSummary:
       type: object
@@ -2493,6 +2563,9 @@ components:
         computedDispatchMt:
           type: number
           description: seedMt + accruedMt.
+        notInLatest:
+          type: boolean
+          description: Current order row absent from the latest Order Review file (kept, not deleted).
       required:
         - project
         - structure
@@ -2505,6 +2578,7 @@ components:
         - seedMt
         - accruedMt
         - computedDispatchMt
+        - notInLatest
     DispatchReconciliationRow:
       type: object
       description: File-vs-computed dispatch comparison for one (project, structure).
