@@ -8,9 +8,11 @@ import type { OrderReviewSummary } from "@workspace/db";
 // balance/activity report. It is joined to WIP marks on (project, structure):
 //   - project   = forward-filled "Project Code : NNN" banner
 //   - structure = Tower Type Code (col C) — matches a WIP mark's derived structure
-// Columns are matched by HEADER NAME first (robust to layout drift) with a
-// fixed letter-position fallback (C/D/I/J/K/L/Q). Everything here is read-only
-// and additive: it never touches WIP parsing, dedup, ageing, or the row hash.
+// The export uses a TWO-ROW header (merged group row over a sub-header row), so
+// columns are matched by COMPOSITE header label first (robust to layout drift)
+// with a fixed letter-position fallback (C/D/F/G/K/L/Q). Everything here is
+// read-only and additive: it never touches WIP parsing, dedup, ageing, or the
+// row hash.
 
 export type OrderReviewFileType = "wip" | "order-review" | "unknown";
 
@@ -166,19 +168,6 @@ export function detectFileType(buffer: Buffer): OrderReviewFileType {
   return "unknown";
 }
 
-// Header aliases per logical column, matched case-insensitively against the
-// detected header row. The first matching header cell wins; otherwise we fall
-// back to the fixed letter position (0-based index) seen in the sample export.
-const HEADER_ALIASES: { key: keyof ColumnIndex; aliases: string[]; fallback: number }[] = [
-  { key: "structure", aliases: ["tower type code", "tower type", "structure", "type code"], fallback: 2 },
-  { key: "subType", aliases: ["sub type", "subtype", "sub-type"], fallback: 3 },
-  { key: "sets", aliases: ["sets", "set", "no of sets", "nos"], fallback: 8 },
-  { key: "weightMt", aliases: ["weight mt", "weight(mt)", "weight (mt)", "weight", "wt mt", "wt(mt)"], fallback: 9 },
-  { key: "bomType", aliases: ["bom label", "bom type", "bom", "bom status"], fallback: 10 },
-  { key: "releaseMt", aliases: ["release mt", "release(mt)", "release (mt)", "release", "released mt"], fallback: 11 },
-  { key: "fileDespatchMt", aliases: ["despatch mt", "despatch(mt)", "despatch (mt)", "dispatch mt", "despatch", "dispatch", "despatched mt"], fallback: 16 },
-];
-
 interface ColumnIndex {
   structure: number;
   subType: number;
@@ -189,48 +178,121 @@ interface ColumnIndex {
   fileDespatchMt: number;
 }
 
-// Locate the header row by scanning the first ~15 rows for one containing both a
-// tower-type/structure header and a weight/despatch header. Returns -1 if none.
+// A logical column spec resolved against COMPOSITE header labels (see
+// buildHeaderModel). `include` is a list of term-groups tried in order; a column
+// matches a group when its composite label contains EVERY term in that group and
+// NONE of the `exclude` terms. The first matching column (lowest index) wins; if
+// nothing matches, `fallback` (0-based letter position) is used. Composite
+// matching is what disambiguates the export's duplicate headers: "Order Qty.
+// Weight" (the total order weight we want, col G) vs "Weight / Set (MT)" (col E,
+// per-set) and "WO Order Qty. Weight (MT)" (col J); and "Progress Release (MT)"
+// (col L) vs "Balance Release (MT)".
+interface HeaderSpec {
+  key: keyof ColumnIndex;
+  include: string[][];
+  exclude?: string[];
+  fallback: number;
+}
+
+// Field -> source column in this export: structure=C, subType=D, sets=F
+// (Order Qty > Sets), weight=G (Order Qty > Weight = total order weight), bom=K,
+// release=L (Progress > Release), despatch=Q (Progress > Despatch, seed-only).
+const HEADER_SPECS: HeaderSpec[] = [
+  { key: "structure", include: [["tower type"], ["type code"], ["structure"]], fallback: 2 },
+  { key: "subType", include: [["sub type"], ["subtype"]], fallback: 3 },
+  { key: "sets", include: [["order qty", "sets"], ["sets"]], exclude: ["wo", "work order"], fallback: 5 },
+  { key: "weightMt", include: [["order qty", "weight"], ["weight (mt)"], ["weight"]], exclude: ["wo", "work order", "/ set", "per set", "balance"], fallback: 6 },
+  { key: "bomType", include: [["bom"]], fallback: 10 },
+  { key: "releaseMt", include: [["progress", "release"], ["release"]], exclude: ["balance"], fallback: 11 },
+  { key: "fileDespatchMt", include: [["progress", "despatch"], ["progress", "dispatch"], ["despatch"], ["dispatch"]], exclude: ["balance"], fallback: 16 },
+];
+
+// Lowercase + collapse whitespace for a header cell ("BOM\nLabel" -> "bom label").
+function headerText(value: Cell): string {
+  return cellStr(value).replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+// True when a row looks like the sub-header row of a two-row header: it carries
+// several measure sub-tokens and is not itself a data/banner row.
+function looksLikeSubHeader(cells: unknown[]): boolean {
+  const tokens = ["sets", "weight", "release", "despatch", "dispatch", "fabrication", "galvanising", "inspection", "(mt)", "work order"];
+  let hits = 0;
+  for (const c of cells) {
+    const t = headerText(c as Cell);
+    if (!t) continue;
+    if (PROJECT_BANNER.test(t)) return false;
+    if (tokens.some((tok) => t.includes(tok))) hits++;
+  }
+  return hits >= 2;
+}
+
+// Locate the PRIMARY (group) header row: the first of the top rows carrying a
+// tower-type/structure header, where measures appear either in that row or the
+// sub-header row directly below it (two-row header). Returns -1 if none.
 function detectHeaderRow(grid: unknown[][]): number {
   const limit = Math.min(grid.length, 15);
+  const hasMeasure = (cells: unknown[]): boolean =>
+    cells.some((c) => {
+      const t = headerText(c as Cell);
+      return t.includes("weight") || t.includes("despatch") || t.includes("dispatch") || t.includes("release");
+    });
   for (let i = 0; i < limit; i++) {
     const cells = grid[i];
     if (!Array.isArray(cells)) continue;
-    const lc = cells.map((c) => (c == null ? "" : String(c).trim().toLowerCase()));
-    const hasType = lc.some((c) => c.includes("tower type") || c === "structure" || c.includes("type code"));
-    const hasMeasure = lc.some(
-      (c) => c.includes("weight") || c.includes("despatch") || c.includes("dispatch") || c.includes("release"),
-    );
-    if (hasType && hasMeasure) return i;
+    const hasType = cells.some((c) => {
+      const t = headerText(c as Cell);
+      return t.includes("tower type") || t === "structure" || t.includes("type code");
+    });
+    if (!hasType) continue;
+    if (hasMeasure(cells)) return i;
+    const next = grid[i + 1];
+    if (Array.isArray(next) && hasMeasure(next)) return i;
   }
   return -1;
 }
 
-// Build the logical->physical column index from a header row, with letter
-// fallbacks for any header we cannot name-match.
-function buildColumnIndex(headerCells: unknown[]): ColumnIndex {
-  const lc = headerCells.map((c) => (c == null ? "" : String(c).trim().toLowerCase()));
-  const idx = {} as ColumnIndex;
-  for (const { key, aliases, fallback } of HEADER_ALIASES) {
-    let found = -1;
-    for (const a of aliases) {
-      const at = lc.findIndex((cell) => cell === a);
-      if (at !== -1) {
-        found = at;
-        break;
-      }
-    }
-    if (found === -1) {
-      for (const a of aliases) {
-        const at = lc.findIndex((cell) => cell.includes(a));
-        if (at !== -1) {
-          found = at;
-          break;
-        }
-      }
-    }
-    idx[key] = found === -1 ? fallback : found;
+// Build one COMPOSITE label per physical column by forward-filling the group
+// header row across its merged span (SheetJS leaves merged-cell continuations
+// null) and joining it to the sub-header row when present. Also returns the first
+// data row index (after the one- or two-row header).
+function buildHeaderModel(
+  grid: unknown[][],
+  headerRow: number,
+): { labels: string[]; dataStart: number } {
+  if (headerRow < 0 || !Array.isArray(grid[headerRow])) {
+    return { labels: [], dataStart: headerRow >= 0 ? headerRow + 1 : 0 };
   }
+  const group = grid[headerRow] as unknown[];
+  const subRow = grid[headerRow + 1];
+  const twoRow = Array.isArray(subRow) && looksLikeSubHeader(subRow);
+  const sub = (twoRow ? subRow : []) as unknown[];
+  const width = Math.max(group.length, sub.length);
+  const labels: string[] = [];
+  let carry = "";
+  for (let i = 0; i < width; i++) {
+    const g = headerText(group[i] as Cell);
+    if (g) carry = g;
+    const s = twoRow ? headerText(sub[i] as Cell) : "";
+    labels[i] = `${carry} ${s}`.replace(/\s+/g, " ").trim();
+  }
+  return { labels, dataStart: twoRow ? headerRow + 2 : headerRow + 1 };
+}
+
+// Resolve logical -> physical column indices from composite header labels.
+function buildColumnIndex(labels: string[]): ColumnIndex {
+  const resolve = (spec: HeaderSpec): number => {
+    for (const group of spec.include) {
+      for (let i = 0; i < labels.length; i++) {
+        const l = labels[i];
+        if (!l) continue;
+        if (spec.exclude?.some((x) => l.includes(x))) continue;
+        if (group.every((t) => l.includes(t))) return i;
+      }
+    }
+    return spec.fallback;
+  };
+  const idx = {} as ColumnIndex;
+  for (const spec of HEADER_SPECS) idx[spec.key] = resolve(spec);
   return idx;
 }
 
@@ -263,12 +325,9 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
   const grid = getGrid(buffer);
   const headerRow = detectHeaderRow(grid);
   const asOnDate = detectAsOnDate(grid, headerRow);
-  const cols =
-    headerRow >= 0 && Array.isArray(grid[headerRow])
-      ? buildColumnIndex(grid[headerRow] as unknown[])
-      : buildColumnIndex([]);
+  const { labels, dataStart } = buildHeaderModel(grid, headerRow);
+  const cols = buildColumnIndex(labels);
 
-  const dataStart = headerRow >= 0 ? headerRow + 1 : 0;
   const rows: ParsedOrderReviewRow[] = [];
   const projects = new Set<string>();
   let currentProject = "";

@@ -72,3 +72,18 @@ ever ingesting. Any future shared-state UPSERT under a retry-guard must recheck 
 **How to apply:** any new file type added to the staging flow must extend `detectFileType`, the
 `StageResult.fileType` enum, and the `CommitResult` union — do not assume a single file shape.
 Direct `POST /imports` stays WIP-only (`UploadResult`); the dual-file logic lives in the staged path.
+
+## Order Review export has a TWO-ROW header (the column-misread gotcha)
+**Why:** the file's header is a merged GROUP row ("Order Qty.", "WO Order Qty.", "Progress",
+"Balance") over a SUB row ("Sets", "Weight", "Release (MT)", "Despatch (MT)"). A naive single-row
+alias matcher detects the group row and substring-matches "set"/"weight" onto the unrelated col E
+"Weight / Set (MT)" (per-set), so Sets AND Weight both read the wrong column and totals are tiny.
+**How to apply:** resolve columns against COMPOSITE labels = forward-fill the merged group row across
+its span, then join group+sub per column; match with include/exclude term-groups. Disambiguations
+that MUST hold: Sets/Weight = "Order Qty." block (cols F/G, the total order weight) NOT "WO Order Qty."
+nor per-set col E; Release/Despatch = "Progress" block (cols L/Q) NOT the "Balance" block (remaining).
+Letter fallbacks C/D/F/G/K/L/Q. After a parser column fix, RE-INGEST the stored file (ingestOrderReview
+is idempotent; dispatch seed is capture-once so seeded=0) — old committed rows keep the wrong values.
+**Join reality:** WIP `structure` (=alias_corrected) is the best join field (715/2039 OR keys match;
+raw alias 647; tower_type 0). "0 everywhere" is usually WIP coverage (one WIP file covered only 56 of
+153 OR projects), NOT a join bug. Fab/Galv/Yard are computed from WIP, never from the file's M/N/O.
