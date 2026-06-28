@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTracker } from "@/lib/store";
 import {
   useGetOrderStatus,
@@ -12,7 +12,13 @@ import { bundleActivitySet } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { exportToXlsx, type XlsxColumn } from "@/lib/export";
-import { FileSpreadsheet, PackageCheck, AlertTriangle } from "lucide-react";
+import {
+  FileSpreadsheet,
+  PackageCheck,
+  AlertTriangle,
+  ChevronRight,
+  ChevronDown,
+} from "lucide-react";
 
 // Activity buckets used to roll WIP marks into Fabrication / Galvanizing / Yard.
 // Galvanizing = G,GB; Yard = Y (terminal). Everything else still in the route is
@@ -438,55 +444,82 @@ function ProjectGroup({
   };
 }) {
   const { project, list, subtotal } = group;
+  const [open, setOpen] = useState(false);
   return (
     <>
-      <tr className="bg-muted/20 border-b">
-        <td colSpan={11} className="px-3 py-1.5 font-semibold text-xs uppercase tracking-wide text-muted-foreground">
-          {project}
+      <tr
+        className="border-b border-primary/20 bg-primary/10 hover:bg-primary/15 cursor-pointer"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <td colSpan={3} className="px-3 py-2">
+          <div className="flex items-center gap-2">
+            {open ? (
+              <ChevronDown className="h-4 w-4 text-primary shrink-0" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-primary shrink-0" />
+            )}
+            <span className="font-bold text-foreground tracking-wide">
+              {project}
+            </span>
+            <span className="text-[10px] uppercase text-muted-foreground">
+              {list.length} structure{list.length === 1 ? "" : "s"}
+            </span>
+          </div>
         </td>
+        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.weightMt)}</td>
+        <td className="px-3 py-2" />
+        <td className="px-3 py-2" />
+        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.fabMt)}</td>
+        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.galvMt)}</td>
+        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.yardMt)}</td>
+        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.fileDespatchMt)}</td>
+        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.computedDispatchMt)}</td>
       </tr>
-      {list.map((r) => (
-        <tr key={`${r.project}-${r.structure}`} className="border-b last:border-0 hover:bg-muted/30">
-          <td className="px-3 py-2">
-            <span>{r.structure}</span>
-            {!r.inFile && (
-              <span className="ml-2 text-[10px] uppercase text-muted-foreground">WIP only</span>
-            )}
-            {!r.inWip && (
-              <span className="ml-2 text-[10px] uppercase text-muted-foreground">file only</span>
-            )}
-            {r.outOfScope && (
-              <span className="ml-2 text-[10px] uppercase text-amber-600 dark:text-amber-400">NTLT - out of scope</span>
-            )}
-            {r.notInLatest && (
-              <span className="ml-2 text-[10px] uppercase text-rose-600 dark:text-rose-400">not in latest file</span>
-            )}
-          </td>
-          <td className="px-3 py-2">{r.subType ?? "-"}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{r.sets ?? "-"}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{mt(r.weightMt)}</td>
-          <td className="px-3 py-2">{r.bomType ?? "-"}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{mt(r.releaseMt)}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.fabMt)}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.galvMt)}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.yardMt)}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{mt(r.fileDespatchMt)}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{mt(r.computedDispatchMt)}</td>
+      {open &&
+        list.map((r) => (
+          <tr key={`${r.project}-${r.structure}`} className="border-b last:border-0 hover:bg-muted/30">
+            <td className="px-3 py-2 pl-9">
+              <span>{r.structure}</span>
+              {!r.inFile && (
+                <span className="ml-2 text-[10px] uppercase text-muted-foreground">WIP only</span>
+              )}
+              {!r.inWip && (
+                <span className="ml-2 text-[10px] uppercase text-muted-foreground">file only</span>
+              )}
+              {r.outOfScope && (
+                <span className="ml-2 text-[10px] uppercase text-amber-600 dark:text-amber-400">NTLT - out of scope</span>
+              )}
+              {r.notInLatest && (
+                <span className="ml-2 text-[10px] uppercase text-rose-600 dark:text-rose-400">not in latest file</span>
+              )}
+            </td>
+            <td className="px-3 py-2">{r.subType ?? "-"}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{r.sets ?? "-"}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{mt(r.weightMt)}</td>
+            <td className="px-3 py-2">{r.bomType ?? "-"}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{mt(r.releaseMt)}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.fabMt)}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.galvMt)}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.yardMt)}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{mt(r.fileDespatchMt)}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{mt(r.computedDispatchMt)}</td>
+          </tr>
+        ))}
+      {open && (
+        <tr className="border-b bg-muted/10 text-xs">
+          <td className="px-3 py-1.5 pl-9 font-medium text-muted-foreground">Subtotal</td>
+          <td className="px-3 py-1.5" />
+          <td className="px-3 py-1.5" />
+          <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.weightMt)}</td>
+          <td className="px-3 py-1.5" />
+          <td className="px-3 py-1.5" />
+          <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.fabMt)}</td>
+          <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.galvMt)}</td>
+          <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.yardMt)}</td>
+          <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.fileDespatchMt)}</td>
+          <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.computedDispatchMt)}</td>
         </tr>
-      ))}
-      <tr className="border-b bg-muted/10 text-xs">
-        <td className="px-3 py-1.5 font-medium text-muted-foreground">Subtotal</td>
-        <td className="px-3 py-1.5" />
-        <td className="px-3 py-1.5" />
-        <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.weightMt)}</td>
-        <td className="px-3 py-1.5" />
-        <td className="px-3 py-1.5" />
-        <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.fabMt)}</td>
-        <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.galvMt)}</td>
-        <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.yardMt)}</td>
-        <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.fileDespatchMt)}</td>
-        <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.computedDispatchMt)}</td>
-      </tr>
+      )}
     </>
   );
 }
