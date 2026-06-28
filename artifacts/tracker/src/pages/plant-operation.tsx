@@ -461,7 +461,7 @@ function ContractorGroup({
           </div>
           <div className="flex items-center gap-4 text-right shrink-0">
             <div className="text-xs text-muted-foreground">
-              {stats.marks} marks • {formatWeight(stats.weight)}
+              {stats.marks} marks • <span className="font-bold text-foreground">{formatWeight(stats.weight)}</span>
             </div>
             <div className={`font-bold text-sm w-12 ${getAgeingColor(stats.avgAge)}`}>
               {stats.avgAge !== null ? `${stats.avgAge}d` : "-"}

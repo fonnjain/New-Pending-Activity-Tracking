@@ -660,7 +660,7 @@ function JobDetail({
           <h2 className="text-xl font-bold tracking-tight truncate">{label} {job}</h2>
           <p className="text-xs text-muted-foreground">
             {structureCount} {secondaryNoun} • {filtered.length.toLocaleString()} marks •{" "}
-            {totalQty.toLocaleString()} pcs • {formatWeight(totalWt)}
+            {totalQty.toLocaleString()} pcs • <span className="font-bold text-foreground">{formatWeight(totalWt)}</span>
           </p>
         </div>
       </div>

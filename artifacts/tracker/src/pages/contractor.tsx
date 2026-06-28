@@ -7,7 +7,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { formatWeight } from "@/lib/utils";
-import { ChevronDown, ChevronLeft, Search } from "lucide-react";
+import { ChevronDown, ChevronLeft, Search, Building2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { compareActivity, contractorCategoryLabel, outVendorTypeLabel } from "@workspace/domain";
 
@@ -131,7 +131,7 @@ function ContractorContent() {
                     <span className="truncate">{s.name}</span>
                     <ContractorCategoryBadge info={contractorCategoryFor(s.name, categoryMap)} />
                   </span>
-                  <span className="text-muted-foreground font-mono shrink-0">{formatWeight(s.weight)}</span>
+                  <span className="font-bold text-foreground font-mono shrink-0">{formatWeight(s.weight)}</span>
                 </div>
                 <div className="h-2.5 bg-muted rounded-full overflow-hidden flex">
                   <div 
@@ -213,6 +213,21 @@ function ContractorDetail({ name, records, categoryInfo, onBack }: { name: strin
     return { activities, sortedActivities };
   }, [filtered]);
 
+  const { projects, sortedProjects } = useMemo(() => {
+    const projects = new Map<string, any[]>();
+    filtered.forEach(r => {
+      const job = r.job || "(Unassigned)";
+      if (!projects.has(job)) projects.set(job, []);
+      projects.get(job)!.push(r);
+    });
+    const sortedProjects = Array.from(projects.entries())
+      .sort((a, b) =>
+        b[1].reduce((s, r) => s + r.balanceWt, 0) - a[1].reduce((s, r) => s + r.balanceWt, 0)
+      )
+      .map(([job]) => job);
+    return { projects, sortedProjects };
+  }, [filtered]);
+
   const totalQty = useMemo(() => filtered.reduce((sum, r) => sum + r.balanceQty, 0), [filtered]);
   const totalWt = useMemo(() => filtered.reduce((sum, r) => sum + r.balanceWt, 0), [filtered]);
 
@@ -233,7 +248,8 @@ function ContractorDetail({ name, records, categoryInfo, onBack }: { name: strin
             <ContractorCategoryBadge info={categoryInfo} />
           </div>
           <p className="text-xs text-muted-foreground">
-            {filtered.length.toLocaleString()} marks • {totalQty.toLocaleString()} pcs • {formatWeight(totalWt)} • {sortedActivities.length} activities
+            {filtered.length.toLocaleString()} marks • {totalQty.toLocaleString()} pcs •{" "}
+            <span className="font-bold text-foreground">{formatWeight(totalWt)}</span> • {sortedActivities.length} activities
           </p>
         </div>
       </div>
@@ -248,13 +264,144 @@ function ContractorDetail({ name, records, categoryInfo, onBack }: { name: strin
         />
       </div>
 
-      {sortedActivities.map(act => (
-        <ContractorActivityCard key={act} activity={act} records={activities.get(act)!} />
-      ))}
-      {sortedActivities.length === 0 && (
+      {filtered.length === 0 ? (
         <div className="text-center p-8 text-muted-foreground">No marks found for this contractor.</div>
+      ) : (
+        <div className="grid lg:grid-cols-2 gap-6 items-start">
+          <div className="space-y-3">
+            <h3 className="px-1 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Projects</h3>
+            {sortedProjects.map(job => (
+              <ContractorProjectCard key={job} project={job} records={projects.get(job)!} />
+            ))}
+          </div>
+          <div className="space-y-3">
+            <h3 className="px-1 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Activities</h3>
+            {sortedActivities.map(act => (
+              <ContractorActivityCard key={act} activity={act} records={activities.get(act)!} />
+            ))}
+          </div>
+        </div>
       )}
     </div>
+  );
+}
+
+function ContractorProjectCard({ project, records }: { project: string, records: any[] }) {
+  const [open, setOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+
+  const wt = records.reduce((sum, r) => sum + r.balanceWt, 0);
+  const structureCount = new Set(
+    records.map(r => r.structure).filter((s): s is string => !!s)
+  ).size;
+
+  const withAge = records.filter(r => r.ageingDays !== null);
+  const avgAge = withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays, 0) / withAge.length) : null;
+
+  const sortedRows = useMemo(() => {
+    return [...records].sort((a, b) => {
+      const s = String(a.structure ?? "").localeCompare(String(b.structure ?? ""));
+      if (s !== 0) return s;
+      const act = compareActivity(String(a.activity ?? ""), String(b.activity ?? ""));
+      if (act !== 0) return act;
+      return (b.ageingDays ?? -1) - (a.ageingDays ?? -1);
+    });
+  }, [records]);
+
+  const visibleRows = showAll ? sortedRows : sortedRows.slice(0, ROW_CAP);
+
+  return (
+    <Card className="overflow-hidden">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger className="w-full">
+          <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors gap-3">
+            <div className="flex items-center gap-3 text-left min-w-0">
+              <div className="bg-secondary text-secondary-foreground w-12 h-12 flex items-center justify-center rounded-md shrink-0">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="font-semibold truncate">{project}</div>
+                <div className="text-xs text-muted-foreground">
+                  <span className="font-bold text-foreground text-sm">{formatWeight(wt)}</span>
+                  {" • "}{records.length} marks • {structureCount} {structureCount === 1 ? "structure" : "structures"}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 text-right shrink-0">
+              <div className="hidden sm:block">
+                <div className="text-xs uppercase text-muted-foreground font-semibold">Avg Age</div>
+                <div className={`font-bold text-lg ${getAgeingColor(avgAge)}`}>{avgAge !== null ? `${avgAge}d` : '-'}</div>
+              </div>
+              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+            </div>
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="border-t bg-card">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Structure</TableHead>
+                    <TableHead>Mark</TableHead>
+                    <TableHead>Activity</TableHead>
+                    <TableHead>Section</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="text-right">Wt</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead className="text-right">Ageing</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {visibleRows.map(r => (
+                    <TableRow key={r.id}>
+                      <TableCell className="font-medium whitespace-nowrap">{r.structure || '-'}</TableCell>
+                      <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
+                      <TableCell className="whitespace-nowrap">{r.activity || '-'}</TableCell>
+                      <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || '-'}</TableCell>
+                      <TableCell className="text-right">{r.balanceQty}</TableCell>
+                      <TableCell className="text-right font-bold">{formatWeight(r.balanceWt)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || '-'}</TableCell>
+                      <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
+                        {ageingCell(r)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            {sortedRows.length > ROW_CAP && (
+              <div className="p-3 text-center text-xs text-muted-foreground border-t">
+                {showAll ? (
+                  <span>
+                    Showing all {sortedRows.length.toLocaleString()} marks.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setShowAll(false)}
+                      className="text-primary font-medium hover:underline"
+                    >
+                      Show less
+                    </button>
+                  </span>
+                ) : (
+                  <span>
+                    Showing first {ROW_CAP.toLocaleString()} of {sortedRows.length.toLocaleString()} marks.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setShowAll(true)}
+                      className="text-primary font-medium hover:underline"
+                    >
+                      Show all
+                    </button>{" "}
+                    or use the search to narrow down.
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </Card>
   );
 }
 
@@ -290,8 +437,8 @@ function ContractorActivityCard({ activity, records }: { activity: string, recor
                 {activity}
               </div>
               <div className="min-w-[120px]">
-                <div className="font-semibold text-lg">{records.length} marks</div>
-                <div className="text-xs text-muted-foreground">{qty.toLocaleString()} pcs • {formatWeight(wt)}</div>
+                <div className="font-bold text-lg">{formatWeight(wt)}</div>
+                <div className="text-xs text-muted-foreground">{records.length} marks • {qty.toLocaleString()} pcs</div>
               </div>
             </div>
             <div className="flex items-center gap-4 text-right">

@@ -427,7 +427,8 @@ function ReportBuilder() {
                 <span className="font-semibold">{h.label}</span>
                 <span className="text-muted-foreground">
                   {" "}
-                  • {h.marks.toLocaleString()} marks • {num(h.qty)} pcs • {formatWeight(h.wt)}
+                  • {h.marks.toLocaleString()} marks • {num(h.qty)} pcs •{" "}
+                  <span className="font-bold text-foreground">{formatWeight(h.wt)}</span>
                 </span>
               </div>
             ))}
