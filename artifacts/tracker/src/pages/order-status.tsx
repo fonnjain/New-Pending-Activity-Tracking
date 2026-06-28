@@ -192,7 +192,9 @@ export default function OrderStatusView() {
     return Array.from(byProject.entries()).map(([project, list]) => {
       const subtotal = list.reduce(
         (acc, r) => {
+          acc.sets += r.sets ?? 0;
           acc.weightMt += r.weightMt ?? 0;
+          acc.releaseMt += r.releaseMt ?? 0;
           acc.fabMt += r.fabMt ?? 0;
           acc.galvMt += r.galvMt ?? 0;
           acc.yardMt += r.yardMt ?? 0;
@@ -201,7 +203,9 @@ export default function OrderStatusView() {
           return acc;
         },
         {
+          sets: 0,
           weightMt: 0,
+          releaseMt: 0,
           fabMt: 0,
           galvMt: 0,
           yardMt: 0,
@@ -216,7 +220,9 @@ export default function OrderStatusView() {
   const totals = useMemo(() => {
     return rows.reduce(
       (acc, r) => {
+        acc.sets += r.sets ?? 0;
         acc.weightMt += r.weightMt ?? 0;
+        acc.releaseMt += r.releaseMt ?? 0;
         acc.fabMt += r.fabMt ?? 0;
         acc.galvMt += r.galvMt ?? 0;
         acc.yardMt += r.yardMt ?? 0;
@@ -225,7 +231,9 @@ export default function OrderStatusView() {
         return acc;
       },
       {
+        sets: 0,
         weightMt: 0,
+        releaseMt: 0,
         fabMt: 0,
         galvMt: 0,
         yardMt: 0,
@@ -392,12 +400,11 @@ export default function OrderStatusView() {
                 </tbody>
                 <tfoot className="border-t-2 bg-muted/60 font-semibold">
                   <tr>
-                    <td className="px-3 py-2">Total ({rows.length})</td>
-                    <td className="px-3 py-2" />
-                    <td className="px-3 py-2" />
+                    <td className="px-3 py-2" colSpan={2}>Total ({rows.length})</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{totals.sets.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{mt(totals.weightMt)}</td>
                     <td className="px-3 py-2" />
-                    <td className="px-3 py-2" />
+                    <td className="px-3 py-2 text-right tabular-nums">{mt(totals.releaseMt)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{mt(totals.fabMt)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{mt(totals.galvMt)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{mt(totals.yardMt)}</td>
@@ -434,7 +441,9 @@ function ProjectGroup({
     project: string;
     list: DisplayRow[];
     subtotal: {
+      sets: number;
       weightMt: number;
+      releaseMt: number;
       fabMt: number;
       galvMt: number;
       yardMt: number;
@@ -451,7 +460,7 @@ function ProjectGroup({
         className="border-b border-primary/20 bg-primary/10 hover:bg-primary/15 cursor-pointer"
         onClick={() => setOpen((v) => !v)}
       >
-        <td colSpan={3} className="px-3 py-2">
+        <td colSpan={2} className="px-3 py-2">
           <div className="flex items-center gap-2">
             {open ? (
               <ChevronDown className="h-4 w-4 text-primary shrink-0" />
@@ -466,9 +475,10 @@ function ProjectGroup({
             </span>
           </div>
         </td>
+        <td className="px-3 py-2 text-right tabular-nums font-bold">{subtotal.sets.toLocaleString()}</td>
         <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.weightMt)}</td>
         <td className="px-3 py-2" />
-        <td className="px-3 py-2" />
+        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.releaseMt)}</td>
         <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.fabMt)}</td>
         <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.galvMt)}</td>
         <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.yardMt)}</td>
