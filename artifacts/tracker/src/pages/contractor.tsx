@@ -148,28 +148,30 @@ function ContractorContent() {
                     className="cursor-pointer hover:bg-muted/40"
                     onClick={() => setSelectedContractor(s.name)}
                   >
-                    <TableCell>
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-semibold text-foreground truncate">{s.name}</span>
-                        <ContractorCategoryBadge info={contractorCategoryFor(s.name, categoryMap)} />
+                    <TableCell className="align-top">
+                      <div className="flex flex-col gap-1 min-w-[10rem] max-w-[16rem]">
+                        <span className="text-sm font-medium text-foreground leading-snug break-words whitespace-normal">{s.name}</span>
+                        <div>
+                          <ContractorCategoryBadge info={contractorCategoryFor(s.name, categoryMap)} />
+                        </div>
                       </div>
                     </TableCell>
-                    <TableCell className="text-right font-bold font-mono tabular-nums text-foreground">
+                    <TableCell className="text-right align-top font-bold font-mono tabular-nums text-foreground text-base">
                       {formatWeight(s.weight)}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                    <TableCell className="text-right align-top tabular-nums text-foreground text-base">
                       {s.projects.toLocaleString()}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                    <TableCell className="text-right align-top tabular-nums text-foreground text-base">
                       {s.marks.toLocaleString()}
                     </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums text-muted-foreground">
+                    <TableCell className="text-right align-top font-mono tabular-nums text-foreground text-base">
                       {formatWeight(s.fabLoad)}
                     </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums text-muted-foreground">
+                    <TableCell className="text-right align-top font-mono tabular-nums text-foreground text-base">
                       {formatWeight(s.galvaLoad)}
                     </TableCell>
-                    <TableCell className={`text-right font-semibold tabular-nums ${getAgeingColor(s.avgAge)}`}>
+                    <TableCell className={`text-right align-top font-semibold tabular-nums text-base ${getAgeingColor(s.avgAge)}`}>
                       {s.avgAge !== null ? `${s.avgAge}d` : "-"}
                     </TableCell>
                   </TableRow>
