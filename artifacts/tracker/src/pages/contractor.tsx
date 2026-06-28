@@ -413,8 +413,8 @@ function ContractorProjectCard({ project, records }: { project: string, records:
         <CollapsibleContent>
           <div className="border-t bg-card">
             <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
+              <Table containerClassName="max-h-[28rem]">
+                <TableHeader className="sticky top-0 z-10 bg-card">
                   <TableRow>
                     <TableHead>Structure</TableHead>
                     <TableHead>Mark</TableHead>
@@ -442,7 +442,7 @@ function ContractorProjectCard({ project, records }: { project: string, records:
                     </TableRow>
                   ))}
                 </TableBody>
-                <TableFooter>
+                <TableFooter className="sticky bottom-0 z-10 bg-muted">
                   <TableRow>
                     <TableCell colSpan={4} className="font-semibold">Total ({records.length.toLocaleString()} marks)</TableCell>
                     <TableCell className="text-right font-bold tabular-nums">{records.reduce((s, r) => s + (r.balanceQty ?? 0), 0).toLocaleString()}</TableCell>
@@ -535,8 +535,8 @@ function ContractorActivityCard({ activity, records }: { activity: string, recor
         <CollapsibleContent>
           <div className="border-t bg-card">
             <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
+              <Table containerClassName="max-h-[28rem]">
+                <TableHeader className="sticky top-0 z-10 bg-card">
                   <TableRow>
                     <TableHead>Job</TableHead>
                     <TableHead>Structure</TableHead>
@@ -564,7 +564,7 @@ function ContractorActivityCard({ activity, records }: { activity: string, recor
                     </TableRow>
                   ))}
                 </TableBody>
-                <TableFooter>
+                <TableFooter className="sticky bottom-0 z-10 bg-muted">
                   <TableRow>
                     <TableCell colSpan={4} className="font-semibold">Total ({records.length.toLocaleString()} marks)</TableCell>
                     <TableCell className="text-right font-bold tabular-nums">{records.reduce((s, r) => s + (r.balanceQty ?? 0), 0).toLocaleString()}</TableCell>

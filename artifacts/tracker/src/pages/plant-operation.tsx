@@ -492,8 +492,8 @@ function ContractorGroup({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="overflow-x-auto bg-muted/20">
-          <Table>
-            <TableHeader>
+          <Table containerClassName="max-h-[28rem]">
+            <TableHeader className="sticky top-0 z-10 bg-muted">
               <TableRow>
                 <TableHead>Structure</TableHead>
                 <TableHead>Mark</TableHead>
@@ -533,7 +533,7 @@ function ContractorGroup({
                 </TableRow>
               ))}
             </TableBody>
-            <TableFooter>
+            <TableFooter className="sticky bottom-0 z-10 bg-muted">
               <TableRow>
                 <TableCell colSpan={5} className="font-semibold">Total ({stats.marks.toLocaleString()} marks)</TableCell>
                 <TableCell className="text-right font-bold tabular-nums">{stats.qty.toLocaleString()}</TableCell>
