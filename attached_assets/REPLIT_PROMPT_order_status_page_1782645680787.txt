@@ -1,0 +1,123 @@
+REPLIT AGENT PROMPT — ORDER STATUS PAGE + DISPATCH TRACKING + ORDER-REVIEW FILE INTAKE
+=======================================================================================
+Add a new "Order Status" page driven by a SECOND input file (the "Order Review" export),
+joined to the existing WIP mark data. Compute stage progress (Fabrication / Galvanising /
+Yard) from the WIP data, seed Dispatch once from the Order Review file, then track Dispatch
+going forward by comparing consecutive WIP uploads (marks leaving Yard). Cross-check against
+the Order Review file's Dispatch and flag mismatches on a new Data-page "Order Status" tab.
+Also extend the input sanity check to recognise TWO file types. Deterministic engine; do not
+change existing WIP parsing, ageing, dedup, classification, warning, or load logic.
+
+============================================================
+A. THE SECOND FILE — "Order Review" (new input type)
+============================================================
+Structure (multi-row header; data starts ~row 8; project headers as "Project Code : NNN"
+rows; "Sub Total" rows to skip):
+  - As-On Date in the banner (e.g. "As On Date :28/06/2026").
+  - Per structure row:
+      Col C  = Tower Type CODE  == the WIP ALIAS (this is the STRUCTURE key)  <-- JOIN KEY
+      Col D  = Tower Sub Type
+      Col I  = Sets,  Col J = Weight (MT)         (order qty)
+      Col K  = BOM Label (Mass / Proto / Pre)
+      Col L  = Release (MT)
+      Col Q  = Despatch (MT)
+  - Project Code comes from the "Project Code : NNN" header rows (forward-fill to the
+    structures beneath, like the WIP file). Normalize project codes (strip trailing dot/".0").
+  - Parse helper: detect this file by its banner/columns ("Order Review", "BOM Label",
+    "Despatch (MT)") — distinct from the WIP file.
+
+JOIN KEY (confirmed): Project Code + Structure, where Structure = Order Review Col C = WIP
+Alias. (Project + Alias is unique in the Order Review; matches the app's Project->Structure
+hierarchy. Tower Sub Type NOT needed for the join.)
+
+============================================================
+B. ORDER STATUS PAGE (new nav page)
+============================================================
+One row per (Project, Structure[/Alias]) showing:
+  From the Order Review file:
+    Date (as-on), Project Code, Structure Type (Col C), Sub Type (Col D), Sets (Col I),
+    Weight (Col J), Total Sets, Total Weight (rolled up per project), BOM Type (Col K),
+    Release (Col L).
+  COMPUTED FROM EXISTING WIP DATA (override the file's M/N/O):
+    Col M "Fabrication" = WIP weight (MT) of that Project+Structure's marks whose current
+        activity is in Fabrication (C, RFI, NH, B, HAB, HG, W, Q, TS).   [bundle TLT_FABRICATION]
+    Col N "Galvanising" = WIP weight (MT) of marks at G or GB.            [bundle GALVANIZING]
+    Col O "Yard"        = WIP weight (MT) of marks at Y.                  [Yard]
+    (Weight in MT = Balance Wt / 1000. Match marks by Project + Alias.)
+  Col Q "Dispatch": see section C.
+Rollups/totals per project; respect global filters; results page (no inputs except where
+needed). TLT focus (NTLT handling can come later; if a structure is NTLT, still show what
+applies, but the M/N/O bundles are TLT — flag NTLT rows as out-of-scope for now).
+
+============================================================
+C. DISPATCH TRACKING (seed once, then delta from WIP)
+============================================================
+  - SEED (one time, today): Dispatch (Col Q) for each Project+Structure = the Order Review
+    file's Despatch (MT) value, captured once on the first load. Store as
+    dispatch_mt (cumulative) with dispatch_seeded_date.
+  - GOING FORWARD (delta from WIP): on each new WIP upload, compare to the PREVIOUS WIP
+    snapshot. For each Project+Structure, any marks that have LEFT THE YARD (were at Y in the
+    prior snapshot and are now GONE from the report) -> their weight (MT) is newly DISPATCHED.
+    Add that delta to dispatch_mt (cumulative). (Dispatch is measured in WEIGHT/MT.)
+        dispatched_delta = weight of marks (Project+Structure) that were at Y previously and
+        are absent now.  dispatch_mt += dispatched_delta.
+    Store a dispatch ledger (date, project, structure, delta, running total) for audit.
+  - This makes Dispatch a live, cumulative figure built from real yard departures after the
+    initial seed.
+
+============================================================
+D. CROSS-CHECK vs ORDER REVIEW FILE + MISMATCH TAB
+============================================================
+  - The Order Review file keeps being uploaded and carries its own Despatch (MT) per
+    Project+Structure. On each Order Review upload, COMPARE the file's Despatch to the app's
+    computed dispatch_mt for the same Project+Structure.
+  - TOLERANCE = 1%. If |file_despatch - computed_dispatch| / max(file_despatch, computed,
+    epsilon) > 1%, flag a MISMATCH.
+  - Show mismatches on a NEW "Order Status" TAB on the DATA page: Project | Structure |
+    computed dispatch (MT) | file dispatch (MT) | diff | % diff | status (OK / MISMATCH).
+    Summary count of mismatches. This is a reconciliation view, not an auto-correct — the
+    engine's computed value stands; the tab surfaces discrepancies for human review.
+  - Optionally let the user accept the file value to reconcile a row (manual, logged) — but
+    default is just to report.
+
+============================================================
+E. INPUT SANITY CHECK — NOW TWO FILE TYPES
+============================================================
+Extend the gatekeeper (stage -> validate -> commit) to RECOGNISE AND ROUTE two file types:
+  - WIP mark file (existing 18/19-col, "Project Code"/"Mark No."/"Activity"...). 
+  - Order Review file (banner "Order Review", "BOM Label", "Despatch (MT)", structure rows
+    keyed by Col C = alias).
+  Validation:
+    - Detect type from columns/banner; if it matches neither -> reject with reason.
+    - Route WIP files to the existing parse+merge; route Order Review files to the Order
+      Status intake (seed/refresh order data + dispatch cross-check).
+    - Sanitisation stays descriptive-only (formatting/dates), never altering quantities,
+      dispatch, alias, or project; blanks stay blank; distinct names not merged.
+    - Deterministic checks for Order Review: project codes normalized; Col C (alias) present
+      and joinable to WIP (report how many structures matched vs unmatched); Despatch numeric;
+      as-on date parsed.
+    - Report an Order-Review intake summary (structures, matched to WIP, dispatch mismatches).
+
+============================================================
+F. SCHEMA / CONTRACT
+============================================================
+  - New tables: order_review_rows (project, structure/alias, sub_type, sets, weight_mt,
+    bom_type, release_mt, file_despatch_mt, as_on_date, import_id) and
+    dispatch_ledger (date, project, structure, delta_mt, running_mt) +
+    order_dispatch (project, structure, dispatch_mt, seeded_date).
+  - Expose via openapi.yaml; regenerate hooks/Zod. Keep Order Review intake separate from the
+    WIP record_pool; join at read time on Project+Alias.
+
+ACCEPTANCE CHECK
+  - Uploading the Order Review file is recognised, routed correctly, and populates the Order
+    Status page (Date, Project, Structure(C), Sub Type(D), Sets(I), Weight(J), totals,
+    BOM(K), Release(L)).
+  - M/N/O are computed from WIP by Project+Alias: Fabrication = C..TS weight, Galvanising =
+    G,GB weight, Yard = Y weight (overriding the file's M/N/O).
+  - Dispatch seeds once from the file, then increases by the weight of marks that leave Yard
+    between WIP uploads; a dispatch ledger records deltas.
+  - On each Order Review upload, computed vs file Despatch is compared at 1% tolerance;
+    mismatches listed on the Data page "Order Status" tab.
+  - Sanity check recognises both file types and routes them; rejects unknown files; reports an
+    intake summary with WIP-match and mismatch counts.
+  - No change to existing WIP parsing, ageing, dedup, classification, warnings, or load logic.
