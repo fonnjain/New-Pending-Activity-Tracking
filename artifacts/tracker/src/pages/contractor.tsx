@@ -3,7 +3,7 @@ import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api
 import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { formatWeight } from "@/lib/utils";
@@ -442,6 +442,14 @@ function ContractorProjectCard({ project, records }: { project: string, records:
                     </TableRow>
                   ))}
                 </TableBody>
+                <TableFooter>
+                  <TableRow>
+                    <TableCell colSpan={4} className="font-semibold">Total ({records.length.toLocaleString()} marks)</TableCell>
+                    <TableCell className="text-right font-bold tabular-nums">{records.reduce((s, r) => s + (r.balanceQty ?? 0), 0).toLocaleString()}</TableCell>
+                    <TableCell className="text-right font-bold tabular-nums">{formatWeight(records.reduce((s, r) => s + (r.balanceWt ?? 0), 0))}</TableCell>
+                    <TableCell colSpan={2} />
+                  </TableRow>
+                </TableFooter>
               </Table>
             </div>
             {sortedRows.length > ROW_CAP && (
@@ -556,6 +564,14 @@ function ContractorActivityCard({ activity, records }: { activity: string, recor
                     </TableRow>
                   ))}
                 </TableBody>
+                <TableFooter>
+                  <TableRow>
+                    <TableCell colSpan={4} className="font-semibold">Total ({records.length.toLocaleString()} marks)</TableCell>
+                    <TableCell className="text-right font-bold tabular-nums">{records.reduce((s, r) => s + (r.balanceQty ?? 0), 0).toLocaleString()}</TableCell>
+                    <TableCell className="text-right font-bold tabular-nums">{formatWeight(records.reduce((s, r) => s + (r.balanceWt ?? 0), 0))}</TableCell>
+                    <TableCell colSpan={2} />
+                  </TableRow>
+                </TableFooter>
               </Table>
             </div>
             {sortedRows.length > ROW_CAP && (

@@ -4,7 +4,7 @@ import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
 import { StatusDot } from "@/components/status-dot";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { ChevronDown, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -292,6 +292,14 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
                     </TableRow>
                   ))}
                 </TableBody>
+                <TableFooter>
+                  <TableRow>
+                    <TableCell colSpan={5} className="font-semibold">Total ({records.length.toLocaleString()} marks)</TableCell>
+                    <TableCell className="text-right font-bold tabular-nums">{records.reduce((s, r) => s + (r.balanceQty ?? 0), 0).toLocaleString()}</TableCell>
+                    <TableCell className="text-right font-bold tabular-nums">{formatWeight(wt)}</TableCell>
+                    <TableCell colSpan={4} />
+                  </TableRow>
+                </TableFooter>
               </Table>
             </div>
             {sortedRows.length > ROW_CAP && (

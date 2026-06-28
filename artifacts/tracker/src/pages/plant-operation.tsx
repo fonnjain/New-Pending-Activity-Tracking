@@ -4,7 +4,7 @@ import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api
 import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
 import { Card, CardContent } from "@/components/ui/card";
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Segmented } from "@/components/ui/segmented";
@@ -533,6 +533,14 @@ function ContractorGroup({
                 </TableRow>
               ))}
             </TableBody>
+            <TableFooter>
+              <TableRow>
+                <TableCell colSpan={5} className="font-semibold">Total ({stats.marks.toLocaleString()} marks)</TableCell>
+                <TableCell className="text-right font-bold tabular-nums">{stats.qty.toLocaleString()}</TableCell>
+                <TableCell className="text-right font-bold tabular-nums">{formatWeight(stats.weight)}</TableCell>
+                <TableCell colSpan={2} />
+              </TableRow>
+            </TableFooter>
           </Table>
         </div>
         {sortedRows.length > ROW_CAP && (
