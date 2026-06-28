@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ClipboardList,
+  Lock,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -43,9 +44,18 @@ function mismatchMessage(detected: StageResult["fileType"]): string {
 interface Props {
   expectedType: SlotType;
   onCommitted: (res: CommitResult) => void;
+  /** When true, the slot is gated: no file can be selected and a note explains why. */
+  locked?: boolean;
+  /** Explanation shown in place of the upload control when locked. */
+  lockedMessage?: string;
 }
 
-export function StagedUploadPanel({ expectedType, onCommitted }: Props) {
+export function StagedUploadPanel({
+  expectedType,
+  onCommitted,
+  locked = false,
+  lockedMessage,
+}: Props) {
   const stage = useStageImport();
   const validate = useValidateStagedImport();
   const commit = useCommitStagedImport();
@@ -202,21 +212,36 @@ export function StagedUploadPanel({ expectedType, onCommitted }: Props) {
           </div>
           <h3 className="text-lg font-bold mb-2">{heading}</h3>
           <p className="text-sm text-muted-foreground mb-6 max-w-md">{helper}</p>
-          <div className="relative">
-            <input
-              type="file"
-              accept=".xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              onChange={handleFileChange}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              disabled={busy}
-            />
-            <Button
-              disabled={busy}
-              className="px-8 font-bold text-primary-foreground"
-            >
-              {stage.isPending ? "STAGING..." : "SELECT FILE"}
-            </Button>
-          </div>
+          {locked ? (
+            <div className="flex flex-col items-center gap-3 max-w-md">
+              <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-700 dark:text-amber-300">
+                <Lock className="w-4 h-4 shrink-0" />
+                <span>
+                  {lockedMessage ??
+                    "Upload a WIP report and accept its checks first."}
+                </span>
+              </div>
+              <Button disabled className="px-8 font-bold">
+                SELECT FILE
+              </Button>
+            </div>
+          ) : (
+            <div className="relative">
+              <input
+                type="file"
+                accept=".xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                onChange={handleFileChange}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                disabled={busy}
+              />
+              <Button
+                disabled={busy}
+                className="px-8 font-bold text-primary-foreground"
+              >
+                {stage.isPending ? "STAGING..." : "SELECT FILE"}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

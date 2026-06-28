@@ -211,6 +211,8 @@ function DataViewContent() {
         <StagedUploadPanel
           expectedType="order-review"
           onCommitted={handleCommitted}
+          locked={imports.length === 0}
+          lockedMessage="Upload a WIP / Balance & Activity report and accept its checks first. The Order Review file unlocks once at least one WIP import exists."
         />
       </div>
 
