@@ -64,6 +64,32 @@ function DataViewContent() {
   const { data: imports = [], refetch } = useListImports();
   const { data: orderStatus } = useGetOrderStatus({ query: { queryKey: getGetOrderStatusQueryKey() } });
   const orderImports = orderStatus?.imports ?? [];
+
+  // Gate the Order Review uploader on a per-date basis: a fresh WIP / Balance &
+  // Activity report for a given date must be uploaded (and its checks accepted,
+  // i.e. committed) before its Order Review file can be uploaded. Dates are
+  // YYYY-MM-DD strings, so lexicographic max == chronological max.
+  const latestWipDate = imports
+    .map((i) => i.reportDate)
+    .filter((d): d is string => !!d)
+    .reduce<string | null>((max, d) => (max === null || d > max ? d : max), null);
+  const latestOrderDate = orderImports
+    .map((i) => i.asOnDate)
+    .filter((d): d is string => !!d)
+    .reduce<string | null>((max, d) => (max === null || d > max ? d : max), null);
+  const wipExists = imports.length > 0;
+  // Locked when there is no WIP at all, or when the newest WIP date already has
+  // an Order Review at the same (or newer) date. When dates can't be compared
+  // (a WIP exists but has no parseable report date) we stay unlocked so a
+  // data-quality gap never blocks legitimate work.
+  const orderReviewLocked =
+    !wipExists ||
+    (latestWipDate !== null &&
+      latestOrderDate !== null &&
+      latestWipDate <= latestOrderDate);
+  const orderReviewLockedMessage = !wipExists
+    ? "Upload a WIP / Balance & Activity report and accept its checks first. The Order Review file unlocks once a WIP import exists."
+    : `The Order Review for ${latestOrderDate} is already uploaded. Upload the WIP report for a newer date and accept its checks to enable a fresh Order Review.`;
   const { selectedImportId, setSelectedImportId } = useTracker();
   const deleteImport = useDeleteImport();
   const deleteAll = useDeleteAllImports();
@@ -211,8 +237,8 @@ function DataViewContent() {
         <StagedUploadPanel
           expectedType="order-review"
           onCommitted={handleCommitted}
-          locked={imports.length === 0}
-          lockedMessage="Upload a WIP / Balance & Activity report and accept its checks first. The Order Review file unlocks once at least one WIP import exists."
+          locked={orderReviewLocked}
+          lockedMessage={orderReviewLockedMessage}
         />
       </div>
 
