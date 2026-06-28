@@ -478,7 +478,7 @@ function SummaryTile({ label, value, cls }: { label: string; value: number; cls:
           <span className={`w-3 h-3 rounded-sm ${cls}`} />
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
         </div>
-        <span className="text-2xl font-bold tabular-nums">{value}</span>
+        <span className="text-base sm:text-lg font-semibold tabular-nums">{value}</span>
       </CardContent>
     </Card>
   );

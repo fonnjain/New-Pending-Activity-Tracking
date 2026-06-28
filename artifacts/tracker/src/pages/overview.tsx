@@ -290,7 +290,7 @@ function SnapStat({ label, value, cls }: { label: string; value: number; cls: st
   return (
     <div className="flex flex-col items-center justify-center rounded-md border border-border p-2">
       <span className={`w-3 h-3 rounded-sm ${cls} mb-1`} />
-      <span className="text-xl font-bold tabular-nums">{value}</span>
+      <span className="text-base font-semibold tabular-nums">{value}</span>
       <span className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</span>
     </div>
   );
@@ -301,7 +301,7 @@ function KpiTile({ title, value }: { title: string, value: string | number }) {
     <Card className="shadow-sm border-border bg-card">
       <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full">
         <p className="text-[10px] sm:text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 line-clamp-1">{title}</p>
-        <p className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">{value}</p>
+        <p className="text-base sm:text-lg font-semibold tracking-tight text-foreground">{value}</p>
       </CardContent>
     </Card>
   );
