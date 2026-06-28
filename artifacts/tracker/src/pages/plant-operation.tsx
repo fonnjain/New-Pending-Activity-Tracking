@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { formatWeight } from "@/lib/utils";
 import { exportToXlsx, type XlsxColumn } from "@/lib/export";
 import { ChevronDown, FileSpreadsheet } from "lucide-react";
-import { bundleActivitySet, compareActivity, sortActivities } from "@workspace/domain";
+import { bundleActivitySet, compareActivity, sortActivities, getActivityBundle, TLT_OPERATION_BUNDLE_IDS } from "@workspace/domain";
 
 // Activity scopes for each plant operation, sliced from the canonical bundles in
 // @workspace/domain (single source of truth). Display/aggregation only — this is
@@ -142,13 +142,28 @@ function SummaryTile({ title, value, sub }: { title: string; value: string; sub?
 // Fabrication
 // ---------------------------------------------------------------------------
 
+// Operation group tabs shown under Fabrication: All + the three TLT operation
+// sub-bundles. Presentation filter over the fabrication scope only — never
+// changes ageing, warnings, the fabrication-load report, or the bundle scopes.
+const OP_GROUP_OPTIONS: { value: string; label: string }[] = [
+  { value: "ALL", label: "All" },
+  ...TLT_OPERATION_BUNDLE_IDS.map((id) => ({
+    value: id,
+    label: getActivityBundle(id)!.label.replace(" (TLT)", ""),
+  })),
+];
+
 function FabricationTab({ records }: { records: any[] }) {
   const [opFilter, setOpFilter] = useState<HoleOpFilter>("ALL");
+  const [group, setGroup] = useState<string>("ALL");
+  const groupSet = group === "ALL" ? null : bundleActivitySet(group);
 
-  const scope = useMemo(
-    () => records.filter((r) => FAB_SET.has((r.activity ?? "").toUpperCase())),
-    [records],
-  );
+  const scope = useMemo(() => {
+    const base = records.filter((r) => FAB_SET.has((r.activity ?? "").toUpperCase()));
+    return groupSet
+      ? base.filter((r) => groupSet.has((r.activity ?? "").toUpperCase()))
+      : base;
+  }, [records, groupSet]);
 
   // Punching / Drilling / Not set split over the full fabrication scope (always
   // shows the complete split, independent of the local op filter).
@@ -218,6 +233,12 @@ function FabricationTab({ records }: { records: any[] }) {
 
   return (
     <div className="space-y-4">
+      <Segmented
+        value={group}
+        onChange={(v) => setGroup(v ?? "ALL")}
+        options={OP_GROUP_OPTIONS}
+      />
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <SummaryTile title="Fabrication Marks" value={total.marks.toLocaleString()} sub={formatWeight(total.weight)} />
         <SummaryTile title="Punching" value={split.PUNCHING.marks.toLocaleString()} sub={formatWeight(split.PUNCHING.weight)} />

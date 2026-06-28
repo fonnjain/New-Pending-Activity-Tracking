@@ -11,7 +11,8 @@ import { Button } from "@/components/ui/button";
 import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import { useState, useMemo } from "react";
-import { compareActivity } from "@workspace/domain";
+import { Segmented } from "@/components/ui/segmented";
+import { compareActivity, bundleActivitySet, getActivityBundle, TLT_OPERATION_BUNDLE_IDS } from "@workspace/domain";
 
 const ROW_CAP = 300;
 
@@ -21,14 +22,54 @@ export default function ActivityView() {
   return <ActivityContent />;
 }
 
+function KpiTile({ title, value }: { title: string; value: string }) {
+  return (
+    <Card className="shadow-sm">
+      <CardContent className="p-4">
+        <p className="text-[10px] sm:text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{title}</p>
+        <p className="text-sm sm:text-base font-medium tracking-tight">{value}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 function ActivityContent() {
-  const { selectedImportId } = useTracker();
+  const { selectedImportId, filters } = useTracker();
   const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
-  const records = useFilteredRecords(allRecords);
+  const filteredRecords = useFilteredRecords(allRecords);
 
-  const { activities, sortedActivities, totalWt, totalMarks } = useMemo(() => {
+  const isTlt = filters.category === "TLT";
+  const [group, setGroup] = useState<string>("ALL");
+  const activeGroup = isTlt ? group : "ALL";
+  const groupSet = activeGroup === "ALL" ? null : bundleActivitySet(activeGroup);
+
+  // Operation tabs (TLT-only): All + the three operation sub-bundles. Page-level
+  // presentation filter over the already-filtered records — never touches ageing,
+  // warnings, the fabrication-load report, or the bundle scopes themselves.
+  const groupOptions = useMemo(
+    () => [
+      { value: "ALL", label: "All" },
+      ...(isTlt
+        ? TLT_OPERATION_BUNDLE_IDS.map((id) => ({
+            value: id,
+            label: getActivityBundle(id)!.label.replace(" (TLT)", ""),
+          }))
+        : []),
+    ],
+    [isTlt],
+  );
+
+  const records = useMemo(
+    () =>
+      groupSet
+        ? filteredRecords.filter((r) => groupSet.has((r.activity ?? "").toUpperCase()))
+        : filteredRecords,
+    [filteredRecords, groupSet],
+  );
+
+  const { activities, sortedActivities, totalWt, totalMarks, avgAge } = useMemo(() => {
     // Group by activity
     const activities = new Map<string, any[]>();
     records.forEach(r => {
@@ -39,8 +80,12 @@ function ActivityContent() {
 
     const sortedActivities = Array.from(activities.keys()).sort(compareActivity);
     const totalWt = records.reduce((sum, r) => sum + (r.balanceWt ?? 0), 0);
+    const aged = records.filter((r) => r.ageingDays !== null);
+    const avgAge = aged.length
+      ? Math.round(aged.reduce((s, r) => s + (r.ageingDays || 0), 0) / aged.length)
+      : null;
 
-    return { activities, sortedActivities, totalWt, totalMarks: records.length };
+    return { activities, sortedActivities, totalWt, totalMarks: records.length, avgAge };
   }, [records]);
 
   const handleExport = () => {
@@ -113,7 +158,12 @@ function ActivityContent() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <Segmented
+          value={activeGroup}
+          onChange={(v) => setGroup(v ?? "ALL")}
+          options={groupOptions}
+        />
         <Button
           variant="outline"
           size="sm"
@@ -124,27 +174,20 @@ function ActivityContent() {
           <FileSpreadsheet className="h-4 w-4" /> Export Excel
         </Button>
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiTile title="Marks" value={totalMarks.toLocaleString()} />
+        <KpiTile title="Balance Weight" value={formatWeight(totalWt)} />
+        <KpiTile title="Avg Age" value={avgAge !== null ? `${avgAge}d` : "-"} />
+        <KpiTile title="Activities" value={sortedActivities.length.toLocaleString()} />
+      </div>
+
+      <div className="space-y-3 lg:w-1/2">
         {sortedActivities.map(act => (
           <ActivityCard key={act} activity={act} records={activities.get(act)!} />
         ))}
       </div>
       {sortedActivities.length === 0 && <div className="text-center p-8 text-muted-foreground">No activities found matching filters.</div>}
-      {sortedActivities.length > 0 && (
-        <Card className="border-2 border-primary/40 bg-muted/40">
-          <div className="flex items-center justify-between p-4">
-            <div className="flex items-center gap-4">
-              <div className="bg-primary text-primary-foreground font-bold w-12 h-12 flex items-center justify-center rounded-md text-xs uppercase shrink-0">
-                Total
-              </div>
-              <div>
-                <div className="font-bold text-lg">{formatWeight(totalWt)}</div>
-                <div className="text-xs text-muted-foreground">{totalMarks.toLocaleString()} marks across {sortedActivities.length} activities</div>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
     </div>
   );
 }

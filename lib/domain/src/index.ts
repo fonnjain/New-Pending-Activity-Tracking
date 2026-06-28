@@ -233,6 +233,15 @@ export function bundleActivitySet(id: string): Set<string> | null {
   return new Set(b.activities.map((a) => a.toUpperCase()));
 }
 
+// The three TLT operation sub-bundles, in display order. The page-level
+// "operation tabs" (Activity Wise, Plant Operation Fabrication) render an "All"
+// tab plus these three. TLT-only; display/filter only.
+export const TLT_OPERATION_BUNDLE_IDS = [
+  "TLT_STANDARD_OPERATIONS",
+  "TLT_SPECIAL_OPERATIONS",
+  "TLT_QUALITY",
+] as const;
+
 // ---------------------------------------------------------------------------
 // Contractor sub-categories (config overlay, additive)
 // ---------------------------------------------------------------------------
