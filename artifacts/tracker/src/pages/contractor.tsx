@@ -67,15 +67,16 @@ function ContractorContent() {
 
     const stats = Array.from(conMap.entries()).map(([name, recs]) => {
       const withAge = recs.filter(r => r.ageingDays !== null);
+      const projects = new Set(
+        recs.map(r => r.job).filter((j): j is string => !!j && j !== "(Unassigned)")
+      ).size;
       return {
         name,
         marks: recs.length,
+        projects,
         qty: recs.reduce((sum, r) => sum + r.balanceQty, 0),
         weight: recs.reduce((sum, r) => sum + r.balanceWt, 0),
         avgAge: withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays!, 0) / withAge.length) : null,
-        c0to30: withAge.filter(r => r.ageingDays !== null && r.ageingDays <= 30).length,
-        c31to60: withAge.filter(r => r.ageingDays !== null && r.ageingDays > 30 && r.ageingDays <= 60).length,
-        c60Plus: withAge.filter(r => r.ageingDays !== null && r.ageingDays > 60).length,
       };
     });
 
@@ -112,75 +113,46 @@ function ContractorContent() {
         <KpiTile title="Unassigned Marks" value={unassignedCount} />
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Workload</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {sortedStats.map(s => (
-                <button
-                  key={s.name}
-                  type="button"
-                  onClick={() => setSelectedContractor(s.name)}
-                  className="w-full space-y-1.5 text-left rounded-md p-1.5 -m-1.5 hover:bg-muted/40 transition-colors"
-                >
-                  <div className="flex justify-between text-sm gap-2">
-                    <span className="font-semibold text-foreground hover:text-primary transition-colors flex items-center gap-2 min-w-0">
-                      <span className="truncate">{s.name}</span>
-                      <ContractorCategoryBadge info={contractorCategoryFor(s.name, categoryMap)} />
-                    </span>
-                    <span className="text-muted-foreground font-mono shrink-0">{formatWeight(s.weight)}</span>
-                  </div>
-                  <div className="h-2.5 bg-muted rounded-full overflow-hidden flex">
-                    <div 
-                      className="bg-secondary transition-all h-full" 
-                      style={{ width: `${(s.weight / maxWeight) * 100}%` }}
-                    />
-                  </div>
-                  <div className="text-[10px] text-muted-foreground text-right">
-                    {s.marks} marks • {s.qty} pcs
-                  </div>
-                </button>
-              ))}
-              {sortedStats.length === 0 && <div className="text-muted-foreground text-sm">No data available.</div>}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Ageing Matrix (Marks)</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Contractor</TableHead>
-                    <TableHead className="text-right">0-30</TableHead>
-                    <TableHead className="text-right">31-60</TableHead>
-                    <TableHead className="text-right">60+</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sortedStats.map(s => (
-                    <TableRow key={s.name} className="cursor-pointer hover:bg-muted/40" onClick={() => setSelectedContractor(s.name)}>
-                      <TableCell className="font-medium text-xs text-primary">{s.name}</TableCell>
-                      <TableCell className={`text-right tabular-nums ${s.c0to30 > 0 ? 'bg-ageing-green/10 font-bold ageing-green' : 'text-muted-foreground'}`}>{s.c0to30}</TableCell>
-                      <TableCell className={`text-right tabular-nums ${s.c31to60 > 0 ? 'bg-ageing-amber/10 font-bold ageing-amber' : 'text-muted-foreground'}`}>{s.c31to60}</TableCell>
-                      <TableCell className={`text-right tabular-nums ${s.c60Plus > 0 ? 'bg-ageing-red/10 font-bold ageing-red' : 'text-muted-foreground'}`}>{s.c60Plus}</TableCell>
-                      <TableCell className="text-right font-bold tabular-nums bg-muted/30">{s.c0to30 + s.c31to60 + s.c60Plus}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Workload</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {sortedStats.map(s => (
+              <button
+                key={s.name}
+                type="button"
+                onClick={() => setSelectedContractor(s.name)}
+                className="w-full space-y-1.5 text-left rounded-md p-1.5 -m-1.5 hover:bg-muted/40 transition-colors"
+              >
+                <div className="flex justify-between text-sm gap-2">
+                  <span className="font-semibold text-foreground hover:text-primary transition-colors flex items-center gap-2 min-w-0">
+                    <span className="truncate">{s.name}</span>
+                    <ContractorCategoryBadge info={contractorCategoryFor(s.name, categoryMap)} />
+                  </span>
+                  <span className="text-muted-foreground font-mono shrink-0">{formatWeight(s.weight)}</span>
+                </div>
+                <div className="h-2.5 bg-muted rounded-full overflow-hidden flex">
+                  <div 
+                    className="bg-secondary transition-all h-full" 
+                    style={{ width: `${(s.weight / maxWeight) * 100}%` }}
+                  />
+                </div>
+                <div className="flex justify-between gap-2 text-[11px] text-muted-foreground">
+                  <span>
+                    {s.projects.toLocaleString()} {s.projects === 1 ? "project" : "projects"} • {s.marks.toLocaleString()} marks
+                  </span>
+                  <span className={`font-semibold tabular-nums ${getAgeingColor(s.avgAge)}`}>
+                    {s.avgAge !== null ? `avg ${s.avgAge}d` : "avg -"}
+                  </span>
+                </div>
+              </button>
+            ))}
+            {sortedStats.length === 0 && <div className="text-muted-foreground text-sm">No data available.</div>}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
