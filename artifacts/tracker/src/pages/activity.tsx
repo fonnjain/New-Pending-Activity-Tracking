@@ -218,11 +218,11 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="w-full">
           <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
-            <div className="flex items-center gap-4 text-left">
-              <div className="bg-secondary text-secondary-foreground font-bold w-12 h-12 flex items-center justify-center rounded-md text-lg shrink-0">
+            <div className="flex items-center gap-3 text-left">
+              <div className="bg-secondary text-secondary-foreground font-bold w-9 h-9 flex items-center justify-center rounded-md text-sm shrink-0">
                 {activity}
               </div>
-              <div className="min-w-[120px]">
+              <div className="min-w-[88px]">
                 <div className="font-bold text-lg">{formatWeight(wt)}</div>
                 <div className="text-xs text-muted-foreground">{records.length} marks</div>
               </div>
