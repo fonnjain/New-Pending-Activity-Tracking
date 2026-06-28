@@ -344,25 +344,25 @@ function ContractorProjectCard({ project, records }: { project: string, records:
     <Card className="overflow-hidden">
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="w-full">
-          <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors gap-3">
-            <div className="flex items-center gap-3 text-left min-w-0">
-              <div className="bg-secondary text-secondary-foreground w-12 h-12 flex items-center justify-center rounded-md shrink-0">
-                <Building2 className="w-5 h-5" />
+          <div className="flex items-center justify-between p-2.5 hover:bg-muted/30 transition-colors gap-2">
+            <div className="flex items-center gap-2 text-left min-w-0">
+              <div className="bg-secondary text-secondary-foreground w-8 h-8 flex items-center justify-center rounded shrink-0">
+                <Building2 className="w-4 h-4" />
               </div>
               <div className="min-w-0">
-                <div className="font-semibold truncate">{project}</div>
-                <div className="text-xs text-muted-foreground">
-                  <span className="font-bold text-foreground text-sm">{formatWeight(wt)}</span>
+                <div className="font-semibold text-sm truncate leading-tight">{project}</div>
+                <div className="text-[11px] text-muted-foreground leading-tight">
+                  <span className="font-bold text-foreground text-xs">{formatWeight(wt)}</span>
                   {" • "}{records.length} marks • {structureCount} {structureCount === 1 ? "structure" : "structures"}
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-4 text-right shrink-0">
-              <div className="hidden sm:block">
-                <div className="text-xs uppercase text-muted-foreground font-semibold">Avg Age</div>
-                <div className={`font-bold text-lg ${getAgeingColor(avgAge)}`}>{avgAge !== null ? `${avgAge}d` : '-'}</div>
+            <div className="flex items-center gap-2.5 text-right shrink-0">
+              <div className="hidden sm:block leading-tight">
+                <div className="text-[10px] uppercase text-muted-foreground font-semibold">Avg Age</div>
+                <div className={`font-bold text-sm ${getAgeingColor(avgAge)}`}>{avgAge !== null ? `${avgAge}d` : '-'}</div>
               </div>
-              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+              <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
             </div>
           </div>
         </CollapsibleTrigger>
@@ -461,22 +461,22 @@ function ContractorActivityCard({ activity, records }: { activity: string, recor
     <Card className="overflow-hidden">
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="w-full">
-          <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
-            <div className="flex items-center gap-4 text-left">
-              <div className="bg-secondary text-secondary-foreground font-bold w-12 h-12 flex items-center justify-center rounded-md text-lg shrink-0">
+          <div className="flex items-center justify-between p-2.5 hover:bg-muted/30 transition-colors gap-2">
+            <div className="flex items-center gap-2 text-left">
+              <div className="bg-secondary text-secondary-foreground font-bold w-8 h-8 flex items-center justify-center rounded text-sm shrink-0">
                 {activity}
               </div>
-              <div className="min-w-[120px]">
-                <div className="font-bold text-lg">{formatWeight(wt)}</div>
-                <div className="text-xs text-muted-foreground">{records.length} marks • {qty.toLocaleString()} pcs</div>
+              <div className="min-w-[100px] leading-tight">
+                <div className="font-bold text-sm">{formatWeight(wt)}</div>
+                <div className="text-[11px] text-muted-foreground">{records.length} marks • {qty.toLocaleString()} pcs</div>
               </div>
             </div>
-            <div className="flex items-center gap-4 text-right">
-              <div className="hidden sm:block">
-                <div className="text-xs uppercase text-muted-foreground font-semibold">Avg Age</div>
-                <div className={`font-bold text-lg ${getAgeingColor(avgAge)}`}>{avgAge !== null ? `${avgAge}d` : '-'}</div>
+            <div className="flex items-center gap-2.5 text-right">
+              <div className="hidden sm:block leading-tight">
+                <div className="text-[10px] uppercase text-muted-foreground font-semibold">Avg Age</div>
+                <div className={`font-bold text-sm ${getAgeingColor(avgAge)}`}>{avgAge !== null ? `${avgAge}d` : '-'}</div>
               </div>
-              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+              <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
             </div>
           </div>
         </CollapsibleTrigger>
