@@ -9,7 +9,12 @@ import { Input } from "@/components/ui/input";
 import { formatWeight } from "@/lib/utils";
 import { ChevronDown, ChevronLeft, Search, Building2 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { compareActivity, contractorCategoryLabel, outVendorTypeLabel } from "@workspace/domain";
+import { compareActivity, contractorCategoryLabel, outVendorTypeLabel, bundleActivitySet } from "@workspace/domain";
+
+// Activity scopes for the per-contractor load split, sliced from the canonical
+// bundles in @workspace/domain. Display/aggregation only.
+const FAB_SET = bundleActivitySet("TLT_FABRICATION") ?? new Set<string>();
+const GALVA_SET = bundleActivitySet("GALVANIZING") ?? new Set<string>();
 
 // Small inline badge for a contractor's sub-category (+ FAB/GALVA tags). Display
 // only; resolved live from the overlay map. Unclassified contractors render a
@@ -57,7 +62,7 @@ function ContractorContent() {
 
   const [selectedContractor, setSelectedContractor] = useState<string | null>(null);
 
-  const { conMap, sortedStats, unassignedCount, busiest, mostAged, maxWeight } = useMemo(() => {
+  const { conMap, sortedStats, unassignedCount, busiest, mostAged } = useMemo(() => {
     const conMap = new Map<string, any[]>();
     records.forEach(r => {
       const c = r.contractor || "Unassigned";
@@ -76,6 +81,12 @@ function ContractorContent() {
         projects,
         qty: recs.reduce((sum, r) => sum + r.balanceQty, 0),
         weight: recs.reduce((sum, r) => sum + r.balanceWt, 0),
+        fabLoad: recs
+          .filter(r => FAB_SET.has((r.activity ?? "").toUpperCase()))
+          .reduce((sum, r) => sum + r.balanceWt, 0),
+        galvaLoad: recs
+          .filter(r => GALVA_SET.has((r.activity ?? "").toUpperCase()))
+          .reduce((sum, r) => sum + r.balanceWt, 0),
         avgAge: withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays!, 0) / withAge.length) : null,
       };
     });
@@ -89,7 +100,6 @@ function ContractorContent() {
       unassignedCount: stats.find(s => s.name === "Unassigned")?.marks || 0,
       busiest: sortedStats[0]?.name || "-",
       mostAged: [...stats].sort((a, b) => (b.avgAge || 0) - (a.avgAge || 0))[0]?.name || "-",
-      maxWeight: Math.max(...sortedStats.map(s => s.weight), 1),
     };
   }, [records]);
 
@@ -117,71 +127,60 @@ function ContractorContent() {
         <CardHeader>
           <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Workload</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {sortedStats.map(s => (
-              <button
-                key={s.name}
-                type="button"
-                onClick={() => setSelectedContractor(s.name)}
-                className="w-full space-y-1.5 text-left rounded-md p-1.5 -m-1.5 hover:bg-muted/40 transition-colors"
-              >
-                <div className="flex justify-between text-sm gap-2">
-                  <span className="font-semibold text-foreground hover:text-primary transition-colors flex items-center gap-2 min-w-0">
-                    <span className="truncate">{s.name}</span>
-                    <ContractorCategoryBadge info={contractorCategoryFor(s.name, categoryMap)} />
-                  </span>
-                  <span className="font-bold text-foreground font-mono shrink-0">{formatWeight(s.weight)}</span>
-                </div>
-                <div className="h-2.5 bg-muted rounded-full overflow-hidden flex">
-                  <div 
-                    className="bg-secondary transition-all h-full" 
-                    style={{ width: `${(s.weight / maxWeight) * 100}%` }}
-                  />
-                </div>
-                <div className="flex justify-between gap-2 text-[11px] text-muted-foreground">
-                  <span>
-                    {s.projects.toLocaleString()} {s.projects === 1 ? "project" : "projects"} • {s.marks.toLocaleString()} marks
-                  </span>
-                  <span className={`font-semibold tabular-nums ${getAgeingColor(s.avgAge)}`}>
-                    {s.avgAge !== null ? `avg ${s.avgAge}d` : "avg -"}
-                  </span>
-                </div>
-              </button>
-            ))}
-            {sortedStats.length === 0 && <div className="text-muted-foreground text-sm">No data available.</div>}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">Summary</CardTitle>
-        </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Contractor</TableHead>
+                  <TableHead className="text-right">Total Wt</TableHead>
+                  <TableHead className="text-right">Projects</TableHead>
                   <TableHead className="text-right">Marks</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Wt</TableHead>
+                  <TableHead className="text-right">Fabrication Load</TableHead>
+                  <TableHead className="text-right">Galvanizing Load</TableHead>
                   <TableHead className="text-right">Avg Ageing</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {sortedStats.map(s => (
-                  <TableRow key={s.name} className="cursor-pointer hover:bg-muted/40" onClick={() => setSelectedContractor(s.name)}>
-                    <TableCell className="font-bold text-primary">{s.name}</TableCell>
-                    <TableCell className="text-right">{s.marks}</TableCell>
-                    <TableCell className="text-right">{s.qty}</TableCell>
-                    <TableCell className="text-right">{formatWeight(s.weight)}</TableCell>
-                    <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(s.avgAge)}`}>
-                      {s.avgAge !== null ? `${s.avgAge}d` : '-'}
+                  <TableRow
+                    key={s.name}
+                    className="cursor-pointer hover:bg-muted/40"
+                    onClick={() => setSelectedContractor(s.name)}
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-semibold text-foreground truncate">{s.name}</span>
+                        <ContractorCategoryBadge info={contractorCategoryFor(s.name, categoryMap)} />
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right font-bold font-mono tabular-nums text-foreground">
+                      {formatWeight(s.weight)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {s.projects.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {s.marks.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums text-muted-foreground">
+                      {formatWeight(s.fabLoad)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums text-muted-foreground">
+                      {formatWeight(s.galvaLoad)}
+                    </TableCell>
+                    <TableCell className={`text-right font-semibold tabular-nums ${getAgeingColor(s.avgAge)}`}>
+                      {s.avgAge !== null ? `${s.avgAge}d` : "-"}
                     </TableCell>
                   </TableRow>
                 ))}
+                {sortedStats.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                      No data available.
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </div>
