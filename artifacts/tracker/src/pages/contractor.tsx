@@ -15,6 +15,7 @@ import { compareActivity, contractorCategoryLabel, outVendorTypeLabel, bundleAct
 // bundles in @workspace/domain. Display/aggregation only.
 const FAB_SET = bundleActivitySet("TLT_FABRICATION") ?? new Set<string>();
 const GALVA_SET = bundleActivitySet("GALVANIZING") ?? new Set<string>();
+const YARD_SET = bundleActivitySet("YARD") ?? new Set<string>();
 
 // Small inline badge for a contractor's sub-category (+ FAB/GALVA tags). Display
 // only; resolved live from the overlay map. Unclassified contractors render a
@@ -104,6 +105,9 @@ function ContractorContent() {
         galvaLoad: recs
           .filter(r => GALVA_SET.has((r.activity ?? "").toUpperCase()))
           .reduce((sum, r) => sum + r.balanceWt, 0),
+        yardLoad: recs
+          .filter(r => YARD_SET.has((r.activity ?? "").toUpperCase()))
+          .reduce((sum, r) => sum + r.balanceWt, 0),
         avgAge: withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays!, 0) / withAge.length) : null,
       };
     });
@@ -155,6 +159,7 @@ function ContractorContent() {
                   <TableHead className="text-right">Marks</TableHead>
                   <TableHead className="text-right">Fabrication Load</TableHead>
                   <TableHead className="text-right">Galvanizing Load</TableHead>
+                  <TableHead className="text-right">Yard Load</TableHead>
                   <TableHead className="text-right">Avg Ageing</TableHead>
                 </TableRow>
               </TableHeader>
@@ -200,6 +205,15 @@ function ContractorContent() {
                     >
                       {formatWeight(s.galvaLoad)}
                     </TableCell>
+                    <TableCell
+                      className="text-right align-top font-mono tabular-nums text-foreground text-base hover:text-primary hover:underline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        drillWithActivity(s.name, "bundle:YARD");
+                      }}
+                    >
+                      {formatWeight(s.yardLoad)}
+                    </TableCell>
                     <TableCell className={`text-right align-top font-semibold tabular-nums text-base ${getAgeingColor(s.avgAge)}`}>
                       {s.avgAge !== null ? `${s.avgAge}d` : "-"}
                     </TableCell>
@@ -207,7 +221,7 @@ function ContractorContent() {
                 ))}
                 {sortedStats.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                       No data available.
                     </TableCell>
                   </TableRow>
