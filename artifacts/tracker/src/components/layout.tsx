@@ -31,7 +31,7 @@ const navItems: NavItem[] = [
   { href: "/activity", icon: Activity, label: "Activity Wise", short: "Activity" },
   { href: "/contractor", icon: Users, label: "Contractor Wise", short: "Contractors" },
   { href: "/plant", icon: Factory, label: "Plant Operation Wise", short: "Plant Ops", disabled: true },
-  { href: "/order-status", icon: PackageCheck, label: "Order Status", short: "Orders" },
+  { href: "/order-status", icon: PackageCheck, label: "Order Status", short: "Orders", disabled: true },
   { href: "/completed", icon: CheckCircle2, label: "Completed", short: "Completed" },
   { href: "/reports", icon: FileText, label: "Reports", short: "Reports" },
   { href: "/turnaround", icon: Timer, label: "Turn Around Time", short: "Turnaround" },
