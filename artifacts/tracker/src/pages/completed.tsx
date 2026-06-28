@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTracker } from "@/lib/store";
 import {
   useGetMilestones,
@@ -7,6 +7,13 @@ import {
 } from "@workspace/api-client-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { fmtDays } from "@/lib/velocity";
 import { exportToCsv } from "@/lib/export";
 import { Download, AlertTriangle, RotateCcw } from "lucide-react";
@@ -44,8 +51,19 @@ function fmtSigned(n: number | null): string {
   return v > 0 ? `+${v}` : `${v}`;
 }
 
+type SortKey = "status" | "project" | "marks" | "readyDays" | "variance";
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "status", label: "Status" },
+  { value: "project", label: "Project" },
+  { value: "marks", label: "Marks" },
+  { value: "readyDays", label: "Ready days" },
+  { value: "variance", label: "Variance" },
+];
+
 export default function CompletedView() {
   const { filters } = useTracker();
+  const [sortKey, setSortKey] = useState<SortKey>("status");
   const { data, isLoading } = useGetMilestones({
     query: { queryKey: getGetMilestonesQueryKey() },
   });
@@ -57,13 +75,36 @@ export default function CompletedView() {
   // per-project milestone.
   const rows = useMemo(() => {
     const filtered = filters.job ? all.filter((m) => m.project === filters.job) : all;
-    const rank: Record<Status, number> = { progress: 0, ready: 1, dispatched: 2 };
+    // Dispatched first, then in-yard (ready), then in-progress.
+    const rank: Record<Status, number> = { dispatched: 0, ready: 1, progress: 2 };
+    const byProject = (a: ProjectMilestone, b: ProjectMilestone) =>
+      a.project.localeCompare(b.project);
+    const numDesc = (av: number | null | undefined, bv: number | null | undefined) =>
+      (bv ?? -Infinity) - (av ?? -Infinity);
     return [...filtered].sort((a, b) => {
-      const r = rank[statusOf(a)] - rank[statusOf(b)];
-      if (r !== 0) return r;
-      return a.project.localeCompare(b.project);
+      let primary = 0;
+      switch (sortKey) {
+        case "project":
+          primary = byProject(a, b);
+          break;
+        case "marks":
+          primary = numDesc(a.marksTotal, b.marksTotal);
+          break;
+        case "readyDays":
+          primary = numDesc(a.readyTurnaroundDays, b.readyTurnaroundDays);
+          break;
+        case "variance":
+          primary = numDesc(a.varianceReadyDays, b.varianceReadyDays);
+          break;
+        case "status":
+        default:
+          primary = rank[statusOf(a)] - rank[statusOf(b)];
+          break;
+      }
+      if (primary !== 0) return primary;
+      return byProject(a, b);
     });
-  }, [all, filters.job]);
+  }, [all, filters.job, sortKey]);
 
   const rollup = useMemo(() => {
     let dispatched = 0;
@@ -129,16 +170,35 @@ export default function CompletedView() {
             no longer in any report.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onExport}
-          disabled={rows.length === 0}
-          className="gap-2 shrink-0"
-        >
-          <Download className="h-4 w-4" />
-          <span className="hidden sm:inline">Export CSV</span>
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="hidden sm:inline text-xs font-semibold uppercase text-muted-foreground">
+              Sort by
+            </span>
+            <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
+              <SelectTrigger className="h-9 w-[150px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onExport}
+            disabled={rows.length === 0}
+            className="gap-2"
+          >
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">Export CSV</span>
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
