@@ -54,14 +54,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
       {/* Top Nav (Desktop) */}
       <header className="hidden md:flex sticky top-0 z-40 min-h-14 bg-sidebar border-b border-sidebar-border items-center flex-wrap gap-x-3 gap-y-1 px-4 py-1.5">
         <div className="font-bold text-lg text-primary tracking-tight shrink-0">TRACKER</div>
-        <nav className="flex flex-1 items-center justify-center flex-wrap gap-x-1 gap-y-1">
+        <nav className="flex flex-1 items-center justify-center flex-nowrap gap-x-0.5">
           {navItems.map((item) =>
             item.disabled ? (
               <div
                 key={item.href}
                 title={`${item.label} (disabled)`}
                 aria-disabled="true"
-                className="px-2 py-1 rounded-md text-xs font-medium whitespace-nowrap text-sidebar-foreground/40 cursor-not-allowed select-none"
+                className="px-2 py-1 rounded-md text-xs font-medium text-center leading-tight text-sidebar-foreground/40 cursor-not-allowed select-none"
               >
                 {item.label}
               </div>
@@ -69,7 +69,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <Link key={item.href} href={item.href}>
                 <div
                   title={item.label}
-                  className={`px-2 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                  className={`px-2 py-1 rounded-md text-xs font-medium text-center leading-tight transition-colors cursor-pointer ${
                     location === item.href
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "text-sidebar-foreground hover:bg-sidebar-accent/50"
