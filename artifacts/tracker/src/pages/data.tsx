@@ -193,7 +193,13 @@ function DataViewContent() {
         </p>
       </div>
 
-      <StagedUploadPanel onCommitted={handleCommitted} />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <StagedUploadPanel expectedType="wip" onCommitted={handleCommitted} />
+        <StagedUploadPanel
+          expectedType="order-review"
+          onCommitted={handleCommitted}
+        />
+      </div>
 
       {selectedImportId && <AiSanitizePanel importId={selectedImportId} />}
 

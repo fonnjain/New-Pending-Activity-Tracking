@@ -36,6 +36,12 @@ so the original WIP-only contract crashed on them. The fix:
   `kind`. Frontend `onCommitted` discriminates on `kind`.
 - Order-review files **skip the AI gatekeeper** (direct commit). Unknown files are rejected with 400
   at commit too (defense-in-depth), not only in the validate UI.
+- **Slot-declared expected type.** The Data page has TWO uploaders; each declares an `expectedType`
+  (`wip` / `order-review`). The slot — not the file — defines intent. A file whose `detectFileType`
+  result differs is rejected with a cross-type "use the other uploader" message. Enforced in THREE
+  places: frontend slot gate (no preview/commit on mismatch), `/imports/validate` (early reject),
+  and `/imports/commit` (400 — the guarantee that a wrong-slot file can never commit). `expectedType`
+  is OPTIONAL on the validate/commit requests, so legacy single-slot callers stay valid.
 ## Order Review rows are UPSERTED (idempotent daily snapshot), NOT appended
 **Why:** the Order Review file is a daily snapshot of the same order book; appending a fresh row set
 per upload duplicated every structure. The intake is now idempotent: ONE current row per

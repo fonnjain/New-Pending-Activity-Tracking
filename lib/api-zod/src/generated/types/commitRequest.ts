@@ -6,9 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AcceptedSuggestion } from './acceptedSuggestion';
+import type { CommitRequestExpectedType } from './commitRequestExpectedType';
 
 export interface CommitRequest {
   stagingId: string;
+  /** The file type the upload slot expects. When set and the detected type differs, the commit is rejected (defense-in-depth so a mis-routed file never commits).
+   */
+  expectedType?: CommitRequestExpectedType;
   /** Descriptive cleanups the user accepted; applied before parse+merge. */
   acceptedSuggestions?: AcceptedSuggestion[];
 }

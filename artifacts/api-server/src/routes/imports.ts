@@ -59,6 +59,7 @@ import {
 import {
   detectFileType,
   parseOrderReview,
+  type OrderReviewFileType,
 } from "../lib/parse-order-review";
 import {
   parseWorkbook,
@@ -552,6 +553,29 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
 const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_GATEKEEPER_ROWS = 400;
 
+// Read the optional per-slot expected type from a request body. Each upload slot
+// (WIP vs Order Review) tells the validator/commit which type it expects so a
+// mis-routed file is caught — auto-detect stays a secondary safety net.
+function readExpectedType(body: unknown): OrderReviewFileType | null {
+  const v = (body as { expectedType?: unknown })?.expectedType;
+  return v === "wip" || v === "order-review" ? v : null;
+}
+
+const SLOT_LABEL: Record<"wip" | "order-review", string> = {
+  wip: "WIP / Balance & Activity",
+  "order-review": "Order Review",
+};
+
+// A consistent, helpful message when a file does not match its upload slot's
+// expected type. When the file clearly matches the OTHER known type we point the
+// user at the correct slot; otherwise we report it is neither known type.
+function typeMismatchMessage(detected: OrderReviewFileType): string {
+  if (detected === "wip" || detected === "order-review") {
+    return `This looks like a ${SLOT_LABEL[detected]} file — please use the ${SLOT_LABEL[detected]} uploader.`;
+  }
+  return "This doesn't look like a valid WIP or Order Review file.";
+}
+
 // Opportunistically drop staged rows older than the TTL.
 async function expireStagedUploads(): Promise<void> {
   const cutoff = new Date(Date.now() - STAGING_TTL_MS);
@@ -674,6 +698,26 @@ router.post("/imports/validate", requireAuth, async (req, res): Promise<void> =>
   // Order Review files are validated deterministically (no AI gatekeeper): a
   // parseable file with at least one (project, structure) row is accepted.
   const fileType = detectFileType(staged.fileData);
+
+  // Type-matched validation: the slot tells us which type to EXPECT. If the file
+  // does not match, reject with a helpful cross-type message before any further
+  // checks. Auto-detect (fileType) is the secondary safety net behind the slot.
+  const expectedType = readExpectedType(req.body);
+  if (expectedType && fileType !== expectedType) {
+    res.json({
+      available: false,
+      fileType,
+      verdict: "reject",
+      reason: typeMismatchMessage(fileType),
+      expectedShape:
+        expectedType === "wip"
+          ? "A WIP balance/activity .xlsx with Project Code + Mark No. + Activity."
+          : "An Order Review .xlsx with Tower Type Code + Despatch MT.",
+      sanitize: [],
+    });
+    return;
+  }
+
   if (fileType === "order-review") {
     let parsedOr;
     try {
@@ -891,9 +935,19 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
+  // Type-matched commit (defense in depth): when the slot declares an expected
+  // type, a file whose detected type differs must NOT commit, even if a caller
+  // posts straight to commit bypassing the UI gate and /validate.
+  const detected = detectFileType(staged.fileData);
+  const expectedType = readExpectedType(req.body);
+  if (expectedType && detected !== expectedType) {
+    res.status(400).json({ error: typeMismatchMessage(detected) });
+    return;
+  }
+
   // Reject unrecognised files explicitly (defense in depth: a caller may post
   // straight to commit, bypassing /validate). Only WIP and Order Review commit.
-  if (detectFileType(staged.fileData) === "unknown") {
+  if (detected === "unknown") {
     res.status(400).json({
       error:
         "Unrecognised file. Upload either a WIP balance/activity report (Project Code + Mark No. + Activity) or an Order Review export.",
@@ -904,7 +958,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   // Order Review files commit via a separate, deterministic ingest path: create
   // an order_review_imports row, capture-once seed dispatch, recompute. Idempotent
   // via committed_order_review_import_id (a retried commit returns the same one).
-  if (detectFileType(staged.fileData) === "order-review") {
+  if (detected === "order-review") {
     if (staged.committedOrderReviewImportId != null) {
       const [imp] = await db
         .select()

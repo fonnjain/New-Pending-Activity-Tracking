@@ -204,8 +204,23 @@ export interface StageResult {
   orderReview?: OrderReviewStageInfo | null;
 }
 
+/**
+ * The file type the upload slot expects. When set and the detected type differs, the file is rejected with a cross-type message (type-matched validation).
+
+ */
+export type ValidateRequestExpectedType = typeof ValidateRequestExpectedType[keyof typeof ValidateRequestExpectedType];
+
+
+export const ValidateRequestExpectedType = {
+  wip: 'wip',
+  'order-review': 'order-review',
+} as const;
+
 export interface ValidateRequest {
   stagingId: string;
+  /** The file type the upload slot expects. When set and the detected type differs, the file is rejected with a cross-type message (type-matched validation).
+   */
+  expectedType?: ValidateRequestExpectedType;
 }
 
 /**
@@ -281,8 +296,23 @@ export interface AcceptedSuggestion {
   to: string | null;
 }
 
+/**
+ * The file type the upload slot expects. When set and the detected type differs, the commit is rejected (defense-in-depth so a mis-routed file never commits).
+
+ */
+export type CommitRequestExpectedType = typeof CommitRequestExpectedType[keyof typeof CommitRequestExpectedType];
+
+
+export const CommitRequestExpectedType = {
+  wip: 'wip',
+  'order-review': 'order-review',
+} as const;
+
 export interface CommitRequest {
   stagingId: string;
+  /** The file type the upload slot expects. When set and the detected type differs, the commit is rejected (defense-in-depth so a mis-routed file never commits).
+   */
+  expectedType?: CommitRequestExpectedType;
   /** Descriptive cleanups the user accepted; applied before parse+merge. */
   acceptedSuggestions?: AcceptedSuggestion[];
 }

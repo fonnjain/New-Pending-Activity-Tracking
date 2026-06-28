@@ -24,11 +24,28 @@ import { useToast } from "@/hooks/use-toast";
 
 type Phase = "idle" | "staged" | "validating" | "validated";
 
+export type SlotType = "wip" | "order-review";
+
+const SLOT_LABEL: Record<SlotType, string> = {
+  wip: "WIP / Balance & Activity",
+  "order-review": "Order Review",
+};
+
+// A helpful, slot-aware message when the staged file does not match the slot's
+// expected type. Mirrors the server's typeMismatchMessage wording.
+function mismatchMessage(detected: StageResult["fileType"]): string {
+  if (detected === "wip" || detected === "order-review") {
+    return `This looks like a ${SLOT_LABEL[detected]} file — please use the ${SLOT_LABEL[detected]} uploader.`;
+  }
+  return "This doesn't look like a valid WIP or Order Review file.";
+}
+
 interface Props {
+  expectedType: SlotType;
   onCommitted: (res: CommitResult) => void;
 }
 
-export function StagedUploadPanel({ onCommitted }: Props) {
+export function StagedUploadPanel({ expectedType, onCommitted }: Props) {
   const stage = useStageImport();
   const validate = useValidateStagedImport();
   const commit = useCommitStagedImport();
@@ -53,7 +70,9 @@ export function StagedUploadPanel({ onCommitted }: Props) {
     setAccepted(new Set());
   };
 
-  const isOrderReview = staged?.fileType === "order-review";
+  const isOrderReview = expectedType === "order-review";
+  // Slot gate: the file the user picked must match THIS slot's expected type.
+  const typeMismatch = staged != null && staged.fileType !== expectedType;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -84,7 +103,7 @@ export function StagedUploadPanel({ onCommitted }: Props) {
     if (!staged) return;
     setPhase("validating");
     validate.mutate(
-      { data: { stagingId: staged.stagingId } },
+      { data: { stagingId: staged.stagingId, expectedType } },
       {
         onSuccess: (res) => {
           setValidation(res);
@@ -113,7 +132,7 @@ export function StagedUploadPanel({ onCommitted }: Props) {
         .map((s) => ({ field: s.field, from: s.from, to: s.to })) ?? [];
 
     commit.mutate(
-      { data: { stagingId: staged.stagingId, acceptedSuggestions } },
+      { data: { stagingId: staged.stagingId, expectedType, acceptedSuggestions } },
       {
         onSuccess: (res) => {
           onCommitted(res);
@@ -154,19 +173,35 @@ export function StagedUploadPanel({ onCommitted }: Props) {
     });
   };
 
+  const heading = isOrderReview
+    ? "Order Review File"
+    : "WIP / Balance & Activity Report";
+  const helper = isOrderReview
+    ? "The Order Review export (per project & structure: sets, weight, release, dispatch). Updates the Order Status page; re-uploading is safe (idempotent upsert, one row per project + structure)."
+    : "The daily WIP balance/activity export (marks, activities, weights). Staged and checked first; nothing imports until you accept. Re-uploading the same file is safe and registers zero changes.";
+  const Icon = isOrderReview ? ClipboardList : Upload;
+  // Visually distinguish the two slots so a file can never go to the wrong one.
+  const accent = isOrderReview
+    ? {
+        card: "border-sky-500/40 bg-sky-500/5",
+        chip: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
+      }
+    : {
+        card: "border-primary/40 bg-primary/5",
+        chip: "bg-primary/10 text-primary",
+      };
+
   return (
     <div className="space-y-4">
-      <Card className="border-dashed border-2 bg-muted/10">
-        <CardContent className="flex flex-col items-center justify-center p-12 text-center">
-          <div className="w-16 h-16 bg-primary/10 text-primary rounded-full flex items-center justify-center mb-4">
-            <Upload className="w-8 h-8" />
+      <Card className={`border-dashed border-2 ${accent.card}`}>
+        <CardContent className="flex flex-col items-center justify-center p-10 text-center">
+          <div
+            className={`w-14 h-14 rounded-full flex items-center justify-center mb-4 ${accent.chip}`}
+          >
+            <Icon className="w-7 h-7" />
           </div>
-          <h3 className="text-lg font-bold mb-2">Upload Report</h3>
-          <p className="text-sm text-muted-foreground mb-6 max-w-md">
-            Select an Excel (.xlsx or .xls) balance/activity report. The file is
-            staged and checked first. Nothing is imported until you accept.
-            Re-uploading the same file is safe and registers zero changes.
-          </p>
+          <h3 className="text-lg font-bold mb-2">{heading}</h3>
+          <p className="text-sm text-muted-foreground mb-6 max-w-md">{helper}</p>
           <div className="relative">
             <input
               type="file"
@@ -208,75 +243,110 @@ export function StagedUploadPanel({ onCommitted }: Props) {
               </Button>
             </div>
 
-            {staged.structural && (
-              <StructuralSummary structural={staged.structural} />
-            )}
-
-            {isOrderReview && staged.orderReview && (
-              <OrderReviewSummary info={staged.orderReview} />
-            )}
-
-            {phase === "staged" && isOrderReview && (
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Button
-                  onClick={doCommit}
-                  disabled={busy}
-                  className="gap-2 text-primary-foreground"
-                >
-                  <ClipboardList className="w-4 h-4" />
-                  {commit.isPending ? "Importing..." : "Import Order Review"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={doDiscard}
-                  disabled={busy}
-                >
-                  Discard
-                </Button>
-              </div>
-            )}
-
-            {phase === "staged" && !isOrderReview && (
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Button
-                  onClick={runValidate}
-                  disabled={busy}
-                  className="gap-2 text-primary-foreground"
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  Check &amp; sanitize with Claude
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={doCommit}
-                  disabled={busy}
-                  className="gap-2"
-                >
-                  Skip check &amp; import as-is
-                </Button>
-              </div>
-            )}
-
-            {phase === "validating" && (
-              <div className="text-sm text-muted-foreground">
-                Checking the file with Claude...
-              </div>
-            )}
-
-            {phase === "validated" && validation && (
-              <ValidationView
-                validation={validation}
-                accepted={accepted}
-                onToggle={toggle}
-                onCommit={doCommit}
+            {typeMismatch ? (
+              <TypeMismatchView
+                message={mismatchMessage(staged.fileType)}
                 onDiscard={doDiscard}
                 busy={busy}
-                committing={commit.isPending}
               />
+            ) : (
+              <>
+                {staged.structural && (
+                  <StructuralSummary structural={staged.structural} />
+                )}
+
+                {isOrderReview && staged.orderReview && (
+                  <OrderReviewSummary info={staged.orderReview} />
+                )}
+
+                {phase === "staged" && isOrderReview && (
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Button
+                      onClick={doCommit}
+                      disabled={busy}
+                      className="gap-2 text-primary-foreground"
+                    >
+                      <ClipboardList className="w-4 h-4" />
+                      {commit.isPending ? "Importing..." : "Import Order Review"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={doDiscard}
+                      disabled={busy}
+                    >
+                      Discard
+                    </Button>
+                  </div>
+                )}
+
+                {phase === "staged" && !isOrderReview && (
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Button
+                      onClick={runValidate}
+                      disabled={busy}
+                      className="gap-2 text-primary-foreground"
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                      Check &amp; sanitize with Claude
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={doCommit}
+                      disabled={busy}
+                      className="gap-2"
+                    >
+                      Skip check &amp; import as-is
+                    </Button>
+                  </div>
+                )}
+
+                {phase === "validating" && (
+                  <div className="text-sm text-muted-foreground">
+                    Checking the file with Claude...
+                  </div>
+                )}
+
+                {phase === "validated" && validation && (
+                  <ValidationView
+                    validation={validation}
+                    accepted={accepted}
+                    onToggle={toggle}
+                    onCommit={doCommit}
+                    onDiscard={doDiscard}
+                    busy={busy}
+                    committing={commit.isPending}
+                  />
+                )}
+              </>
             )}
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+function TypeMismatchView({
+  message,
+  onDiscard,
+  busy,
+}: {
+  message: string;
+  onDiscard: () => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm space-y-2">
+        <div className="flex items-center gap-2 font-bold text-destructive">
+          <AlertTriangle className="w-4 h-4" />
+          Wrong file for this uploader
+        </div>
+        <p className="text-foreground/90">{message}</p>
+      </div>
+      <Button variant="outline" onClick={onDiscard} disabled={busy}>
+        Reset
+      </Button>
     </div>
   );
 }

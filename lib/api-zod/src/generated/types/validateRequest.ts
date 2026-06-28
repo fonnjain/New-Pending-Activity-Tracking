@@ -5,7 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ValidateRequestExpectedType } from './validateRequestExpectedType';
 
 export interface ValidateRequest {
   stagingId: string;
+  /** The file type the upload slot expects. When set and the detected type differs, the file is rejected with a cross-type message (type-matched validation).
+   */
+  expectedType?: ValidateRequestExpectedType;
 }

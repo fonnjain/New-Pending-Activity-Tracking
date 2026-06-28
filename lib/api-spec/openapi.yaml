@@ -1335,6 +1335,12 @@ components:
       properties:
         stagingId:
           type: string
+        expectedType:
+          type: string
+          enum: [wip, order-review]
+          description: >
+            The file type the upload slot expects. When set and the detected type differs,
+            the file is rejected with a cross-type message (type-matched validation).
       required:
         - stagingId
     StagedSanitizeSuggestion:
@@ -1409,6 +1415,12 @@ components:
       properties:
         stagingId:
           type: string
+        expectedType:
+          type: string
+          enum: [wip, order-review]
+          description: >
+            The file type the upload slot expects. When set and the detected type differs,
+            the commit is rejected (defense-in-depth so a mis-routed file never commits).
         acceptedSuggestions:
           type: array
           items:

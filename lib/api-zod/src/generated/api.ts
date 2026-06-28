@@ -904,7 +904,8 @@ export const StageImportBody = zod.object({
  * @summary Validate a staged upload with the AI gatekeeper
  */
 export const ValidateStagedImportBody = zod.object({
-  "stagingId": zod.string()
+  "stagingId": zod.string(),
+  "expectedType": zod.enum(['wip', 'order-review']).optional().describe('The file type the upload slot expects. When set and the detected type differs, the file is rejected with a cross-type message (type-matched validation).\n')
 })
 
 export const ValidateStagedImportResponse = zod.object({
@@ -930,6 +931,7 @@ export const ValidateStagedImportResponse = zod.object({
  */
 export const CommitStagedImportBody = zod.object({
   "stagingId": zod.string(),
+  "expectedType": zod.enum(['wip', 'order-review']).optional().describe('The file type the upload slot expects. When set and the detected type differs, the commit is rejected (defense-in-depth so a mis-routed file never commits).\n'),
   "acceptedSuggestions": zod.array(zod.object({
   "field": zod.string(),
   "from": zod.string().nullable(),
