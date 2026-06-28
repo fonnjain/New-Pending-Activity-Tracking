@@ -358,39 +358,28 @@ function JobDashboardContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-end">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-2"
-          onClick={handleExport}
-          disabled={byProject.length === 0}
-        >
-          <FileSpreadsheet className="h-4 w-4" /> Export Excel
-        </Button>
-      </div>
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-3">
+        <CardHeader className="pb-3">
           <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
             {isAll ? "Group Filters" : isNtlt ? "Section Filters" : "Project Filters"}
           </CardTitle>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-muted-foreground uppercase">
-              Order Type
-            </span>
-            <Segmented
-              value={filters.category}
-              onChange={switchMode}
-              options={[
-                { value: "ALL", label: "All" },
-                { value: "TLT", label: "TLT" },
-                { value: "NTLT", label: "NTLT" },
-              ]}
-            />
-          </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-muted-foreground uppercase">
+                Order Type
+              </label>
+              <Segmented
+                value={filters.category}
+                onChange={switchMode}
+                options={[
+                  { value: "ALL", label: "All" },
+                  { value: "TLT", label: "TLT" },
+                  { value: "NTLT", label: "NTLT" },
+                ]}
+              />
+            </div>
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">
                 {primaryLabel}
@@ -635,6 +624,18 @@ function JobDashboardContent() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="flex items-center justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-2"
+          onClick={handleExport}
+          disabled={byProject.length === 0}
+        >
+          <FileSpreadsheet className="h-4 w-4" /> Export Excel
+        </Button>
+      </div>
     </div>
   );
 }
