@@ -1,14 +1,17 @@
 import { Router, type IRouter } from "express";
-import { desc } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import {
   db,
   orderReviewImportsTable,
+  orderReviewRowsTable,
   orderDispatchTable,
+  dispatchLedgerTable,
 } from "@workspace/db";
 import {
   loadLatestOrderReview,
   crossCheckDispatch,
 } from "../lib/dispatch";
+import { requireAuth } from "./auth";
 
 const router: IRouter = Router();
 
@@ -86,6 +89,75 @@ router.get("/order-status", async (_req, res): Promise<void> => {
     reconciliation,
     imports,
   });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /order-imports/:id — remove one Order Review upload from the history.
+// The Order Review file is a daily snapshot merged (UPSERTed) into ONE current
+// order book per (project, structure); history entries do not own per-import
+// rows, so deleting a log entry does NOT roll back current order-book values.
+//   - Deleting the most recent upload re-points current snapshot rows (which we
+//     cannot un-merge) to the now-latest remaining upload, so they stay flagged
+//     as present in the latest file.
+//   - Deleting the last remaining upload clears the entire order book (rows +
+//     computed dispatch + ledger) so the overlay returns to available:false with
+//     no orphaned rows.
+// Purely additive to WIP state — never touches WIP parsing/activity/dedup/
+// ageing/warning/milestone math.
+// ---------------------------------------------------------------------------
+router.delete("/order-imports/:id", requireAuth, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const deleted = await db.transaction(async (tx) => {
+    // Serialize with the shared Order Review / WIP commit lock so concurrent
+    // deletes can't each read a stale "remaining" snapshot and both skip cleanup.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(728041)`);
+
+    const [target] = await tx
+      .select({ id: orderReviewImportsTable.id })
+      .from(orderReviewImportsTable)
+      .where(eq(orderReviewImportsTable.id, id));
+    if (!target) return false;
+
+    await tx
+      .delete(orderReviewImportsTable)
+      .where(eq(orderReviewImportsTable.id, id));
+
+    // Base cleanup/repoint on POST-delete DB state (inside the lock), never on a
+    // pre-delete snapshot.
+    const remaining = await tx
+      .select({ id: orderReviewImportsTable.id })
+      .from(orderReviewImportsTable);
+    if (remaining.length === 0) {
+      // No uploads left: clear the merged order book and the computed dispatch
+      // overlay so the system returns to a clean "no Order Review" state.
+      await tx.delete(orderReviewRowsTable);
+      await tx.delete(orderDispatchTable);
+      await tx.delete(dispatchLedgerTable);
+    } else {
+      const newLatest = Math.max(...remaining.map((r) => r.id));
+      // Deleting the most recent upload: the merged snapshot rows can't be rolled
+      // back, so attribute them to the now-latest upload (keeps notInLatest sane).
+      if (id > newLatest) {
+        await tx
+          .update(orderReviewRowsTable)
+          .set({ importId: newLatest })
+          .where(eq(orderReviewRowsTable.importId, id));
+      }
+    }
+    return true;
+  });
+
+  if (!deleted) {
+    res.status(404).json({ error: "Order Review import not found" });
+    return;
+  }
+
+  res.sendStatus(204);
 });
 
 export default router;

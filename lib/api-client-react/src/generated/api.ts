@@ -2687,6 +2687,78 @@ export function useGetOrderStatus<TData = Awaited<ReturnType<typeof getOrderStat
 
 
 
+export const getDeleteOrderImportUrl = (id: number,) => {
+
+
+
+
+  return `/api/order-imports/${id}`
+}
+
+/**
+ * Removes a single Order Review upload from the history log. The Order Review file is a daily snapshot merged (UPSERTed) into one current order book, so deleting a history entry does NOT roll back the current order-book values. Deleting the most recent upload re-points the current snapshot rows to the now-latest remaining upload. Deleting the last remaining upload clears the entire order book (rows + computed dispatch). Purely additive to WIP state — never touches WIP parsing, activity, dedup, ageing, warning, or milestone math.
+
+ * @summary Delete one Order Review file from the upload history
+ */
+export const deleteOrderImport = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteOrderImportUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteOrderImportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteOrderImport>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteOrderImport>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteOrderImport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteOrderImport>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteOrderImport(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteOrderImportMutationResult = NonNullable<Awaited<ReturnType<typeof deleteOrderImport>>>
+
+    export type DeleteOrderImportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Delete one Order Review file from the upload history
+ */
+export const useDeleteOrderImport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteOrderImport>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteOrderImport>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteOrderImportMutationOptions(options));
+    }
+
 export const getGetImportChangesUrl = (id: number,) => {
 
 

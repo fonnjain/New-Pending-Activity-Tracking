@@ -837,6 +837,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OrderStatusResponse"
+  /order-imports/{id}:
+    delete:
+      operationId: deleteOrderImport
+      tags: [orderStatus]
+      summary: Delete one Order Review file from the upload history
+      description: >
+        Removes a single Order Review upload from the history log. The Order Review
+        file is a daily snapshot merged (UPSERTed) into one current order book, so
+        deleting a history entry does NOT roll back the current order-book values.
+        Deleting the most recent upload re-points the current snapshot rows to the
+        now-latest remaining upload. Deleting the last remaining upload clears the
+        entire order book (rows + computed dispatch). Purely additive to WIP state —
+        never touches WIP parsing, activity, dedup, ageing, warning, or milestone math.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /imports/{id}/changes:
     get:
       operationId: getImportChanges

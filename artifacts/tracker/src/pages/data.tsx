@@ -1,4 +1,4 @@
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, type CommitResult, type DispatchReconciliationRow } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, type CommitResult, type DispatchReconciliationRow } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor } from "@/lib/store";
 import { contractorCategoryLabel } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -67,6 +67,7 @@ function DataViewContent() {
   const { selectedImportId, setSelectedImportId } = useTracker();
   const deleteImport = useDeleteImport();
   const deleteAll = useDeleteAllImports();
+  const deleteOrderImport = useDeleteOrderImport();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -111,6 +112,16 @@ function DataViewContent() {
         if (selectedImportId === id) setSelectedImportId(null);
         queryClient.invalidateQueries({ queryKey: getListImportsQueryKey() });
       }
+    });
+  };
+
+  const handleDeleteOrder = (id: number) => {
+    if (!confirm("Delete this Order Review file from the history? The current order book is a merge of all uploads, so deleting one history entry does not change the current numbers. Deleting the last remaining entry clears the order book entirely.")) return;
+    deleteOrderImport.mutate({ id }, {
+      onSuccess: () => {
+        toast({ title: "Order Review file deleted" });
+        queryClient.invalidateQueries({ queryKey: getGetOrderStatusQueryKey() });
+      },
     });
   };
 
@@ -357,6 +368,11 @@ function DataViewContent() {
                         </>
                       )}
                     </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <Button variant="ghost" size="icon" onClick={() => handleDeleteOrder(o.id)} className="text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
                   </div>
                 </CardContent>
               </Card>

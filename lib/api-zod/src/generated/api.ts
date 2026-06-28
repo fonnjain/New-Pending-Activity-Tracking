@@ -1569,6 +1569,16 @@ export const GetOrderStatusResponse = zod.object({
 
 
 /**
+ * Removes a single Order Review upload from the history log. The Order Review file is a daily snapshot merged (UPSERTed) into one current order book, so deleting a history entry does NOT roll back the current order-book values. Deleting the most recent upload re-points the current snapshot rows to the now-latest remaining upload. Deleting the last remaining upload clears the entire order book (rows + computed dispatch). Purely additive to WIP state — never touches WIP parsing, activity, dedup, ageing, warning, or milestone math.
+
+ * @summary Delete one Order Review file from the upload history
+ */
+export const DeleteOrderImportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
  * Returns the full field-level change set for an import versus the immediately preceding import. For the first import, all marks are reported as new.
 
  * @summary Get the change set for an import
