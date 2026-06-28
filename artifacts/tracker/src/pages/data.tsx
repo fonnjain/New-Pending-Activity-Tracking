@@ -62,6 +62,8 @@ function AdminTabbedPage() {
 
 function DataViewContent() {
   const { data: imports = [], refetch } = useListImports();
+  const { data: orderStatus } = useGetOrderStatus({ query: { queryKey: getGetOrderStatusQueryKey() } });
+  const orderImports = orderStatus?.imports ?? [];
   const { selectedImportId, setSelectedImportId } = useTracker();
   const deleteImport = useDeleteImport();
   const deleteAll = useDeleteAllImports();
@@ -294,42 +296,73 @@ function DataViewContent() {
             </Button>
           )}
         </div>
-        <div className="grid gap-3">
-          {imports.map(s => (
-            <Card
-              key={s.id}
-              className={`transition-all ${selectedImportId === s.id ? 'border-primary ring-1 ring-primary shadow-md' : 'hover:border-primary/50'}`}
-            >
-              <CardContent className="p-4 flex items-center justify-between">
-                <div
-                  className="flex-1 cursor-pointer flex flex-col gap-1"
-                  onClick={() => setSelectedImportId(s.id)}
-                >
-                  <div className="font-bold flex items-center gap-2">
-                    {s.label || s.sourceFilename}
-                    {selectedImportId === s.id && <CheckCircle2 className="w-4 h-4 text-primary" />}
+        <div className="space-y-2">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">WIP Files</h4>
+          <div className="grid gap-3">
+            {imports.map(s => (
+              <Card
+                key={s.id}
+                className={`transition-all ${selectedImportId === s.id ? 'border-primary ring-1 ring-primary shadow-md' : 'hover:border-primary/50'}`}
+              >
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div
+                    className="flex-1 cursor-pointer flex flex-col gap-1"
+                    onClick={() => setSelectedImportId(s.id)}
+                  >
+                    <div className="font-bold flex items-center gap-2">
+                      {s.label || s.sourceFilename}
+                      {selectedImportId === s.id && <CheckCircle2 className="w-4 h-4 text-primary" />}
+                    </div>
+                    <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
+                      <span>{new Date(s.createdAt).toLocaleDateString()}</span>
+                      <span>{s.summary.rowsKept.toLocaleString()} rows</span>
+                      {s.changeSummary && (
+                        <>
+                          <span className="text-emerald-600 dark:text-emerald-400">+{s.changeSummary.addedRows.toLocaleString()} added</span>
+                          <span>{s.changeSummary.newMarks.toLocaleString()} new</span>
+                          <span>{s.changeSummary.completed.toLocaleString()} completed</span>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
-                    <span>{new Date(s.createdAt).toLocaleDateString()}</span>
-                    <span>{s.summary.rowsKept.toLocaleString()} rows</span>
-                    {s.changeSummary && (
-                      <>
-                        <span className="text-emerald-600 dark:text-emerald-400">+{s.changeSummary.addedRows.toLocaleString()} added</span>
-                        <span>{s.changeSummary.newMarks.toLocaleString()} new</span>
-                        <span>{s.changeSummary.completed.toLocaleString()} completed</span>
-                      </>
-                    )}
+                  <div className="flex gap-2 shrink-0">
+                    <Button variant="ghost" size="icon" onClick={() => handleDelete(s.id)} className="text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
                   </div>
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <Button variant="ghost" size="icon" onClick={() => handleDelete(s.id)} className="text-muted-foreground hover:text-destructive hover:bg-destructive/10">
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-          {imports.length === 0 && <div className="text-center p-8 text-sm text-muted-foreground border rounded-lg border-dashed">No imports uploaded yet.</div>}
+                </CardContent>
+              </Card>
+            ))}
+            {imports.length === 0 && <div className="text-center p-8 text-sm text-muted-foreground border rounded-lg border-dashed">No WIP files uploaded yet.</div>}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">Order Review Files</h4>
+          <div className="grid gap-3">
+            {orderImports.map(o => (
+              <Card key={o.id} className="transition-all hover:border-primary/50">
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="flex-1 flex flex-col gap-1">
+                    <div className="font-bold">{o.label || o.sourceFilename}</div>
+                    <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
+                      <span>{new Date(o.createdAt).toLocaleDateString()}</span>
+                      {o.asOnDate && <span>as on {o.asOnDate}</span>}
+                      <span>{o.summary.rowsKept.toLocaleString()} rows</span>
+                      {o.changeLog && (
+                        <>
+                          <span className="text-emerald-600 dark:text-emerald-400">+{o.changeLog.inserted.length.toLocaleString()} added</span>
+                          <span>{o.changeLog.updated.length.toLocaleString()} updated</span>
+                          <span>{o.changeLog.unchanged.toLocaleString()} unchanged</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            {orderImports.length === 0 && <div className="text-center p-8 text-sm text-muted-foreground border rounded-lg border-dashed">No Order Review files uploaded yet.</div>}
+          </div>
         </div>
       </div>
     </div>
