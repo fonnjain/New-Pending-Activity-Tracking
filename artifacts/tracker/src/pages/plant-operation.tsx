@@ -425,9 +425,6 @@ function FabricationTab({ records }: { records: any[] }) {
             />
           </div>
         )}
-      </div>
-
-      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-muted-foreground uppercase">
             {dimension === "special" ? "Operation" : "Hole Operation"}
@@ -452,10 +449,6 @@ function FabricationTab({ records }: { records: any[] }) {
             }
           />
         </div>
-        <Button variant="outline" size="sm" className="gap-2" onClick={handleExport} disabled={projects.length === 0}>
-          <FileSpreadsheet className="h-4 w-4" />
-          Export Excel
-        </Button>
       </div>
 
       <div className={`grid grid-cols-2 gap-3 ${dimension === "special" ? "md:grid-cols-3" : "md:grid-cols-4"}`}>
@@ -490,6 +483,13 @@ function FabricationTab({ records }: { records: any[] }) {
             )}
           </>
         )}
+      </div>
+
+      <div className="flex justify-end">
+        <Button variant="outline" size="sm" className="gap-2" onClick={handleExport} disabled={projects.length === 0}>
+          <FileSpreadsheet className="h-4 w-4" />
+          Export Excel
+        </Button>
       </div>
 
       {actCounts.length > 0 && (
