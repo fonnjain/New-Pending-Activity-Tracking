@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTracker, useFilteredRecords } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
@@ -176,15 +176,22 @@ function PlantOperationContent() {
   });
   const records = useFilteredRecords(allRecords);
   const isTlt = filters.category === "TLT";
+  const [tab, setTab] = useState("fabrication");
+  const [group, setGroup] = useState<string>("ALL");
 
   return (
-    <Tabs defaultValue="fabrication" className="space-y-4">
-      <TabsList className="h-10">
-        <TabsTrigger value="fabrication" className="px-6">Fabrication</TabsTrigger>
-        <TabsTrigger value="galvanization" className="px-6">Galvanization</TabsTrigger>
-      </TabsList>
+    <Tabs value={tab} onValueChange={setTab} className="space-y-4">
+      <div className="flex items-center gap-x-6 gap-y-3 flex-wrap">
+        <TabsList className="h-10">
+          <TabsTrigger value="fabrication" className="px-6">Fabrication</TabsTrigger>
+          <TabsTrigger value="galvanization" className="px-6">Galvanization</TabsTrigger>
+        </TabsList>
+        {tab === "fabrication" && isTlt && (
+          <Segmented value={group} onChange={(v) => setGroup(v ?? "ALL")} options={OP_GROUP_OPTIONS} />
+        )}
+      </div>
       <TabsContent value="fabrication">
-        {isTlt ? <FabricationTab records={records} /> : <ComingSoon />}
+        {isTlt ? <FabricationTab records={records} group={group} /> : <ComingSoon />}
       </TabsContent>
       <TabsContent value="galvanization">
         {isTlt ? <GalvanizationTab records={records} /> : <ComingSoon />}
@@ -234,11 +241,19 @@ const OP_GROUP_OPTIONS: { value: string; label: string }[] = [
   })),
 ];
 
-function FabricationTab({ records }: { records: any[] }) {
+function FabricationTab({ records, group }: { records: any[]; group: string }) {
   const [opFilter, setOpFilter] = useState<string>("ALL");
-  const [group, setGroup] = useState<string>("ALL");
   const [load, setLoad] = useState<LoadState>("ALL");
   const [section, setSection] = useState<SectionFilter>("ALL");
+
+  // The operation group control lives beside the tab bar (lifted to the parent).
+  // Reset the local sub-filters whenever the group changes, matching the prior
+  // in-component behaviour.
+  useEffect(() => {
+    setOpFilter("ALL");
+    setLoad("ALL");
+    setSection("ALL");
+  }, [group]);
 
   const groupSet = group === "ALL" ? null : bundleActivitySet(group);
   const dimension: FabDimension =
@@ -385,17 +400,6 @@ function FabricationTab({ records }: { records: any[] }) {
 
   return (
     <div className="space-y-4">
-      <Segmented
-        value={group}
-        onChange={(v) => {
-          setGroup(v ?? "ALL");
-          setOpFilter("ALL");
-          setLoad("ALL");
-          setSection("ALL");
-        }}
-        options={OP_GROUP_OPTIONS}
-      />
-
       <div className="flex items-center gap-x-6 gap-y-3 flex-wrap">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-muted-foreground uppercase">Load</span>
