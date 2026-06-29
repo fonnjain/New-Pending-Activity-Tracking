@@ -184,7 +184,7 @@ function SummaryTile({ title, value, sub }: { title: string; value: string; sub?
     <Card className="shadow-sm">
       <CardContent className="p-4">
         <p className="text-[10px] sm:text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{title}</p>
-        <p className="text-sm sm:text-base font-medium tracking-tight">{value}</p>
+        <p className="text-lg sm:text-2xl font-bold tracking-tight">{value}</p>
         {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
       </CardContent>
     </Card>
@@ -400,29 +400,29 @@ function FabricationTab({ records }: { records: any[] }) {
           <>
             <SummaryTile
               title={`${opLabel(opTarget, "special")} Pipeline`}
-              value={(specialLoadCounts.op.marks + specialLoadCounts.inh.marks).toLocaleString()}
-              sub={formatWeight(specialLoadCounts.op.weight + specialLoadCounts.inh.weight)}
+              value={formatWeight(specialLoadCounts.op.weight + specialLoadCounts.inh.weight)}
+              sub={`${(specialLoadCounts.op.marks + specialLoadCounts.inh.marks).toLocaleString()} marks`}
             />
-            <SummaryTile title="Operational Load" value={specialLoadCounts.op.marks.toLocaleString()} sub={formatWeight(specialLoadCounts.op.weight)} />
-            <SummaryTile title="In Hand" value={specialLoadCounts.inh.marks.toLocaleString()} sub={formatWeight(specialLoadCounts.inh.weight)} />
+            <SummaryTile title="Operational Load" value={formatWeight(specialLoadCounts.op.weight)} sub={`${specialLoadCounts.op.marks.toLocaleString()} marks`} />
+            <SummaryTile title="In Hand" value={formatWeight(specialLoadCounts.inh.weight)} sub={`${specialLoadCounts.inh.marks.toLocaleString()} marks`} />
           </>
         ) : (
           <>
             <SummaryTile
-              title={dimension === "special" ? "Special Op. Marks" : "Fabrication Marks"}
-              value={total.marks.toLocaleString()}
-              sub={formatWeight(total.weight)}
+              title={dimension === "special" ? "Special Op." : "Fabrication"}
+              value={formatWeight(total.weight)}
+              sub={`${total.marks.toLocaleString()} marks`}
             />
             {dimension === "special" ? (
               <>
-                <SummaryTile title="Bending" value={(split.BENDING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.BENDING?.weight ?? 0)} />
-                <SummaryTile title="Welding" value={(split.WELDING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.WELDING?.weight ?? 0)} />
+                <SummaryTile title="Bending" value={formatWeight(split.BENDING?.weight ?? 0)} sub={`${(split.BENDING?.marks ?? 0).toLocaleString()} marks`} />
+                <SummaryTile title="Welding" value={formatWeight(split.WELDING?.weight ?? 0)} sub={`${(split.WELDING?.marks ?? 0).toLocaleString()} marks`} />
               </>
             ) : (
               <>
-                <SummaryTile title="Punching" value={(split.PUNCHING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.PUNCHING?.weight ?? 0)} />
-                <SummaryTile title="Drilling" value={(split.DRILLING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.DRILLING?.weight ?? 0)} />
-                <SummaryTile title="Not Set" value={(split.NOT_SET?.marks ?? 0).toLocaleString()} sub={formatWeight(split.NOT_SET?.weight ?? 0)} />
+                <SummaryTile title="Punching" value={formatWeight(split.PUNCHING?.weight ?? 0)} sub={`${(split.PUNCHING?.marks ?? 0).toLocaleString()} marks`} />
+                <SummaryTile title="Drilling" value={formatWeight(split.DRILLING?.weight ?? 0)} sub={`${(split.DRILLING?.marks ?? 0).toLocaleString()} marks`} />
+                <SummaryTile title="Not Set" value={formatWeight(split.NOT_SET?.weight ?? 0)} sub={`${(split.NOT_SET?.marks ?? 0).toLocaleString()} marks`} />
               </>
             )}
           </>
@@ -549,10 +549,10 @@ function GalvanizationTab({ records }: { records: any[] }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <SummaryTile title="Galvanizing Marks" value={total.marks.toLocaleString()} sub={formatWeight(total.weight)} />
+        <SummaryTile title="Galvanizing" value={formatWeight(total.weight)} sub={`${total.marks.toLocaleString()} marks`} />
         <SummaryTile title="Balance Qty" value={total.qty.toLocaleString()} />
-        <SummaryTile title="Thickness Set" value={thickness.set.toLocaleString()} sub={formatWeight(thickness.setWt)} />
-        <SummaryTile title="Thickness Not Set" value={thickness.notSet.toLocaleString()} sub={formatWeight(thickness.notSetWt)} />
+        <SummaryTile title="Thickness Set" value={formatWeight(thickness.setWt)} sub={`${thickness.set.toLocaleString()} marks`} />
+        <SummaryTile title="Thickness Not Set" value={formatWeight(thickness.notSetWt)} sub={`${thickness.notSet.toLocaleString()} marks`} />
       </div>
 
       <div className="flex items-center justify-end">
