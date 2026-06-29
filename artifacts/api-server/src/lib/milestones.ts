@@ -227,17 +227,24 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
     latestPresent = new Set(present.keys());
   }
 
-  // Earliest Assign Date per project across the whole permanent pool.
+  // Earliest Assign Date + distinct mark count per project across the whole
+  // permanent pool. The mark count provides a marksTotal for orphan projects
+  // (below) whose import history was deleted, so they don't display as "0 marks".
   const startRows = await db
     .select({
       job: recordPoolTable.job,
       start: sql<string | null>`min(${recordPoolTable.assignDate})`,
+      marks: sql<number>`count(distinct coalesce(${recordPoolTable.markId}, '') || chr(1) || coalesce(${recordPoolTable.jobCardNo}, ''))`,
     })
     .from(recordPoolTable)
     .where(ne(recordPoolTable.job, UNASSIGNED))
     .groupBy(recordPoolTable.job);
   const startByJob = new Map<string, string | null>();
-  for (const s of startRows) startByJob.set(s.job, s.start);
+  const poolMarksByJob = new Map<string, number>();
+  for (const s of startRows) {
+    startByJob.set(s.job, s.start);
+    poolMarksByJob.set(s.job, Number(s.marks) || 0);
+  }
 
   // Capture-once merge: a stored milestone date always wins over a recomputed one
   // (they agree while history is intact; the stored value survives if history is
@@ -248,11 +255,18 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
   const items: ProjectMilestone[] = [];
   const upserts: (typeof projectMilestonesTable.$inferInsert)[] = [];
 
-  // Materialize over the UNION of replayed projects and already-stored milestone
-  // rows, so a previously captured project that no longer appears in the current
-  // history (import deleted/pruned, partial-history environment) is still
-  // returned and re-persisted unchanged — honouring capture-once permanence.
-  const allProjects = new Set<string>([...states.keys(), ...existing.keys()]);
+  // Materialize over the UNION of replayed projects, already-stored milestone
+  // rows, AND every project that still exists in the permanent record_pool, so a
+  // completed project that no longer appears in the current import history (import
+  // deleted/pruned, partial-history environment) is still returned and persisted
+  // — honouring capture-once permanence. Seeding from the pool is what keeps an
+  // orphaned completed project (its imports deleted before it was ever captured)
+  // from vanishing from the Completed view.
+  const allProjects = new Set<string>([
+    ...states.keys(),
+    ...existing.keys(),
+    ...startByJob.keys(),
+  ]);
   for (const project of allProjects) {
     const st = states.get(project);
     const ex = existing.get(project);
@@ -262,7 +276,13 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
     let dispatchedDate = ex?.dispatchedDate ?? st?.dispatchedDate ?? null;
     let dispatchedImportId =
       ex?.dispatchedImportId ?? st?.dispatchedImportId ?? null;
-    const marksTotal = Math.max(st?.identities.size ?? 0, ex?.marksTotal ?? 0);
+    // An orphan (in the pool, but with no walk state and no stored milestone)
+    // has no identity set or stored count, so fall back to the pool mark count.
+    const marksTotal = Math.max(
+      st?.identities.size ?? 0,
+      ex?.marksTotal ?? 0,
+      !st && !ex ? (poolMarksByJob.get(project) ?? 0) : 0,
+    );
     const reopened = (st?.reopened ?? false) || (ex?.reopened ?? false);
     let limitedHistory = ex?.limitedHistory ?? st?.limitedHistory ?? false;
 
@@ -305,6 +325,24 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
         readyImportId = latestImportId;
         if (!(st?.inProgressObserved ?? false)) limitedHistory = true;
       }
+    }
+
+    // Orphan retention: a completed project that survives only in the permanent
+    // record_pool — every import that referenced it has since been deleted, so
+    // the replay walk never saw it (no `st`) and no milestone was ever stored
+    // (no `ex`). It cannot be in any current import (or it would have a walk
+    // state), so it is by definition Dispatched. Keep it permanently rather than
+    // dropping it from Completed, stamped from the newest report with limited
+    // history. Once persisted it flows through the capture-once `ex` branch and
+    // its dates never move again.
+    if (!st && !ex && dispatchedDate === null && latestYmd !== null) {
+      dispatchedDate = latestYmd;
+      dispatchedImportId = latestImportId;
+      if (readyDate === null) {
+        readyDate = latestYmd;
+        readyImportId = latestImportId;
+      }
+      limitedHistory = true;
     }
 
     const readyTurnaroundDays = dayDiff(readyDate, projectStart);
