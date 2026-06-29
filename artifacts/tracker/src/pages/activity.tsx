@@ -11,8 +11,7 @@ import { Button } from "@/components/ui/button";
 import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import { useState, useMemo } from "react";
-import { Segmented } from "@/components/ui/segmented";
-import { compareActivity, bundleActivitySet, getActivityBundle, TLT_OPERATION_BUNDLE_IDS } from "@workspace/domain";
+import { compareActivity } from "@workspace/domain";
 
 const ROW_CAP = 300;
 
@@ -34,40 +33,11 @@ function KpiTile({ title, value }: { title: string; value: string }) {
 }
 
 function ActivityContent() {
-  const { selectedImportId, filters } = useTracker();
+  const { selectedImportId } = useTracker();
   const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
-  const filteredRecords = useFilteredRecords(allRecords);
-
-  const isTlt = filters.category === "TLT";
-  const [group, setGroup] = useState<string>("ALL");
-  const activeGroup = isTlt ? group : "ALL";
-  const groupSet = activeGroup === "ALL" ? null : bundleActivitySet(activeGroup);
-
-  // Operation tabs (TLT-only): All + the three operation sub-bundles. Page-level
-  // presentation filter over the already-filtered records — never touches ageing,
-  // warnings, the fabrication-load report, or the bundle scopes themselves.
-  const groupOptions = useMemo(
-    () => [
-      { value: "ALL", label: "All" },
-      ...(isTlt
-        ? TLT_OPERATION_BUNDLE_IDS.map((id) => ({
-            value: id,
-            label: getActivityBundle(id)!.label.replace(" (TLT)", ""),
-          }))
-        : []),
-    ],
-    [isTlt],
-  );
-
-  const records = useMemo(
-    () =>
-      groupSet
-        ? filteredRecords.filter((r) => groupSet.has((r.activity ?? "").toUpperCase()))
-        : filteredRecords,
-    [filteredRecords, groupSet],
-  );
+  const records = useFilteredRecords(allRecords);
 
   const { activities, sortedActivities, totalWt, totalMarks, avgAge } = useMemo(() => {
     // Group by activity
@@ -158,12 +128,7 @@ function ActivityContent() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <Segmented
-          value={activeGroup}
-          onChange={(v) => setGroup(v ?? "ALL")}
-          options={groupOptions}
-        />
+      <div className="flex items-center justify-end gap-3 flex-wrap">
         <Button
           variant="outline"
           size="sm"
