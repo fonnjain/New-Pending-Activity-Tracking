@@ -14,15 +14,26 @@ records via ACTIVITY_BUNDLES (so header filters are honoured); Dispatch is serve
 `detectFileType(buffer)` returns `wip | order-review | unknown`. This forced the staged contract to
 become file-type-aware (see below).
 
-## Dispatch = seed-once + ledger accrual (NOT recomputed from the file each time)
-- The Order Review file's despatch column seeds `order_dispatch` (pk project+structure) ONCE, the
-  first time a key is seen. After that the file value is NOT trusted as the running total.
-- Running dispatch accrues from **WIP yard departures**: comparing the last two WIP imports, marks
-  that left the Yard bucket append to `dispatch_ledger`. Running total = seed baseline + ledger.
+## Two independent dispatch figures: File Dispatch vs Computed Dispatch
+- **File Dispatch** = `fileDespatchMt`, the despatch tonnage stated in the Order Review file (live latest file value).
+- **Computed Dispatch** = `accruedMt` ONLY = WIP yard departures (marks that left the Yard bucket
+  between consecutive WIP imports, accrued in `dispatch_ledger`). **The Order Review file/seed NEVER
+  contributes to Computed Dispatch** (product decision: file and computed are two independent measures).
+- `seedMt` (capture-once baseline from the FIRST Order Review file, stored on `order_dispatch`) is now
+  RECORD-ONLY: it still seeds the row + sets `seedImportId`, but it is NOT summed into the
+  displayed/reconciled figure. Anywhere that reconciles or displays computed dispatch must use
+  `accruedMt` alone, never `seedMt + accruedMt`.
+- **Cutoff caveat:** `seedImportId` still gates accrual (`recomputeDispatch` skips departures at/before
+  the key's seed import), so Computed = "WIP departures since the order-review baseline," NOT full WIP
+  history. Pre-baseline yard departures are excluded by design. If "WIP-only" must mean all-history,
+  remove that gate and re-run `recomputeDispatch()`.
+- **Why:** the file's despatch column is its own column; computed must be an INDEPENDENT WIP-derived
+  measure so reconciliation (file vs computed, 1% tolerance, Data page "Order Reconciliation" tab) is
+  meaningful. After this change reconciliation legitimately shows large file-vs-computed gaps until WIP
+  catches up — that is expected, not a bug.
 - `recomputeDispatch()` is wired best-effort (try/catch) after every WIP commit, exactly like
-  milestones — it can never fail an import.
-- File-vs-computed dispatch is cross-checked at **1% tolerance** and surfaced on the Data page
-  "Order Reconciliation" tab; mismatches are flagged, never auto-corrected.
+  milestones — it can never fail an import. The `ledger`/`dispatch_ledger` table is audit-only (still
+  written, still holds a seed entry); nothing reads it except the import-delete cleanup.
 
 ## Staged-upload contract is file-type-discriminated (the gotcha)
 **Why:** order-review files have no WIP `structural` read and commit produces a different entity,

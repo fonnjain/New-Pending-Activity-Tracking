@@ -1234,7 +1234,7 @@ export interface OrderStatusRow {
   seedMt: number;
   /** Tonnes that left the Yard across WIP imports after the seed. */
   accruedMt: number;
-  /** seedMt + accruedMt. */
+  /** WIP-derived dispatch only (equals accruedMt). The Order Review file/seed never contributes. */
   computedDispatchMt: number;
   /** Current order row absent from the latest Order Review file (kept, not deleted). */
   notInLatest: boolean;

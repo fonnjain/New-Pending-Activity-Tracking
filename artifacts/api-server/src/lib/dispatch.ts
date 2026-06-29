@@ -22,11 +22,14 @@ import {
 // ---------------------------------------------------------------------------
 // Dispatch engine (additive, deterministic, idempotent)
 // ---------------------------------------------------------------------------
-// Computes a running Dispatch tonnage per (project, structure):
-//   seedMt    = one-time baseline from the FIRST Order Review file (capture-once).
+// Computes dispatch tonnage per (project, structure):
+//   seedMt    = one-time baseline captured from the FIRST Order Review file
+//               (capture-once). Kept for record/seed-time only; it is NOT part
+//               of Computed Dispatch.
 //   accruedMt = tonnes that LEFT the Yard (a mark identity at Y in a WIP import,
 //               absent from the NEXT WIP import) across import pairs AFTER the
-//               key's seed import.
+//               key's seed import. This alone is the Computed Dispatch figure
+//               (WIP-derived only; the Order Review file never contributes).
 // Like the milestone engine, recompute() replays the full WIP history and
 // rebuilds the ledger from scratch, so it is idempotent and safe to run after
 // every WIP commit and every import deletion. It NEVER mutates WIP parsing,
@@ -300,10 +303,9 @@ export function crossCheckDispatch(
 ): DispatchReconciliation {
   const computedByKey = new Map<string, number>();
   for (const d of dispatchRows) {
-    computedByKey.set(
-      dispatchKey(d.project, d.structure),
-      d.seedMt + d.accruedMt,
-    );
+    // Computed Dispatch is WIP-derived only (Yard departures). The Order Review
+    // seed baseline never contributes to the figure reconciled against the file.
+    computedByKey.set(dispatchKey(d.project, d.structure), d.accruedMt);
   }
   const fileByKey = new Map<
     string,

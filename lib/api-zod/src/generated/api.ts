@@ -1514,7 +1514,7 @@ export const GetOrderStatusResponse = zod.object({
   "fileDespatchMt": zod.number().nullable().describe('Despatch MT as stated in the Order Review file.'),
   "seedMt": zod.number().describe('One-time dispatch baseline captured from the first Order Review file.'),
   "accruedMt": zod.number().describe('Tonnes that left the Yard across WIP imports after the seed.'),
-  "computedDispatchMt": zod.number().describe('seedMt + accruedMt.'),
+  "computedDispatchMt": zod.number().describe('WIP-derived dispatch only (equals accruedMt). The Order Review file\/seed never contributes.'),
   "notInLatest": zod.boolean().describe('Current order row absent from the latest Order Review file (kept, not deleted).')
 }).describe('One (project, structure) order row joined to computed dispatch.')),
   "reconciliation": zod.object({
