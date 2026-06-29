@@ -1,0 +1,30 @@
+REPLIT AGENT PROMPT — RENAME CONTRACTOR CATEGORY "IN-HOUSE" TO "CNC"
+====================================================================
+Rename the contractor sub-category currently called "In-house" to "CNC". This is a LABEL /
+value rename only — not a new category, no logic change. Deterministic; do not change the
+out-vendor tags, sub-contractor handling, classification rules, or anything else.
+
+CHANGE
+  - The contractor sub-category enum value IN_HOUSE becomes "CNC".
+        contractor_category: "CNC" | "SUB_CONTRACTOR" | "OUT_VENDOR" | "UNCLASSIFIED"
+    (was: IN_HOUSE | SUB_CONTRACTOR | OUT_VENDOR | UNCLASSIFIED)
+  - Display label everywhere shows "CNC" (instead of "In-house"): the Contractor Categories
+    settings panel dropdown, contractor filters/sub-category selectors, the Contractor
+    dashboard grouping labels, legends, and exports.
+  - MIGRATE existing data: any contractor already classified IN_HOUSE -> set to CNC. (If none
+    are classified yet, nothing to migrate.)
+  - Update the openapi.yaml enum + regenerate hooks/Zod so the value is "CNC" end to end.
+
+UNCHANGED
+  - SUB_CONTRACTOR, OUT_VENDOR (with FAB/GALVA tags, RR Ispat = both), and UNCLASSIFIED are
+    unchanged.
+  - The in-app editable Contractor Categories panel still lets the user assign each contractor
+    to CNC / Sub-contractor / Out vendor (FAB/GALVA); unmatched = Unclassified.
+  - No change to matching rules, the out-vendor seed list, or any other logic.
+
+ACCEPTANCE CHECK
+  - The category formerly "In-house" now appears as "CNC" everywhere (settings, filters,
+    dashboard, exports); enum value is CNC.
+  - Any previously IN_HOUSE-classified contractors are now CNC.
+  - Sub-contractor / Out-vendor (FAB/GALVA) / Unclassified unchanged.
+  - No other behaviour changes.

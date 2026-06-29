@@ -1,0 +1,50 @@
+REPLIT AGENT PROMPT — "IN-HOUSE" CONTRACTOR GROUP (CNC + Sub-contractor) + DROPDOWN ORDER
+=========================================================================================
+Add an "In-House" grouping to the contractor filter that COMBINES CNC and Sub-contractor.
+In-House is a COMPUTED roll-up, NOT a new stored tag — each contractor stays tagged at the
+detailed level (CNC / SUB_CONTRACTOR / OUT_VENDOR / UNCLASSIFIED). Also set the dropdown
+order. Display/filter change only; do not change classification storage, out-vendor tags, or
+any other logic.
+
+CATEGORY MODEL (unchanged storage)
+  contractor_category stays: "CNC" | "SUB_CONTRACTOR" | "OUT_VENDOR" | "UNCLASSIFIED".
+  "In-House" is a VIRTUAL group = (contractor_category == CNC OR == SUB_CONTRACTOR).
+  It is computed at read/filter time; do NOT add an IN_HOUSE stored value.
+
+CONTRACTOR DROPDOWN — STRUCTURE & ORDER
+Order the dropdown as:
+  1) All individual CONTRACTORS first (the actual contractor names; existing behaviour).
+  2) Then a GROUP "In-House" — selecting it filters to all contractors tagged CNC OR
+     SUB_CONTRACTOR. Under In-House, keep CNC and Sub-contractor INDIVIDUALLY selectable as
+     sub-options:
+         In-House          (CNC + Sub-contractor combined)
+            - CNC          (only CNC-tagged contractors)
+            - Sub-contractor (only Sub-contractor-tagged)
+  3) Then "Out Vendors" — all OUT_VENDOR contractors (keep the existing FAB / GALVA
+     sub-options under it if present).
+  4) Then "Everything else" — UNCLASSIFIED contractors (and anything not in the above).
+So group order is: [individual contractors] -> In-House -> Out Vendors -> Everything else.
+
+FILTER BEHAVIOUR
+  - Selecting "In-House" -> marks whose contractor is CNC or Sub-contractor.
+  - Selecting "CNC" -> only CNC; "Sub-contractor" -> only Sub-contractor.
+  - Selecting "Out Vendors" -> all out-vendors (FAB/GALVA sub-filters still work).
+  - Selecting "Everything else" -> unclassified.
+  - Selecting an individual contractor -> just that contractor (unchanged).
+  - Groups are filter shortcuts; they don't change how contractors are stored or counted.
+
+WHERE IT APPLIES
+  - The contractor filter/dropdown wherever it appears (Overview, Activity, Ageing,
+    Job-wise/Section-wise, Plant Operation Wise, Reports).
+  - The Contractor dashboard can show the In-House roll-up (CNC + Sub-contractor) as a
+    grouping header with CNC and Sub-contractor beneath, plus Out Vendors and Everything else.
+  - Exports may include both the detailed category and the In-House roll-up flag.
+
+ACCEPTANCE CHECK
+  - Dropdown lists individual contractors first, then In-House (with CNC and Sub-contractor
+    selectable under it), then Out Vendors, then Everything else.
+  - "In-House" filters to CNC + Sub-contractor combined; CNC and Sub-contractor each filter
+    individually; Out Vendors and Everything else work as before.
+  - In-House is computed (CNC OR SUB_CONTRACTOR), NOT a stored tag; storage values unchanged.
+  - Applies across all pages with the contractor filter; no change to classification,
+    out-vendor tags, or other logic.

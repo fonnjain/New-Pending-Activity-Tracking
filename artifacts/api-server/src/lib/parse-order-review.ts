@@ -321,6 +321,66 @@ function detectAsOnDate(grid: unknown[][], headerRow: number): string | null {
   return null;
 }
 
+// Parse a date out of free text (a report banner cell or a filename). Handles the
+// VTPL report convention (day-first DD/MM/YYYY, also `.` or `-` separators) and ISO
+// YYYY-MM-DD. Returns a YYYY-MM-DD string or null. NOTE: `new Date(text)` is NOT
+// used — it cannot parse day-first dates like "29/06/2026" (returns Invalid Date),
+// which is exactly why the in-file banner went undetected before.
+function parseLooseDate(text: string): string | null {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const valid = (y: number, m: number, d: number): string | null =>
+    m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}-${pad(m)}-${pad(d)}` : null;
+  // ISO first: YYYY[sep]M[sep]D.
+  let m = text.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) return valid(+m[1], +m[2], +m[3]);
+  // Day-first: D[sep]M[sep]YYYY (the report convention). If the day/month are
+  // unambiguously swapped (month > 12 but day <= 12) fall back to month-first.
+  m = text.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (m) {
+    const a = +m[1];
+    const b = +m[2];
+    const y = +m[3];
+    if (b > 12 && a <= 12) return valid(y, a, b);
+    return valid(y, b, a);
+  }
+  return null;
+}
+
+// Detect the report's "As on" pairing date. Looks in two places, in order:
+//   1. The in-file banner — any of the top rows mentioning "as on" / "dated"
+//      (e.g. "As On Date :29/06/2026"). Authoritative when present.
+//   2. The filename (e.g. "wip 29.06.2026.xls", "Order Review29-6-2026.xlsx") —
+//      WIP exports carry NO banner, so the name is the only in-band date source.
+// Used to pair a WIP import with its Order Review strictly by date. Returns a
+// YYYY-MM-DD string, or null when no parseable date is present anywhere.
+export function detectReportAsOnDate(
+  buffer: Buffer,
+  filename?: string,
+): string | null {
+  try {
+    const grid = getGrid(buffer);
+    const limit = Math.min(grid.length, 15);
+    for (let i = 0; i < limit; i++) {
+      const cells = grid[i];
+      if (!Array.isArray(cells)) continue;
+      for (const cell of cells) {
+        const s = cellStr(cell as Cell);
+        if (s && /as[\s-]*on|dated?\b/i.test(s)) {
+          const d = parseLooseDate(s);
+          if (d) return d;
+        }
+      }
+    }
+  } catch {
+    // fall through to the filename
+  }
+  if (filename) {
+    const fromName = parseLooseDate(filename);
+    if (fromName) return fromName;
+  }
+  return null;
+}
+
 const PROJECT_BANNER = /project\s*code\s*:?\s*([A-Za-z0-9.\-/]+)/i;
 const TOTAL_ROW = /^(sub\s*total|grand\s*total|total)\b/i;
 

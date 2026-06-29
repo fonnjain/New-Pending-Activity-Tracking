@@ -1135,6 +1135,8 @@ components:
           type: string
         reportDate:
           type: ["string", "null"]
+        asOnDate:
+          type: ["string", "null"]
         createdAt:
           type: string
         summary:
@@ -1148,6 +1150,7 @@ components:
         - label
         - sourceFilename
         - reportDate
+        - asOnDate
         - createdAt
         - summary
         - changeSummary

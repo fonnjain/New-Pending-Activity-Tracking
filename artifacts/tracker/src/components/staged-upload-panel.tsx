@@ -48,6 +48,12 @@ interface Props {
   locked?: boolean;
   /** Explanation shown in place of the upload control when locked. */
   lockedMessage?: string;
+  /**
+   * Order Review slot only: the set of committed WIP "As on" dates. A staged Order
+   * Review whose date is not in this set is blocked (strict per-date pairing). When
+   * undefined, this client-side gate is skipped (the server still enforces it).
+   */
+  allowedDates?: Set<string>;
 }
 
 export function StagedUploadPanel({
@@ -55,6 +61,7 @@ export function StagedUploadPanel({
   onCommitted,
   locked = false,
   lockedMessage,
+  allowedDates,
 }: Props) {
   const stage = useStageImport();
   const validate = useValidateStagedImport();
@@ -83,6 +90,21 @@ export function StagedUploadPanel({
   const isOrderReview = expectedType === "order-review";
   // Slot gate: the file the user picked must match THIS slot's expected type.
   const typeMismatch = staged != null && staged.fileType !== expectedType;
+  // Per-date pairing gate (Order Review only): the staged file's "As on" date must
+  // already have a committed WIP import. allowedDates is that set of WIP dates; when
+  // undefined the client gate is skipped (the server still enforces pairing).
+  const stagedOrderDate =
+    isOrderReview && staged != null ? staged.orderReview?.asOnDate ?? null : null;
+  const dateUnmatched =
+    isOrderReview &&
+    staged != null &&
+    !typeMismatch &&
+    allowedDates != null &&
+    (stagedOrderDate == null || !allowedDates.has(stagedOrderDate));
+  const dateMismatchMessage =
+    stagedOrderDate == null
+      ? "Could not read this Order Review's 'As on' date, so it can't be matched to a WIP report."
+      : `No committed WIP / Balance & Activity report for ${stagedOrderDate}. Upload and accept that WIP report first.`;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -271,6 +293,12 @@ export function StagedUploadPanel({
             {typeMismatch ? (
               <TypeMismatchView
                 message={mismatchMessage(staged.fileType)}
+                onDiscard={doDiscard}
+                busy={busy}
+              />
+            ) : dateUnmatched ? (
+              <TypeMismatchView
+                message={dateMismatchMessage}
                 onDiscard={doDiscard}
                 busy={busy}
               />

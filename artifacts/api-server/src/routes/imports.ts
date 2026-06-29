@@ -59,6 +59,7 @@ import {
 import {
   detectFileType,
   parseOrderReview,
+  detectReportAsOnDate,
   type OrderReviewFileType,
 } from "../lib/parse-order-review";
 import {
@@ -325,7 +326,12 @@ interface MergeLogger {
 // upload route and the staged-commit route so both behave identically.
 async function mergeImport(
   parsed: ReturnType<typeof parseWorkbook>,
-  meta: { label: string | null; reportDate: string | null; sourceFilename: string },
+  meta: {
+    label: string | null;
+    reportDate: string | null;
+    asOnDate: string | null;
+    sourceFilename: string;
+  },
   log: MergeLogger,
 ) {
   const multiset = new Map<
@@ -356,6 +362,7 @@ async function mergeImport(
         label: meta.label,
         sourceFilename: meta.sourceFilename,
         reportDate: meta.reportDate,
+        asOnDate: meta.asOnDate,
         summary: parsed.summary,
       })
       .returning();
@@ -498,6 +505,9 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
   const reportDate = /^\d{4}-\d{2}-\d{2}$/.test(reportDateRaw)
     ? reportDateRaw
     : null;
+  // Pairing date for the Order Review gate: the report's own "As on" banner date,
+  // falling back to today (the upload date) when the file has no parseable banner.
+  const asOnDate = detectReportAsOnDate(file.buffer) ?? todayYmd();
 
   let parsed;
   try {
@@ -520,7 +530,7 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
 
   const result = await mergeImport(
     parsed,
-    { label, reportDate, sourceFilename: file.originalname },
+    { label, reportDate, asOnDate, sourceFilename: file.originalname },
     req.log,
   );
 
@@ -971,6 +981,35 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
         return;
       }
     }
+
+    // Strict per-date pairing: an Order Review may only be committed for a date
+    // that already has a committed WIP / Balance & Activity import. The pairing key
+    // is the "As on" banner date (WIP falls back to its upload date). This is the
+    // authoritative guard; the uploader UI mirrors it for a friendlier message.
+    let orderAsOnDate: string | null = null;
+    try {
+      orderAsOnDate = parseOrderReview(staged.fileData).asOnDate;
+    } catch {
+      orderAsOnDate = null;
+    }
+    if (!orderAsOnDate) {
+      res.status(400).json({
+        error:
+          "Could not read the Order Review's 'As on' date, so it can't be matched to a WIP report.",
+      });
+      return;
+    }
+    const [wipMatch] = await db
+      .select({ id: importsTable.id })
+      .from(importsTable)
+      .where(eq(importsTable.asOnDate, orderAsOnDate))
+      .limit(1);
+    if (!wipMatch) {
+      res.status(409).json({
+        error: `Upload and accept the WIP / Balance & Activity report for ${orderAsOnDate} before its Order Review.`,
+      });
+      return;
+    }
     // Serialize the whole Order Review commit under the shared dispatch advisory
     // lock (the same one WIP merges take). The ingest now UPSERTS shared current
     // rows in place, so two concurrent commits of the same staged file must NOT
@@ -1079,6 +1118,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     {
       label: staged.label,
       reportDate: staged.reportDate,
+      asOnDate: detectReportAsOnDate(staged.fileData) ?? todayYmd(),
       sourceFilename: staged.sourceFilename,
     },
     req.log,
@@ -1577,6 +1617,15 @@ async function loadVelocityStates(
     });
   }
   return out;
+}
+
+// Today's date as a YYYY-MM-DD string (UTC). Used as the Order Review pairing
+// fallback when a report has no parseable "As on" banner date.
+function todayYmd(): string {
+  const n = new Date();
+  const m = String(n.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(n.getUTCDate()).padStart(2, "0");
+  return `${n.getUTCFullYear()}-${m}-${d}`;
 }
 
 // Epoch ms for an import's pace time-axis: report date when present, else upload

@@ -15,6 +15,8 @@ export interface Import {
   sourceFilename: string;
   /** @nullable */
   reportDate: string | null;
+  /** @nullable */
+  asOnDate: string | null;
   createdAt: string;
   summary: ParseSummary;
   changeSummary: ChangeSummary | null;

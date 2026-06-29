@@ -834,6 +834,7 @@ export const ListImportsResponseItem = zod.object({
   "label": zod.string().nullable(),
   "sourceFilename": zod.string(),
   "reportDate": zod.string().nullable(),
+  "asOnDate": zod.string().nullable(),
   "createdAt": zod.string(),
   "summary": zod.object({
   "rowsRead": zod.number(),
@@ -946,6 +947,7 @@ export const CommitStagedImportResponse = zod.union([zod.object({
   "label": zod.string().nullable(),
   "sourceFilename": zod.string(),
   "reportDate": zod.string().nullable(),
+  "asOnDate": zod.string().nullable(),
   "createdAt": zod.string(),
   "summary": zod.object({
   "rowsRead": zod.number(),
@@ -1188,6 +1190,7 @@ export const GetImportResponse = zod.object({
   "label": zod.string().nullable(),
   "sourceFilename": zod.string(),
   "reportDate": zod.string().nullable(),
+  "asOnDate": zod.string().nullable(),
   "createdAt": zod.string(),
   "summary": zod.object({
   "rowsRead": zod.number(),

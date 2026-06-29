@@ -47,6 +47,10 @@ export const importsTable = pgTable("imports", {
   label: text("label"),
   sourceFilename: text("source_filename").notNull(),
   reportDate: date("report_date", { mode: "string" }),
+  // "As on" date parsed from the report banner (falls back to the upload date).
+  // Used ONLY to pair a WIP import with its Order Review by date; never feeds
+  // ageing / milestone / dispatch math (those key off reportDate / createdAt).
+  asOnDate: date("as_on_date", { mode: "string" }),
   summary: jsonb("summary").$type<ParseSummary>().notNull(),
   changeSummary: jsonb("change_summary").$type<ChangeSummary>(),
   // Advisory-only cache of the last whole-import AI turnaround report. Never on
