@@ -6,7 +6,11 @@ import {
   PROCESS_PHASES,
   type ProcessPhaseKey,
 } from "@workspace/domain";
-import { useTracker } from "@/lib/store";
+import { useTracker, useContractorCategoryMap } from "@/lib/store";
+import {
+  buildContractorGroups,
+  matchesContractorSelection,
+} from "@/lib/contractorFilter";
 import {
   useGetImportRecords,
   getGetImportRecordsQueryKey,
@@ -656,11 +660,14 @@ function JobDetail({
       sortActivities(Array.from(new Set(records.map((r) => r.activity).filter(Boolean)))),
     [records],
   );
-  const contractorOptions = useMemo(
+  const categoryMap = useContractorCategoryMap();
+  const contractorGroups = useMemo(
     () =>
-      Array.from(
-        new Set(records.map((r) => r.contractor).filter(Boolean)),
-      ).sort(),
+      buildContractorGroups(
+        Array.from(
+          new Set(records.map((r) => r.contractor).filter(Boolean)),
+        ).sort(),
+      ),
     [records],
   );
 
@@ -668,7 +675,7 @@ function JobDetail({
     const q = search.trim().toLowerCase();
     return records.filter((r) => {
       if (activity && r.activity !== activity) return false;
-      if (contractor && r.contractor !== contractor) return false;
+      if (!matchesContractorSelection(r.contractor, contractor, categoryMap)) return false;
       if (
         q &&
         ![r.structure, r.markId, r.activity, r.section].some((v) =>
@@ -678,7 +685,7 @@ function JobDetail({
         return false;
       return true;
     });
-  }, [records, search, activity, contractor]);
+  }, [records, search, activity, contractor, categoryMap]);
 
   const sortedRows = useMemo(() => sortRecords(filtered, sortBy), [filtered, sortBy]);
 
@@ -749,10 +756,9 @@ function JobDetail({
             <SearchableSelect
               value={contractor}
               onChange={setContractor}
-              options={contractorOptions}
+              groups={contractorGroups}
               allLabel="All Contractors"
-              searchPlaceholder="Search contractors..."
-              disabled={contractorOptions.length === 0}
+              searchPlaceholder="Search contractors or types..."
             />
           </div>
         </div>

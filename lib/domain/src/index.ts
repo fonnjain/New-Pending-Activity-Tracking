@@ -302,6 +302,26 @@ export function isContractorCategory(v: unknown): v is ContractorCategory {
   );
 }
 
+// Virtual "In-House" contractor grouping. This is a FILTER-ONLY shortcut value
+// (never stored, NOT a ContractorCategory): selecting it matches every contractor
+// whose stored category is CNC OR SUB_CONTRACTOR. Storage/classification is
+// unchanged — In-House is computed at read/filter time only.
+export const IN_HOUSE_GROUP = "IN_HOUSE";
+export const IN_HOUSE_MEMBERS: ContractorCategory[] = ["CNC", "SUB_CONTRACTOR"];
+
+// Single source of truth for matching a contractor's stored category against a
+// selected contractor-category filter value, honouring the virtual In-House
+// group. Used by the shared record filter so client and server stay identical.
+export function matchesContractorCategoryFilter(
+  category: string,
+  filter: string,
+): boolean {
+  if (filter === IN_HOUSE_GROUP) {
+    return category === "CNC" || category === "SUB_CONTRACTOR";
+  }
+  return category === filter;
+}
+
 export function isOutVendorType(v: unknown): v is OutVendorType {
   return v === "FAB" || v === "GALVA";
 }

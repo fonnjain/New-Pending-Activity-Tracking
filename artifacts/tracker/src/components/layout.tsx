@@ -7,15 +7,12 @@ import { Button } from "@/components/ui/button";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Segmented } from "@/components/ui/segmented";
-import { sortActivities, ACTIVITY_BUNDLES, CONTRACTOR_CATEGORIES, OUT_VENDOR_TYPES } from "@workspace/domain";
-
-// The three contractor classifications surfaced at the TOP of the contractor
-// filter (Unclassified is omitted — it is the implicit "everything else").
-// Selecting one drives `contractorCategory`; selecting a name drives `contractor`.
-const CONTRACTOR_CLASSIFICATIONS = CONTRACTOR_CATEGORIES.filter(
-  (c) => c.value !== "UNCLASSIFIED",
-).map((c) => ({ value: c.value, label: c.label }));
-const CONTRACTOR_CATEGORY_VALUES = new Set<string>(CONTRACTOR_CATEGORIES.map((c) => c.value));
+import { sortActivities, ACTIVITY_BUNDLES, OUT_VENDOR_TYPES } from "@workspace/domain";
+import {
+  buildContractorGroups,
+  encodeContractorCategory,
+  decodeContractorCategory,
+} from "@/lib/contractorFilter";
 
 type NavItem = {
   href: string;
@@ -304,13 +301,19 @@ function FilterBar() {
           </div>
           <div className="flex-1 min-w-[180px] max-w-[340px]">
             <SearchableSelect
-              value={filters.contractor ?? filters.contractorCategory}
+              value={
+                filters.contractor ??
+                (filters.contractorCategory
+                  ? encodeContractorCategory(filters.contractorCategory)
+                  : null)
+              }
               onChange={(v) => {
-                if (v !== null && CONTRACTOR_CATEGORY_VALUES.has(v)) {
+                const category = decodeContractorCategory(v);
+                if (category !== null) {
                   // A classification was picked: drive the category filter and
                   // clear any specific-contractor selection.
                   setFilter("contractor", null);
-                  setFilter("contractorCategory", v);
+                  setFilter("contractorCategory", category);
                 } else {
                   // A specific contractor (or "All") was picked: clear the
                   // classification so the two never stack.
@@ -318,10 +321,7 @@ function FilterBar() {
                   setFilter("contractor", v);
                 }
               }}
-              groups={[
-                { heading: "Classification", options: CONTRACTOR_CLASSIFICATIONS },
-                { heading: "Contractors", options: contractors.map((c) => ({ value: c, label: c })) },
-              ]}
+              groups={buildContractorGroups(contractors)}
               allLabel="All Contractors"
               searchPlaceholder="Search contractors or types..."
             />

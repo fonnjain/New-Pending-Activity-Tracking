@@ -7,6 +7,7 @@
 
 import {
   bundleActivitySet,
+  matchesContractorCategoryFilter,
   normalizeContractorName,
   lifecycleStatus,
   scopeFor,
@@ -183,7 +184,10 @@ export function filterRecords<T extends AggRecord>(
     if (filters.contractor && r.contractor !== filters.contractor) return false;
     if (filters.contractorCategory || filters.outVendorType) {
       const info = catInfoFor(r.contractor);
-      if (filters.contractorCategory && info.category !== filters.contractorCategory)
+      if (
+        filters.contractorCategory &&
+        !matchesContractorCategoryFilter(info.category, filters.contractorCategory)
+      )
         return false;
       if (filters.outVendorType && !info.outVendorType.includes(filters.outVendorType))
         return false;
