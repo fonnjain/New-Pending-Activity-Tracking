@@ -307,12 +307,15 @@ function FabricationTab({ records }: { records: any[] }) {
 
   // Per-activity counts within fabrication, ordered by the TLT process sequence.
   const actCounts = useMemo(() => {
-    const m = new Map<string, number>();
+    const m = new Map<string, { n: number; weight: number }>();
     for (const r of scope) {
       const a = r.activity || "?";
-      m.set(a, (m.get(a) ?? 0) + 1);
+      const e = m.get(a) ?? { n: 0, weight: 0 };
+      e.n += 1;
+      e.weight += r.balanceWt;
+      m.set(a, e);
     }
-    return sortActivities(Array.from(m.keys())).map((a) => ({ a, n: m.get(a)! }));
+    return sortActivities(Array.from(m.keys())).map((a) => ({ a, ...m.get(a)! }));
   }, [scope]);
 
   const displayed = useMemo(() => {
@@ -494,10 +497,11 @@ function FabricationTab({ records }: { records: any[] }) {
 
       {actCounts.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {actCounts.map(({ a, n }) => (
+          {actCounts.map(({ a, n, weight }) => (
             <span key={a} className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs">
               <span className="font-semibold">{a}</span>
-              <span className="text-muted-foreground">{n.toLocaleString()}</span>
+              <span className="text-muted-foreground">{formatWeight(weight)}</span>
+              <span className="text-muted-foreground">{n.toLocaleString()} marks</span>
             </span>
           ))}
         </div>
