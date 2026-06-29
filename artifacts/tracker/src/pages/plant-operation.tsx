@@ -402,7 +402,6 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
     <div className="space-y-4">
       <div className="flex items-center gap-x-6 gap-y-3 flex-wrap">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-muted-foreground uppercase">Load</span>
           <Segmented
             value={load}
             onChange={(v) => {
@@ -433,9 +432,6 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
           </div>
         )}
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-muted-foreground uppercase">
-            {dimension === "special" ? "Operation" : "Hole Operation"}
-          </span>
           <Segmented
             value={opFilter}
             onChange={(v) => setOpFilter(v ?? "ALL")}
