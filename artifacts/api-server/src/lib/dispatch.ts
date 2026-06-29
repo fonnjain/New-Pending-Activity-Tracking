@@ -27,9 +27,10 @@ import {
 //               (capture-once). Kept for record/seed-time only; it is NOT part
 //               of Computed Dispatch.
 //   accruedMt = tonnes that LEFT the Yard (a mark identity at Y in a WIP import,
-//               absent from the NEXT WIP import) across import pairs AFTER the
-//               key's seed import. This alone is the Computed Dispatch figure
-//               (WIP-derived only; the Order Review file never contributes).
+//               absent from the NEXT WIP import) across the FULL WIP history
+//               (from the very first WIP file; the seed import is NOT a cutoff).
+//               This alone is the Computed Dispatch figure (WIP-derived only;
+//               the Order Review file never contributes).
 // Like the milestone engine, recompute() replays the full WIP history and
 // rebuilds the ledger from scratch, so it is idempotent and safe to run after
 // every WIP commit and every import deletion. It NEVER mutates WIP parsing,
@@ -200,9 +201,10 @@ export async function recomputeDispatch(): Promise<void> {
       }
       for (const [key, delta] of deltaByKey) {
         const seed = seedByKey.get(key);
-        if (!seed) continue; // only accrue for seeded keys
-        // Only count departures AFTER the key was seeded.
-        if (seed.seedImportId != null && imp.id <= seed.seedImportId) continue;
+        if (!seed) continue; // only accrue for keys present in the order book
+        // Computed Dispatch counts ALL yard departures across the full WIP
+        // history (from the very first WIP file). The Order Review seed import
+        // is NOT a cutoff — the file never bounds the WIP-derived figure.
         if (delta === 0) continue;
         const list = accrualsByKey.get(key) ?? [];
         list.push({
@@ -227,17 +229,9 @@ export async function recomputeDispatch(): Promise<void> {
     const accruedUpdates: { key: string; accruedMt: number }[] = [];
 
     for (const [key, seed] of seedByKey) {
-      let running = seed.seedMt;
-      // Seed entry first.
-      ledgerInserts.push({
-        project: seed.project,
-        structure: seed.structure,
-        entryDate: seed.seedDate,
-        deltaMt: seed.seedMt,
-        runningMt: running,
-        source: "seed",
-        importId: null,
-      });
+      // Computed Dispatch is WIP-only: the running total starts at 0 (no Order
+      // Review seed baseline). Only wip_departure entries build the ledger.
+      let running = 0;
       const accruals = (accrualsByKey.get(key) ?? []).sort(
         (a, b) => a.importId - b.importId,
       );

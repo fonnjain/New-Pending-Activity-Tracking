@@ -23,17 +23,24 @@ become file-type-aware (see below).
   RECORD-ONLY: it still seeds the row + sets `seedImportId`, but it is NOT summed into the
   displayed/reconciled figure. Anywhere that reconciles or displays computed dispatch must use
   `accruedMt` alone, never `seedMt + accruedMt`.
-- **Cutoff caveat:** `seedImportId` still gates accrual (`recomputeDispatch` skips departures at/before
-  the key's seed import), so Computed = "WIP departures since the order-review baseline," NOT full WIP
-  history. Pre-baseline yard departures are excluded by design. If "WIP-only" must mean all-history,
-  remove that gate and re-run `recomputeDispatch()`.
+- **Full WIP history, no cutoff.** `recomputeDispatch` accrues yard departures across EVERY consecutive
+  WIP import pair from the very first WIP file — `seedImportId` is NOT an accrual cutoff (user: computed
+  must not use the Order Review file at all). The ledger running total starts at 0; no `seed` ledger
+  entry is written. `accruedMt` is still stored only for keys present in `order_dispatch` (the order
+  book defines which keys to track/store).
+- **Recompute is stored, not live.** Displayed `computedDispatchMt` reads stored `accruedMt`; the GET
+  /order-status route does NOT recompute. After changing accrual logic you MUST run `recomputeDispatch()`
+  once or the stored value stays stale until the next WIP commit/delete triggers it. There is no admin
+  recompute endpoint — bundle a one-off entry with esbuild (mirror `build.mjs`) and run it, or trigger
+  via a WIP/order-review commit.
 - **Why:** the file's despatch column is its own column; computed must be an INDEPENDENT WIP-derived
   measure so reconciliation (file vs computed, 1% tolerance, Data page "Order Reconciliation" tab) is
   meaningful. After this change reconciliation legitimately shows large file-vs-computed gaps until WIP
   catches up — that is expected, not a bug.
 - `recomputeDispatch()` is wired best-effort (try/catch) after every WIP commit, exactly like
-  milestones — it can never fail an import. The `ledger`/`dispatch_ledger` table is audit-only (still
-  written, still holds a seed entry); nothing reads it except the import-delete cleanup.
+  milestones — it can never fail an import. The `dispatch_ledger` table is audit-only (rebuilt each
+  recompute, wip_departure entries only, NO seed entry, running starts at 0); nothing reads it except
+  the import-delete cleanup.
 
 ## Staged-upload contract is file-type-discriminated (the gotcha)
 **Why:** order-review files have no WIP `structural` read and commit produces a different entity,
