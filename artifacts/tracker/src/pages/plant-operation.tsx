@@ -291,7 +291,10 @@ function FabricationTab({ records }: { records: any[] }) {
   }, [scope, opFilter, dimension, specialLoad]);
 
   const projects = useMemo(() => groupProjectContractor(displayed), [displayed]);
-  const total = useMemo(() => rollup(displayed), [displayed]);
+  // Summary tile shows the total of ALL relevant activities in the scope (the full
+  // operation breakdown), independent of the local operation sub-filter (opFilter)
+  // which only narrows the marks table below.
+  const total = useMemo(() => rollup(scope), [scope]);
 
   const loadLabel = load === "OPERATIONAL" ? "Operational" : "In Hand";
 
