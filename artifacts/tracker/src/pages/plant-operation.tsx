@@ -181,7 +181,7 @@ function PlantOperationContent() {
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-      <div className="flex items-center gap-x-6 gap-y-3 flex-wrap">
+      <div className="flex items-center justify-between gap-x-6 gap-y-3 flex-wrap">
         <TabsList className="h-10">
           <TabsTrigger value="fabrication" className="px-6">Fabrication</TabsTrigger>
           <TabsTrigger value="galvanization" className="px-6">Galvanization</TabsTrigger>
