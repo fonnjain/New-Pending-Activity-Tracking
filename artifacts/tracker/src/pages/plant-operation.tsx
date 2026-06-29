@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { formatWeight } from "@/lib/utils";
 import { exportToXlsx, type XlsxColumn } from "@/lib/export";
 import { ChevronDown, FileSpreadsheet } from "lucide-react";
-import { bundleActivitySet, compareActivity, sortActivities, getActivityBundle, TLT_OPERATION_BUNDLE_IDS, activityRank } from "@workspace/domain";
+import { bundleActivitySet, compareActivity, getActivityBundle, TLT_OPERATION_BUNDLE_IDS, activityRank } from "@workspace/domain";
 
 // Activity scopes for each plant operation, sliced from the canonical bundles in
 // @workspace/domain (single source of truth). Display/aggregation only — this is
@@ -320,19 +320,6 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
     return c;
   }, [scope, dimension]);
 
-  // Per-activity counts within fabrication, ordered by the TLT process sequence.
-  const actCounts = useMemo(() => {
-    const m = new Map<string, { n: number; weight: number }>();
-    for (const r of scope) {
-      const a = r.activity || "?";
-      const e = m.get(a) ?? { n: 0, weight: 0 };
-      e.n += 1;
-      e.weight += r.balanceWt;
-      m.set(a, e);
-    }
-    return sortActivities(Array.from(m.keys())).map((a) => ({ a, ...m.get(a)! }));
-  }, [scope]);
-
   const displayed = useMemo(() => {
     // Special Load scope is already a single operation + load state.
     if (specialLoad) return scope;
@@ -494,18 +481,6 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
           Export Excel
         </Button>
       </div>
-
-      {actCounts.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {actCounts.map(({ a, n, weight }) => (
-            <span key={a} className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs">
-              <span className="font-semibold">{a}</span>
-              <span className="text-muted-foreground">{formatWeight(weight)}</span>
-              <span className="text-muted-foreground">{n.toLocaleString()} marks</span>
-            </span>
-          ))}
-        </div>
-      )}
 
       {projects.map((p) => (
         <ProjectGroup key={p.project} project={p} mode="fab" dimension={dimension} load={load} loadLabel={loadLabel} />
