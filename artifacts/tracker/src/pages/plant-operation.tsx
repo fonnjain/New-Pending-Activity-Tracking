@@ -27,13 +27,39 @@ const HOLE_OP_LABELS: Record<string, string> = {
   NOT_SET: "Not set",
 };
 
+const SPECIAL_OP_LABELS: Record<string, string> = {
+  BENDING: "Bending",
+  WELDING: "Welding",
+  OTHER: "Other",
+};
+
 const ROW_CAP = 300;
 
-type HoleOpFilter = "ALL" | "PUNCHING" | "DRILLING" | "NOT_SET";
+// The operation split shown inside the Fabrication tab depends on which sub-bundle
+// is selected. For Standard Operations (cutting/punch/drill) the hole operation is
+// the meaningful axis; for Special Operations (bending/welding) the activity is.
+// Display/aggregation only — never changes parsing, ageing, dedup, or activity values.
+type FabDimension = "hole" | "special";
 
 function holeOpOf(r: any): "PUNCHING" | "DRILLING" | "NOT_SET" {
   const op = r.holeOperation;
   return op === "PUNCHING" || op === "DRILLING" ? op : "NOT_SET";
+}
+
+// Bending = activities B (Bending) + HAB (Heat / Assembly-Bending); Welding = W.
+function specialOpOf(r: any): "BENDING" | "WELDING" | "OTHER" {
+  const a = (r.activity ?? "").toUpperCase();
+  if (a === "B" || a === "HAB") return "BENDING";
+  if (a === "W") return "WELDING";
+  return "OTHER";
+}
+
+function opOf(r: any, dimension: FabDimension): string {
+  return dimension === "special" ? specialOpOf(r) : holeOpOf(r);
+}
+
+function opLabel(key: string, dimension: FabDimension): string {
+  return dimension === "special" ? SPECIAL_OP_LABELS[key] : HOLE_OP_LABELS[key];
 }
 
 interface Rollup {
@@ -154,9 +180,11 @@ const OP_GROUP_OPTIONS: { value: string; label: string }[] = [
 ];
 
 function FabricationTab({ records }: { records: any[] }) {
-  const [opFilter, setOpFilter] = useState<HoleOpFilter>("ALL");
+  const [opFilter, setOpFilter] = useState<string>("ALL");
   const [group, setGroup] = useState<string>("ALL");
   const groupSet = group === "ALL" ? null : bundleActivitySet(group);
+  const dimension: FabDimension =
+    group === "TLT_SPECIAL_OPERATIONS" ? "special" : "hole";
 
   const scope = useMemo(() => {
     const base = records.filter((r) => FAB_SET.has((r.activity ?? "").toUpperCase()));
@@ -165,21 +193,19 @@ function FabricationTab({ records }: { records: any[] }) {
       : base;
   }, [records, groupSet]);
 
-  // Punching / Drilling / Not set split over the full fabrication scope (always
-  // shows the complete split, independent of the local op filter).
+  // Operation split over the full scope (always the complete split, independent of
+  // the local op filter). Standard/All split by hole operation (Punching/Drilling/
+  // Not set); Special Operations split by Bending/Welding.
   const split = useMemo(() => {
-    const c = {
-      PUNCHING: { marks: 0, weight: 0 },
-      DRILLING: { marks: 0, weight: 0 },
-      NOT_SET: { marks: 0, weight: 0 },
-    };
+    const c: Record<string, { marks: number; weight: number }> = {};
     for (const r of scope) {
-      const op = holeOpOf(r);
+      const op = opOf(r, dimension);
+      if (!c[op]) c[op] = { marks: 0, weight: 0 };
       c[op].marks += 1;
       c[op].weight += r.balanceWt;
     }
     return c;
-  }, [scope]);
+  }, [scope, dimension]);
 
   // Per-activity counts within fabrication, ordered by the TLT process sequence.
   const actCounts = useMemo(() => {
@@ -192,8 +218,8 @@ function FabricationTab({ records }: { records: any[] }) {
   }, [scope]);
 
   const displayed = useMemo(
-    () => (opFilter === "ALL" ? scope : scope.filter((r) => holeOpOf(r) === opFilter)),
-    [scope, opFilter],
+    () => (opFilter === "ALL" ? scope : scope.filter((r) => opOf(r, dimension) === opFilter)),
+    [scope, opFilter, dimension],
   );
 
   const projects = useMemo(() => groupProjectContractor(displayed), [displayed]);
@@ -202,19 +228,25 @@ function FabricationTab({ records }: { records: any[] }) {
   const handleExport = () => {
     const rows = projects.flatMap((p) =>
       p.contractors.map((c) => {
-        const s = { PUNCHING: 0, DRILLING: 0, NOT_SET: 0 };
-        for (const r of c.records) s[holeOpOf(r)] += 1;
-        return {
+        const base = {
           project: p.project,
           contractor: c.name,
           marks: c.stats.marks,
           qty: c.stats.qty,
           weight: c.stats.weight,
           avgAge: c.stats.avgAge,
-          punching: s.PUNCHING,
-          drilling: s.DRILLING,
-          notSet: s.NOT_SET,
         };
+        if (dimension === "special") {
+          const s = { BENDING: 0, WELDING: 0 };
+          for (const r of c.records) {
+            const op = specialOpOf(r);
+            if (op !== "OTHER") s[op] += 1;
+          }
+          return { ...base, bending: s.BENDING, welding: s.WELDING };
+        }
+        const s = { PUNCHING: 0, DRILLING: 0, NOT_SET: 0 };
+        for (const r of c.records) s[holeOpOf(r)] += 1;
+        return { ...base, punching: s.PUNCHING, drilling: s.DRILLING, notSet: s.NOT_SET };
       }),
     );
     const columns: XlsxColumn[] = [
@@ -224,9 +256,16 @@ function FabricationTab({ records }: { records: any[] }) {
       { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
       { label: "Balance Wt (kg)", field: "weight", numeric: true, decimals: 2, total: true },
       { label: "Avg Ageing (days)", field: "avgAge", numeric: true, decimals: 0 },
-      { label: "Punching", field: "punching", numeric: true, decimals: 0, total: true },
-      { label: "Drilling", field: "drilling", numeric: true, decimals: 0, total: true },
-      { label: "Not Set", field: "notSet", numeric: true, decimals: 0, total: true },
+      ...(dimension === "special"
+        ? [
+            { label: "Bending", field: "bending", numeric: true, decimals: 0, total: true },
+            { label: "Welding", field: "welding", numeric: true, decimals: 0, total: true },
+          ]
+        : [
+            { label: "Punching", field: "punching", numeric: true, decimals: 0, total: true },
+            { label: "Drilling", field: "drilling", numeric: true, decimals: 0, total: true },
+            { label: "Not Set", field: "notSet", numeric: true, decimals: 0, total: true },
+          ]),
     ];
     exportToXlsx("plant-operation-fabrication.xlsx", columns, rows, { sheetName: "Fabrication" });
   };
@@ -235,15 +274,31 @@ function FabricationTab({ records }: { records: any[] }) {
     <div className="space-y-4">
       <Segmented
         value={group}
-        onChange={(v) => setGroup(v ?? "ALL")}
+        onChange={(v) => {
+          setGroup(v ?? "ALL");
+          setOpFilter("ALL");
+        }}
         options={OP_GROUP_OPTIONS}
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <SummaryTile title="Fabrication Marks" value={total.marks.toLocaleString()} sub={formatWeight(total.weight)} />
-        <SummaryTile title="Punching" value={split.PUNCHING.marks.toLocaleString()} sub={formatWeight(split.PUNCHING.weight)} />
-        <SummaryTile title="Drilling" value={split.DRILLING.marks.toLocaleString()} sub={formatWeight(split.DRILLING.weight)} />
-        <SummaryTile title="Not Set" value={split.NOT_SET.marks.toLocaleString()} sub={formatWeight(split.NOT_SET.weight)} />
+      <div className={`grid grid-cols-2 gap-3 ${dimension === "special" ? "md:grid-cols-3" : "md:grid-cols-4"}`}>
+        <SummaryTile
+          title={dimension === "special" ? "Special Op. Marks" : "Fabrication Marks"}
+          value={total.marks.toLocaleString()}
+          sub={formatWeight(total.weight)}
+        />
+        {dimension === "special" ? (
+          <>
+            <SummaryTile title="Bending" value={(split.BENDING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.BENDING?.weight ?? 0)} />
+            <SummaryTile title="Welding" value={(split.WELDING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.WELDING?.weight ?? 0)} />
+          </>
+        ) : (
+          <>
+            <SummaryTile title="Punching" value={(split.PUNCHING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.PUNCHING?.weight ?? 0)} />
+            <SummaryTile title="Drilling" value={(split.DRILLING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.DRILLING?.weight ?? 0)} />
+            <SummaryTile title="Not Set" value={(split.NOT_SET?.marks ?? 0).toLocaleString()} sub={formatWeight(split.NOT_SET?.weight ?? 0)} />
+          </>
+        )}
       </div>
 
       {actCounts.length > 0 && (
@@ -259,16 +314,26 @@ function FabricationTab({ records }: { records: any[] }) {
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-muted-foreground uppercase">Hole Operation</span>
+          <span className="text-xs font-semibold text-muted-foreground uppercase">
+            {dimension === "special" ? "Operation" : "Hole Operation"}
+          </span>
           <Segmented
             value={opFilter}
-            onChange={(v) => setOpFilter((v as HoleOpFilter) ?? "ALL")}
-            options={[
-              { value: "ALL", label: "All" },
-              { value: "PUNCHING", label: "Punching" },
-              { value: "DRILLING", label: "Drilling" },
-              { value: "NOT_SET", label: "Not set" },
-            ]}
+            onChange={(v) => setOpFilter(v ?? "ALL")}
+            options={
+              dimension === "special"
+                ? [
+                    { value: "ALL", label: "All" },
+                    { value: "BENDING", label: "Bending" },
+                    { value: "WELDING", label: "Welding" },
+                  ]
+                : [
+                    { value: "ALL", label: "All" },
+                    { value: "PUNCHING", label: "Punching" },
+                    { value: "DRILLING", label: "Drilling" },
+                    { value: "NOT_SET", label: "Not set" },
+                  ]
+            }
           />
         </div>
         <Button variant="outline" size="sm" className="gap-2" onClick={handleExport} disabled={projects.length === 0}>
@@ -278,7 +343,7 @@ function FabricationTab({ records }: { records: any[] }) {
       </div>
 
       {projects.map((p) => (
-        <ProjectGroup key={p.project} project={p} mode="fab" />
+        <ProjectGroup key={p.project} project={p} mode="fab" dimension={dimension} />
       ))}
       {projects.length === 0 && (
         <div className="text-center p-8 text-muted-foreground">No fabrication marks match the current filters.</div>
@@ -391,7 +456,7 @@ interface ProjectNode {
   contractors: { name: string; records: any[]; stats: Rollup }[];
 }
 
-function ProjectGroup({ project, mode }: { project: ProjectNode; mode: GroupMode }) {
+function ProjectGroup({ project, mode, dimension = "hole" }: { project: ProjectNode; mode: GroupMode; dimension?: FabDimension }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -424,7 +489,7 @@ function ProjectGroup({ project, mode }: { project: ProjectNode; mode: GroupMode
         <CollapsibleContent>
           <div className="border-t bg-card divide-y">
             {project.contractors.map((c) => (
-              <ContractorGroup key={c.name} project={project.project} name={c.name} records={c.records} stats={c.stats} mode={mode} />
+              <ContractorGroup key={c.name} project={project.project} name={c.name} records={c.records} stats={c.stats} mode={mode} dimension={dimension} />
             ))}
           </div>
         </CollapsibleContent>
@@ -438,18 +503,28 @@ function ContractorGroup({
   records,
   stats,
   mode,
+  dimension = "hole",
 }: {
   project: string;
   name: string;
   records: any[];
   stats: Rollup;
   mode: GroupMode;
+  dimension?: FabDimension;
 }) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
   const extra = useMemo(() => {
     if (mode === "fab") {
+      if (dimension === "special") {
+        const s = { BENDING: 0, WELDING: 0 };
+        for (const r of records) {
+          const op = specialOpOf(r);
+          if (op !== "OTHER") s[op] += 1;
+        }
+        return `Bending ${s.BENDING} • Welding ${s.WELDING}`;
+      }
       const s = { PUNCHING: 0, DRILLING: 0, NOT_SET: 0 };
       for (const r of records) s[holeOpOf(r)] += 1;
       return `Punching ${s.PUNCHING} • Drilling ${s.DRILLING} • Not set ${s.NOT_SET}`;
@@ -457,7 +532,7 @@ function ContractorGroup({
     let notSet = 0;
     for (const r of records) if (r.thicknessMm == null) notSet += 1;
     return `Thickness not set: ${notSet}`;
-  }, [records, mode]);
+  }, [records, mode, dimension]);
 
   const sortedRows = useMemo(() => {
     return [...records].sort((a, b) => {
@@ -500,7 +575,7 @@ function ContractorGroup({
                 <TableHead>Section</TableHead>
                 <TableHead>Activity</TableHead>
                 {mode === "fab" ? (
-                  <TableHead>Hole Op.</TableHead>
+                  <TableHead>{dimension === "special" ? "Operation" : "Hole Op."}</TableHead>
                 ) : (
                   <TableHead className="text-right">Thick.</TableHead>
                 )}
@@ -518,7 +593,7 @@ function ContractorGroup({
                   <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || "-"}</TableCell>
                   <TableCell className="font-medium">{r.activity || "-"}</TableCell>
                   {mode === "fab" ? (
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{HOLE_OP_LABELS[holeOpOf(r)]}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{opLabel(opOf(r, dimension), dimension)}</TableCell>
                   ) : (
                     <TableCell className="text-right tabular-nums whitespace-nowrap" title={r.thicknessSource ?? "unset"}>
                       {r.thicknessMm != null ? `${r.thicknessMm} mm` : <span className="text-muted-foreground">-</span>}
