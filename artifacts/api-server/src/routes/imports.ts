@@ -505,9 +505,11 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
   const reportDate = /^\d{4}-\d{2}-\d{2}$/.test(reportDateRaw)
     ? reportDateRaw
     : null;
-  // Pairing date for the Order Review gate: the report's own "As on" banner date,
-  // falling back to today (the upload date) when the file has no parseable banner.
-  const asOnDate = detectReportAsOnDate(file.buffer) ?? todayYmd();
+  // Pairing date for the Order Review gate: the report's own "As on" banner date or
+  // the date encoded in its filename, falling back to today (the upload date) when
+  // neither is present/parseable.
+  const asOnDate =
+    detectReportAsOnDate(file.buffer, file.originalname) ?? todayYmd();
 
   let parsed;
   try {
@@ -644,7 +646,11 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
       sourceFilename: file.originalname,
       fileType,
       orderReview: {
-        asOnDate: orderReview.asOnDate,
+        // Surface the robust pairing date (banner OR filename) so the uploader can
+        // pre-check per-date pairing; falls back to the parser's banner-only value.
+        asOnDate:
+          detectReportAsOnDate(file.buffer, file.originalname) ??
+          orderReview.asOnDate,
         summary: orderReview.summary,
       },
       structural: null,
@@ -984,14 +990,12 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
 
     // Strict per-date pairing: an Order Review may only be committed for a date
     // that already has a committed WIP / Balance & Activity import. The pairing key
-    // is the "As on" banner date (WIP falls back to its upload date). This is the
-    // authoritative guard; the uploader UI mirrors it for a friendlier message.
-    let orderAsOnDate: string | null = null;
-    try {
-      orderAsOnDate = parseOrderReview(staged.fileData).asOnDate;
-    } catch {
-      orderAsOnDate = null;
-    }
+    // is the "As on" banner date or the filename date (matching how WIP imports
+    // derive theirs). This is the authoritative guard; the uploader UI mirrors it.
+    const orderAsOnDate = detectReportAsOnDate(
+      staged.fileData,
+      staged.sourceFilename,
+    );
     if (!orderAsOnDate) {
       res.status(400).json({
         error:
@@ -1118,7 +1122,9 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     {
       label: staged.label,
       reportDate: staged.reportDate,
-      asOnDate: detectReportAsOnDate(staged.fileData) ?? todayYmd(),
+      asOnDate:
+        detectReportAsOnDate(staged.fileData, staged.sourceFilename) ??
+        todayYmd(),
       sourceFilename: staged.sourceFilename,
     },
     req.log,
