@@ -744,7 +744,7 @@ export const DeleteFabricationPriorityQueryParams = zod.object({
 export const ListContractorCategoriesResponseItem = zod.object({
   "nameKey": zod.string().describe('Normalized contractor name (join key).'),
   "displayName": zod.string().describe('Contractor name as last seen\/entered (for display).'),
-  "category": zod.enum(['IN_HOUSE', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']).describe('Contractor sub-category.'),
+  "category": zod.enum(['CNC', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']).describe('Contractor sub-category.'),
   "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).describe('FAB\/GALVA tags (only meaningful when category=OUT_VENDOR).'),
   "updatedAt": zod.string().optional()
 })
@@ -758,14 +758,14 @@ export const ListContractorCategoriesResponse = zod.array(ListContractorCategori
  */
 export const UpsertContractorCategoryBody = zod.object({
   "displayName": zod.string(),
-  "category": zod.enum(['IN_HOUSE', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']),
+  "category": zod.enum(['CNC', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']),
   "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).optional()
 })
 
 export const UpsertContractorCategoryResponse = zod.object({
   "nameKey": zod.string().describe('Normalized contractor name (join key).'),
   "displayName": zod.string().describe('Contractor name as last seen\/entered (for display).'),
-  "category": zod.enum(['IN_HOUSE', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']).describe('Contractor sub-category.'),
+  "category": zod.enum(['CNC', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']).describe('Contractor sub-category.'),
   "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).describe('FAB\/GALVA tags (only meaningful when category=OUT_VENDOR).'),
   "updatedAt": zod.string().optional()
 })

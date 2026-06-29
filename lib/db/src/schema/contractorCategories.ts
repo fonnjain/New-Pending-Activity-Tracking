@@ -7,7 +7,7 @@ import { z } from "zod/v4";
 // in @workspace/domain) so casing/spacing variants resolve to one row while
 // distinct suffixes stay distinct. Joined to records at read time — it NEVER
 // touches parsing, ageing, dedup, the row hash, or the contractor string.
-//   category      = IN_HOUSE | SUB_CONTRACTOR | OUT_VENDOR | UNCLASSIFIED
+//   category      = CNC | SUB_CONTRACTOR | OUT_VENDOR | UNCLASSIFIED
 //   outVendorType = FAB/GALVA tags (only meaningful when category=OUT_VENDOR)
 //   displayName   = the contractor name exactly as last seen/entered (for UI)
 export const contractorCategoriesTable = pgTable("contractor_categories", {

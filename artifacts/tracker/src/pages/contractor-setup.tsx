@@ -151,7 +151,7 @@ export function ContractorSetupContent() {
       </div>
 
       <p className="text-sm text-muted-foreground">
-        Classify each contractor as In-house, Sub-contractor, or Out-vendor.
+        Classify each contractor as CNC, Sub-contractor, or Out-vendor.
         Out-vendors can be tagged Fabrication and/or Galvanizing. Mappings are
         descriptive only — they never change parsing, ageing, quantities, or the
         contractor names themselves, and are matched on the full contractor name.

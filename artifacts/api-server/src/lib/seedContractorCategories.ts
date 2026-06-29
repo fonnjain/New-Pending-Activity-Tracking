@@ -9,7 +9,7 @@ import { logger } from "./logger";
  * One-time, idempotent seed of the known out-vendor contractor mappings (with
  * their FAB/GALVA tags). Inserted with onConflictDoNothing on the normalized
  * name key, so any user edit made in-app ALWAYS wins and re-running on every
- * boot is a no-op. In-house / Sub-contractor are deliberately NOT seeded — they
+ * boot is a no-op. CNC / Sub-contractor are deliberately NOT seeded — they
  * start Unclassified and are set in-app. This is config only: it never touches
  * parsing, ageing, dedup, qty, or the row hash.
  */

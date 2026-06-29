@@ -15,7 +15,7 @@ export interface Filters {
   structure: string | null;
   mark: string | null;
   contractor: string | null;
-  contractorCategory: string | null; // IN_HOUSE | SUB_CONTRACTOR | OUT_VENDOR | UNCLASSIFIED
+  contractorCategory: string | null; // CNC | SUB_CONTRACTOR | OUT_VENDOR | UNCLASSIFIED
   outVendorType: string | null; // FAB | GALVA (only meaningful with OUT_VENDOR)
   activity: string | null;
   holeOperation: string | null; // "PUNCHING" | "DRILLING" | "NOT_SET" (derived)

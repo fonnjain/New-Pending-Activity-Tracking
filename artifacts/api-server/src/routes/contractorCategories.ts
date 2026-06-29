@@ -11,7 +11,7 @@ import { requireAuth } from "./auth";
 
 const router: IRouter = Router();
 
-// --- Contractor sub-category overlay (In-house / Sub-contractor / Out-vendor +
+// --- Contractor sub-category overlay (CNC / Sub-contractor / Out-vendor +
 // FAB/GALVA tags). Config only; joined to records at read time. ---
 
 router.get("/contractor-categories", async (_req, res): Promise<void> => {

@@ -247,14 +247,14 @@ export const TLT_OPERATION_BUNDLE_IDS = [
 // ---------------------------------------------------------------------------
 // Contractor sub-categories (config overlay, additive)
 // ---------------------------------------------------------------------------
-// A purely descriptive classification of each contractor into In-house /
+// A purely descriptive classification of each contractor into CNC /
 // Sub-contractor / Out-vendor, with Out-vendors additionally tagged FAB and/or
 // GALVA. It is stored in its own config table keyed by a NORMALIZED contractor
 // name and joined to records at read time — it NEVER changes parsing, Activity
 // values, qty, ageing, dedup, the row hash, or the contractor string itself.
 // Unmapped contractors are treated as "Unclassified".
 export type ContractorCategory =
-  | "IN_HOUSE"
+  | "CNC"
   | "SUB_CONTRACTOR"
   | "OUT_VENDOR"
   | "UNCLASSIFIED";
@@ -265,7 +265,7 @@ export const CONTRACTOR_CATEGORIES: {
   value: ContractorCategory;
   label: string;
 }[] = [
-  { value: "IN_HOUSE", label: "In-house" },
+  { value: "CNC", label: "CNC" },
   { value: "SUB_CONTRACTOR", label: "Sub-contractor" },
   { value: "OUT_VENDOR", label: "Out-vendor" },
   { value: "UNCLASSIFIED", label: "Unclassified" },
@@ -295,7 +295,7 @@ export function outVendorTypeLabel(value: string | null | undefined): string {
 
 export function isContractorCategory(v: unknown): v is ContractorCategory {
   return (
-    v === "IN_HOUSE" ||
+    v === "CNC" ||
     v === "SUB_CONTRACTOR" ||
     v === "OUT_VENDOR" ||
     v === "UNCLASSIFIED"
@@ -386,7 +386,7 @@ export interface ContractorCategorySeed {
 // Seed list of known out-vendors with their FAB/GALVA tags (full names exactly
 // as they appear in the source workbook). Applied once at boot with
 // onConflictDoNothing on the normalized key, so user edits always win and
-// re-seeding is idempotent. In-house / Sub-contractor are intentionally NOT
+// re-seeding is idempotent. CNC / Sub-contractor are intentionally NOT
 // seeded — they start Unclassified and are set in-app.
 export const CONTRACTOR_CATEGORY_SEED: ContractorCategorySeed[] = [
   { name: "BAJRANG STEEL INDUSTRIES & MINERALS PVT.LTD.JW", category: "OUT_VENDOR", outVendorType: ["FAB"] },

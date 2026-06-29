@@ -13,7 +13,7 @@ export type ContractorCategoryCategory = typeof ContractorCategoryCategory[keyof
 
 
 export const ContractorCategoryCategory = {
-  IN_HOUSE: 'IN_HOUSE',
+  CNC: 'CNC',
   SUB_CONTRACTOR: 'SUB_CONTRACTOR',
   OUT_VENDOR: 'OUT_VENDOR',
   UNCLASSIFIED: 'UNCLASSIFIED',

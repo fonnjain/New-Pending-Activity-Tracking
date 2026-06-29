@@ -2060,7 +2060,7 @@ components:
           description: Contractor name as last seen/entered (for display).
         category:
           type: string
-          enum: [IN_HOUSE, SUB_CONTRACTOR, OUT_VENDOR, UNCLASSIFIED]
+          enum: [CNC, SUB_CONTRACTOR, OUT_VENDOR, UNCLASSIFIED]
           description: Contractor sub-category.
         outVendorType:
           type: array
@@ -2082,7 +2082,7 @@ components:
           type: string
         category:
           type: string
-          enum: [IN_HOUSE, SUB_CONTRACTOR, OUT_VENDOR, UNCLASSIFIED]
+          enum: [CNC, SUB_CONTRACTOR, OUT_VENDOR, UNCLASSIFIED]
         outVendorType:
           type: array
           items:

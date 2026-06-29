@@ -76,6 +76,7 @@ type SectionFilter = "ALL" | "ANGLE" | "PLATE";
 
 const W_RANK = activityRank("W");
 const B_RANK = activityRank("B");
+const Q_RANK = activityRank("Q");
 
 function passesSpecialLoad(
   r: any,
@@ -87,6 +88,33 @@ function passesSpecialLoad(
   // In Hand: strictly before the target activity. Unknown activities rank past the
   // sequence end, so they are naturally excluded (matches the report's behaviour).
   return activityRank(r.activity) < (target === "WELDING" ? W_RANK : B_RANK);
+}
+
+// Hole-dimension load split for the top-level Load tab row. Operational = work AT
+// the operation now; In Hand (Upcoming) = work still upstream. What counts as "the
+// operation" depends on which operation tab is selected:
+//   - Standard Operations (hole making): Operational = ready at the machine (RFI),
+//     In Hand = cut and waiting upstream (C).
+//   - Quality: Operational = at the quality stages (Q / TS), In Hand = still in
+//     fabrication, upstream of Q.
+//   - All (whole fabrication): every fab mark is at fabrication now, so all are
+//     Operational and nothing sits upstream (In Hand is empty).
+// Display/aggregation only — never changes parsing, ageing, dedup, qty, or activity.
+function passesHoleLoad(
+  r: any,
+  group: string,
+  load: "OPERATIONAL" | "INHAND",
+): boolean {
+  const act = (r.activity ?? "").toUpperCase();
+  if (group === "TLT_STANDARD_OPERATIONS") {
+    return load === "OPERATIONAL" ? act === "RFI" : act === "C";
+  }
+  if (group === "TLT_QUALITY") {
+    return load === "OPERATIONAL"
+      ? act === "Q" || act === "TS"
+      : activityRank(r.activity) < Q_RANK;
+  }
+  return load === "OPERATIONAL";
 }
 
 interface Rollup {
@@ -217,9 +245,8 @@ function FabricationTab({ records }: { records: any[] }) {
     group === "TLT_SPECIAL_OPERATIONS" ? "special" : "hole";
   const isStandard = group === "TLT_STANDARD_OPERATIONS";
   const isSpecial = group === "TLT_SPECIAL_OPERATIONS";
-  // The Load and Section bifurcations only apply to the two operation sub-bundles
-  // that the Fabrication Load rules cover; All / Quality keep the plain view.
-  const showLoad = isStandard || isSpecial;
+  // Section split only applies to Standard Operations (Angle vs Plate). The Load
+  // tab row is a top-level control that applies to every operation tab.
   const showSection = isStandard;
   // Special-operations load is positional and operation-specific, so it needs a
   // single target operation; default to Bending when "All" was selected.
@@ -237,18 +264,22 @@ function FabricationTab({ records }: { records: any[] }) {
     if (specialLoad) {
       return fabBase.filter((r) => passesSpecialLoad(r, opTarget, load as "OPERATIONAL" | "INHAND"));
     }
+    // When a hole-dimension Load tab is active it defines its own activity set
+    // (Operational = at the operation; In Hand = upstream), so it runs against the
+    // full fab base rather than the group-restricted set — otherwise "In Hand"
+    // (e.g. work upstream of Quality) would be filtered out before it can match.
+    if (dimension === "hole" && load !== "ALL") {
+      let s = section !== "ALL" ? fabBase.filter((r) => r.sectionType === section) : fabBase;
+      return s.filter((r) => passesHoleLoad(r, group, load as "OPERATIONAL" | "INHAND"));
+    }
     let s = groupSet
       ? fabBase.filter((r) => groupSet.has((r.activity ?? "").toUpperCase()))
       : fabBase;
-    if (dimension === "hole") {
-      if (section !== "ALL") s = s.filter((r) => r.sectionType === section);
-      if (load !== "ALL") {
-        const want = load === "OPERATIONAL" ? "RFI" : "C";
-        s = s.filter((r) => (r.activity ?? "").toUpperCase() === want);
-      }
+    if (dimension === "hole" && section !== "ALL") {
+      s = s.filter((r) => r.sectionType === section);
     }
     return s;
-  }, [fabBase, groupSet, dimension, section, load, specialLoad, opTarget]);
+  }, [fabBase, groupSet, dimension, section, load, specialLoad, opTarget, group]);
 
   // For the Special Load view, the full Operational vs In-Hand pipeline for the
   // selected operation (shown as tiles regardless of which Load tab is active).
@@ -362,41 +393,70 @@ function FabricationTab({ records }: { records: any[] }) {
         options={OP_GROUP_OPTIONS}
       />
 
-      {showLoad && (
-        <div className="flex items-center gap-x-6 gap-y-3 flex-wrap">
+      <div className="flex items-center gap-x-6 gap-y-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground uppercase">Load</span>
+          <Segmented
+            value={load}
+            onChange={(v) => {
+              const nv = (v ?? "ALL") as LoadState;
+              setLoad(nv);
+              // Special load is operation-specific; lock to a single op.
+              if (isSpecial && nv !== "ALL" && opFilter === "ALL") setOpFilter("BENDING");
+            }}
+            options={[
+              { value: "ALL", label: "All" },
+              { value: "OPERATIONAL", label: "Operational Load" },
+              { value: "INHAND", label: "In Hand (Upcoming)" },
+            ]}
+          />
+        </div>
+        {showSection && (
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-muted-foreground uppercase">Load</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase">Section</span>
             <Segmented
-              value={load}
-              onChange={(v) => {
-                const nv = (v ?? "ALL") as LoadState;
-                setLoad(nv);
-                // Special load is operation-specific; lock to a single op.
-                if (isSpecial && nv !== "ALL" && opFilter === "ALL") setOpFilter("BENDING");
-              }}
+              value={section}
+              onChange={(v) => setSection((v ?? "ALL") as SectionFilter)}
               options={[
                 { value: "ALL", label: "All" },
-                { value: "OPERATIONAL", label: "Operational" },
-                { value: "INHAND", label: "In Hand" },
+                { value: "ANGLE", label: "Angle" },
+                { value: "PLATE", label: "Plate" },
               ]}
             />
           </div>
-          {showSection && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-muted-foreground uppercase">Section</span>
-              <Segmented
-                value={section}
-                onChange={(v) => setSection((v ?? "ALL") as SectionFilter)}
-                options={[
-                  { value: "ALL", label: "All" },
-                  { value: "ANGLE", label: "Angle" },
-                  { value: "PLATE", label: "Plate" },
-                ]}
-              />
-            </div>
-          )}
+        )}
+      </div>
+
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground uppercase">
+            {dimension === "special" ? "Operation" : "Hole Operation"}
+          </span>
+          <Segmented
+            value={opFilter}
+            onChange={(v) => setOpFilter(v ?? "ALL")}
+            options={
+              dimension === "special"
+                ? [
+                    // In a Special Load view a single operation is required.
+                    ...(specialLoad ? [] : [{ value: "ALL", label: "All" }]),
+                    { value: "BENDING", label: "Bending" },
+                    { value: "WELDING", label: "Welding" },
+                  ]
+                : [
+                    { value: "ALL", label: "All" },
+                    { value: "PUNCHING", label: "Punching" },
+                    { value: "DRILLING", label: "Drilling" },
+                    { value: "NOT_SET", label: "Not set" },
+                  ]
+            }
+          />
         </div>
-      )}
+        <Button variant="outline" size="sm" className="gap-2" onClick={handleExport} disabled={projects.length === 0}>
+          <FileSpreadsheet className="h-4 w-4" />
+          Export Excel
+        </Button>
+      </div>
 
       <div className={`grid grid-cols-2 gap-3 ${dimension === "special" ? "md:grid-cols-3" : "md:grid-cols-4"}`}>
         {specialLoad && specialLoadCounts ? (
@@ -442,37 +502,6 @@ function FabricationTab({ records }: { records: any[] }) {
           ))}
         </div>
       )}
-
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-muted-foreground uppercase">
-            {dimension === "special" ? "Operation" : "Hole Operation"}
-          </span>
-          <Segmented
-            value={opFilter}
-            onChange={(v) => setOpFilter(v ?? "ALL")}
-            options={
-              dimension === "special"
-                ? [
-                    // In a Special Load view a single operation is required.
-                    ...(specialLoad ? [] : [{ value: "ALL", label: "All" }]),
-                    { value: "BENDING", label: "Bending" },
-                    { value: "WELDING", label: "Welding" },
-                  ]
-                : [
-                    { value: "ALL", label: "All" },
-                    { value: "PUNCHING", label: "Punching" },
-                    { value: "DRILLING", label: "Drilling" },
-                    { value: "NOT_SET", label: "Not set" },
-                  ]
-            }
-          />
-        </div>
-        <Button variant="outline" size="sm" className="gap-2" onClick={handleExport} disabled={projects.length === 0}>
-          <FileSpreadsheet className="h-4 w-4" />
-          Export Excel
-        </Button>
-      </div>
 
       {projects.map((p) => (
         <ProjectGroup key={p.project} project={p} mode="fab" dimension={dimension} load={load} loadLabel={loadLabel} />

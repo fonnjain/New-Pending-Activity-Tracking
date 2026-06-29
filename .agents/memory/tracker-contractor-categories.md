@@ -3,7 +3,9 @@ name: Contractor sub-categories overlay
 description: Non-obvious decisions for the additive contractor classification layer
 ---
 
-# Contractor sub-categories (In-house / Sub-contractor / Out-vendor + FAB/GALVA)
+# Contractor sub-categories (CNC / Sub-contractor / Out-vendor + FAB/GALVA)
+
+> Category label "In-house" (enum `IN_HOUSE`) was renamed to "CNC" (enum `CNC`) across domain/openapi/db/UI. Treat any lingering "In-house"/`IN_HOUSE` reference as stale.
 
 A descriptive overlay that classifies each contractor; joined to records at READ time only.
 
