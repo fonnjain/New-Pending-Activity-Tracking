@@ -38,7 +38,7 @@ export function decodeContractorCategory(
   return null;
 }
 
-// Classification shortcuts shown BELOW the individual contractor names, in the
+// Classification shortcuts shown ABOVE the individual contractor names, in the
 // required order: In-House (combined + members) -> Out Vendors -> Everything else.
 const IN_HOUSE_OPTIONS = [
   { value: encodeContractorCategory(IN_HOUSE_GROUP), label: "In-House (CNC + Sub-contractor)" },
@@ -52,14 +52,14 @@ const EVERYTHING_ELSE_OPTIONS = [
   { value: encodeContractorCategory("UNCLASSIFIED"), label: "Everything else (Unclassified)" },
 ];
 
-// Build the grouped SearchableSelect options: individual contractors first, then
-// the classification shortcuts in canonical order.
+// Build the grouped SearchableSelect options: the classification shortcuts in
+// canonical order first, then the individual contractor names.
 export function buildContractorGroups(contractors: string[]): SelectGroup[] {
   return [
-    { heading: "Contractors", options: contractors.map((c) => ({ value: c, label: c })) },
     { heading: "In-House", options: IN_HOUSE_OPTIONS },
     { heading: "Out Vendors", options: OUT_VENDOR_OPTIONS },
     { heading: "Everything else", options: EVERYTHING_ELSE_OPTIONS },
+    { heading: "Contractors", options: contractors.map((c) => ({ value: c, label: c })) },
   ];
 }
 
