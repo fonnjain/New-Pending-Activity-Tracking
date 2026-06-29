@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { formatWeight } from "@/lib/utils";
 import { exportToXlsx, type XlsxColumn } from "@/lib/export";
 import { ChevronDown, FileSpreadsheet } from "lucide-react";
-import { bundleActivitySet, compareActivity, sortActivities, getActivityBundle, TLT_OPERATION_BUNDLE_IDS } from "@workspace/domain";
+import { bundleActivitySet, compareActivity, sortActivities, getActivityBundle, TLT_OPERATION_BUNDLE_IDS, activityRank } from "@workspace/domain";
 
 // Activity scopes for each plant operation, sliced from the canonical bundles in
 // @workspace/domain (single source of truth). Display/aggregation only — this is
@@ -60,6 +60,33 @@ function opOf(r: any, dimension: FabDimension): string {
 
 function opLabel(key: string, dimension: FabDimension): string {
   return dimension === "special" ? SPECIAL_OP_LABELS[key] : HOLE_OP_LABELS[key];
+}
+
+// Load bifurcation (Fabrication Load report rules, display-only). Each operation
+// is split into work AT it now (Operational) and still upstream (In Hand):
+//   - Standard / hole operations (Punching, Drilling): SPECIFIC-ACTIVITY rule —
+//     Operational = at RFI, In Hand = at C (regardless of punch/drill or section).
+//   - Special operations (Bending = B, Welding = W): POSITIONAL rule — Operational
+//     = at the activity, In Hand = anywhere earlier in the TLT sequence. In Hand
+//     therefore pulls marks from OUTSIDE the special bundle (C/RFI/NH ... HG).
+// None of this changes parsing, ageing, dedup, classification, qty, or activity
+// values — it only re-buckets existing records for display.
+type LoadState = "ALL" | "OPERATIONAL" | "INHAND";
+type SectionFilter = "ALL" | "ANGLE" | "PLATE";
+
+const W_RANK = activityRank("W");
+const B_RANK = activityRank("B");
+
+function passesSpecialLoad(
+  r: any,
+  target: "BENDING" | "WELDING",
+  load: "OPERATIONAL" | "INHAND",
+): boolean {
+  const act = (r.activity ?? "").toUpperCase();
+  if (load === "OPERATIONAL") return target === "WELDING" ? act === "W" : act === "B";
+  // In Hand: strictly before the target activity. Unknown activities rank past the
+  // sequence end, so they are naturally excluded (matches the report's behaviour).
+  return activityRank(r.activity) < (target === "WELDING" ? W_RANK : B_RANK);
 }
 
 interface Rollup {
@@ -182,16 +209,56 @@ const OP_GROUP_OPTIONS: { value: string; label: string }[] = [
 function FabricationTab({ records }: { records: any[] }) {
   const [opFilter, setOpFilter] = useState<string>("ALL");
   const [group, setGroup] = useState<string>("ALL");
+  const [load, setLoad] = useState<LoadState>("ALL");
+  const [section, setSection] = useState<SectionFilter>("ALL");
+
   const groupSet = group === "ALL" ? null : bundleActivitySet(group);
   const dimension: FabDimension =
     group === "TLT_SPECIAL_OPERATIONS" ? "special" : "hole";
+  const isStandard = group === "TLT_STANDARD_OPERATIONS";
+  const isSpecial = group === "TLT_SPECIAL_OPERATIONS";
+  // The Load and Section bifurcations only apply to the two operation sub-bundles
+  // that the Fabrication Load rules cover; All / Quality keep the plain view.
+  const showLoad = isStandard || isSpecial;
+  const showSection = isStandard;
+  // Special-operations load is positional and operation-specific, so it needs a
+  // single target operation; default to Bending when "All" was selected.
+  const specialLoad = isSpecial && load !== "ALL";
+  const opTarget: "BENDING" | "WELDING" = opFilter === "WELDING" ? "WELDING" : "BENDING";
+
+  const fabBase = useMemo(
+    () => records.filter((r) => FAB_SET.has((r.activity ?? "").toUpperCase())),
+    [records],
+  );
 
   const scope = useMemo(() => {
-    const base = records.filter((r) => FAB_SET.has((r.activity ?? "").toUpperCase()));
-    return groupSet
-      ? base.filter((r) => groupSet.has((r.activity ?? "").toUpperCase()))
-      : base;
-  }, [records, groupSet]);
+    // Special In-Hand reaches upstream of the special bundle, so it is computed
+    // over the full fabrication scope rather than the (B/HAB/W) sub-bundle.
+    if (specialLoad) {
+      return fabBase.filter((r) => passesSpecialLoad(r, opTarget, load as "OPERATIONAL" | "INHAND"));
+    }
+    let s = groupSet
+      ? fabBase.filter((r) => groupSet.has((r.activity ?? "").toUpperCase()))
+      : fabBase;
+    if (dimension === "hole") {
+      if (section !== "ALL") s = s.filter((r) => r.sectionType === section);
+      if (load !== "ALL") {
+        const want = load === "OPERATIONAL" ? "RFI" : "C";
+        s = s.filter((r) => (r.activity ?? "").toUpperCase() === want);
+      }
+    }
+    return s;
+  }, [fabBase, groupSet, dimension, section, load, specialLoad, opTarget]);
+
+  // For the Special Load view, the full Operational vs In-Hand pipeline for the
+  // selected operation (shown as tiles regardless of which Load tab is active).
+  const specialLoadCounts = useMemo(() => {
+    if (!specialLoad) return null;
+    return {
+      op: rollup(fabBase.filter((r) => passesSpecialLoad(r, opTarget, "OPERATIONAL"))),
+      inh: rollup(fabBase.filter((r) => passesSpecialLoad(r, opTarget, "INHAND"))),
+    };
+  }, [specialLoad, fabBase, opTarget]);
 
   // Operation split over the full scope (always the complete split, independent of
   // the local op filter). Standard/All split by hole operation (Punching/Drilling/
@@ -217,13 +284,16 @@ function FabricationTab({ records }: { records: any[] }) {
     return sortActivities(Array.from(m.keys())).map((a) => ({ a, n: m.get(a)! }));
   }, [scope]);
 
-  const displayed = useMemo(
-    () => (opFilter === "ALL" ? scope : scope.filter((r) => opOf(r, dimension) === opFilter)),
-    [scope, opFilter, dimension],
-  );
+  const displayed = useMemo(() => {
+    // Special Load scope is already a single operation + load state.
+    if (specialLoad) return scope;
+    return opFilter === "ALL" ? scope : scope.filter((r) => opOf(r, dimension) === opFilter);
+  }, [scope, opFilter, dimension, specialLoad]);
 
   const projects = useMemo(() => groupProjectContractor(displayed), [displayed]);
   const total = useMemo(() => rollup(displayed), [displayed]);
+
+  const loadLabel = load === "OPERATIONAL" ? "Operational" : "In Hand";
 
   const handleExport = () => {
     const rows = projects.flatMap((p) =>
@@ -236,6 +306,9 @@ function FabricationTab({ records }: { records: any[] }) {
           weight: c.stats.weight,
           avgAge: c.stats.avgAge,
         };
+        // Special Load rows are a single operation + load state, so the
+        // Bending/Welding split would be meaningless — base columns only.
+        if (specialLoad) return base;
         if (dimension === "special") {
           const s = { BENDING: 0, WELDING: 0 };
           for (const r of c.records) {
@@ -249,14 +322,9 @@ function FabricationTab({ records }: { records: any[] }) {
         return { ...base, punching: s.PUNCHING, drilling: s.DRILLING, notSet: s.NOT_SET };
       }),
     );
-    const columns: XlsxColumn[] = [
-      { label: "Project", field: "project" },
-      { label: "Contractor", field: "contractor" },
-      { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
-      { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
-      { label: "Balance Wt (kg)", field: "weight", numeric: true, decimals: 2, total: true },
-      { label: "Avg Ageing (days)", field: "avgAge", numeric: true, decimals: 0 },
-      ...(dimension === "special"
+    const splitColumns: XlsxColumn[] = specialLoad
+      ? []
+      : dimension === "special"
         ? [
             { label: "Bending", field: "bending", numeric: true, decimals: 0, total: true },
             { label: "Welding", field: "welding", numeric: true, decimals: 0, total: true },
@@ -265,7 +333,15 @@ function FabricationTab({ records }: { records: any[] }) {
             { label: "Punching", field: "punching", numeric: true, decimals: 0, total: true },
             { label: "Drilling", field: "drilling", numeric: true, decimals: 0, total: true },
             { label: "Not Set", field: "notSet", numeric: true, decimals: 0, total: true },
-          ]),
+          ];
+    const columns: XlsxColumn[] = [
+      { label: "Project", field: "project" },
+      { label: "Contractor", field: "contractor" },
+      { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
+      { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
+      { label: "Balance Wt (kg)", field: "weight", numeric: true, decimals: 2, total: true },
+      { label: "Avg Ageing (days)", field: "avgAge", numeric: true, decimals: 0 },
+      ...splitColumns,
     ];
     exportToXlsx("plant-operation-fabrication.xlsx", columns, rows, { sheetName: "Fabrication" });
   };
@@ -277,26 +353,78 @@ function FabricationTab({ records }: { records: any[] }) {
         onChange={(v) => {
           setGroup(v ?? "ALL");
           setOpFilter("ALL");
+          setLoad("ALL");
+          setSection("ALL");
         }}
         options={OP_GROUP_OPTIONS}
       />
 
+      {showLoad && (
+        <div className="flex items-center gap-x-6 gap-y-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-muted-foreground uppercase">Load</span>
+            <Segmented
+              value={load}
+              onChange={(v) => {
+                const nv = (v ?? "ALL") as LoadState;
+                setLoad(nv);
+                // Special load is operation-specific; lock to a single op.
+                if (isSpecial && nv !== "ALL" && opFilter === "ALL") setOpFilter("BENDING");
+              }}
+              options={[
+                { value: "ALL", label: "All" },
+                { value: "OPERATIONAL", label: "Operational" },
+                { value: "INHAND", label: "In Hand" },
+              ]}
+            />
+          </div>
+          {showSection && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-muted-foreground uppercase">Section</span>
+              <Segmented
+                value={section}
+                onChange={(v) => setSection((v ?? "ALL") as SectionFilter)}
+                options={[
+                  { value: "ALL", label: "All" },
+                  { value: "ANGLE", label: "Angle" },
+                  { value: "PLATE", label: "Plate" },
+                ]}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       <div className={`grid grid-cols-2 gap-3 ${dimension === "special" ? "md:grid-cols-3" : "md:grid-cols-4"}`}>
-        <SummaryTile
-          title={dimension === "special" ? "Special Op. Marks" : "Fabrication Marks"}
-          value={total.marks.toLocaleString()}
-          sub={formatWeight(total.weight)}
-        />
-        {dimension === "special" ? (
+        {specialLoad && specialLoadCounts ? (
           <>
-            <SummaryTile title="Bending" value={(split.BENDING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.BENDING?.weight ?? 0)} />
-            <SummaryTile title="Welding" value={(split.WELDING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.WELDING?.weight ?? 0)} />
+            <SummaryTile
+              title={`${opLabel(opTarget, "special")} Pipeline`}
+              value={(specialLoadCounts.op.marks + specialLoadCounts.inh.marks).toLocaleString()}
+              sub={formatWeight(specialLoadCounts.op.weight + specialLoadCounts.inh.weight)}
+            />
+            <SummaryTile title="Operational Load" value={specialLoadCounts.op.marks.toLocaleString()} sub={formatWeight(specialLoadCounts.op.weight)} />
+            <SummaryTile title="In Hand" value={specialLoadCounts.inh.marks.toLocaleString()} sub={formatWeight(specialLoadCounts.inh.weight)} />
           </>
         ) : (
           <>
-            <SummaryTile title="Punching" value={(split.PUNCHING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.PUNCHING?.weight ?? 0)} />
-            <SummaryTile title="Drilling" value={(split.DRILLING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.DRILLING?.weight ?? 0)} />
-            <SummaryTile title="Not Set" value={(split.NOT_SET?.marks ?? 0).toLocaleString()} sub={formatWeight(split.NOT_SET?.weight ?? 0)} />
+            <SummaryTile
+              title={dimension === "special" ? "Special Op. Marks" : "Fabrication Marks"}
+              value={total.marks.toLocaleString()}
+              sub={formatWeight(total.weight)}
+            />
+            {dimension === "special" ? (
+              <>
+                <SummaryTile title="Bending" value={(split.BENDING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.BENDING?.weight ?? 0)} />
+                <SummaryTile title="Welding" value={(split.WELDING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.WELDING?.weight ?? 0)} />
+              </>
+            ) : (
+              <>
+                <SummaryTile title="Punching" value={(split.PUNCHING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.PUNCHING?.weight ?? 0)} />
+                <SummaryTile title="Drilling" value={(split.DRILLING?.marks ?? 0).toLocaleString()} sub={formatWeight(split.DRILLING?.weight ?? 0)} />
+                <SummaryTile title="Not Set" value={(split.NOT_SET?.marks ?? 0).toLocaleString()} sub={formatWeight(split.NOT_SET?.weight ?? 0)} />
+              </>
+            )}
           </>
         )}
       </div>
@@ -323,7 +451,8 @@ function FabricationTab({ records }: { records: any[] }) {
             options={
               dimension === "special"
                 ? [
-                    { value: "ALL", label: "All" },
+                    // In a Special Load view a single operation is required.
+                    ...(specialLoad ? [] : [{ value: "ALL", label: "All" }]),
                     { value: "BENDING", label: "Bending" },
                     { value: "WELDING", label: "Welding" },
                   ]
@@ -343,7 +472,7 @@ function FabricationTab({ records }: { records: any[] }) {
       </div>
 
       {projects.map((p) => (
-        <ProjectGroup key={p.project} project={p} mode="fab" dimension={dimension} />
+        <ProjectGroup key={p.project} project={p} mode="fab" dimension={dimension} load={load} loadLabel={loadLabel} />
       ))}
       {projects.length === 0 && (
         <div className="text-center p-8 text-muted-foreground">No fabrication marks match the current filters.</div>
@@ -456,7 +585,19 @@ interface ProjectNode {
   contractors: { name: string; records: any[]; stats: Rollup }[];
 }
 
-function ProjectGroup({ project, mode, dimension = "hole" }: { project: ProjectNode; mode: GroupMode; dimension?: FabDimension }) {
+function ProjectGroup({
+  project,
+  mode,
+  dimension = "hole",
+  load = "ALL",
+  loadLabel = "In Hand",
+}: {
+  project: ProjectNode;
+  mode: GroupMode;
+  dimension?: FabDimension;
+  load?: LoadState;
+  loadLabel?: string;
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -489,7 +630,7 @@ function ProjectGroup({ project, mode, dimension = "hole" }: { project: ProjectN
         <CollapsibleContent>
           <div className="border-t bg-card divide-y">
             {project.contractors.map((c) => (
-              <ContractorGroup key={c.name} project={project.project} name={c.name} records={c.records} stats={c.stats} mode={mode} dimension={dimension} />
+              <ContractorGroup key={c.name} project={project.project} name={c.name} records={c.records} stats={c.stats} mode={mode} dimension={dimension} load={load} loadLabel={loadLabel} />
             ))}
           </div>
         </CollapsibleContent>
@@ -504,6 +645,8 @@ function ContractorGroup({
   stats,
   mode,
   dimension = "hole",
+  load = "ALL",
+  loadLabel = "In Hand",
 }: {
   project: string;
   name: string;
@@ -511,12 +654,19 @@ function ContractorGroup({
   stats: Rollup;
   mode: GroupMode;
   dimension?: FabDimension;
+  load?: LoadState;
+  loadLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
   const extra = useMemo(() => {
     if (mode === "fab") {
+      // Special Load rows are a single operation + load state, so the Bending /
+      // Welding tally is meaningless — surface the load state instead.
+      if (dimension === "special" && load !== "ALL") {
+        return `${loadLabel} load`;
+      }
       if (dimension === "special") {
         const s = { BENDING: 0, WELDING: 0 };
         for (const r of records) {
@@ -532,7 +682,7 @@ function ContractorGroup({
     let notSet = 0;
     for (const r of records) if (r.thicknessMm == null) notSet += 1;
     return `Thickness not set: ${notSet}`;
-  }, [records, mode, dimension]);
+  }, [records, mode, dimension, load, loadLabel]);
 
   const sortedRows = useMemo(() => {
     return [...records].sort((a, b) => {
