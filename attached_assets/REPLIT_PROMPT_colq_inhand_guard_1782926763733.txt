@@ -1,0 +1,54 @@
+REPLIT AGENT PROMPT — GATE "IN HAND" LOAD ON COL Q ROUTE (mark must actually do the operation)
+==============================================================================================
+Fix over-counting in the "In Hand" (upcoming) load: a mark should count toward an operation's
+upcoming load ONLY IF that operation is actually in the mark's route (Col Q = "Operation").
+Some marks are positionally before Welding but never weld (W not in their Col Q) — they must
+be excluded from Welding In Hand. Narrow, deterministic fix. Do NOT change punching/drilling
+logic, Operational Load, sequences, ageing, dedup, or anything else.
+
+BACKGROUND
+  - Col Q "Operation" lists the FULL set of standard operations a mark's job requires (its
+    route), e.g. "C,P,S,RFI,Q,G,GB" or "C,P,S,RFI,B,HAB,TS,Q,G,GB,Y".
+  - Col P "Activity" is the mark's CURRENT activity.
+  - Problem: "In Hand" (upcoming) load counted every mark positionally BEFORE an operation in
+    the sequence — including marks that will never perform that operation because it isn't in
+    their route. Example: a mark at RFI with route "C,P,S,RFI,Q,G,GB" has NO W, yet was being
+    counted as Welding In Hand. Wrong — it never welds.
+
+THE FIX — only ONE thing
+  Parse Col Q into a set of route operations per mark (route_ops). When computing IN-HAND /
+  UPCOMING load for a standard operation OP (e.g. W, B):
+        include the mark ONLY IF (mark is positionally before OP in its sequence, per the
+        existing rule) AND (OP is in route_ops).
+  If OP is NOT in the mark's route_ops -> exclude it from that operation's In-Hand load (it
+  will never do OP).
+
+SCOPE — strictly bounded (do NOT over-reach)
+  - Applies to the IN-HAND / UPCOMING load calculations only (e.g. Fabrication Load report/
+    dashboard: Welded In Hand, Bending In Hand; and any other "before X / upcoming" load that
+    assumes the mark will reach X).
+  - OPERATIONAL LOAD is UNCHANGED and UNGUARDED: a mark currently AT W is genuinely welding;
+    do not add a Col Q check there. (Its current activity is by definition in its route.)
+  - PUNCHING / DRILLING logic is UNCHANGED (section + thickness as built). Do NOT re-derive it
+    from Col Q. Do NOT add columns or features for it.
+  - Only check membership of the STANDARD sequence activities (C, RFI, NH, B, HAB, HG, W, Q,
+    TS, G, GB, Y and the NTLT equivalents). IGNORE any extra/non-standard codes in Col Q
+    (P, S, D, N, BL, etc.) — do NOT track, display, or treat them as activities. Col Q is used
+    ONLY as a membership lookup for the standard operations.
+  - No new page, tag, or feature. This is a filter guard on existing In-Hand math.
+
+PARSING Col Q
+  - route_ops(mark) = the set of comma-separated tokens in Col Q, trimmed/uppercased,
+    INTERSECTED with the standard activity set (drop P,S,D,N,BL and any non-standard token).
+  - Store/compute route_ops per mark (derived; keep out of the dedup hash).
+  - If Col Q is blank for a mark, fall back to the previous behaviour for that mark (do not
+    exclude it) and flag it, so a missing route doesn't silently zero out its load.
+
+ACCEPTANCE CHECK
+  - A mark at RFI whose Col Q has no W is NOT counted in Welding In Hand; a mark at RFI whose
+    Col Q includes W IS counted (assuming it's positionally before W).
+  - Bending In Hand similarly requires B in the route.
+  - Operational Load (at W, at B, hole columns at RFI/C) unchanged — no Col Q guard added.
+  - Punching/drilling logic unchanged; no non-standard Col Q codes are tracked or shown.
+  - Blank Col Q -> mark keeps prior behaviour and is flagged, not silently dropped.
+  - No change to sequences, ageing, dedup, or any other calculation.

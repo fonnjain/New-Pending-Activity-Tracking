@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { formatWeight } from "@/lib/utils";
 import { exportToXlsx, type XlsxColumn } from "@/lib/export";
 import { ChevronDown, FileSpreadsheet } from "lucide-react";
-import { bundleActivitySet, compareActivity, getActivityBundle, TLT_OPERATION_BUNDLE_IDS, activityRank } from "@workspace/domain";
+import { bundleActivitySet, compareActivity, getActivityBundle, TLT_OPERATION_BUNDLE_IDS, activityRank, routeIncludesOp } from "@workspace/domain";
 
 // Activity scopes for each plant operation, sliced from the canonical bundles in
 // @workspace/domain (single source of truth). Display/aggregation only — this is
@@ -87,7 +87,13 @@ function passesSpecialLoad(
   if (load === "OPERATIONAL") return target === "WELDING" ? act === "W" : act === "B";
   // In Hand: strictly before the target activity. Unknown activities rank past the
   // sequence end, so they are naturally excluded (matches the report's behaviour).
-  return activityRank(r.activity) < (target === "WELDING" ? W_RANK : B_RANK);
+  const before = activityRank(r.activity) < (target === "WELDING" ? W_RANK : B_RANK);
+  if (!before) return false;
+  // ...AND the operation must actually be in the mark's Col Q route: a mark
+  // positioned before W/B that never welds/bends (op absent from its route) must
+  // NOT count toward that operation's upcoming load. Blank/unknown route keeps
+  // prior behaviour (routeIncludesOp returns true).
+  return routeIncludesOp(r.operation, target === "WELDING" ? "W" : "B");
 }
 
 // Hole-dimension load split for the top-level Load tab row. Operational = work AT

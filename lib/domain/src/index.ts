@@ -489,6 +489,46 @@ export function isKnownIn(
   return sequence.indexOf(normalizeActivity(code)) !== -1;
 }
 
+// Union of every standard activity code across all known sequences (TLT + NTLT).
+// Used ONLY as a membership set when parsing a mark's Col Q "Operation" route.
+const STANDARD_ACTIVITY_CODES = new Set<string>(
+  Object.values(SEQUENCES).flat().map((c) => normalizeActivity(c)),
+);
+
+// Parse a mark's Col Q "Operation" string (its FULL route, e.g.
+// "C,P,S,RFI,Q,G,GB") into the SET of STANDARD activity codes it contains.
+// Comma-separated tokens are trimmed/uppercased and INTERSECTED with the standard
+// activity set, so non-standard route codes (P, S, D, N, BL, ...) are dropped —
+// Col Q is used only as a membership lookup for the standard operations.
+// Derived/display-only: never hashed, never affects parsing/ageing/dedup/qty/
+// activity. Blank/absent Col Q (or a route with no standard codes) yields an
+// empty set, which callers treat as "route unknown" and fall back rather than
+// excluding the mark.
+export function routeOps(operation: string | null | undefined): Set<string> {
+  const out = new Set<string>();
+  if (operation == null) return out;
+  for (const raw of operation.split(",")) {
+    const code = normalizeActivity(raw);
+    if (code && STANDARD_ACTIVITY_CODES.has(code)) out.add(code);
+  }
+  return out;
+}
+
+// Whether a mark's Col Q route includes a given standard operation. Only a
+// genuinely BLANK Col Q (null / empty / whitespace) falls back to `true` so the
+// caller keeps its prior positional behaviour rather than silently zeroing the
+// mark's upcoming ("In Hand") load. A NON-blank route that simply does not list
+// the op (even if it contains only non-standard tokens) returns false — that
+// mark legitimately never performs the op. `op` is a standard activity code
+// (e.g. "W", "B").
+export function routeIncludesOp(
+  operation: string | null | undefined,
+  op: string,
+): boolean {
+  if (operation == null || operation.trim() === "") return true; // blank -> don't exclude
+  return routeOps(operation).has(normalizeActivity(op));
+}
+
 // Map a category (+ NTLT subtype) to its SequenceKey. Anything that is not
 // explicitly NTLT is treated as TLT (the safe default that preserves existing
 // behaviour). NTLT with an unrecognised/blank subtype falls back to the General

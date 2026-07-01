@@ -8,6 +8,7 @@ import {
   lifecycleStatus,
   migrateTurnaroundSettings,
   normalizeActivity,
+  routeIncludesOp,
   scopeFor,
   sequenceFor,
   type FabLoadColumn,
@@ -659,9 +660,13 @@ function fabLoadMatch(
   }
   switch (column) {
     case "welded":
-      return rank < W_RANK; // before W (C,RFI,NH,B,HAB,HG); unknown ranks excluded
+      // before W (C,RFI,NH,B,HAB,HG); unknown ranks excluded. AND the mark must
+      // actually weld: W must be in its Col Q route, else it is upcoming-load for
+      // an operation it never performs. Blank route keeps prior behaviour.
+      return rank < W_RANK && routeIncludesOp(r.operation, "W");
     case "bending":
-      return rank < B_RANK; // before B (C,RFI,NH)
+      // before B (C,RFI,NH) AND B must be in the mark's Col Q route.
+      return rank < B_RANK && routeIncludesOp(r.operation, "B");
     case "drilling":
       return sec === "ANGLE" && act === "C" && op === "DRILLING";
     case "platePunch":
