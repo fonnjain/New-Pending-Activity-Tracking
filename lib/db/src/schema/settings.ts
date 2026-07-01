@@ -77,7 +77,7 @@ export const settingsTable = pgTable("settings", {
   // imports are ignored as if never uploaded. NULL = no cutoff = byte-identical
   // to prior behaviour. Advisory/scoping only: never touches parsing, activity,
   // qty, dedup/hash identity, or ageing math.
-  validFromDate: date("valid_from_date"),
+  validFromDate: date("valid_from_date", { mode: "string" }),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
