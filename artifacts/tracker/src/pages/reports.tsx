@@ -949,7 +949,11 @@ function FabricationLoadReport() {
                                       <SelectTrigger className="h-7 text-xs">
                                         <SelectValue />
                                       </SelectTrigger>
-                                      <SelectContent>
+                                      <SelectContent
+                                        position="popper"
+                                        side="bottom"
+                                        avoidCollisions={false}
+                                      >
                                         <SelectItem value={NONE_PRIORITY}>
                                           —
                                         </SelectItem>
