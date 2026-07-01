@@ -56,6 +56,7 @@ import {
   ingestOrderReview,
   computeWipCoverage,
 } from "../lib/dispatch";
+import { cutoffSql, loadValidFrom, importDayKey } from "../lib/cutoff";
 import {
   detectFileType,
   parseOrderReview,
@@ -349,10 +350,15 @@ async function mergeImport(
     // and pool insertions are computed against a stable, committed state.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(728041)`);
 
-    // Previous import = the most recent existing import (append-only ledger).
+    // Previous import = the most recent existing import (append-only ledger),
+    // bounded to the global WIP cutoff so the change log a new upload produces
+    // compares against the previous IN-WINDOW import (pre-cutoff imports are
+    // ignored as if never uploaded). cutoffSql(null) is a no-op.
+    const cutoff = await loadValidFrom();
     const [prevImport] = await tx
       .select()
       .from(importsTable)
+      .where(cutoffSql(cutoff))
       .orderBy(desc(importsTable.id))
       .limit(1);
 
@@ -481,10 +487,17 @@ async function mergeImport(
   });
 }
 
-router.get("/imports", async (_req, res): Promise<void> => {
+router.get("/imports", async (req, res): Promise<void> => {
+  // The app-wide list is scoped to the global WIP cutoff so every consumer
+  // (header selector, changes panel, store selection) agrees on the active
+  // window. `?all=true` bypasses the cutoff for the admin cutoff picker, which
+  // must offer every upload date. cutoffSql(null) is a no-op (byte-identical).
+  const all = req.query.all === "true" || req.query.all === "1";
+  const cutoff = all ? null : await loadValidFrom();
   const rows = await db
     .select()
     .from(importsTable)
+    .where(cutoffSql(cutoff))
     .orderBy(desc(importsTable.createdAt));
   res.json(rows);
 });
@@ -1231,6 +1244,22 @@ router.get("/imports/compare", async (req, res): Promise<void> => {
     return;
   }
 
+  // Enforce the global WIP cutoff server-side: a pre-cutoff import is treated as
+  // if it were never uploaded, so it cannot be one side of a comparison. The
+  // client selector already only offers in-window ids, so this never rejects a
+  // legitimate request; it just makes the server authoritative. cutoff === null
+  // (the default) skips the check entirely, so behaviour is byte-identical.
+  const compareCutoff = await loadValidFrom();
+  if (compareCutoff !== null) {
+    const outOfWindow =
+      importDayKey(toImport.reportDate, toImport.createdAt) < compareCutoff ||
+      importDayKey(fromImport.reportDate, fromImport.createdAt) < compareCutoff;
+    if (outOfWindow) {
+      res.status(404).json({ error: "Import is outside the active window" });
+      return;
+    }
+  }
+
   const changeSet = buildChangeSet(
     toMembershipRows(await loadMembership(db, fromImport.id)),
     toMembershipRows(await loadMembership(db, toImport.id)),
@@ -1474,10 +1503,13 @@ router.get("/imports/:id/changes", async (req, res): Promise<void> => {
     return;
   }
 
+  // Bound the previous-import lookup to the global WIP cutoff so the change log
+  // compares against the previous IN-WINDOW import. cutoffSql(null) is a no-op.
+  const changesCutoff = await loadValidFrom();
   const [prevImport] = await db
     .select()
     .from(importsTable)
-    .where(lt(importsTable.id, toImport.id))
+    .where(and(lt(importsTable.id, toImport.id), cutoffSql(changesCutoff)))
     .orderBy(desc(importsTable.id))
     .limit(1);
 
@@ -1514,10 +1546,13 @@ router.get("/imports/:id/movement", async (req, res): Promise<void> => {
 
   const current = await loadIdentityStates(target.id);
 
+  // Bound the history walk to the global WIP cutoff so movement ignores
+  // pre-cutoff imports as if never uploaded. cutoffSql(null) is a no-op.
+  const movementCutoff = await loadValidFrom();
   const priorImports = await db
     .select({ id: importsTable.id, createdAt: importsTable.createdAt })
     .from(importsTable)
-    .where(lt(importsTable.id, target.id))
+    .where(and(lt(importsTable.id, target.id), cutoffSql(movementCutoff)))
     .orderBy(desc(importsTable.id));
 
   const days = new Map<string, number | null>();
@@ -1662,6 +1697,9 @@ async function computeVelocityItems(
   const current = await loadVelocityStates(target.id);
   const currentMs = importDateMs(target.reportDate, target.createdAt);
 
+  // Bound the history walk to the global WIP cutoff so velocity ignores
+  // pre-cutoff imports as if never uploaded. cutoffSql(null) is a no-op.
+  const velocityCutoff = await loadValidFrom();
   const priorImports = await db
     .select({
       id: importsTable.id,
@@ -1669,7 +1707,7 @@ async function computeVelocityItems(
       reportDate: importsTable.reportDate,
     })
     .from(importsTable)
-    .where(lt(importsTable.id, target.id))
+    .where(and(lt(importsTable.id, target.id), cutoffSql(velocityCutoff)))
     .orderBy(desc(importsTable.id));
 
   // Build per-identity snapshot series: seed with the current import, then layer

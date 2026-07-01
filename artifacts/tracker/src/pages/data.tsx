@@ -1,5 +1,6 @@
 import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, type CommitResult, type DispatchReconciliationRow } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor } from "@/lib/store";
+import { useSettings } from "@/lib/settings";
 import { contractorCategoryLabel } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -218,6 +219,8 @@ function DataViewContent() {
         </p>
       </div>
 
+      <CutoffCard />
+
       <div className="grid gap-6 lg:grid-cols-2">
         <StagedUploadPanel expectedType="wip" onCommitted={handleCommitted} />
         <StagedUploadPanel
@@ -397,6 +400,81 @@ function DataViewContent() {
         </div>
       </div>
     </div>
+  );
+}
+
+// The canonical "day" of an import, mirroring the server's importDayKey:
+// report date when a valid YYYY-MM-DD, else the UTC calendar day of createdAt.
+function importDayKey(i: { reportDate: string | null; createdAt: string }): string {
+  if (i.reportDate && /^\d{4}-\d{2}-\d{2}$/.test(i.reportDate)) return i.reportDate;
+  return new Date(i.createdAt).toISOString().slice(0, 10);
+}
+
+// Global "valid data starts here" WIP cutoff. Persisted in the singleton
+// settings row; when set, the whole app (client selection + every server-side
+// history replay) ignores WIP imports dated before it. Listing uses all=true so
+// the picker can offer every date, including ones currently hidden by the cutoff.
+function CutoffCard() {
+  const { settings, updateSettings, saving } = useSettings();
+  const { data: allImports = [] } = useListImports(
+    { all: true },
+    { query: { queryKey: getListImportsQueryKey({ all: true }) } },
+  );
+  const cutoff = settings.validFromDate ?? "";
+  const dayKeys = Array.from(new Set(allImports.map(importDayKey))).sort().reverse();
+
+  return (
+    <Card className="border-border">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+          Valid Data Cutoff
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Pick the earliest WIP report date that should count. Every view, report,
+          and history calculation ignores imports dated before it. Leave as
+          "No cutoff" to include all uploaded data.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            className="bg-background border border-border rounded-md px-3 py-2 text-sm min-w-[14rem]"
+            value={cutoff}
+            disabled={saving}
+            onChange={(e) =>
+              updateSettings({ validFromDate: e.target.value || null })
+            }
+          >
+            <option value="">No cutoff (include all data)</option>
+            {dayKeys.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+            {cutoff && !dayKeys.includes(cutoff) && (
+              <option value={cutoff}>{cutoff}</option>
+            )}
+          </select>
+          {cutoff && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9"
+              disabled={saving}
+              onClick={() => updateSettings({ validFromDate: null })}
+            >
+              Clear cutoff
+            </Button>
+          )}
+          {saving && <span className="text-xs text-muted-foreground">Saving...</span>}
+        </div>
+        {cutoff && (
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            Active: imports dated before {cutoff} are hidden everywhere.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

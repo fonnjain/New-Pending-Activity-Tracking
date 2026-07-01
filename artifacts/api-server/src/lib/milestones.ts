@@ -8,6 +8,7 @@ import {
   settingsTable,
   SETTINGS_SINGLETON_ID,
 } from "@workspace/db";
+import { cutoffSql } from "./cutoff";
 import {
   isKnownIn,
   rankIn,
@@ -113,7 +114,9 @@ function newState(): WalkState {
 // qualifying import, so the result is idempotent and a later (possibly partial)
 // file can never move a captured date. Purely additive — reads only; never
 // touches parsing / activity / dedup / ageing / warning / velocity.
-export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
+export async function recomputeMilestones(
+  cutoffArg?: string | null,
+): Promise<ProjectMilestone[]> {
   const [settingsRow] = await db
     .select()
     .from(settingsTable)
@@ -125,11 +128,24 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
           activities: settingsRow.activities,
           perProject: settingsRow.perProject,
           stalledDays: settingsRow.stalledDays,
+          validFromDate: settingsRow.validFromDate,
         }
       : {},
   );
 
+  // Global WIP cutoff. When set, the replay observes only in-window imports and
+  // the merge with stored (capture-once) milestones honours ONLY anchors that
+  // fall inside the window, so the whole Completed view reflects the active
+  // window. When null (default), every gate below is a no-op and the result is
+  // byte-identical to the un-cutoff behaviour. Crucially, a cutoff run NEVER
+  // persists: it returns bounded items but leaves the permanent, capture-once
+  // milestone rows untouched (see the persist guard at the end) — clearing the
+  // cutoff restores the full, permanent history exactly.
+  const cutoff =
+    cutoffArg === undefined ? (settings.validFromDate ?? null) : cutoffArg;
+
   // Chronological (arrival) order, matching the velocity / movement walks.
+  // cutoffSql(null) is undefined -> `.where(undefined)` selects every import.
   const imports = await db
     .select({
       id: importsTable.id,
@@ -137,7 +153,15 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
       createdAt: importsTable.createdAt,
     })
     .from(importsTable)
+    .where(cutoffSql(cutoff))
     .orderBy(asc(importsTable.id));
+
+  // Ids the replay actually observed (all in-window). Used to gate stored
+  // capture-once anchors so a pre-cutoff captured date is ignored while a cutoff
+  // is active. When cutoff is null every id is "in window" (inW below).
+  const inWindowIds = new Set<number>(imports.map((i) => i.id));
+  const inW = (id: number | null | undefined): boolean =>
+    cutoff === null ? true : id != null && inWindowIds.has(id);
 
   const states = new Map<string, WalkState>();
 
@@ -270,28 +294,53 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
   for (const project of allProjects) {
     const st = states.get(project);
     const ex = existing.get(project);
+
+    // Gate stored capture-once anchors by whether they fall inside the active
+    // window. When cutoff is null, inW is always true so each `ex*Ok` reduces to
+    // `ex != null` and the merge below is byte-identical to the original.
+    const exReadyOk = ex != null && inW(ex.readyImportId);
+    const exDispOk = ex != null && inW(ex.dispatchedImportId);
+    const exLastSeenOk = ex != null && inW(ex.lastSeenImportId);
+    // Fields not tied to a single import id (marksTotal / reopened /
+    // limitedHistory) are honoured from the stored row only if the project has
+    // ANY in-window anchor. When cutoff is null this is just `ex != null`.
+    const exAnyOk = exReadyOk || exDispOk || exLastSeenOk;
+
+    // When a cutoff is active, drop projects whose only evidence is out of window
+    // (pool-only orphans, or stored milestones captured entirely before the
+    // cutoff). Never triggers when cutoff is null (byte-identical).
+    if (cutoff !== null && !st && !exAnyOk) continue;
+
     const projectStart = startByJob.get(project) ?? ex?.projectStart ?? null;
-    let readyDate = ex?.readyDate ?? st?.readyDate ?? null;
-    let readyImportId = ex?.readyImportId ?? st?.readyImportId ?? null;
-    let dispatchedDate = ex?.dispatchedDate ?? st?.dispatchedDate ?? null;
+    let readyDate = (exReadyOk ? ex!.readyDate : null) ?? st?.readyDate ?? null;
+    let readyImportId =
+      (exReadyOk ? ex!.readyImportId : null) ?? st?.readyImportId ?? null;
+    let dispatchedDate =
+      (exDispOk ? ex!.dispatchedDate : null) ?? st?.dispatchedDate ?? null;
     let dispatchedImportId =
-      ex?.dispatchedImportId ?? st?.dispatchedImportId ?? null;
+      (exDispOk ? ex!.dispatchedImportId : null) ??
+      st?.dispatchedImportId ??
+      null;
     // An orphan (in the pool, but with no walk state and no stored milestone)
     // has no identity set or stored count, so fall back to the pool mark count.
     const marksTotal = Math.max(
       st?.identities.size ?? 0,
-      ex?.marksTotal ?? 0,
+      exAnyOk ? (ex?.marksTotal ?? 0) : 0,
       !st && !ex ? (poolMarksByJob.get(project) ?? 0) : 0,
     );
-    const reopened = (st?.reopened ?? false) || (ex?.reopened ?? false);
-    let limitedHistory = ex?.limitedHistory ?? st?.limitedHistory ?? false;
+    const reopened =
+      (st?.reopened ?? false) || (exAnyOk ? (ex?.reopened ?? false) : false);
+    let limitedHistory =
+      (exAnyOk ? (ex?.limitedHistory ?? null) : null) ??
+      st?.limitedHistory ??
+      false;
 
     // Merge last-seen presence: keep the GREATER import id (advance forward only)
     // so a deleted/pruned import can never roll it backward. This is what makes
     // dispatch-on-disappear survive deletion of the import that established the
     // project's presence.
     const stLastSeenId = st?.lastSeenImportId ?? null;
-    const exLastSeenId = ex?.lastSeenImportId ?? null;
+    const exLastSeenId = exLastSeenOk ? (ex?.lastSeenImportId ?? null) : null;
     let lastSeenImportId: number | null;
     let lastSeenDate: string | null;
     if (
@@ -392,32 +441,39 @@ export async function recomputeMilestones(): Promise<ProjectMilestone[]> {
     });
   }
 
-  const chunk = 200;
-  for (let i = 0; i < upserts.length; i += chunk) {
-    await db
-      .insert(projectMilestonesTable)
-      .values(upserts.slice(i, i + chunk))
-      .onConflictDoUpdate({
-        target: projectMilestonesTable.project,
-        set: {
-          projectStart: sql`excluded.project_start`,
-          readyDate: sql`excluded.ready_date`,
-          readyImportId: sql`excluded.ready_import_id`,
-          readyTurnaroundDays: sql`excluded.ready_turnaround_days`,
-          dispatchedDate: sql`excluded.dispatched_date`,
-          dispatchedImportId: sql`excluded.dispatched_import_id`,
-          dispatchedTurnaroundDays: sql`excluded.dispatched_turnaround_days`,
-          dispatchLagDays: sql`excluded.dispatch_lag_days`,
-          marksTotal: sql`excluded.marks_total`,
-          plannedReadyDays: sql`excluded.planned_ready_days`,
-          varianceReadyDays: sql`excluded.variance_ready_days`,
-          limitedHistory: sql`excluded.limited_history`,
-          reopened: sql`excluded.reopened`,
-          lastSeenImportId: sql`excluded.last_seen_import_id`,
-          lastSeenDate: sql`excluded.last_seen_date`,
-          updatedAt: sql`excluded.updated_at`,
-        },
-      });
+  // Persist ONLY on a full-history run (no active cutoff). A cutoff run returns
+  // bounded items for display but must never overwrite the permanent,
+  // capture-once milestone rows with window-scoped values — otherwise clearing
+  // the cutoff could not restore the true earliest dates. On a full run this is
+  // the normal capture-once persistence.
+  if (cutoff === null) {
+    const chunk = 200;
+    for (let i = 0; i < upserts.length; i += chunk) {
+      await db
+        .insert(projectMilestonesTable)
+        .values(upserts.slice(i, i + chunk))
+        .onConflictDoUpdate({
+          target: projectMilestonesTable.project,
+          set: {
+            projectStart: sql`excluded.project_start`,
+            readyDate: sql`excluded.ready_date`,
+            readyImportId: sql`excluded.ready_import_id`,
+            readyTurnaroundDays: sql`excluded.ready_turnaround_days`,
+            dispatchedDate: sql`excluded.dispatched_date`,
+            dispatchedImportId: sql`excluded.dispatched_import_id`,
+            dispatchedTurnaroundDays: sql`excluded.dispatched_turnaround_days`,
+            dispatchLagDays: sql`excluded.dispatch_lag_days`,
+            marksTotal: sql`excluded.marks_total`,
+            plannedReadyDays: sql`excluded.planned_ready_days`,
+            varianceReadyDays: sql`excluded.variance_ready_days`,
+            limitedHistory: sql`excluded.limited_history`,
+            reopened: sql`excluded.reopened`,
+            lastSeenImportId: sql`excluded.last_seen_import_id`,
+            lastSeenDate: sql`excluded.last_seen_date`,
+            updatedAt: sql`excluded.updated_at`,
+          },
+        });
+    }
   }
 
   items.sort((a, b) => a.project.localeCompare(b.project));

@@ -994,6 +994,13 @@ export interface TurnaroundSettings {
   /** Stalled-mark threshold in days. A mark whose activity/last-production signature has not changed for >= this many days is flagged stalled.
    */
   stalledDays?: number;
+  /**
+     * Global "valid data starts here" WIP cutoff (YYYY-MM-DD) or null (default = no cutoff). When set, the whole app — client selection AND every server-side history replay (change log, movement, velocity, milestones, dispatch) — considers only WIP imports dated (report date, else upload date) on/after this day; older imports are ignored as if never uploaded. Scoping only: never touches parsing, activity, qty, dedup/hash identity, or ageing math.
+
+     * @nullable
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
+  validFromDate?: string | null;
 }
 
 /**
@@ -1535,6 +1542,14 @@ project: string;
 
 export type DeleteContractorCategoryParams = {
 nameKey: string;
+};
+
+export type ListImportsParams = {
+/**
+ * When true, ignore the global WIP cutoff and return every import regardless of date. Default false (scoped to the cutoff).
+
+ */
+all?: boolean;
 };
 
 export type CompareImportsParams = {

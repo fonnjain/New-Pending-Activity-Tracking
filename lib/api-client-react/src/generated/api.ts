@@ -41,6 +41,7 @@ import type {
   Import,
   ImportSummary,
   ImportUpload,
+  ListImportsParams,
   ManualThickness,
   ManualThicknessInput,
   MilestonesResponse,
@@ -1453,22 +1454,29 @@ export const useLogout = <TError = ErrorType<unknown>,
       return useMutation(getLogoutMutationOptions(options));
     }
 
-export const getListImportsUrl = () => {
+export const getListImportsUrl = (params?: ListImportsParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/imports`
+  return stringifiedParams.length > 0 ? `/api/imports?${stringifiedParams}` : `/api/imports`
 }
 
 /**
- * Returns every import in the append-only ledger, newest first, each with its parse summary and (when available) a compact change summary versus the prior import.
+ * Returns imports in the append-only ledger, newest first, each with its parse summary and (when available) a compact change summary versus the prior import. By default the list is scoped to the global "valid data starts here" cutoff (settings.validFromDate) — imports dated before the cutoff are excluded so the whole app agrees on the active window. Pass `all=true` to bypass the cutoff and return every import (used by the admin cutoff picker).
 
  * @summary List imports
  */
-export const listImports = async ( options?: RequestInit): Promise<Import[]> => {
+export const listImports = async (params?: ListImportsParams, options?: RequestInit): Promise<Import[]> => {
 
-  return customFetch<Import[]>(getListImportsUrl(),
+  return customFetch<Import[]>(getListImportsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -1481,23 +1489,23 @@ export const listImports = async ( options?: RequestInit): Promise<Import[]> => 
 
 
 
-export const getListImportsQueryKey = () => {
+export const getListImportsQueryKey = (params?: ListImportsParams,) => {
     return [
-    `/api/imports`
+    `/api/imports`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListImportsQueryOptions = <TData = Awaited<ReturnType<typeof listImports>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listImports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getListImportsQueryOptions = <TData = Awaited<ReturnType<typeof listImports>>, TError = ErrorType<unknown>>(params?: ListImportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listImports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListImportsQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListImportsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImports>>> = ({ signal }) => listImports({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImports>>> = ({ signal }) => listImports(params, { signal, ...requestOptions });
 
 
 
@@ -1515,11 +1523,11 @@ export type ListImportsQueryError = ErrorType<unknown>
  */
 
 export function useListImports<TData = Awaited<ReturnType<typeof listImports>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listImports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: ListImportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listImports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getListImportsQueryOptions(options)
+  const queryOptions = getListImportsQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

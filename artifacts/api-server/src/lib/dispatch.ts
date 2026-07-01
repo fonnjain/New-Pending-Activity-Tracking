@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { cutoffSql, loadValidFrom } from "./cutoff";
 import {
   db,
   importsTable,
@@ -167,7 +168,16 @@ interface LedgerAccrual {
 // WIP history. Idempotent: replay always yields the same accrual totals. Seeds
 // (seedMt/seedDate/seedImportId) are preserved (capture-once); only accruedMt and
 // the ledger are rewritten. Safe to call best-effort after any WIP commit/delete.
-export async function recomputeDispatch(): Promise<void> {
+export async function recomputeDispatch(
+  cutoffArg?: string | null,
+): Promise<void> {
+  // Global WIP cutoff: when set, only WIP imports on/after it accrue yard
+  // departures (older imports ignored as if never uploaded). When null (the
+  // default), cutoffSql is a no-op and the full-history replay is byte-identical
+  // to before. Order Status reads the STORED accrual, so the bounded total is
+  // persisted; it is fully rebuilt from (never-deleted) WIP history on every
+  // recompute, so clearing the cutoff restores the full total.
+  const cutoff = cutoffArg === undefined ? await loadValidFrom() : cutoffArg;
   const seeds = await db.select().from(orderDispatchTable);
   if (seeds.length === 0) {
     // No seeds yet: nothing to accrue. Keep the ledger empty.
@@ -185,6 +195,7 @@ export async function recomputeDispatch(): Promise<void> {
       createdAt: importsTable.createdAt,
     })
     .from(importsTable)
+    .where(cutoffSql(cutoff))
     .orderBy(asc(importsTable.id));
 
   const accrualsByKey = new Map<string, LedgerAccrual[]>();

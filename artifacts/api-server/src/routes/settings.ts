@@ -4,6 +4,8 @@ import { db, settingsTable, SETTINGS_SINGLETON_ID } from "@workspace/db";
 import { migrateTurnaroundSettings } from "@workspace/domain";
 import { UpdateSettingsBody } from "@workspace/api-zod";
 import { requireAuth } from "./auth";
+import { recomputeMilestones } from "../lib/milestones";
+import { recomputeDispatch } from "../lib/dispatch";
 
 const router: IRouter = Router();
 
@@ -35,6 +37,7 @@ router.get("/settings", async (_req, res): Promise<void> => {
       perProject: row.perProject,
       stalledDays: row.stalledDays,
       ntlt: row.ntlt,
+      validFromDate: row.validFromDate,
     }),
   );
 });
@@ -55,6 +58,8 @@ router.put("/settings", requireAuth, async (req, res): Promise<void> => {
     perProject: normalized.perProject ?? {},
     ntlt: normalized.ntlt ?? {},
     stalledDays: normalized.stalledDays ?? 10,
+    // Global WIP cutoff (YYYY-MM-DD) or null. Scoping only.
+    validFromDate: normalized.validFromDate ?? null,
     updatedAt: new Date(),
   };
 
@@ -62,6 +67,17 @@ router.put("/settings", requireAuth, async (req, res): Promise<void> => {
     .insert(settingsTable)
     .values({ id: SETTINGS_SINGLETON_ID, ...values })
     .onConflictDoUpdate({ target: settingsTable.id, set: values });
+
+  // The cutoff bounds the persisted dispatch overlay (Order Status reads the
+  // STORED table, not a live recompute) and the persisted milestones. Rebuild
+  // both against the new window so a cutoff change takes effect immediately.
+  // Best-effort: a recompute failure must never fail the settings save.
+  try {
+    await recomputeDispatch();
+    await recomputeMilestones();
+  } catch (err) {
+    req.log.warn({ err }, "Post-settings recompute failed (non-fatal)");
+  }
 
   res.json(normalized);
 });

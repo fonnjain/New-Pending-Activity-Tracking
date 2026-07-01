@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, integer, date } from "drizzle-orm/pg-core";
 
 // App-level turnaround-warning configuration. This is a SINGLETON row (one
 // config for the whole app, not per-import) keyed by a constant id. The
@@ -70,6 +70,14 @@ export const settingsTable = pgTable("settings", {
   // App-level stalled-mark threshold (days). A mark whose activity/last-production
   // signature has not changed for >= this many days is flagged stalled.
   stalledDays: integer("stalled_days").notNull().default(10),
+  // Global "valid data starts here" cutoff (YYYY-MM-DD) or NULL (default). When
+  // set, the whole app — client selection AND every server-side history replay
+  // (change log, movement, velocity, milestones, dispatch) — considers ONLY WIP
+  // imports dated (report date, else upload date) on/after this day; older
+  // imports are ignored as if never uploaded. NULL = no cutoff = byte-identical
+  // to prior behaviour. Advisory/scoping only: never touches parsing, activity,
+  // qty, dedup/hash identity, or ageing math.
+  validFromDate: date("valid_from_date"),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

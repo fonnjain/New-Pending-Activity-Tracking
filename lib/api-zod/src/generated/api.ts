@@ -13,6 +13,9 @@ import * as zod from 'zod';
 
  * @summary Get turnaround settings
  */
+export const getSettingsResponseValidFromDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+
+
 export const GetSettingsResponse = zod.object({
   "activities": zod.record(zod.string(), zod.object({
   "idealDays": zod.number().describe('Ideal days for this single activity (feeds the cumulative target).'),
@@ -206,7 +209,8 @@ export const GetSettingsResponse = zod.object({
 }).describe('Sparse per-project override of any subset of {idealDays, yellow\/orange\/red cell, preWarn}. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value (per cell). All fields optional.\n'))).optional().describe('Sparse per-section overrides keyed by section (group_key) then activity code. Only overridden cells\/fields are stored.\n')
 }).optional().describe('One NTLT category\'s turnaround config: a global (\"All Sections\") per-activity map keyed by THIS category\'s sequence activity codes, plus optional sparse per-SECTION overrides (the NTLT analogue of activities + perProject). TLT stays at the top level of TurnaroundSettings.\n')
 }).optional().describe('The three NTLT categories\' configs keyed by subtype (RSJ, EARTHING, GENERAL). TLT stays at the top level (activities\/perProject). Seeded with defaults on read.\n'),
-  "stalledDays": zod.number().optional().describe('Stalled-mark threshold in days. A mark whose activity\/last-production signature has not changed for >= this many days is flagged stalled.\n')
+  "stalledDays": zod.number().optional().describe('Stalled-mark threshold in days. A mark whose activity\/last-production signature has not changed for >= this many days is flagged stalled.\n'),
+  "validFromDate": zod.string().regex(getSettingsResponseValidFromDateRegExp).nullish().describe('Global \"valid data starts here\" WIP cutoff (YYYY-MM-DD) or null (default = no cutoff). When set, the whole app — client selection AND every server-side history replay (change log, movement, velocity, milestones, dispatch) — considers only WIP imports dated (report date, else upload date) on\/after this day; older imports are ignored as if never uploaded. Scoping only: never touches parsing, activity, qty, dedup\/hash identity, or ageing math.\n')
 }).describe('App-level turnaround-warning configuration. Singleton; global per-activity ideal days, grace cells and pre-warning thresholds keyed by canonical activity code, plus optional sparse per-project overrides and the stalled-mark threshold.')
 
 
@@ -215,6 +219,9 @@ export const GetSettingsResponse = zod.object({
 
  * @summary Update turnaround settings
  */
+export const updateSettingsBodyValidFromDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+
+
 export const UpdateSettingsBody = zod.object({
   "activities": zod.record(zod.string(), zod.object({
   "idealDays": zod.number().describe('Ideal days for this single activity (feeds the cumulative target).'),
@@ -408,8 +415,12 @@ export const UpdateSettingsBody = zod.object({
 }).describe('Sparse per-project override of any subset of {idealDays, yellow\/orange\/red cell, preWarn}. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value (per cell). All fields optional.\n'))).optional().describe('Sparse per-section overrides keyed by section (group_key) then activity code. Only overridden cells\/fields are stored.\n')
 }).optional().describe('One NTLT category\'s turnaround config: a global (\"All Sections\") per-activity map keyed by THIS category\'s sequence activity codes, plus optional sparse per-SECTION overrides (the NTLT analogue of activities + perProject). TLT stays at the top level of TurnaroundSettings.\n')
 }).optional().describe('The three NTLT categories\' configs keyed by subtype (RSJ, EARTHING, GENERAL). TLT stays at the top level (activities\/perProject). Seeded with defaults on read.\n'),
-  "stalledDays": zod.number().optional().describe('Stalled-mark threshold in days. A mark whose activity\/last-production signature has not changed for >= this many days is flagged stalled.\n')
+  "stalledDays": zod.number().optional().describe('Stalled-mark threshold in days. A mark whose activity\/last-production signature has not changed for >= this many days is flagged stalled.\n'),
+  "validFromDate": zod.string().regex(updateSettingsBodyValidFromDateRegExp).nullish().describe('Global \"valid data starts here\" WIP cutoff (YYYY-MM-DD) or null (default = no cutoff). When set, the whole app — client selection AND every server-side history replay (change log, movement, velocity, milestones, dispatch) — considers only WIP imports dated (report date, else upload date) on\/after this day; older imports are ignored as if never uploaded. Scoping only: never touches parsing, activity, qty, dedup\/hash identity, or ageing math.\n')
 }).describe('App-level turnaround-warning configuration. Singleton; global per-activity ideal days, grace cells and pre-warning thresholds keyed by canonical activity code, plus optional sparse per-project overrides and the stalled-mark threshold.')
+
+export const updateSettingsResponseValidFromDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+
 
 export const UpdateSettingsResponse = zod.object({
   "activities": zod.record(zod.string(), zod.object({
@@ -604,7 +615,8 @@ export const UpdateSettingsResponse = zod.object({
 }).describe('Sparse per-project override of any subset of {idealDays, yellow\/orange\/red cell, preWarn}. Any field present REPLACES the global value for that (project, activity); any field absent INHERITS the global value (per cell). All fields optional.\n'))).optional().describe('Sparse per-section overrides keyed by section (group_key) then activity code. Only overridden cells\/fields are stored.\n')
 }).optional().describe('One NTLT category\'s turnaround config: a global (\"All Sections\") per-activity map keyed by THIS category\'s sequence activity codes, plus optional sparse per-SECTION overrides (the NTLT analogue of activities + perProject). TLT stays at the top level of TurnaroundSettings.\n')
 }).optional().describe('The three NTLT categories\' configs keyed by subtype (RSJ, EARTHING, GENERAL). TLT stays at the top level (activities\/perProject). Seeded with defaults on read.\n'),
-  "stalledDays": zod.number().optional().describe('Stalled-mark threshold in days. A mark whose activity\/last-production signature has not changed for >= this many days is flagged stalled.\n')
+  "stalledDays": zod.number().optional().describe('Stalled-mark threshold in days. A mark whose activity\/last-production signature has not changed for >= this many days is flagged stalled.\n'),
+  "validFromDate": zod.string().regex(updateSettingsResponseValidFromDateRegExp).nullish().describe('Global \"valid data starts here\" WIP cutoff (YYYY-MM-DD) or null (default = no cutoff). When set, the whole app — client selection AND every server-side history replay (change log, movement, velocity, milestones, dispatch) — considers only WIP imports dated (report date, else upload date) on\/after this day; older imports are ignored as if never uploaded. Scoping only: never touches parsing, activity, qty, dedup\/hash identity, or ageing math.\n')
 }).describe('App-level turnaround-warning configuration. Singleton; global per-activity ideal days, grace cells and pre-warning thresholds keyed by canonical activity code, plus optional sparse per-project overrides and the stalled-mark threshold.')
 
 
@@ -825,10 +837,14 @@ export const LogoutResponse = zod.object({
 
 
 /**
- * Returns every import in the append-only ledger, newest first, each with its parse summary and (when available) a compact change summary versus the prior import.
+ * Returns imports in the append-only ledger, newest first, each with its parse summary and (when available) a compact change summary versus the prior import. By default the list is scoped to the global "valid data starts here" cutoff (settings.validFromDate) — imports dated before the cutoff are excluded so the whole app agrees on the active window. Pass `all=true` to bypass the cutoff and return every import (used by the admin cutoff picker).
 
  * @summary List imports
  */
+export const ListImportsQueryParams = zod.object({
+  "all": zod.coerce.boolean().optional().describe('When true, ignore the global WIP cutoff and return every import regardless of date. Default false (scoped to the cutoff).\n')
+})
+
 export const ListImportsResponseItem = zod.object({
   "id": zod.number(),
   "label": zod.string().nullable(),

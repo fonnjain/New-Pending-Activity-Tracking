@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, CheckCircle2, Factory, PackageCheck } from "lucide-react";
 import { useTracker, dateRangeWindow } from "@/lib/store";
+import { useSettings } from "@/lib/settings";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -82,6 +83,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </nav>
       </header>
 
+      {/* Active WIP cutoff indicator (visible on every page/breakpoint) */}
+      <CutoffBanner />
+
       {/* Global Filter Bar */}
       {showFilters && <FilterBar />}
 
@@ -119,6 +123,20 @@ export function Layout({ children }: { children: React.ReactNode }) {
           );
         })}
       </nav>
+    </div>
+  );
+}
+
+function CutoffBanner() {
+  const { settings } = useSettings();
+  const cutoff = settings.validFromDate;
+  if (!cutoff) return null;
+  return (
+    <div className="bg-amber-500/10 border-b border-amber-500/25 text-amber-800 dark:text-amber-300 text-xs md:text-sm px-4 md:px-6 py-2 flex items-center gap-2">
+      <Filter className="h-3.5 w-3.5 shrink-0" />
+      <span>
+        Showing WIP data from <span className="font-semibold tabular-nums">{cutoff}</span> onward. Earlier imports are hidden across every view. Change this on the Data tab.
+      </span>
     </div>
   );
 }

@@ -403,8 +403,21 @@ paths:
       tags: [imports]
       summary: List imports
       description: >
-        Returns every import in the append-only ledger, newest first, each with its
+        Returns imports in the append-only ledger, newest first, each with its
         parse summary and (when available) a compact change summary versus the prior import.
+        By default the list is scoped to the global "valid data starts here" cutoff
+        (settings.validFromDate) — imports dated before the cutoff are excluded so the
+        whole app agrees on the active window. Pass `all=true` to bypass the cutoff and
+        return every import (used by the admin cutoff picker).
+      parameters:
+        - name: all
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: >
+            When true, ignore the global WIP cutoff and return every import
+            regardless of date. Default false (scoped to the cutoff).
       responses:
         "200":
           description: List of imports
@@ -2171,6 +2184,17 @@ components:
           description: >
             Stalled-mark threshold in days. A mark whose activity/last-production
             signature has not changed for >= this many days is flagged stalled.
+        validFromDate:
+          type: ["string", "null"]
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: >
+            Global "valid data starts here" WIP cutoff (YYYY-MM-DD) or null
+            (default = no cutoff). When set, the whole app — client selection AND
+            every server-side history replay (change log, movement, velocity,
+            milestones, dispatch) — considers only WIP imports dated (report
+            date, else upload date) on/after this day; older imports are ignored
+            as if never uploaded. Scoping only: never touches parsing, activity,
+            qty, dedup/hash identity, or ageing math.
       required:
         - activities
     MovementItem:

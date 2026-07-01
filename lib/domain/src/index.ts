@@ -695,6 +695,11 @@ export interface TurnaroundSettings {
   // defaults by migrateTurnaroundSettings so the engine always has values. TLT
   // stays at the top level above (byte-for-byte back-compat).
   ntlt?: Partial<Record<NtltSubtype, CategorySettings>>;
+  // Global "valid data starts here" cutoff (YYYY-MM-DD) or null (default). When
+  // set, the whole app considers only WIP imports dated on/after this day; older
+  // imports are ignored. null = no cutoff = byte-identical to prior behaviour.
+  // Scoping only: never affects any per-activity/warning/ageing computation here.
+  validFromDate?: string | null;
 }
 
 // A resolution scope for the warning engine: which category's parameters to read
@@ -1116,11 +1121,18 @@ export function migrateTurnaroundSettings(raw: unknown): TurnaroundSettings {
     EARTHING: migrateCategorySettings(ntltRaw.EARTHING, SEQUENCES.NTLT_EARTHING),
     GENERAL: migrateCategorySettings(ntltRaw.GENERAL, SEQUENCES.NTLT_GENERAL),
   };
+  // Global WIP cutoff: accept a valid YYYY-MM-DD string, else null (no cutoff).
+  const rawValidFrom = obj.validFromDate;
+  const validFromDate =
+    typeof rawValidFrom === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rawValidFrom)
+      ? rawValidFrom
+      : null;
   return {
     activities,
     perProject: migratePerProject(obj.perProject),
     stalledDays,
     ntlt,
+    validFromDate,
   };
 }
 
