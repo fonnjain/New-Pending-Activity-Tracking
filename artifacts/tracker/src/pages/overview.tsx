@@ -7,8 +7,7 @@ import { Button } from "@/components/ui/button";
 import { formatWeight } from "@/lib/utils";
 import { useMemo } from "react";
 import { ChangesPanel } from "@/components/changes-panel";
-import { Clock, AlertTriangle, ChevronRight, FileSpreadsheet } from "lucide-react";
-import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
+import { Clock, AlertTriangle, ChevronRight } from "lucide-react";
 
 export default function Overview() {
   const { selectedImportId } = useTracker();
@@ -62,81 +61,8 @@ function OverviewContent() {
     );
   }
 
-  const handleExport = () => {
-    const sheets: XlsxSheet[] = [
-      {
-        name: "KPIs",
-        columns: [
-          { label: "Metric", field: "metric" },
-          { label: "Value", field: "value", numeric: true, decimals: 2 },
-        ],
-        rows: [
-          { metric: "Pending Marks", value: summary.totalMarks },
-          { metric: "Balance Qty", value: summary.totalQty },
-          { metric: "Balance Wt", value: summary.totalWt },
-          { metric: "Avg Ageing (days)", value: summary.avgAgeing },
-          { metric: "Contractors", value: summary.contractorsCount },
-          { metric: "Structures", value: summary.structuresCount },
-        ],
-      },
-      {
-        name: "Ageing",
-        columns: [
-          { label: "Bucket", field: "bucket" },
-          { label: "Count", field: "count", numeric: true, decimals: 0, total: true },
-        ],
-        rows: [
-          { bucket: "0-30 days", count: summary.age0to30 },
-          { bucket: "31-60 days", count: summary.age31to60 },
-          { bucket: "60+ days", count: summary.age60Plus },
-          { bucket: "No ageing date", count: summary.noAgeing },
-        ],
-      },
-      {
-        name: "Top Aged Marks",
-        columns: [
-          { label: "Mark", field: "markId" },
-          { label: "Contractor", field: "contractor" },
-          { label: "Ageing (days)", field: "ageingDays", numeric: true, decimals: 0 },
-        ],
-        rows: summary.topAgedMarks.map((m) => ({
-          markId: m.markId ?? "",
-          contractor: m.contractor || "Unassigned",
-          ageingDays: m.ageingDays,
-        })),
-      },
-      {
-        name: "Busiest Contractors",
-        columns: [
-          { label: "Contractor", field: "contractor" },
-          { label: "Balance Wt", field: "weight", numeric: true, decimals: 2, total: true },
-          { label: "Marks", field: "count", numeric: true, decimals: 0, total: true },
-        ],
-        rows: summary.busiestContractors.map((c) => ({
-          contractor: c.contractor || "Unassigned",
-          weight: c.weight,
-          count: c.count,
-        })),
-      },
-    ];
-    void exportToXlsxSheets(
-      `overview_${new Date().toISOString().slice(0, 10)}.xlsx`,
-      sheets,
-    );
-  };
-
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-end">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-2"
-          onClick={handleExport}
-        >
-          <FileSpreadsheet className="h-4 w-4" /> Export Excel
-        </Button>
-      </div>
       <SnapshotCards summary={summary} />
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
