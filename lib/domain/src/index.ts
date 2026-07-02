@@ -6,14 +6,15 @@
 // import from here instead.
 //
 // Order is intentional: W -> Q -> TS (Quality before Tee Stock). HG (Grinding)
-// sits at position 6 even though it is seldom populated.
+// sits at position 2 (right after C, before RFI): it is grinding/finishing done
+// on the cut piece before it is presented for inspection.
 export const PROCESS_SEQUENCE = [
   "C",
+  "HG",
   "RFI",
   "NH",
   "B",
   "HAB",
-  "HG",
   "W",
   "Q",
   "TS",
@@ -179,8 +180,13 @@ export const ACTIVITY_BUNDLES: readonly ActivityBundle[] = [
     id: "TLT_FAB_PENDING_QUALITY",
     label: "Fab - Pending Quality (TLT)",
     scope: "TLT",
-    // RFI -> TS (fabrication minus cutting).
-    activities: PROCESS_SEQUENCE.slice(1, BUNDLE_GALV_START_INDEX),
+    // RFI -> TS (fabrication minus the cutting-prep steps C and HG). Sliced from
+    // RFI explicitly (not index 1) so HG — which now sits before RFI — is
+    // correctly EXCLUDED from Fab-Pending.
+    activities: PROCESS_SEQUENCE.slice(
+      PROCESS_SEQUENCE.indexOf("RFI"),
+      BUNDLE_GALV_START_INDEX,
+    ),
   },
   {
     id: "GALVANIZING",
@@ -198,13 +204,14 @@ export const ACTIVITY_BUNDLES: readonly ActivityBundle[] = [
   },
   // Operation sub-bundles (TLT-only). These overlap the broad Fabrication /
   // Fab-Pending bundles by design — a mark can match more than one bundle;
-  // bundles are filter shortcuts, not exclusive partitions. HG (Grinding) is
-  // intentionally in none of these three.
+  // bundles are filter shortcuts, not exclusive partitions.
   {
     id: "TLT_STANDARD_OPERATIONS",
     label: "Standard Operations (TLT)",
     scope: "TLT",
-    activities: ["C", "RFI", "NH"],
+    // C, HG (grinding on the cut piece), then RFI, NH — the early cutting-prep
+    // and inspection steps, before the special (B/HAB/W) operations.
+    activities: ["C", "HG", "RFI", "NH"],
   },
   {
     id: "TLT_SPECIAL_OPERATIONS",
@@ -355,7 +362,7 @@ export const FAB_LOAD_COLUMNS: { value: FabLoadColumn; label: string }[] = [
 
 // Both sections (Operational and In Hand) carry the same five columns —
 // Welded, Drilling, Plate Punch, Plate Drill, Bending — in the same order.
-// In-Hand Bending = marks positioned before B in the TLT sequence (C, RFI, NH).
+// In-Hand Bending = marks positioned before B in the TLT sequence (C, HG, RFI, NH).
 export function fabLoadColumnsForSection(
   _section: FabLoadSection,
 ): { value: FabLoadColumn; label: string }[] {

@@ -12,12 +12,28 @@ and every sequence-aware fn defaults `sequence = PROCESS_SEQUENCE`, so all
 existing TLT call sites are byte-for-byte unchanged.
 
 ## Sequences (`SEQUENCES` map in `@workspace/domain`)
-- `TLT` = `PROCESS_SEQUENCE` (12: C,RFI,NH,B,HAB,HG,W,Q,TS,G,GB,Y)
+- `TLT` = `PROCESS_SEQUENCE` (12: **C,HG,RFI,NH,B,HAB,W,Q,TS,G,GB,Y**). HG (Grinding)
+  sits at index 1 (right after C, before RFI) — grinding/finishing on the cut piece
+  before inspection. (It was historically at index 5, between HAB and W.)
 - `NTLT_RSJ` = NTF,NTFSW,NTFW,TS,G,GB,Y (7)
 - `NTLT_EARTHING` = TS,G,GB,Y (4)
 - `NTLT_GENERAL` = TS,G,GB,Y (4)
 - **`Y` is the terminal stage in EVERY sequence.** Final-stage tests use
   `sequence.length - 1`, never a module-level `Y_RANK`.
+
+## Slice-anchored bundles must key off the ACTIVITY, not a magic index
+`TLT_FAB_PENDING_QUALITY` = "fabrication minus cutting prep" = RFI..TS. It is sliced
+`PROCESS_SEQUENCE.slice(indexOf("RFI"), indexOf("G"))` — **NOT `slice(1, ...)`**.
+`slice(1)` used to equal RFI because RFI was at index 1, but HG now occupies index 1,
+so a positional slice would silently pull HG into Fab-Pending.
+**Why:** relocating an activity inside `PROCESS_SEQUENCE` changes every index, so any
+bundle/phase that slices by a hard index (rather than `indexOf(code)`) breaks meaning
+without a type error. `TLT_STANDARD_OPERATIONS` = literal `[C,HG,RFI,NH]` (membership
+set, order-independent). Fabrication load hole columns key off `Activity==RFI/==C`, and
+Welded/Bending In-Hand off `rank < W_RANK/B_RANK` — all re-derive; parity held because
+0 marks ever sit AT activity HG (so Bending's now-included HG adds nothing).
+**How to apply:** when moving any code in `PROCESS_SEQUENCE`, grep every `slice(<int>,`
+and confirm each still means the intended activity; prefer `indexOf(code)` anchors.
 
 ## Why per-row sequence matters
 NTLT-only steps (NTF/NTFSW/NTFW) are UNKNOWN to the TLT route, so TLT's

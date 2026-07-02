@@ -1,0 +1,77 @@
+REPLIT AGENT PROMPT — RELOCATE HG (Grinding) TO BEFORE RFI + ADD TO STANDARD OPERATIONS (with verification)
+============================================================================================================
+Correct the TLT process sequence: HG (Grinding) moves from its current position (6, between
+HAB and W) to BEFORE RFI (position 2, right after C). HG also joins the "Standard Operations"
+bundle. Then RUN verifications proving the change is applied consistently and that the
+Fabrication Load numbers are unchanged. Deterministic engine change (single source of truth) +
+a verification pass. Do not change ageing source, dedup, punching/drilling logic, or the
+In-Hand Col-Q guard.
+
+WHY
+HG is grinding/finishing done on the cut piece before it is presented for inspection, so it
+belongs between C and RFI, not mid-sequence. This also gives HG a home in Standard Operations
+(previously it was in no bundle). The Col Q route data corroborates this (HG appears early,
+alongside the cutting sub-steps).
+
+1) CHANGE THE TLT SEQUENCE (single source of truth)
+   OLD: ["C","RFI","NH","B","HAB","HG","W","Q","TS","G","GB","Y"]
+   NEW: ["C","HG","RFI","NH","B","HAB","W","Q","TS","G","GB","Y"]
+   - Update the ONE canonical PROCESS_SEQUENCE / SEQUENCES["TLT"] constant. Everything that
+     imports it (targets, pre-warning, velocity, milestones, ordering, "before X" logic)
+     must re-derive automatically. Do NOT hard-code the order anywhere else.
+   - NTLT sequences unchanged (RSJ: NTF,NTFSW,NTFW,TS,G,GB,Y; Earthing/General: TS,G,GB,Y).
+
+2) ADD HG TO STANDARD OPERATIONS BUNDLE
+   - TLT_STANDARD_OPERATIONS becomes: [C, HG, RFI, NH]  (was [C, RFI, NH]).
+   - TLT_SPECIAL_OPERATIONS unchanged: [B, HAB, W].
+   - TLT_QUALITY unchanged: [Q, TS].
+   - Other bundles (Fabrication C..TS, Fab-Pending Quality RFI..TS, Galvanizing G,GB, Yard Y)
+     unchanged in membership — HG was already inside the Fabrication span, and Fab-Pending
+     starts at RFI so HG (now before RFI) is NOT in Fab-Pending (matches "excludes cutting
+     prep"). Confirm Fab-Pending Quality still = RFI..TS and does not now include HG.
+
+3) THINGS THAT SHOULD NOT CHANGE (guard against over-reach)
+   - Ageing (today - last production date; C uses Assign Date), dedup/merge, classification,
+     punching/drilling (section + thickness), the Col-Q In-Hand guard, and quantity math.
+   - The Fabrication Load hole columns (Drilling/Plate Punch/Plate Drill) key off Activity ==
+     RFI / == C and section+thickness — HG's move must NOT change them.
+   - Welded/Bending In-Hand key off "before W/B in sequence AND op in Col-Q route" — HG stays
+     before W and before B in the new order, so these must NOT change either.
+
+4) VERIFICATION PASS (run and report PASS/FAIL with numbers)
+   a) SEQUENCE: assert SEQUENCES["TLT"] == the NEW order above, and that stage_index(HG)=1
+      (0-based, i.e. position 2), stage_index(RFI)=2, and HG is before RFI, NH, B, HAB, W.
+      Confirm only ONE definition of the sequence exists (grep for stray hard-coded orders).
+   b) BUNDLE: assert TLT_STANDARD_OPERATIONS == [C,HG,RFI,NH]; Special/Quality unchanged;
+      Fab-Pending Quality == [RFI,NH,B,HAB,W,Q,TS] (HG NOT included); Fabrication ==
+      [C,RFI,NH,B,HAB,HG,W,Q,TS] as a set (still includes HG).
+   c) FABRICATION LOAD PARITY (the key check): compute the 10 fabrication-load figures
+      (Welded/Bending/Drilling/PlatePunch/PlateDrill x Operational/In-Hand) BEFORE and AFTER
+      the sequence change and show they are IDENTICAL. Expected (TLT, current data) — confirm:
+         Operational (at RFI): Drilling(Angle)=84.42t, Plate Punch=39.00t, Plate Drill=14.58t
+         In Hand (at C):       Drilling(Angle)=301.57t, Plate Punch=187.02t, Plate Drill=98.10t
+         Welding In-Hand=251.48t (1602 marks); Bending In-Hand=544.51t (2609 marks)
+      If any differ, the change touched something it shouldn't -> investigate.
+   d) TARGETS (expected small change, allowed): cumulative targets for marks whose route
+      includes HG shift because HG accumulates earlier now. Report how many marks have HG in
+      route (~1,959) and confirm ONLY those are affected; TLT marks without HG unchanged.
+   e) ORDERING: activity dropdowns/legends/tables now show HG between C and RFI (not between
+      HAB and W). Confirm.
+   f) NO-REGRESSION: headline counts (TLT ~ mark total, NTLT split), ageing buckets, and the
+      Col-Q In-Hand guard results (~31.7k excluded from Welding, ~28.4k from Bending) are
+      unchanged.
+
+OUTPUT
+   - PASS/FAIL table for a-f with the numbers. Fabrication-load parity (c) must be IDENTICAL
+     before/after. Where something unexpectedly changed, state the cause and fix only the
+     deviation (keep the agreed rules). End with: "HG relocated before RFI and added to
+     Standard Operations; fabrication load unchanged; only sequence-ordering and HG-route
+     cumulative targets shift; nothing else changed."
+
+ACCEPTANCE
+   - Sequence = C,HG,RFI,NH,B,HAB,W,Q,TS,G,GB,Y (one source of truth).
+   - Standard Operations = C,HG,RFI,NH; Special/Quality/Fab-Pending/Fabrication/Galvanizing/
+     Yard correct as above.
+   - Fabrication Load (all 10 cells) identical before vs after (parity proven with numbers).
+   - Only HG-route marks' cumulative targets change; ordering shows HG before RFI.
+   - Ageing, dedup, punching/drilling, Col-Q guard, classification unchanged.

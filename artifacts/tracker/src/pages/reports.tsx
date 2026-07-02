@@ -660,12 +660,12 @@ function fabLoadMatch(
   }
   switch (column) {
     case "welded":
-      // before W (C,RFI,NH,B,HAB,HG); unknown ranks excluded. AND the mark must
+      // before W (C,HG,RFI,NH,B,HAB); unknown ranks excluded. AND the mark must
       // actually weld: W must be in its Col Q route, else it is upcoming-load for
       // an operation it never performs. Blank route keeps prior behaviour.
       return rank < W_RANK && routeIncludesOp(r.operation, "W");
     case "bending":
-      // before B (C,RFI,NH) AND B must be in the mark's Col Q route.
+      // before B (C,HG,RFI,NH) AND B must be in the mark's Col Q route.
       return rank < B_RANK && routeIncludesOp(r.operation, "B");
     case "drilling":
       return sec === "ANGLE" && act === "C" && op === "DRILLING";
