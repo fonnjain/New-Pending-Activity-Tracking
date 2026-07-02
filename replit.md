@@ -10,6 +10,7 @@ Mobile-first web app for steel-fabrication workshops. Upload an Excel (.xlsx/.xl
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks + Zod schemas (run after any `openapi.yaml` edit)
 - `pnpm --filter @workspace/db run push` — push DB schema (dev). **Re-run against prod after deploying schema changes.**
+- `pnpm --filter @workspace/scripts run fab-load-guard` — Fabrication Load invariant guard (needs `DATABASE_URL`). Recomputes the 10 Fab-Load figures for the latest import using the shared `@workspace/domain` sequence helpers, asserts locked expected tonnages/mark-counts, and fails loudly if any mark sits at activity `HG` (the one case a sequence reorder could silently shift In-Hand Bending/Welding). Re-lock the expected values in the script after any new balance-report upload; a mismatch between uploads means code changed the totals.
 - Required env: `DATABASE_URL`. Optional: `ANTHROPIC_API_KEY` (enables the advisory AI layer).
 
 ## Stack
