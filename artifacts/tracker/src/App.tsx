@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -7,6 +7,7 @@ import { SettingsProvider } from "@/lib/settings";
 import { Layout } from "@/components/layout";
 import NotFound from "@/pages/not-found";
 
+import MasterHome from "@/pages/master-home";
 import Overview from "@/pages/overview";
 import TurnaroundView from "@/pages/turnaround";
 import StuckProjectsView from "@/pages/stuck-projects";
@@ -31,7 +32,7 @@ const queryClient = new QueryClient({
   },
 });
 
-function Router() {
+function ProductionTracker() {
   return (
     <Layout>
       <Switch>
@@ -53,6 +54,42 @@ function Router() {
         <Route component={NotFound} />
       </Switch>
     </Layout>
+  );
+}
+
+// Legacy root paths from before the Production tracker was nested under
+// /production. Kept so old bookmarks / deep links keep working.
+const LEGACY_TRACKER_PATHS = [
+  "/turnaround",
+  "/stuck",
+  "/completed",
+  "/order-status",
+  "/jobs",
+  "/activity",
+  "/contractor",
+  "/plant",
+  "/contractor-setup",
+  "/data",
+  "/order-reconciliation",
+  "/reports",
+  "/thickness",
+  "/warning-parameters",
+];
+
+function Router() {
+  return (
+    <Switch>
+      <Route path="/" component={MasterHome} />
+      <Route path="/production" nest>
+        <ProductionTracker />
+      </Route>
+      {LEGACY_TRACKER_PATHS.map((p) => (
+        <Route key={p} path={p}>
+          <Redirect to={`/production${p}`} />
+        </Route>
+      ))}
+      <Route component={NotFound} />
+    </Switch>
   );
 }
 

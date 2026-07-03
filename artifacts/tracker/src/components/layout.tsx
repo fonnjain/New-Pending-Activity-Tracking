@@ -51,9 +51,20 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground pb-16 md:pb-0">
+      {/* Compact top bar (Mobile) — brand + back to VTPL home */}
+      <div className="md:hidden sticky top-0 z-40 flex items-center justify-between bg-sidebar border-b border-sidebar-border px-4 py-2">
+        <Link href="~/" className="flex items-baseline gap-2">
+          <span className="font-bold text-base text-primary tracking-tight">VTPL</span>
+          <span className="text-[11px] text-sidebar-foreground/60">Production Tracker</span>
+        </Link>
+      </div>
+
       {/* Top Nav (Desktop) */}
       <header className="hidden md:flex sticky top-0 z-40 min-h-14 bg-sidebar border-b border-sidebar-border items-center flex-wrap gap-x-3 gap-y-1 px-4 py-1.5">
-        <div className="font-bold text-lg text-primary tracking-tight shrink-0">TRACKER</div>
+        <Link href="~/" title="VTPL Master Tracker" className="shrink-0 flex items-baseline gap-2">
+          <span className="font-bold text-lg text-primary tracking-tight">VTPL</span>
+          <span className="text-xs text-sidebar-foreground/60 hidden lg:inline">Production Activity Tracker</span>
+        </Link>
         <nav className="flex flex-1 items-center justify-center flex-nowrap gap-x-0.5">
           {navItems.map((item) =>
             item.disabled ? (
