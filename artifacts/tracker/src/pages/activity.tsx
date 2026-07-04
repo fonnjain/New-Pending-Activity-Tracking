@@ -147,7 +147,7 @@ function ActivityContent() {
         <KpiTile title="Activities" value={sortedActivities.length.toLocaleString()} />
       </div>
 
-      <div className="space-y-3 lg:w-1/2">
+      <div className="space-y-3">
         {sortedActivities.map(act => (
           <ActivityCard key={act} activity={act} records={activities.get(act)!} />
         ))}
