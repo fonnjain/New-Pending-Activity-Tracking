@@ -174,9 +174,9 @@ function ChangeTable({ items, tab }: { items: ChangeItem[]; tab: Tab }) {
   const showQty = tab === "qtyChanged";
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-auto max-h-[70vh]">
       <table className="w-full text-sm">
-        <thead>
+        <thead className="bg-card sticky top-0 z-10">
           <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
             <th className="py-2 pr-4 font-semibold">Mark</th>
             <th className="py-2 pr-4 font-semibold">Contractor</th>

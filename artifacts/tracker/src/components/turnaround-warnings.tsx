@@ -258,9 +258,9 @@ export function TurnaroundWarnings({ records }: { records: ApiRecord[] }) {
               Nothing past the target. Good standing.
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[70vh]">
               <table className="w-full text-sm">
-                <thead>
+                <thead className="bg-card sticky top-0 z-10">
                   <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
                     <th className="py-1.5 pr-3 font-medium">Mark</th>
                     <th className="py-1.5 pr-3 font-medium">Activity</th>

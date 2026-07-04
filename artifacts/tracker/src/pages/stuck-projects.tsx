@@ -314,9 +314,9 @@ function StuckContent({ importId }: { importId: number }) {
             {contractors.length === 0 ? (
               <div className="text-sm text-muted-foreground">No velocity data for the current filters.</div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-auto max-h-[70vh]">
                 <table className="w-full text-sm">
-                  <thead>
+                  <thead className="bg-card sticky top-0 z-10">
                     <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
                       <th className="py-1.5 pr-3 font-medium">Contractor</th>
                       <th className="py-1.5 pr-3 font-medium text-right">Marks</th>
@@ -400,9 +400,9 @@ function StuckContent({ importId }: { importId: number }) {
             {stages.length === 0 ? (
               <div className="text-sm text-muted-foreground">No velocity data for the current filters.</div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-auto max-h-[70vh]">
                 <table className="w-full text-sm">
-                  <thead>
+                  <thead className="bg-card sticky top-0 z-10">
                     <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
                       <th className="py-1.5 pr-3 font-medium">Stage</th>
                       <th className="py-1.5 pr-3 font-medium text-right">Marks</th>
@@ -496,9 +496,9 @@ function MarkDrill({ items }: { items: ReturnType<typeof useVelocityInfo>["items
   }, [items]);
 
   return (
-    <div className="border-t border-border overflow-x-auto">
+    <div className="border-t border-border overflow-auto max-h-[70vh]">
       <table className="w-full text-sm">
-        <thead>
+        <thead className="bg-card sticky top-0 z-10">
           <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/30">
             <th className="py-1.5 px-3 font-medium">Mark</th>
             <th className="py-1.5 pr-3 font-medium">Activity</th>

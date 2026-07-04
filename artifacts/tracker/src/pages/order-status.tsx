@@ -452,9 +452,9 @@ export default function OrderStatusView() {
               No data for the selected filters.
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[70vh]">
               <table className="w-full text-sm">
-                <thead className="border-b bg-muted/40">
+                <thead className="border-b bg-muted sticky top-0 z-10">
                   <tr className="text-left">
                     <th className="px-2 py-1.5 font-semibold">Structure Type</th>
                     <th className="px-2 py-1.5 font-semibold">Sub Type</th>
@@ -476,7 +476,7 @@ export default function OrderStatusView() {
                     <ProjectGroup key={g.project} group={g} />
                   ))}
                 </tbody>
-                <tfoot className="border-t-2 bg-muted/60 font-semibold">
+                <tfoot className="border-t-2 bg-muted font-semibold sticky bottom-0 z-10">
                   <tr>
                     <td className="px-2 py-1.5" colSpan={2}>Total ({rows.length})</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{totals.sets.toLocaleString()}</td>

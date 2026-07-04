@@ -856,9 +856,9 @@ export function WarningParametersContent() {
           </p>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
+          <div className="overflow-auto max-h-[70vh]">
+            <table className="w-full text-sm border-separate border-spacing-0">
+              <thead className="bg-card sticky top-0 z-10">
                 <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
                   <th className="py-1.5 pr-3 font-medium">Activity</th>
                   <th className="py-1.5 px-3 font-medium text-right">
@@ -1037,9 +1037,9 @@ export function WarningParametersContent() {
           </p>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
+          <div className="overflow-auto max-h-[70vh]">
+            <table className="w-full text-sm border-separate border-spacing-0">
+              <thead className="bg-card sticky top-0 z-10">
                 <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
                   <th className="py-1.5 pr-3 font-medium">Activity</th>
                   <th className="py-1.5 px-3 font-medium text-right">

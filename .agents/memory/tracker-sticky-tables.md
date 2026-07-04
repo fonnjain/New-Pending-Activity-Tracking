@@ -1,26 +1,17 @@
 ---
-name: Sticky table header/footer in tracker
-description: How to make a table's header/footer stick (and totals stay visible) given the shared ui/table.tsx wrapper.
+name: Sticky table headers in tracker
+description: Sticky column headers are the app-wide default; the one pattern that works here and why.
 ---
 
-# Sticky header/footer + scrollable detail tables
+# Sticky table headers (app-wide default)
 
-The shared `artifacts/tracker/src/components/ui/table.tsx` `Table` renders the
-`<table>` inside its OWN `<div className="relative w-full overflow-auto">`.
+Column headers must stay visible while scrolling ANY table. The only reliable pattern in this app is **internal scroll**: a height-capped `overflow-auto` container is the sticky element's scroll ancestor, with a sticky `thead` (and sticky `tfoot` for totals) that has a SOLID/opaque background.
 
-**Rule:** to make a `TableHeader`/`TableFooter` sticky inside a height-capped
-scroll area, the `max-h-*` cap MUST land on that internal wrapper — pass
-`containerClassName` to `<Table>` (e.g. `containerClassName="max-h-[28rem]"`).
-Capping an OUTER page-level div does nothing: the nearest scroll ancestor of
-the sticky `thead`/`tfoot` is the internal `overflow-auto` div, so sticky pins
-to that. An uncapped outer wrapper is fine (it shrinks to the bounded inner and
-won't create a competing scroll container).
+**Why not page/viewport sticky:** the app has a sticky top nav (`md:top-14`) and per-page sticky filter bars, and wide tables need a horizontal-overflow wrapper. An `overflow-x` wrapper makes `overflow-y` compute to `auto`, so that wrapper — not the window — becomes the sticky element's scroll ancestor. Viewport-level sticky therefore can't work; capping the wrapper's height and pinning inside it is what works.
 
-**Why:** detail tables render up to ROW_CAP (300) rows; without a capped,
-sticky context the totals `<tfoot>` is buried far below the fold and looks like
-it's "not showing".
+**How to apply:**
+- Prefer the shared `ui/table.tsx` `<Table>` — sticky header + a default height cap are baked in (both overridable via `containerClassName` / `TableHeader` `className`; `cn` uses twMerge so consumer overrides win).
+- For a raw `<table>`: wrap in `overflow-auto` + a `max-h` cap, and give the `<thead>` sticky + an OPAQUE bg. Translucent bg (e.g. `bg-muted/40`) bleeds — use the solid variant. If the bg lived on the header `<tr>`, add a solid bg to the `<thead>` too (sticky needs the bg on the sticky element).
+- **border-collapse gotcha:** sticky `<thead>` cells lose their borders under `border-collapse`; use `border-separate border-spacing-0` instead.
 
-**How to apply:** sticky header `className="sticky top-0 z-10 bg-card"` (use a
-solid bg — `bg-muted` where the table body sits on `bg-muted/20`), sticky
-footer `className="sticky bottom-0 z-10 bg-muted"` (solid bg overrides the
-translucent `bg-muted/50` default so rows don't bleed through).
+**Tradeoff (accepted):** every capped table scrolls internally, so very tall tables create a nested/second scrollbar. If a specific table shouldn't cap, override its container cap rather than reverting the global default.

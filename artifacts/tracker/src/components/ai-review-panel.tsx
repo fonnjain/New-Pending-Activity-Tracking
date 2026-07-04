@@ -120,9 +120,9 @@ export function AiReviewPanel({ importId }: { importId: number }) {
             )}
 
             {result.findings.length > 0 ? (
-              <div className="overflow-x-auto">
+              <div className="overflow-auto max-h-[70vh]">
                 <table className="w-full text-sm">
-                  <thead>
+                  <thead className="bg-card sticky top-0 z-10">
                     <tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
                       <th className="py-2 pr-3 font-semibold">Severity</th>
                       <th className="py-2 pr-3 font-semibold">Check</th>

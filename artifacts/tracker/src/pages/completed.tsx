@@ -239,9 +239,9 @@ export default function CompletedView() {
               No project milestones yet. Upload reports to begin tracking turnaround.
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[70vh]">
               <table className="w-full text-sm">
-                <thead>
+                <thead className="bg-card sticky top-0 z-10">
                   <tr className="border-b text-left text-xs uppercase text-muted-foreground">
                     <th className="px-4 py-2 font-semibold">Project</th>
                     <th className="px-4 py-2 font-semibold">Status</th>

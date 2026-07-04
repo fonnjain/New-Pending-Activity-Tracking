@@ -100,9 +100,9 @@ export function AiSanitizePanel({ importId }: { importId: number }) {
               <span>{result.counts.other} other</span>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[70vh]">
               <table className="w-full text-sm">
-                <thead>
+                <thead className="bg-card sticky top-0 z-10">
                   <tr className="text-left text-xs uppercase text-muted-foreground border-b border-border">
                     <th className="py-2 pr-3 font-semibold">Field</th>
                     <th className="py-2 pr-3 font-semibold">Change</th>

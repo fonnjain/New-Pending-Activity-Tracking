@@ -646,9 +646,9 @@ function ComputedFgContent() {
       ) : (
         <Card>
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[70vh]">
               <table className="w-full text-sm">
-                <thead className="border-b bg-muted/40">
+                <thead className="border-b bg-muted sticky top-0 z-10">
                   <tr className="text-left">
                     <th className="px-3 py-2 font-semibold">Project</th>
                     <th className="px-3 py-2 font-semibold cursor-pointer select-none" onClick={() => toggleSort("structure")}>
@@ -703,7 +703,7 @@ function ComputedFgContent() {
                     </tr>
                   </tbody>
                 ))}
-                <tfoot className="border-t-2 bg-muted/60 font-semibold">
+                <tfoot className="border-t-2 bg-muted font-semibold sticky bottom-0 z-10">
                   <tr>
                     <td className="px-3 py-2" colSpan={2}>Grand total ({rows.length})</td>
                     <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.releaseMt)}</td>
@@ -820,9 +820,9 @@ function OrderReconciliationContent() {
                   </div>
                 </div>
                 {order.fileImport.changeLog.updated.length > 0 && (
-                  <div className="mt-4 overflow-x-auto">
+                  <div className="mt-4 overflow-auto max-h-[70vh]">
                     <table className="w-full text-sm">
-                      <thead className="border-b bg-muted/40">
+                      <thead className="border-b bg-muted sticky top-0 z-10">
                         <tr className="text-left">
                           <th className="px-3 py-2 font-semibold">Project</th>
                           <th className="px-3 py-2 font-semibold">Structure</th>
@@ -882,9 +882,9 @@ function OrderReconciliationContent() {
                   No structures to reconcile.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                <div className="overflow-auto max-h-[70vh]">
                   <table className="w-full text-sm">
-                    <thead className="border-b bg-muted/40">
+                    <thead className="border-b bg-muted sticky top-0 z-10">
                       <tr className="text-left">
                         <th className="px-3 py-2 font-semibold">Project</th>
                         <th className="px-3 py-2 font-semibold">Structure</th>
@@ -969,9 +969,9 @@ function OrderReconciliationContent() {
                       No structures to reconcile.
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
+                    <div className="overflow-auto max-h-[70vh]">
                       <table className="w-full text-sm">
-                        <thead className="border-b bg-muted/40">
+                        <thead className="border-b bg-muted sticky top-0 z-10">
                           <tr className="text-left">
                             <th className="px-3 py-2 font-semibold">Project</th>
                             <th className="px-3 py-2 font-semibold">Structure</th>

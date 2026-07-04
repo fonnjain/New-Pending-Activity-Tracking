@@ -332,9 +332,9 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
                 No records for the selected filters.
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-auto max-h-[70vh]">
                 <table className="w-full text-sm">
-                  <thead>
+                  <thead className="bg-card sticky top-0 z-10">
                     <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
                       <th className="py-1.5 pr-3 font-medium">Contractor</th>
                       <th className="py-1.5 pr-3 font-medium text-right">Marks</th>
@@ -423,9 +423,9 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
                 No records for the selected filters.
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-auto max-h-[70vh]">
                 <table className="w-full text-sm">
-                  <thead>
+                  <thead className="bg-card sticky top-0 z-10">
                     <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
                       <th className="py-1.5 pr-3 font-medium">Stage</th>
                       <th className="py-1.5 pr-3 font-medium text-right">Marks</th>
@@ -512,9 +512,9 @@ function MarkDrill({
   }, [items]);
 
   return (
-    <div className="border-t border-border overflow-x-auto">
+    <div className="border-t border-border overflow-auto max-h-[70vh]">
       <table className="w-full text-sm">
-        <thead>
+        <thead className="bg-card sticky top-0 z-10">
           <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/30">
             <th className="py-1.5 px-3 font-medium">Mark</th>
             <th className="py-1.5 pr-3 font-medium">Activity</th>
@@ -599,9 +599,9 @@ function UrgencyWorklist({ records }: { records: ApiRecord[] }) {
             No within-target marks with a defined target for the current filters.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[70vh]">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="bg-card sticky top-0 z-10">
                 <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
                   <th className="py-1.5 pr-3 font-medium">Mark</th>
                   <th className="py-1.5 pr-3 font-medium">Activity</th>
