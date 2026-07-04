@@ -20,3 +20,4 @@ In the tracker frontend, `Filters.category` is a **non-null mode** (`"ALL" | "TL
 - The global FilterBar is hidden on `/jobs` (and requires `selectedImportId`), so the Job-wise/Section-wise page carries its **own** inline Order Type toggle that writes the same shared `filters.category`, keeping the two in sync.
 - `category` is NOT counted in `activeFilterCount` (it is always set, never a "filter").
 - Use the shared `components/ui/segmented.tsx` for the toggle.
+- Project-Wise phase column sub-labels (Cutting/Quality Check/Galvanising/Ready for Dispatch) must be mode-aware: use `processPhasesForMode(mode)` (domain) for the HEADER activity-code lists only. Body/footer cells still map `PROCESS_PHASES` by phase KEY (counting via `processPhase` unchanged) so header/body column counts and aggregation never drift. ALL = combined list; NTLT Cutting is empty (no C) — render "-" for empty phases.

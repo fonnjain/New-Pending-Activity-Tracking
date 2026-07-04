@@ -138,6 +138,49 @@ for (const phase of PROCESS_PHASES) {
   for (const code of phase.activities) PHASE_BY_CODE.set(code.toUpperCase(), phase.key);
 }
 
+// Order Type mode for the Project-Wise phase display. "ALL" shows every phase's
+// full activity list (TLT + NTLT); "TLT"/"NTLT" narrow each phase's listed codes
+// to just that category's sequences. Display/roll-up only — the phase KEYS and
+// the code->phase mapping (processPhase) are unchanged, so counting is identical.
+export type OrderTypeMode = "ALL" | MarkCategory;
+
+// Return PROCESS_PHASES with each phase's `activities` scoped to the given mode.
+// Codes are drawn IN SEQUENCE ORDER from the mode's own sequences (TLT = the TLT
+// route; NTLT = the union of the NTLT sequences, deduped first-seen), so e.g. the
+// NTLT Quality Check reads "NTF, NTFSW, NTFW, TS" rather than the combined list.
+export function processPhasesForMode(mode: OrderTypeMode): {
+  key: ProcessPhaseKey;
+  label: string;
+  activities: readonly string[];
+}[] {
+  if (mode === "ALL") return PROCESS_PHASES;
+  const seqs: readonly (readonly string[])[] =
+    mode === "TLT"
+      ? [SEQUENCES.TLT]
+      : Object.entries(SEQUENCES)
+          .filter(([k]) => k !== "TLT")
+          .map(([, seq]) => seq);
+  const perPhase = new Map<ProcessPhaseKey, string[]>(
+    PROCESS_PHASES.map((p) => [p.key, [] as string[]]),
+  );
+  const seen = new Set<string>();
+  for (const seq of seqs) {
+    for (const code of seq) {
+      const up = code.toUpperCase();
+      if (seen.has(up)) continue;
+      const key = PHASE_BY_CODE.get(up);
+      if (!key) continue;
+      seen.add(up);
+      perPhase.get(key)!.push(code);
+    }
+  }
+  return PROCESS_PHASES.map((phase) => ({
+    key: phase.key,
+    label: phase.label,
+    activities: perPhase.get(phase.key)!,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Activity bundles (filter shortcuts)
 // ---------------------------------------------------------------------------

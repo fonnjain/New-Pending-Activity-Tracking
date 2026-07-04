@@ -4,6 +4,7 @@ import {
   sortActivities,
   processPhase,
   PROCESS_PHASES,
+  processPhasesForMode,
   type ProcessPhaseKey,
 } from "@workspace/domain";
 import { useTracker, useContractorCategoryMap } from "@/lib/store";
@@ -73,6 +74,10 @@ function JobDashboardContent() {
   // Type shows BOTH — every row is resolved by its own category below.
   const isAll = filters.category === "ALL";
   const isNtlt = filters.category === "NTLT";
+  // Phase column headers list mode-specific activity codes (TLT vs NTLT vs both).
+  const headerPhases = processPhasesForMode(
+    isAll ? "ALL" : isNtlt ? "NTLT" : "TLT",
+  );
   const { data: rawRecords = [] } = useGetImportRecords(selectedImportId as number, {
     query: {
       enabled: !!selectedImportId,
@@ -472,11 +477,11 @@ function JobDashboardContent() {
               <TableHeader>
                 <TableRow>
                   <TableHead>{primaryLabel}</TableHead>
-                  {PROCESS_PHASES.map((ph) => (
+                  {headerPhases.map((ph) => (
                     <TableHead key={ph.key} className="text-right align-bottom">
                       <span className="block whitespace-nowrap">{ph.label}</span>
                       <span className="block text-[10px] font-normal text-muted-foreground normal-case leading-tight max-w-[180px] ml-auto">
-                        ({ph.activities.join(", ")})
+                        {ph.activities.length ? `(${ph.activities.join(", ")})` : "-"}
                       </span>
                       <span className="block text-[10px] font-normal text-muted-foreground normal-case">
                         wt / marks
