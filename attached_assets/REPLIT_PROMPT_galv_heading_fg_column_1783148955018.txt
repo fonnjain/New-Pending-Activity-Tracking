@@ -1,0 +1,51 @@
+REPLIT AGENT PROMPT — GALVANIZING HEADING = G, GB, Y + ADD BLANK "FG" PLACEHOLDER COLUMN
+=========================================================================================
+Two changes: (1) the "Galvanizing" heading/grouping now covers G, GB, AND Y everywhere in
+the app (display/grouping); (2) add a new "FG" (Finished Goods) field to the database as a
+placeholder, left BLANK everywhere for now — how it gets populated will be decided later.
+Deterministic; do not change the activity sequence, ageing, dedup, warnings, or completion/
+dispatch logic (those stay on their current basis for now).
+
+============================================================
+PART 1 — GALVANIZING HEADING NOW INCLUDES G, GB, Y (display/grouping)
+============================================================
+  - Wherever the app shows a "Galvanizing" section heading / grouping, it now groups
+    G, GB, AND Y together under it (previously G, GB only).
+  - This is a DISPLAY/GROUPING change of the heading. Keep Y as a distinct ACTIVITY
+    underneath (the sequence is unchanged: C,HG,RFI,NH,B,HAB,W,Q,TS,G,GB,Y) — Y is still its
+    own activity for ageing, milestones, dispatch, and per-activity views; it just now
+    appears within the "Galvanizing" heading/group.
+  - Apply everywhere the Galvanizing grouping/heading appears: Activity views, Plant
+    Operation Wise "Galvanization" tab (now shows G, GB, Y), any stage-group headings,
+    charts/legends, and reports that group by stage.
+  - The GALVANIZING activity BUNDLE (filter shortcut): update it to include Y as well ->
+    [G, GB, Y], so filtering "Galvanizing" returns G, GB and Y marks, consistent with the
+    heading. (If a separate "Yard" bundle exists, keep it available too for anyone who wants
+    Y alone, but the Galvanizing group/heading now spans G, GB, Y.)
+  - Do NOT change completion/milestone/dispatch logic in this step (they currently key off Y;
+    leave them as-is until FG is defined).
+
+============================================================
+PART 2 — ADD "FG" (Finished Goods) PLACEHOLDER FIELD (blank for now)
+============================================================
+  - Add a new field "fg" (Finished Goods) to the records / record_pool schema (Drizzle
+    migration) — nullable/blank. Also expose it in the record API schema (openapi.yaml) and
+    regenerate hooks/Zod.
+  - FG is a STANDALONE status, NOT part of the activity sequence and NOT one of the bundle
+    activities. Do not add FG to PROCESS_SEQUENCE or any bundle.
+  - Leave FG BLANK/empty everywhere for now — no logic reads from or writes to it yet. How FG
+    gets populated (manual, derived, or from a file) will be decided later; this step ONLY
+    creates the column so it exists.
+  - Keep FG OUT of the across-upload row hash (it is a derived/placeholder field, not a source
+    column) so dedup is unaffected.
+  - Optionally surface an empty "FG" column on the Order Status / relevant table (showing
+    blank) so the placeholder is visible — but no calculation depends on it.
+
+ACCEPTANCE CHECK
+  - Every "Galvanizing" heading/group in the app spans G, GB, Y; the Plant Operation Wise
+    Galvanization tab shows G, GB, Y; the Galvanizing bundle filter returns G, GB, Y.
+  - Y remains a distinct activity (sequence unchanged); ageing, milestones, dispatch still key
+    off Y for now (unchanged).
+  - A new "fg" field exists in the DB/API, blank everywhere, not in any sequence/bundle, not
+    in the dedup hash; nothing reads/writes it yet.
+  - No change to sequence, ageing, dedup, warnings, or completion/dispatch logic.
