@@ -204,8 +204,8 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
         <CollapsibleContent>
           <div className="border-t bg-card">
             <div className="overflow-x-auto">
-              <Table containerClassName="max-h-[28rem]">
-                <TableHeader className="sticky top-0 z-10 bg-card">
+              <Table>
+                <TableHeader>
                   <TableRow>
                     <TableHead>Job</TableHead>
                     <TableHead>Structure</TableHead>
