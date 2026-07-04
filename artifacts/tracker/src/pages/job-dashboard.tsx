@@ -355,8 +355,9 @@ function JobDashboardContent() {
         columns: [
           { label: groupLabel, field: "job" },
           { label: "Work Order (MT)", field: "workOrderMt", numeric: true, decimals: 3, total: true },
-          { label: "Release (MT)", field: "releaseMt", numeric: true, decimals: 3, total: true },
           { label: "Dispatch (MT)", field: "dispatchMt", numeric: true, decimals: 3, total: true },
+          { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
+          { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
           { label: "Structures", field: "structures", numeric: true, decimals: 0 },
           { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
           { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
@@ -370,8 +371,9 @@ function JobDashboardContent() {
         rows: sortedProjects.map((p) => ({
           job: p.job,
           workOrderMt: orderByJob.get(p.job)?.wo ?? 0,
-          releaseMt: orderByJob.get(p.job)?.rel ?? 0,
           dispatchMt: orderByJob.get(p.job)?.disp ?? 0,
+          dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
+          releaseBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.rel ?? 0),
           structures: p.structures,
           marks: p.marks,
           qty: p.qty,
@@ -531,8 +533,9 @@ function JobDashboardContent() {
                 <TableRow>
                   <TableHead>{primaryLabel}</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Work Order Qty</TableHead>
-                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Qty</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Qty</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Balance</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Balance</TableHead>
                   {headerPhases.map((ph) => (
                     <TableHead key={ph.key} className="text-right align-bottom">
                       <span className="block whitespace-normal leading-tight">{ph.label}</span>
@@ -571,10 +574,13 @@ function JobDashboardContent() {
                       {o ? formatWeight(o.wo * 1000) : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {o ? formatWeight(o.rel * 1000) : <span className="text-muted-foreground">-</span>}
+                      {o ? formatWeight(o.disp * 1000) : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {o ? formatWeight(o.disp * 1000) : <span className="text-muted-foreground">-</span>}
+                      {o ? formatWeight((o.wo - o.disp) * 1000) : <span className="text-muted-foreground">-</span>}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {o ? formatWeight((o.wo - o.rel) * 1000) : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       const cell = p.phases[ph.key];
@@ -609,7 +615,7 @@ function JobDashboardContent() {
                 })}
                 {byProject.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={PROCESS_PHASES.length + 6} className="text-center py-4 text-muted-foreground">
+                    <TableCell colSpan={PROCESS_PHASES.length + 7} className="text-center py-4 text-muted-foreground">
                       No data for the selected filters.
                     </TableCell>
                   </TableRow>
@@ -620,8 +626,9 @@ function JobDashboardContent() {
                   <TableRow className="border-t-2">
                     <TableCell className="font-bold uppercase tracking-wider text-xs">Total</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.wo * 1000)}</TableCell>
-                    <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.rel * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.disp * 1000)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.disp) * 1000)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.rel) * 1000)}</TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       const marks = byProject.reduce((s, p) => s + p.phases[ph.key].marks, 0);
                       const weight = byProject.reduce((s, p) => s + p.phases[ph.key].weight, 0);
