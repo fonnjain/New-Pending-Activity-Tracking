@@ -1,0 +1,76 @@
+REPLIT AGENT PROMPT — COMPUTE "WIP (Release Balance)" &amp; "Total Dispatch Balance" (WO Order Qty base)
+====================================================================================================
+Add two computed balance figures to the Order Status page, from the Order Review file, using
+WO Order Qty as the base (verified against the file's own balance columns). Cross-check the
+computed values against the file's balance columns and flag differences. Deterministic;
+display/computation only; do not change WIP parsing, ageing, dedup, or other logic.
+
+THE TWO EQUATIONS (per project + structure, weight in MT)
+  WIP (Release Balance)   = WO Order Qty (MT) − Release (MT)
+  Total Dispatch Balance  = WO Order Qty (MT) − Dispatch (MT)
+IMPORTANT: the base is WO ORDER QTY (the work-ordered / released-to-production quantity),
+NOT the full Order Qty. This matches the Order Review file's own Balance columns
+(Balance > Release (MT) and Balance > Despatch (MT)) at ~99.9% (release) / ~95% (dispatch)
+row-for-row; using full Order Qty does NOT reconcile. Order Qty (full contract) and WO Order
+Qty differ a lot (e.g. ~217,256 MT order vs ~133,655 MT work-ordered) because a large part of
+the order has not been work-ordered yet — and un-work-ordered quantity must NOT count in WIP
+or dispatch balance.
+
+COLUMN MAP (Order Review file; multi-row header ~rows 5-6; data ~row 8; JOIN key = Project +
+Structure where Structure = Col C = WIP Alias):
+  - Order Qty Weight (MT)        -> Col G  (full contract qty; store but NOT the balance base)
+  - WO Order Qty Weight (MT)     -> Col J  (the base for both balances)
+  - Progress > Release (MT)      -> Col L
+  - Progress > Despatch (MT)     -> Col Q
+  - Balance > Release (MT)       -> Col S  (file's own WIP/release balance — for cross-check)
+  - Balance > Despatch (MT)      -> Col W  (file's own dispatch balance — for cross-check)
+  (Also present: Progress Fabrication/Galvanising/Inspection in M/N/O; not needed here.)
+  Skip Sub Total / Total / Client / Order Dt. header rows. Forward-fill Project from the
+  "Project Code : NNN" rows. Normalize project codes (strip trailing dot/.0).
+
+1) STORE / COMPUTE
+  - Store per Order-Review structure row: order_qty_mt (G), wo_order_qty_mt (J), release_mt
+    (L), despatch_mt (Q), file_bal_release_mt (S), file_bal_despatch_mt (W).
+  - Compute:
+        wip_release_balance_mt = wo_order_qty_mt − release_mt
+        dispatch_balance_mt    = wo_order_qty_mt − despatch_mt
+    Treat blank numeric cells as 0 for the subtraction (a blank Release/Despatch = 0 done).
+    Clamp tiny negatives from rounding to 0 for display (flag if a value is materially
+    negative, e.g. < −0.02, as a data anomaly).
+  - Round to 3 decimals (MT) consistent with the file.
+
+2) SHOW ON ORDER STATUS
+  - Add two columns to the Order Status page (per project + structure), with project rollups:
+        "WIP (Release Balance)"  and  "Total Dispatch Balance".
+  - These sit alongside the existing Order Status fields (sets, weight, release, dispatch,
+    and the WIP-derived Fabrication/Galvanising/Yard). Keep the existing separate Yard/
+    Ready-for-Dispatch column as-is.
+  - Totals at the project level and overall.
+
+3) CROSS-CHECK vs THE FILE'S OWN BALANCE COLUMNS (reconciliation)
+  - Compare computed wip_release_balance_mt vs file_bal_release_mt (Col S), and
+    dispatch_balance_mt vs file_bal_despatch_mt (Col W).
+  - TOLERANCE = 1% (relative), consistent with the existing dispatch cross-check. If the
+    difference exceeds 1% (or a small absolute floor, e.g. 0.05 MT, to avoid noise on tiny
+    values), flag a MISMATCH.
+  - Surface mismatches on the Data page "Order Status" tab: Project | Structure | computed |
+    file value | diff | %diff | which balance (release/dispatch) | status. Summary count.
+  - This is reconciliation only — the computed value stands; the tab surfaces discrepancies
+    for review. (A small share of rows — ~5% for dispatch — legitimately differ due to source
+    edge cases; the flag lets a human see them.)
+
+4) CONTRACT
+  - Add the stored + computed fields to the Order Review schema and API (openapi.yaml);
+    regenerate hooks/Zod. Include them in exports.
+  - Keep out of the WIP record_pool hash (this is Order-Review data, joined at read time).
+
+ACCEPTANCE CHECK
+  - WIP (Release Balance) = WO Order Qty − Release; Total Dispatch Balance = WO Order Qty −
+    Dispatch, per project+structure, in MT, using Col J (WO Order Qty) as the base — NOT Col
+    G (Order Qty).
+  - Computed values reconcile with the file's Balance Release (S) and Balance Despatch (W)
+    within 1% for the large majority of rows; mismatches beyond 1% are listed on the Order
+    Status data tab.
+  - Blank release/despatch treated as 0; tiny negatives clamped, material negatives flagged.
+  - Columns shown on Order Status with project rollups and totals; exported; not in the WIP
+    hash. No change to WIP parsing, ageing, dedup, or other logic.

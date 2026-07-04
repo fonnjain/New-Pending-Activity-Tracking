@@ -1,0 +1,72 @@
+REPLIT AGENT PROMPT — COMPUTED FG (Finished Goods) TAB ON DATA PAGE (separate field, no auto-populate elsewhere)
+===============================================================================================================
+Add a "FG (Finished Goods)" tab on the Data page that shows Finished Goods computed per
+project + structure, for TLT and NTLT. Store the result in a NEW separate field "computed_fg"
+— do NOT populate the existing blank "fg" placeholder or change anything else in the app.
+Deterministic computation + a display tab; do not change WIP parsing, ageing, dedup, warnings,
+completion, or dispatch logic.
+
+THE FORMULA (per project + structure, weight in MT)
+    Computed FG = Release − (All Activities Balance Weight) − Dispatch
+  Where:
+    - Release (MT)  = Order Review file, Progress > Release (Col L) for that project+structure.
+    - Dispatch (MT) = Order Review file, Progress > Despatch (Col Q) for that project+structure.
+    - All Activities Balance Weight (MT) = sum of Balance Wt (÷1000) of that project+structure's
+      marks currently sitting in ANY activity in the WIP data (the mark-level pending work).
+        * TLT activities: C, HG, RFI, NH, B, HAB, W, Q, TS, G, GB, Y (all the TLT stages).
+        * NTLT activities: the NTLT stages (RSJ: NTF, NTFSW, NTFW, TS, G, GB, Y; Earthing/
+          General: TS, G, GB, Y). Use each row's own category activity set.
+      i.e. it's simply the total remaining balance weight of that structure's marks in the WIP
+      file (every mark still present is in some activity), grouped by project+structure.
+  MEANING: of what was released into production, subtract what is still moving through the
+  activities (WIP) and what has already been dispatched — the remainder is finished goods on
+  hand (finished, not yet dispatched).
+
+  NOTES / DATA HANDLING
+    - Base is Release (what entered production), NOT Order Qty and NOT WO Order Qty. (WO Order
+      Qty is only for the balance equations, not for FG.)
+    - Blank Release/Dispatch -> treat as 0.
+    - Small negative results (rounding/timing noise between the same-day WIP and Order Review
+      files, typically < ~1 MT) -> clamp to 0 for display AND flag the row as a minor anomaly.
+      Materially negative (e.g. < −1 MT) -> flag prominently for review (don't hide).
+    - Round to 3 decimals (MT).
+
+JOIN
+  - Join WIP marks to Order Review by Project + Structure (Structure = Order Review Col C = WIP
+    Alias), same key used across the app. Normalize project codes (strip trailing dot/.0).
+
+STORE — NEW SEPARATE FIELD (do NOT touch the existing blank "fg")
+  - Add a NEW field "computed_fg" (MT) at the project+structure level (a computed/derived
+    value; store where the Order-Review/Order-Status join data lives, or a dedicated
+    computed_fg table keyed by project+structure).
+  - The existing "fg" placeholder field stays BLANK and untouched. computed_fg is separate.
+  - Do NOT auto-populate FG anywhere else in the app (no Order Status column change, no
+    completion/dispatch change, no per-mark fg). computed_fg is shown ONLY on the new Data-page
+    FG tab for now.
+  - Expose computed_fg + its components via the API (openapi.yaml); regenerate hooks/Zod. Keep
+    out of the WIP record_pool hash.
+
+THE "FG" TAB ON THE DATA PAGE
+  - Add a tab labelled "FG (Finished Goods)" on the Data page (alongside the existing Order
+    Status tab etc.).
+  - Granularity: per Project + Structure, WITH project rollups (subtotals per project and a
+    grand total).
+  - Columns (show the components so FG is auditable):
+        Project | Structure | Release (MT) | All-Activities Balance / WIP (MT) | Dispatch (MT)
+        | Computed FG (MT) | flag (if negative/anomaly)
+  - Cover BOTH TLT and NTLT (TLT grouped by project; NTLT by section — show NTLT under its
+    section grouping in the same tab or a clearly separated block).
+  - Sortable; respects global filters where sensible; exportable (CSV/Excel) including
+    components and computed_fg.
+  - Results only (no inputs).
+
+ACCEPTANCE CHECK
+  - New "FG (Finished Goods)" tab on the Data page shows, per project+structure with project
+    rollups: Release, All-Activities Balance (WIP), Dispatch, and Computed FG = Release − WIP −
+    Dispatch (MT, 3 dp), for TLT and NTLT (respective activity sets).
+  - FG stored in a NEW "computed_fg" field; the existing "fg" placeholder stays blank; nothing
+    else in the app is auto-populated or changed.
+  - Blank Release/Dispatch = 0; small negatives clamped + flagged; material negatives flagged.
+  - Join on Project + Structure; project codes normalized; computed_fg exposed in API/exports;
+    not in the WIP hash.
+  - No change to WIP parsing, ageing, dedup, warnings, completion, or dispatch logic.
