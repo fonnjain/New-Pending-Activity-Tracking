@@ -45,6 +45,16 @@ export const recordPoolTable = pgTable("record_pool", {
   activity: text("activity"),
   operation: text("operation"),
   refJobCardNo: text("ref_job_card_no"),
+  // --- Work Order + MFC batch (source cols T + U; part of the row hash). ---
+  // Work Order No. (col T): stored, not used in logic yet (future use).
+  workOrderNo: text("work_order_no"),
+  // WO Batch No. (col U) = the MFC (Manufacturer Fabrication Clearance) batch
+  // letter, meaningful PER PROJECT. Stored NORMALIZED (trim/uppercase, blank ->
+  // "Z" so blanks sort AFTER real batches). The RAW pre-"Z" value (not this
+  // normalized one) is what joins the row hash, so a real batch change is a real
+  // change but the "Z" substitution itself never affects identity. Null on
+  // legacy rows (serialized as "Z").
+  mfcBatch: text("mfc_batch"),
   // --- Classification (Phase 1, additive; NOT part of the row hash/identity). ---
   // Derived at parse time from Order Nature (authoritative) + Tower Sub Type.
   // "TLT" for Structure rows; "NTLT" for RSJ Pole / Earthing / General; null when

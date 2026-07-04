@@ -36,6 +36,9 @@ export interface AggRecord {
   category: string | null;
   ntltSubtype: string | null;
   groupKey: string | null;
+  // MFC batch (WO Batch No.). Optional here because some legacy callers/rows may
+  // omit it; treat a missing value as "Z" (blanks group/sort after real batches).
+  mfcBatch?: string | null;
   // Optional: the generated client Record marks this optional (legacy rows
   // resolve it live), so AggRecord must too or `Record extends AggRecord` fails.
   holeOperation?: string | null;
@@ -55,6 +58,8 @@ export interface RecordFilters {
   ntltSubtype: string | null;
   job: string | null;
   section: string | null;
+  // MFC batch (WO Batch No.) filter. Compared against (r.mfcBatch || "Z").
+  mfcBatch: string | null;
   structure: string | null;
   mark: string | null;
   contractor: string | null;
@@ -178,6 +183,7 @@ export function filterRecords<T extends AggRecord>(
     if (filters.ntltSubtype && r.ntltSubtype !== filters.ntltSubtype) return false;
     if (filters.job && r.job !== filters.job) return false;
     if (filters.section && r.groupKey !== filters.section) return false;
+    if (filters.mfcBatch && (r.mfcBatch || "Z") !== filters.mfcBatch) return false;
     if (filters.structure && r.structure !== filters.structure) return false;
     if (filters.mark && r.markId !== filters.mark && r.markTail !== filters.mark)
       return false;

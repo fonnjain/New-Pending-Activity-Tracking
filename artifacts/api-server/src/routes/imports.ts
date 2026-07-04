@@ -287,6 +287,10 @@ function serializeRecord(
     contractor: r.contractor,
     orderNature: r.orderNature,
     refJobCardNo: r.refJobCardNo,
+    workOrderNo: r.workOrderNo ?? null,
+    // MFC batch (WO Batch No.); legacy rows are null -> serialized as "Z" so
+    // blanks group and sort after real batches everywhere on the client.
+    mfcBatch: r.mfcBatch ?? "Z",
     ageingDays: computeAgeing(r.activity, r.assignDate, r.lastProductionDate),
     routeSteps,
     currentStepIndex,
@@ -1453,6 +1457,7 @@ router.post("/imports/:id/summary", async (req, res): Promise<void> => {
     ntltSubtype: f.ntltSubtype ?? null,
     job: f.job ?? null,
     section: f.section ?? null,
+    mfcBatch: f.mfcBatch ?? null,
     structure: f.structure ?? null,
     mark: f.mark ?? null,
     contractor: f.contractor ?? null,

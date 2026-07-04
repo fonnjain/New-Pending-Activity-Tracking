@@ -503,6 +503,13 @@ export interface Record {
   /** @nullable */
   refJobCardNo: string | null;
   /**
+     * Work Order No. (col T). Stored only; not used in logic yet. Part of the row hash.
+     * @nullable
+     */
+  workOrderNo: string | null;
+  /** MFC batch (WO Batch No., col U), normalized (trim/uppercase). Blank -> "Z" so blanks group/sort after real batches. Raw pre-"Z" value is part of the row hash. */
+  mfcBatch: string;
+  /**
      * today - lastProductionDate (whole days; future clamped to 0). Null when no production date.
      * @nullable
      */
@@ -564,6 +571,8 @@ export interface SummaryFilters {
   job?: string | null;
   /** @nullable */
   section?: string | null;
+  /** @nullable */
+  mfcBatch?: string | null;
   /** @nullable */
   structure?: string | null;
   /** @nullable */

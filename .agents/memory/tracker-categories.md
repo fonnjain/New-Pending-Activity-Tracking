@@ -47,8 +47,9 @@ before classifying. The milestone Ready-block bug class lives here
 `classifyMark()` in parse.ts sets `category`/`ntltSubtype`/`groupType`/
 `groupKey`/`active` from Order Nature (Structure→TLT; RSJ POLE→NTLT/RSJ;
 EARTHING/GENERAL→NTLT/...; FOUNDATION BOLT→active=false). These five fields are
-**NOT in `hashRow`** (still 19 source cols only) — classification never changes
-identity/dedup/ageing.
+**NOT in `hashRow`** — classification never changes identity/dedup/ageing.
+(`hashRow` is now the 21 source cols: 19 original + col T Work Order No. + RAW
+col U WO Batch; see `tracker-mfc-grouping.md`.)
 
 ## Degradation
 NTLT activities missing from `settings` fall back to `DEFAULT_ACTIVITY_CONFIG`

@@ -1614,6 +1614,12 @@ components:
           type: ["string", "null"]
         refJobCardNo:
           type: ["string", "null"]
+        workOrderNo:
+          type: ["string", "null"]
+          description: Work Order No. (col T). Stored only; not used in logic yet. Part of the row hash.
+        mfcBatch:
+          type: string
+          description: MFC batch (WO Batch No., col U), normalized (trim/uppercase). Blank -> "Z" so blanks group/sort after real batches. Raw pre-"Z" value is part of the row hash.
         ageingDays:
           type: ["integer", "null"]
           description: today - lastProductionDate (whole days; future clamped to 0). Null when no production date.
@@ -1679,6 +1685,8 @@ components:
         - contractor
         - orderNature
         - refJobCardNo
+        - workOrderNo
+        - mfcBatch
         - ageingDays
         - routeSteps
         - currentStepIndex
@@ -1700,6 +1708,8 @@ components:
         job:
           type: ["string", "null"]
         section:
+          type: ["string", "null"]
+        mfcBatch:
           type: ["string", "null"]
         structure:
           type: ["string", "null"]

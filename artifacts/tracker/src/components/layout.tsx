@@ -179,8 +179,9 @@ function FilterBar() {
       ? (!filters.ntltSubtype || r.ntltSubtype === filters.ntltSubtype) &&
         (!filters.section || r.groupKey === filters.section)
       : (!filters.job || r.job === filters.job) &&
+        (!filters.mfcBatch || (r.mfcBatch || "Z") === filters.mfcBatch) &&
         (!filters.structure || r.structure === filters.structure)),
-    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.structure]
+    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.mfcBatch, filters.structure]
   );
 
   // TLT primary dimension = Project (job).
@@ -198,13 +199,24 @@ function FilterBar() {
     [modeRecords, filters.ntltSubtype]
   );
 
-  const structures = useMemo(
+  // TLT sub-level = MFC batch (WO Batch No.), between Project and Structure.
+  // Narrowed to the active project; sorted A..Z so the blank-origin "Z" bucket
+  // always lands last.
+  const mfcBatches = useMemo(
     () => Array.from(new Set(modeRecords
       .filter(r => !filters.job || r.job === filters.job)
+      .map(r => r.mfcBatch || "Z")
+    )).sort(),
+    [modeRecords, filters.job]
+  );
+
+  const structures = useMemo(
+    () => Array.from(new Set(modeRecords
+      .filter(r => (!filters.job || r.job === filters.job) && (!filters.mfcBatch || (r.mfcBatch || "Z") === filters.mfcBatch))
       .map(r => r.structure)
       .filter(Boolean)
     )).sort(),
-    [modeRecords, filters.job]
+    [modeRecords, filters.job, filters.mfcBatch]
   );
 
   const marks = useMemo(
@@ -319,6 +331,19 @@ function FilterBar() {
               />
             )}
           </div>
+          {/* MFC batch (TLT sub-level, between Project and Structure). Hidden in
+             NTLT mode where Section is the primary dimension. */}
+          {!isNtlt && (
+            <div className="w-[150px]">
+              <SearchableSelect
+                value={filters.mfcBatch}
+                onChange={(v) => setFilter("mfcBatch", v)}
+                options={mfcBatches}
+                allLabel="All MFC"
+                searchPlaceholder="Search MFC..."
+              />
+            </div>
+          )}
           <div className="w-[180px]">
             <SearchableSelect
               value={filters.activity}

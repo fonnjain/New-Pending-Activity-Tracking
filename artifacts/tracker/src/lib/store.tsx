@@ -12,6 +12,7 @@ export interface Filters {
   ntltSubtype: string | null; // "RSJ" | "EARTHING" | "GENERAL" (only within NTLT)
   job: string | null; // primary dimension in TLT mode
   section: string | null; // primary dimension in NTLT mode (matches groupKey)
+  mfcBatch: string | null; // TLT sub-level: MFC batch (WO Batch No.), between Project and Structure
   structure: string | null;
   mark: string | null;
   contractor: string | null;
@@ -36,6 +37,7 @@ const defaultFilters: Filters = {
   ntltSubtype: null,
   job: null,
   section: null,
+  mfcBatch: null,
   structure: null,
   mark: null,
   contractor: null,
@@ -78,6 +80,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
         next.ntltSubtype = null;
         next.job = null;
         next.section = null;
+        next.mfcBatch = null;
         next.structure = null;
         next.mark = null;
         // A TLT-scoped activity bundle is not offered outside TLT mode; drop it
@@ -88,7 +91,13 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
           if (b && b.scope === "TLT" && value !== "TLT") next.activity = null;
         }
       } else if (key === "job") {
-        // TLT primary cascade: Project -> Structure -> Mark
+        // TLT primary cascade: Project -> MFC -> Structure -> Mark
+        next.mfcBatch = null;
+        next.structure = null;
+        next.mark = null;
+      } else if (key === "mfcBatch") {
+        // MFC sits between Project and Structure in TLT; narrowing it drops any
+        // stale structure/mark selection from a different batch.
         next.structure = null;
         next.mark = null;
       } else if (key === "section") {
@@ -237,6 +246,7 @@ export function resolveActiveFilters(filters: Filters): {
       ntltSubtype: filters.ntltSubtype,
       job: filters.job,
       section: filters.section,
+      mfcBatch: filters.mfcBatch,
       structure: filters.structure,
       mark: filters.mark,
       contractor: filters.contractor,

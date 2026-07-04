@@ -20,6 +20,8 @@ export interface SummaryFilters {
   /** @nullable */
   section?: string | null;
   /** @nullable */
+  mfcBatch?: string | null;
+  /** @nullable */
   structure?: string | null;
   /** @nullable */
   mark?: string | null;

@@ -132,8 +132,12 @@ function JobDashboardContent() {
   };
   const secondaryOf = (r: { structure: string | null; ntltSubtype: string | null; category: string | null }) =>
     rowIsNtlt(r) ? r.ntltSubtype : r.structure;
+  // MFC batch (WO Batch No.) is a TLT-only sub-level between Project and
+  // Structure. Blank-origin batches resolve to "Z" so they sort/group last.
+  const mfcOf = (r: { mfcBatch?: string | null }) => r.mfcBatch || "Z";
 
   const [project, setProject] = useState<string | null>(null);
+  const [mfcBatch, setMfcBatch] = useState<string | null>(null);
   const [structure, setStructure] = useState<string | null>(null);
   const [mark, setMark] = useState<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
@@ -146,6 +150,7 @@ function JobDashboardContent() {
   const switchMode = (v: string | null) => {
     if (!v || v === filters.category) return;
     setProject(null);
+    setMfcBatch(null);
     setStructure(null);
     setMark(null);
     setSelectedJob(null);
@@ -158,17 +163,37 @@ function JobDashboardContent() {
     [records, isNtlt, isAll],
   );
 
+  // MFC options are TLT-only, scoped to the active project. Sorted A..Z so the
+  // blank-origin "Z" bucket always lands last.
+  const mfcOptions = useMemo(
+    () =>
+      isNtlt
+        ? []
+        : Array.from(
+            new Set(
+              records
+                .filter((r) => !project || primaryOf(r) === project)
+                .map((r) => mfcOf(r)),
+            ),
+          ).sort(),
+    [records, project, isNtlt],
+  );
+
   const structureOptions = useMemo(
     () =>
       Array.from(
         new Set(
           records
-            .filter((r) => !project || primaryOf(r) === project)
+            .filter(
+              (r) =>
+                (!project || primaryOf(r) === project) &&
+                (!mfcBatch || mfcOf(r) === mfcBatch),
+            )
             .map((r) => secondaryOf(r))
             .filter((s): s is string => Boolean(s)),
         ),
       ).sort(),
-    [records, project, isNtlt, isAll],
+    [records, project, mfcBatch, isNtlt, isAll],
   );
 
   const markOptions = useMemo(
@@ -179,17 +204,24 @@ function JobDashboardContent() {
             .filter(
               (r) =>
                 (!project || primaryOf(r) === project) &&
+                (!mfcBatch || mfcOf(r) === mfcBatch) &&
                 (!structure || secondaryOf(r) === structure),
             )
             .map((r) => r.markId)
             .filter(Boolean),
         ),
       ).sort(),
-    [records, project, structure, isNtlt, isAll],
+    [records, project, mfcBatch, structure, isNtlt, isAll],
   );
 
   const setProjectCascade = (v: string | null) => {
     setProject(v);
+    setMfcBatch(null);
+    setStructure(null);
+    setMark(null);
+  };
+  const setMfcCascade = (v: string | null) => {
+    setMfcBatch(v);
     setStructure(null);
     setMark(null);
   };
@@ -202,11 +234,12 @@ function JobDashboardContent() {
     () =>
       records.filter((r) => {
         if (project && primaryOf(r) !== project) return false;
+        if (mfcBatch && mfcOf(r) !== mfcBatch) return false;
         if (structure && secondaryOf(r) !== structure) return false;
         if (mark && r.markId !== mark) return false;
         return true;
       }),
-    [records, project, structure, mark, isNtlt, isAll],
+    [records, project, mfcBatch, structure, mark, isNtlt, isAll],
   );
 
   const { totalProjects, totalMarks, totalQty, totalWt, avgAgeing, byProject, byActivity } =
@@ -429,7 +462,7 @@ function JobDashboardContent() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className={`grid grid-cols-1 sm:grid-cols-2 ${isNtlt ? "lg:grid-cols-4" : "lg:grid-cols-5"} gap-3`}>
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">
                 Order Type
@@ -456,6 +489,21 @@ function JobDashboardContent() {
                 searchPlaceholder={`Search ${primaryLabel.toLowerCase()}s...`}
               />
             </div>
+            {!isNtlt && (
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">
+                  MFC
+                </label>
+                <SearchableSelect
+                  value={mfcBatch}
+                  onChange={setMfcCascade}
+                  options={mfcOptions}
+                  allLabel="All MFC"
+                  searchPlaceholder="Search MFC..."
+                  disabled={mfcOptions.length === 0}
+                />
+              </div>
+            )}
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">
                 {secondaryLabel}
@@ -739,8 +787,20 @@ function JobDetail({
   const [search, setSearch] = useState("");
   const [activity, setActivity] = useState<string | null>(null);
   const [contractor, setContractor] = useState<string | null>(null);
+  const [mfc, setMfc] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<RecordSortKey>("activity");
   const [showAll, setShowAll] = useState(false);
+
+  const jobIsNtlt = records.some((r) => (r.category || "TLT") === "NTLT");
+  const mfcVal = (r: { mfcBatch?: string | null }) => r.mfcBatch || "Z";
+  // TLT-only MFC batch options within this project, sorted A..Z ("Z" last).
+  const mfcOptions = useMemo(
+    () =>
+      jobIsNtlt
+        ? []
+        : Array.from(new Set(records.map((r) => mfcVal(r)))).sort(),
+    [records, jobIsNtlt],
+  );
 
   const activityOptions = useMemo(
     () =>
@@ -762,6 +822,7 @@ function JobDetail({
     const q = search.trim().toLowerCase();
     return records.filter((r) => {
       if (activity && r.activity !== activity) return false;
+      if (mfc && mfcVal(r) !== mfc) return false;
       if (!matchesContractorSelection(r.contractor, contractor, categoryMap)) return false;
       if (
         q &&
@@ -772,11 +833,38 @@ function JobDetail({
         return false;
       return true;
     });
-  }, [records, search, activity, contractor, categoryMap]);
+  }, [records, search, activity, mfc, contractor, categoryMap]);
 
   const sortedRows = useMemo(() => sortRecords(filtered, sortBy), [filtered, sortBy]);
 
-  const isNtlt = records.some((r) => (r.category || "TLT") === "NTLT");
+  const isNtlt = jobIsNtlt;
+
+  // MFC-batch rollups within this project (TLT only): totals per batch so users
+  // can see qty/weight/ageing per MFC. Sorted A..Z with the "Z" bucket last.
+  const byMfc = useMemo(() => {
+    if (isNtlt) return [];
+    const groups = new Map<string, any[]>();
+    for (const r of filtered) {
+      const k = mfcVal(r);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(r);
+    }
+    return Array.from(groups.entries())
+      .map(([batch, recs]) => {
+        const aged = recs.filter((r) => r.ageingDays !== null);
+        return {
+          batch,
+          structures: new Set(recs.map((r) => r.structure).filter(Boolean)).size,
+          marks: recs.length,
+          qty: recs.reduce((s, r) => s + r.balanceQty, 0),
+          weight: recs.reduce((s, r) => s + r.balanceWt, 0),
+          avgAge: aged.length
+            ? Math.round(aged.reduce((s, r) => s + (r.ageingDays || 0), 0) / aged.length)
+            : null,
+        };
+      })
+      .sort((a, b) => a.batch.localeCompare(b.batch));
+  }, [filtered, isNtlt]);
   const secondaryNoun = isNtlt ? "sub-categories" : "structures";
   const structureCount = useMemo(
     () =>
@@ -822,7 +910,7 @@ function JobDetail({
             className="pl-9"
           />
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className={`grid grid-cols-1 sm:grid-cols-2 ${isNtlt ? "" : "lg:grid-cols-3"} gap-3`}>
           <div className="space-y-1">
             <label className="text-xs font-semibold text-muted-foreground uppercase">
               Activity
@@ -836,6 +924,21 @@ function JobDetail({
               disabled={activityOptions.length === 0}
             />
           </div>
+          {!isNtlt && (
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-muted-foreground uppercase">
+                MFC
+              </label>
+              <SearchableSelect
+                value={mfc}
+                onChange={setMfc}
+                options={mfcOptions}
+                allLabel="All MFC"
+                searchPlaceholder="Search MFC..."
+                disabled={mfcOptions.length === 0}
+              />
+            </div>
+          )}
           <div className="space-y-1">
             <label className="text-xs font-semibold text-muted-foreground uppercase">
               Contractor
@@ -851,6 +954,48 @@ function JobDetail({
         </div>
       </div>
 
+      {!isNtlt && byMfc.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+              By MFC Batch
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>MFC</TableHead>
+                    <TableHead className="text-right">Structures</TableHead>
+                    <TableHead className="text-right">Marks</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="text-right">Wt</TableHead>
+                    <TableHead className="text-right">Avg Ageing</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {byMfc.map((m) => (
+                    <TableRow
+                      key={m.batch}
+                      className="cursor-pointer"
+                      onClick={() => setMfc(mfc === m.batch ? null : m.batch)}
+                    >
+                      <TableCell className="font-mono font-medium">{m.batch}</TableCell>
+                      <TableCell className="text-right">{m.structures}</TableCell>
+                      <TableCell className="text-right">{m.marks}</TableCell>
+                      <TableCell className="text-right">{m.qty.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{formatWeight(m.weight)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{m.avgAge ?? "-"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardContent className="p-0">
           <div className="flex items-center justify-end px-4 py-3 border-b">
@@ -861,6 +1006,7 @@ function JobDetail({
               <TableHeader>
                 <TableRow>
                   <TableHead>Structure</TableHead>
+                  {!isNtlt && <TableHead>MFC</TableHead>}
                   <TableHead>Mark</TableHead>
                   <TableHead>Activity</TableHead>
                   <TableHead>Section</TableHead>
@@ -875,6 +1021,7 @@ function JobDetail({
                 {visibleRows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="font-medium whitespace-nowrap">{r.structure || "-"}</TableCell>
+                    {!isNtlt && <TableCell className="font-mono whitespace-nowrap">{mfcVal(r)}</TableCell>}
                     <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
                     <TableCell className="whitespace-nowrap">{r.activity || "-"}</TableCell>
                     <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || "-"}</TableCell>
@@ -889,7 +1036,7 @@ function JobDetail({
                 ))}
                 {sortedRows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">
+                    <TableCell colSpan={isNtlt ? 9 : 10} className="text-center py-4 text-muted-foreground">
                       No marks found for this {label.toLowerCase()}.
                     </TableCell>
                   </TableRow>

@@ -210,6 +210,8 @@ const COL = {
   operation: "Operation",
   refJobCard: "Ref. Job Card No.",
   lastProductionDate: "Last Production Entry Date",
+  workOrderNo: "Work Order No.",
+  woBatchNo: "WO Batch No.",
 } as const;
 
 // Derived identity for a Mark No. (col H). See the consolidated Rules 0, A-D
@@ -367,7 +369,14 @@ export function deriveMark(
 
 // Canonical, order-stable serialization of all normalized source fields, hashed
 // to a hex digest. Two rows with identical normalized content share a hash.
-function hashRow(row: Omit<InsertRecordPool, "hash">): string {
+// `rawBatch` is the RAW (pre-"Z", pre-uppercase) WO Batch No. source value —
+// NOT row.mfcBatch (which is normalized to "Z" for blanks). Hashing the raw
+// value means a genuine batch change is a real change while the display-only "Z"
+// substitution never affects identity, and a blank batch stays blank in the hash.
+function hashRow(
+  row: Omit<InsertRecordPool, "hash">,
+  rawBatch: string | null,
+): string {
   const parts = [
     row.job,
     row.orderNature,
@@ -388,6 +397,8 @@ function hashRow(row: Omit<InsertRecordPool, "hash">): string {
     row.activity,
     row.operation,
     row.refJobCardNo,
+    row.workOrderNo,
+    rawBatch,
   ].map((v) => (v == null ? "\u0000" : String(v)));
   return createHash("sha256").update(parts.join("\u0001")).digest("hex");
 }
@@ -658,8 +669,15 @@ export function parseWorkbook(
 
     const towerSubType = emptyToNull(row[COL.towerSubType]);
     const section = emptyToNull(row[COL.section]);
+    // Work Order No. (col T) stored trimmed/null (unused in logic for now).
+    const workOrderNo = emptyToNull(row[COL.workOrderNo]);
+    // WO Batch No. (col U) = MFC batch. Raw (trimmed) value drives the hash;
+    // the stored/displayed value is normalized (uppercased, blank -> "Z" so
+    // blanks sort after real batches A, B, C ...).
+    const rawBatch = emptyToNull(row[COL.woBatchNo]);
+    const mfcBatch = rawBatch ? rawBatch.toUpperCase() : "Z";
     // Classify the mark (TLT vs NTLT + subtype). Additive — these fields are NOT
-    // hashed (hashRow lists only the 19 source columns), so identity is unchanged.
+    // hashed (hashRow lists only source columns), so identity is unchanged.
     const { classification, conflict } = classifyMark({
       orderNature,
       towerSubType,
@@ -696,6 +714,8 @@ export function parseWorkbook(
       activity: emptyToNull(row[COL.activity]),
       operation: emptyToNull(row[COL.operation]),
       refJobCardNo: emptyToNull(row[COL.refJobCard]),
+      workOrderNo,
+      mfcBatch,
       category: classification.category,
       ntltSubtype: classification.ntltSubtype,
       groupType: classification.groupType,
@@ -725,7 +745,7 @@ export function parseWorkbook(
     base.holeOperation = holeOp.holeOperation;
     base.holeOperationSource = holeOp.holeOperationSource;
 
-    rows.push({ ...base, hash: hashRow(base) });
+    rows.push({ ...base, hash: hashRow(base, rawBatch) });
   }
 
   const distinct = new Set(rows.map((r) => r.hash));

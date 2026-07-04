@@ -34,7 +34,7 @@ Mobile-first web app for steel-fabrication workshops. Upload an Excel (.xlsx/.xl
 ## Core invariants (never break)
 
 - **Strictly additive.** No feature below ever changes parsing, Activity values, qty, dedup/hash identity, or ageing math. TLT behaviour is byte-for-byte unchanged.
-- **Hash = the 19 source columns only** (incl. col S). Derived/classification/thickness fields are excluded, so read-time cleanups never change identity. NO within-file dedup; `hash` dedups across uploads only.
+- **Hash = the 21 source columns only** (the 19 original incl. col S, plus col T "Work Order No." + the RAW pre-"Z" col U "WO Batch No."). Derived/classification/thickness/MFC-normalization fields are excluded, so read-time cleanups never change identity. NO within-file dedup; `hash` dedups across uploads only. A genuine batch/work-order change is a real change; the blank→"Z" display substitution is NOT hashed (blank stays blank).
 - **Live ageing, never stored.** Recomputed at read time. **Activity `C` ages from `assignDate`; every other activity ages from `lastProductionDate`** (col S). Future dates clamp to today (ageing 0); blank/unparseable → `null` (excluded from buckets/averages). **Do NOT extend the assign-date fallback to non-C rows.** Null labels are activity-aware: "Not started" (C + blank assign) else "No production date".
 - **Append-only merge.** Each upload = one immutable import; default view = newest. Re-upload is idempotent.
 - Tailwind v4: never `@apply` a custom utility class — use raw CSS.
@@ -93,7 +93,8 @@ TLT/NTLT Order Type toggle switches both the primary filter dimension and groupi
 
 ## Parsing rules (parse.ts)
 
-- Reads `Sheet1` (else first sheet); all 19 columns (col S = "Last Production Entry Date", 19th).
+- Reads `Sheet1` (else first sheet); 21 columns (col S = "Last Production Entry Date", 19th; col T = "Work Order No.", 20th, stored only/unused; col U = "WO Batch No." = MFC batch letter, 21st).
+- **MFC batch (col U, additive display grouping).** `mfcBatch` = trim/upper of col U; blank → "Z" (sorts last). `workOrderNo` = col T (emptyToNull, stored only). Both stored on `record_pool`. The RAW pre-"Z" batch + `workOrderNo` are hashed; the "Z" substitution and trim/upper normalization are NOT. For TLT, MFC is a grouping level between Project and Structure (Project→MFC→Structure→Mark), per-project; global + drilldown MFC filters and MFC rollups. NTLT unaffected (stays Section-grouped).
 - **Header auto-detected:** scans first ~10 rows for `Project Code`; data starts next row. Falls back to row 3 (historical) with a problem note.
 - **Conditional Project Code forward-fill.** Blank Project Code inherits the last project ONLY when `Order Nature` is `Structure`. `RSJ POLE`/`EARTHING`/`GENERAL` and blank/unknown Order Nature → `job = "(Unassigned)"` (must NOT borrow a project; excluded from `projectsFound`; mark-derivation project empty). Normalizes `"794."`→`794`.
 - **Category classification (additive, NOT hashed).** `classifyMark()` tags `category` (TLT/NTLT/null), `ntltSubtype`, `groupType`, `groupKey`, `active`: `Structure`→TLT (groupKey = job); `RSJ POLE`→NTLT/RSJ (groupKey = cleaned RSJ prefix); `EARTHING`/`GENERAL`→NTLT (groupKey = normalized Section); `FOUNDATION BOLT`→`active=false`; unknown→nulls. Drives per-category sequence; excluded from `hashRow`.
