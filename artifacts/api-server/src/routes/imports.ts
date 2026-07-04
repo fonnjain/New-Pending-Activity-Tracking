@@ -297,6 +297,8 @@ function serializeRecord(
     thicknessSource,
     sectionType: hole.sectionType,
     holeOperation: hole.holeOperation,
+    // Finished Goods placeholder — currently blank everywhere (nothing writes it).
+    fg: r.fg ?? null,
   };
 }
 

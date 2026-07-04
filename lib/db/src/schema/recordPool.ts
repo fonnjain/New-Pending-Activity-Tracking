@@ -70,6 +70,12 @@ export const recordPoolTable = pgTable("record_pool", {
   holeOperation: text("hole_operation"),
   // "rule_thickness" | "rule_fixed" | "not_applicable" | "unknown".
   holeOperationSource: text("hole_operation_source"),
+  // --- Finished Goods (placeholder, additive; NOT part of the row hash/identity). ---
+  // Reserved for a future "Finished Goods" status. Left blank (null) everywhere
+  // for now — nothing reads or writes it, it is not in any PROCESS_SEQUENCE or
+  // ACTIVITY_BUNDLE, and it is excluded from the row hash so it never affects
+  // dedup/identity. Nullable so legacy rows stay valid.
+  fg: text("fg"),
 });
 
 export const insertRecordPoolSchema = createInsertSchema(recordPoolTable).omit({

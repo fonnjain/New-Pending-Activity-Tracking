@@ -228,7 +228,7 @@ function FilterBar() {
   // Yard); TLT and All modes offer every bundle.
   const activityGroups = useMemo(() => {
     const bundles = ACTIVITY_BUNDLES
-      .filter(b => (isNtlt ? b.scope === "ALL" : true))
+      .filter(b => !b.hidden && (isNtlt ? b.scope === "ALL" : true))
       .map(b => ({ value: `bundle:${b.id}`, label: b.label }));
     const groups: { heading?: string; options: { value: string; label: string }[] }[] = [];
     if (bundles.length) groups.push({ heading: "Bundles", options: bundles });

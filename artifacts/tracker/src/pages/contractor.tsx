@@ -16,8 +16,13 @@ import { compareActivity, contractorCategoryLabel, outVendorTypeLabel, bundleAct
 // Activity scopes for the per-contractor load split, sliced from the canonical
 // bundles in @workspace/domain. Display/aggregation only.
 const FAB_SET = bundleActivitySet("TLT_FABRICATION") ?? new Set<string>();
-const GALVA_SET = bundleActivitySet("GALVANIZING") ?? new Set<string>();
 const YARD_SET = bundleActivitySet("YARD") ?? new Set<string>();
+// The GALVANIZING bundle now spans G,GB,Y, but this table keeps a SEPARATE Yard
+// Load column, so exclude the Yard codes to keep Galvanizing at G,GB (no double
+// count of Y).
+const GALVA_SET = new Set(
+  [...(bundleActivitySet("GALVANIZING") ?? [])].filter((c) => !YARD_SET.has(c)),
+);
 
 // Small inline badge for a contractor's sub-category (+ FAB/GALVA tags). Display
 // only; resolved live from the overlay map. Unclassified contractors render a
@@ -230,7 +235,7 @@ function ContractorContent() {
                       className="text-right align-top font-mono tabular-nums text-foreground text-base hover:text-primary hover:underline"
                       onClick={(e) => {
                         e.stopPropagation();
-                        drillWithActivity(s.name, "bundle:GALVANIZING");
+                        drillWithActivity(s.name, "bundle:GALVANIZING_CORE");
                       }}
                     >
                       {formatWeight(s.galvaLoad)}

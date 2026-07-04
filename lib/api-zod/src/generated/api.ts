@@ -1290,7 +1290,8 @@ export const GetImportRecordsResponseItem = zod.object({
   "thicknessMm": zod.number().nullish().describe('Live-resolved galvanizing thickness (mm). Null when unset\/unparseable. Never stored on the pool row, never in the hash.'),
   "thicknessSource": zod.enum(['tlt_angle', 'tlt_plate', 'rsj_exact', 'rsj_base', 'rsj_default', 'manual', 'unset']).optional().describe('How thicknessMm was derived (or \"unset\" when not yet resolved).'),
   "sectionType": zod.union([zod.literal('ANGLE'),zod.literal('PLATE'),zod.literal('CHANNEL'),zod.literal('BEAM'),zod.literal('RSJ'),zod.literal('FLAT'),zod.literal('PIPE'),zod.literal('ROUND'),zod.literal('GRATING'),zod.literal('OTHER'),zod.literal(null)]).nullish().describe('Derived section family from the Section string. Null only on legacy rows pending backfill.'),
-  "holeOperation": zod.union([zod.literal('PUNCHING'),zod.literal('DRILLING'),zod.literal('NOT_SET'),zod.literal(null)]).nullish().describe('Derived hole operation. Channel\/Beam\/RSJ always DRILLING; Angle\/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.')
+  "holeOperation": zod.union([zod.literal('PUNCHING'),zod.literal('DRILLING'),zod.literal('NOT_SET'),zod.literal(null)]).nullish().describe('Derived hole operation. Channel\/Beam\/RSJ always DRILLING; Angle\/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.'),
+  "fg": zod.string().nullish().describe('Finished Goods placeholder. Blank (null) everywhere for now — not in any process sequence\/bundle and not in the row hash. Reserved for future use.')
 })
 export const GetImportRecordsResponse = zod.array(GetImportRecordsResponseItem)
 

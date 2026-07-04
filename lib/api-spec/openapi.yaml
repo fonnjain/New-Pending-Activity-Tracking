@@ -1603,6 +1603,9 @@ components:
           type: ["string", "null"]
           enum: [PUNCHING, DRILLING, NOT_SET, null]
           description: Derived hole operation. Channel/Beam/RSJ always DRILLING; Angle/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.
+        fg:
+          type: ["string", "null"]
+          description: Finished Goods placeholder. Blank (null) everywhere for now — not in any process sequence/bundle and not in the row hash. Reserved for future use.
       required:
         - id
         - importId

@@ -96,4 +96,9 @@ export interface Record {
      * @nullable
      */
   holeOperation?: RecordHoleOperation;
+  /**
+     * Finished Goods placeholder. Blank (null) everywhere for now — not in any process sequence/bundle and not in the row hash. Reserved for future use.
+     * @nullable
+     */
+  fg?: string | null;
 }

@@ -202,6 +202,10 @@ export interface ActivityBundle {
   label: string;
   scope: BundleScope;
   activities: readonly string[];
+  // Hidden bundles are resolvable (getActivityBundle / bundleActivitySet still
+  // return them) but are NOT offered in the activity dropdown. Used for internal
+  // drill-down targets that must not appear as a user-selectable shortcut.
+  hidden?: boolean;
 }
 
 // Bundle boundary between fabrication and galvanising. TS (Tee Stock) is the last
@@ -235,8 +239,24 @@ export const ACTIVITY_BUNDLES: readonly ActivityBundle[] = [
     id: "GALVANIZING",
     label: "Galvanizing",
     scope: "ALL",
-    // G, GB (TS excluded — it now lives in the fabrication bundles).
+    // G, GB, Y — the Galvanizing stage-group/filter now spans through the
+    // terminal Yard step (TS still excluded — it lives in the fabrication
+    // bundles). Y also remains available on its own via the YARD bundle. Roll-up
+    // tables that keep a SEPARATE Yard column (Order Status, Contractor) must
+    // exclude the Yard codes from this set to avoid double-counting Y.
+    activities: PROCESS_SEQUENCE.slice(BUNDLE_GALV_START_INDEX),
+  },
+  {
+    // Hidden drill-down target: the Galvanizing stage EXCLUDING the terminal Yard
+    // step (G, GB). Used by roll-up tables that show a separate Yard column
+    // (e.g. Contractor's "Galvanizing Load" cell) so the drill matches the cell's
+    // G,GB-only metric instead of the wider G,GB,Y GALVANIZING bundle. Not shown
+    // in the activity dropdown.
+    id: "GALVANIZING_CORE",
+    label: "Galvanizing (G, GB)",
+    scope: "ALL",
     activities: PROCESS_SEQUENCE.slice(BUNDLE_GALV_START_INDEX, DISPATCH_INDEX),
+    hidden: true,
   },
   {
     id: "YARD",

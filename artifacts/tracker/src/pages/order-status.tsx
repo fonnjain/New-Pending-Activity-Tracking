@@ -23,8 +23,13 @@ import {
 // Activity buckets used to roll WIP marks into Fabrication / Galvanizing / Yard.
 // Galvanizing = G,GB; Yard = Y (terminal). Everything else still in the route is
 // Fabrication (this naturally captures the NTLT pre-galv fab codes too).
-const GALV_SET = bundleActivitySet("GALVANIZING") ?? new Set<string>();
+// The GALVANIZING bundle now spans G,GB,Y (see @workspace/domain), but this table
+// keeps a SEPARATE Yard column, so exclude the Yard codes here to keep the
+// Galvanizing column at G,GB and never double-count Y.
 const YARD_SET = bundleActivitySet("YARD") ?? new Set<string>();
+const GALV_SET = new Set(
+  [...(bundleActivitySet("GALVANIZING") ?? [])].filter((c) => !YARD_SET.has(c)),
+);
 
 const KEY_SEP = "\u0001";
 function keyOf(project: string, structure: string): string {
