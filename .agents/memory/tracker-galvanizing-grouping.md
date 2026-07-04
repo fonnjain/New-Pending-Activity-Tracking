@@ -11,9 +11,14 @@ shortcut and the Plant Operation "Galvanization" tab (which has NO separate Yard
 column). The YARD bundle stays `[Y]`.
 
 **Rule:** any roll-up table that shows a SEPARATE Yard / Ready-for-Dispatch (Y)
-column next to Galvanizing (Order Status, Contractor) must keep its Galvanizing
-column at **G, GB only** by computing `GALVANIZING − YARD`, never the raw
-GALVANIZING bundle — otherwise Y is double-counted in both columns.
+column next to Galvanizing (e.g. Contractor) must keep its Galvanizing column at
+**G, GB only** by computing `GALVANIZING − YARD`, never the raw GALVANIZING
+bundle — otherwise Y is double-counted in both columns.
+
+**Order Status exception:** the Order Status page dropped its separate Yard
+column (replaced by a "Finished Good" = Computed FG column), so its Galvanizing
+column now uses the FULL `GALVANIZING` bundle (G,GB,Y). No double-count because
+there is no longer a Y column beside it.
 
 **Project Wise exception (PROCESS_PHASES):** the Project-Wise stage table uses
 `PROCESS_PHASES`, NOT the activity bundles. Its Galvanising phase now spans

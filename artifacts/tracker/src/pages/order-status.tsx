@@ -5,6 +5,8 @@ import {
   getGetOrderStatusQueryKey,
   useGetImportRecords,
   getGetImportRecordsQueryKey,
+  useGetFg,
+  getGetFgQueryKey,
   type OrderStatusRow,
   type Record as WipRecord,
 } from "@workspace/api-client-react";
@@ -20,16 +22,11 @@ import {
   ChevronDown,
 } from "lucide-react";
 
-// Activity buckets used to roll WIP marks into Fabrication / Galvanizing / Yard.
-// Galvanizing = G,GB; Yard = Y (terminal). Everything else still in the route is
-// Fabrication (this naturally captures the NTLT pre-galv fab codes too).
-// The GALVANIZING bundle now spans G,GB,Y (see @workspace/domain), but this table
-// keeps a SEPARATE Yard column, so exclude the Yard codes here to keep the
-// Galvanizing column at G,GB and never double-count Y.
-const YARD_SET = bundleActivitySet("YARD") ?? new Set<string>();
-const GALV_SET = new Set(
-  [...(bundleActivitySet("GALVANIZING") ?? [])].filter((c) => !YARD_SET.has(c)),
-);
+// Activity buckets used to roll WIP marks into Fabrication / Galvanizing.
+// Galvanizing spans the FULL GALVANIZING bundle (G,GB,Y) — Y (Yard/terminal) is
+// folded in here rather than kept in a separate column. Everything else still in
+// the route is Fabrication (this naturally captures the NTLT pre-galv fab codes).
+const GALV_SET = bundleActivitySet("GALVANIZING") ?? new Set<string>();
 
 const KEY_SEP = "\u0001";
 function keyOf(project: string, structure: string): string {
@@ -44,7 +41,6 @@ function mt(n: number | null | undefined): string {
 interface ComputedBuckets {
   fabMt: number;
   galvMt: number;
-  yardMt: number;
 }
 
 interface DisplayRow {
@@ -62,10 +58,14 @@ interface DisplayRow {
   releaseBalanceMt: number | null;
   dispatchBalanceMt: number | null;
   // Bundle tonnage is TLT-only. For an out-of-scope (NTLT) structure these are
-  // null and rendered "n/a" — NTLT marks never contribute Fab/Galv/Yard math.
+  // null and rendered "n/a" — NTLT marks never contribute Fab/Galv math.
   fabMt: number | null;
   galvMt: number | null;
-  yardMt: number | null;
+  // Finished Good (computed): the stored Computed FG for this (project,
+  // structure) = Release - all-activity WIP balance - Dispatch. Order-book
+  // sourced and category-independent, so shown even for out-of-scope rows; null
+  // when the structure has no computed FG (absent from the order book).
+  computedFgMt: number | null;
   inFile: boolean;
   inWip: boolean;
   // The structure has NTLT marks whose bundle math is intentionally suppressed.
@@ -96,12 +96,14 @@ export default function OrderStatusView() {
     },
   );
 
+  const { data: fg } = useGetFg({ query: { queryKey: getGetFgQueryKey() } });
+
   const isNtlt = filters.category === "NTLT";
   const isAll = filters.category === "ALL";
 
   // WIP records narrowed to the active dimension selections (project / structure
   // / order-type mode). Activity and contractor filters are intentionally NOT
-  // applied here — the Fabrication / Galvanizing / Yard columns ARE activity
+  // applied here — the Fabrication / Galvanizing columns ARE activity
   // partitions, so filtering by a single activity would make them meaningless.
   const scopedRecords = useMemo(() => {
     return records.filter((r: WipRecord) => {
@@ -113,11 +115,11 @@ export default function OrderStatusView() {
     });
   }, [records, isAll, filters.category, filters.job, filters.structure]);
 
-  // Roll WIP marks into per (project, structure) Fab / Galv / Yard tonnages
-  // (balanceWt is kilograms; /1000 -> metric tonnes). Bundle math is TLT-only:
-  // NTLT marks are OUT OF SCOPE for Order Status — they never contribute to the
-  // Fab/Galv/Yard buckets. We still record their key so the structure can be
-  // flagged "out of scope" in the table.
+  // Roll WIP marks into per (project, structure) Fab / Galv tonnages (balanceWt
+  // is kilograms; /1000 -> metric tonnes). Galvanizing spans G,GB,Y. Bundle math
+  // is TLT-only: NTLT marks are OUT OF SCOPE for Order Status — they never
+  // contribute to the Fab/Galv buckets. We still record their key so the
+  // structure can be flagged "out of scope" in the table.
   const { computedByKey, ntltKeys } = useMemo(() => {
     const m = new Map<string, ComputedBuckets>();
     const ntlt = new Set<string>();
@@ -131,13 +133,12 @@ export default function OrderStatusView() {
       }
       let agg = m.get(k);
       if (!agg) {
-        agg = { fabMt: 0, galvMt: 0, yardMt: 0 };
+        agg = { fabMt: 0, galvMt: 0 };
         m.set(k, agg);
       }
       const tonnes = (r.balanceWt || 0) / 1000;
       const act = (r.activity || "").toUpperCase();
-      if (YARD_SET.has(act)) agg.yardMt += tonnes;
-      else if (GALV_SET.has(act)) agg.galvMt += tonnes;
+      if (GALV_SET.has(act)) agg.galvMt += tonnes;
       else agg.fabMt += tonnes;
     }
     return { computedByKey: m, ntltKeys: ntlt };
@@ -166,6 +167,16 @@ export default function OrderStatusView() {
     return m;
   }, [order]);
 
+  // Computed FG per (project, structure), joined from the /fg endpoint. Stored,
+  // order-book sourced, and category-independent.
+  const fgByKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of fg?.rows ?? []) {
+      m.set(keyOf(r.project, r.structure), r.computedFgMt);
+    }
+    return m;
+  }, [fg]);
+
   // Union of file rows and WIP-derived keys, filtered by the active project /
   // structure selections so the table tracks the global filter bar.
   const rows = useMemo<DisplayRow[]>(() => {
@@ -182,16 +193,16 @@ export default function OrderStatusView() {
       if (filters.job && project !== filters.job) continue;
       if (filters.structure && structure !== filters.structure) continue;
       // A structure is out of scope when it has NTLT marks but no TLT bundle
-      // tonnage (NTLT-only). Its Fab/Galv/Yard are not computed -> null (n/a).
+      // tonnage (NTLT-only). Its Fab/Galv are not computed -> null (n/a).
       const outOfScope = ntltKeys.has(k) && !comp;
       // TRUE WIP absence (any order-type), not just "absent from the current
       // mode's computed buckets". A structure present in WIP must never use the
       // file fallback even when the active mode hides its marks.
       const inWipReport = wipKeys.has(k);
       // When a structure is genuinely absent from WIP, fall back to the order
-      // file's Progress Fabrication / Galvanising so it no longer reads 0. Yard
-      // is intentionally left blank (the file has no Yard column). Tagged so the
-      // file-sourced (cumulative-done) figures aren't read as live WIP balances.
+      // file's Progress Fabrication / Galvanising so it no longer reads 0. Tagged
+      // so the file-sourced (cumulative-done) figures aren't read as live WIP
+      // balances.
       const bundleFromFile =
         !outOfScope &&
         !inWipReport &&
@@ -210,7 +221,7 @@ export default function OrderStatusView() {
         releaseBalanceMt: file?.releaseBalanceMt ?? null,
         dispatchBalanceMt: file?.dispatchBalanceMt ?? null,
         // comp -> live WIP buckets; else in-WIP-but-mode-hidden -> 0; else truly
-        // absent -> file Progress (Yard always blank for file-sourced rows).
+        // absent -> file Progress.
         fabMt: outOfScope
           ? null
           : comp
@@ -225,7 +236,7 @@ export default function OrderStatusView() {
             : inWipReport
               ? 0
               : file?.fileGalvMt ?? null,
-        yardMt: outOfScope ? null : comp ? comp.yardMt : inWipReport ? 0 : null,
+        computedFgMt: fgByKey.get(k) ?? null,
         inFile: !!file,
         inWip: !!comp,
         outOfScope,
@@ -242,6 +253,7 @@ export default function OrderStatusView() {
   }, [
     dispatchByKey,
     computedByKey,
+    fgByKey,
     ntltKeys,
     wipKeys,
     filters.job,
@@ -266,7 +278,7 @@ export default function OrderStatusView() {
           acc.releaseBalanceMt += r.releaseBalanceMt ?? 0;
           acc.fabMt += r.fabMt ?? 0;
           acc.galvMt += r.galvMt ?? 0;
-          acc.yardMt += r.yardMt ?? 0;
+          acc.computedFgMt += r.computedFgMt ?? 0;
           acc.fileDespatchMt += r.fileDespatchMt ?? 0;
           acc.dispatchBalanceMt += r.dispatchBalanceMt ?? 0;
           return acc;
@@ -279,7 +291,7 @@ export default function OrderStatusView() {
           releaseBalanceMt: 0,
           fabMt: 0,
           galvMt: 0,
-          yardMt: 0,
+          computedFgMt: 0,
           fileDespatchMt: 0,
           dispatchBalanceMt: 0,
         },
@@ -298,7 +310,7 @@ export default function OrderStatusView() {
         acc.releaseBalanceMt += r.releaseBalanceMt ?? 0;
         acc.fabMt += r.fabMt ?? 0;
         acc.galvMt += r.galvMt ?? 0;
-        acc.yardMt += r.yardMt ?? 0;
+        acc.computedFgMt += r.computedFgMt ?? 0;
         acc.fileDespatchMt += r.fileDespatchMt ?? 0;
         acc.dispatchBalanceMt += r.dispatchBalanceMt ?? 0;
         return acc;
@@ -311,7 +323,7 @@ export default function OrderStatusView() {
         releaseBalanceMt: 0,
         fabMt: 0,
         galvMt: 0,
-        yardMt: 0,
+        computedFgMt: 0,
         fileDespatchMt: 0,
         dispatchBalanceMt: 0,
       },
@@ -332,7 +344,7 @@ export default function OrderStatusView() {
       { label: "Scope", field: "scope" },
       { label: "Fabrication (MT)", field: "fabMt", numeric: true, decimals: 3, total: true },
       { label: "Galvanizing (MT)", field: "galvMt", numeric: true, decimals: 3, total: true },
-      { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
+      { label: "Finished Good (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
       { label: "Dispatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
       { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
     ];
@@ -349,7 +361,7 @@ export default function OrderStatusView() {
       scope: r.outOfScope ? "NTLT (out of scope)" : "TLT",
       fabMt: r.fabMt ?? "",
       galvMt: r.galvMt ?? "",
-      yardMt: r.yardMt ?? "",
+      computedFgMt: r.computedFgMt ?? "",
       fileDespatchMt: r.fileDespatchMt ?? "",
       dispatchBalanceMt: r.dispatchBalanceMt ?? "",
     }));
@@ -371,8 +383,9 @@ export default function OrderStatusView() {
           <h1 className="text-2xl font-bold tracking-tight">Order Status</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Per project and structure: order quantities from the latest Order Review
-            file, joined to live Fabrication / Galvanizing / Yard tonnage computed
-            from the selected WIP report, and Dispatch (MT) from the file.
+            file, joined to live Fabrication / Galvanizing tonnage computed from the
+            selected WIP report, Dispatch (MT) from the file, and Finished Good
+            (computed).
           </p>
         </div>
         <Button
@@ -394,8 +407,8 @@ export default function OrderStatusView() {
             <p className="font-medium">No Order Review file ingested yet</p>
             <p className="text-sm mt-1">
               Upload an Order Review export on the Data page to seed dispatch and
-              populate this view. Fabrication / Galvanizing / Yard tonnage will
-              still appear from WIP marks below.
+              populate this view. Fabrication / Galvanizing tonnage will still
+              appear from WIP marks below.
             </p>
           </CardContent>
         </Card>
@@ -407,8 +420,8 @@ export default function OrderStatusView() {
             <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
             <span>
               Order Status is a TLT view. NTLT marks are out of scope: their
-              Fabrication / Galvanizing / Yard tonnage is not computed and shows
-              as "n/a". Switch the Order Type to TLT or All for bundle math.
+              Fabrication / Galvanizing tonnage is not computed and shows as
+              "n/a". Switch the Order Type to TLT or All for bundle math.
             </span>
           </CardContent>
         </Card>
@@ -419,7 +432,7 @@ export default function OrderStatusView() {
           <KpiTile label="Order Wt (MT)" value={mt(totals.weightMt)} />
           <KpiTile label="In Fabrication (MT)" value={mt(totals.fabMt)} />
           <KpiTile label="In Galvanizing (MT)" value={mt(totals.galvMt)} />
-          <KpiTile label="In Yard (MT)" value={mt(totals.yardMt)} />
+          <KpiTile label="Finished Good (MT)" value={mt(totals.computedFgMt)} />
         </div>
       )}
 
@@ -453,7 +466,7 @@ export default function OrderStatusView() {
                     <th className="px-2 py-1.5 font-semibold text-right">Release Bal.</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Fabrication</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Galvanizing</th>
-                    <th className="px-2 py-1.5 font-semibold text-right">Yard</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">Finished Good</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Dispatch</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Dispatch Bal.</th>
                   </tr>
@@ -474,7 +487,7 @@ export default function OrderStatusView() {
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.releaseBalanceMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.fabMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.galvMt)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.yardMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.computedFgMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.fileDespatchMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.dispatchBalanceMt)}</td>
                   </tr>
@@ -515,7 +528,7 @@ function ProjectGroup({
       releaseBalanceMt: number;
       fabMt: number;
       galvMt: number;
-      yardMt: number;
+      computedFgMt: number;
       fileDespatchMt: number;
       dispatchBalanceMt: number;
     };
@@ -552,7 +565,7 @@ function ProjectGroup({
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.releaseBalanceMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.fabMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.galvMt)}</td>
-        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.yardMt)}</td>
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.computedFgMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.fileDespatchMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.dispatchBalanceMt)}</td>
       </tr>
@@ -586,7 +599,7 @@ function ProjectGroup({
             <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.releaseBalanceMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.fabMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.galvMt)}</td>
-            <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.yardMt)}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.computedFgMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.fileDespatchMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.dispatchBalanceMt)}</td>
           </tr>
@@ -603,7 +616,7 @@ function ProjectGroup({
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.releaseBalanceMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.fabMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.galvMt)}</td>
-          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.yardMt)}</td>
+          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.computedFgMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.fileDespatchMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.dispatchBalanceMt)}</td>
         </tr>
