@@ -21,12 +21,18 @@ export interface ParsedOrderReviewRow {
   structure: string;
   subType: string | null;
   sets: number | null;
+  // Order Qty Weight (MT) — col G (total order weight).
   weightMt: number | null;
+  // WO Order Qty Weight (MT) — col J (work-order qty; base for balance figures).
+  woOrderQtyMt: number | null;
   bomType: string | null;
   releaseMt: number | null;
   fabMt: number | null;
   galvMt: number | null;
   fileDespatchMt: number | null;
+  // File-stated balances: Balance Release (col S), Balance Despatch (col W).
+  fileBalReleaseMt: number | null;
+  fileBalDespatchMt: number | null;
 }
 
 export interface OrderReviewParseResult {
@@ -175,11 +181,14 @@ interface ColumnIndex {
   subType: number;
   sets: number;
   weightMt: number;
+  woOrderQtyMt: number;
   bomType: number;
   releaseMt: number;
   fabMt: number;
   galvMt: number;
   fileDespatchMt: number;
+  fileBalReleaseMt: number;
+  fileBalDespatchMt: number;
 }
 
 // A logical column spec resolved against COMPOSITE header labels (see
@@ -206,11 +215,19 @@ const HEADER_SPECS: HeaderSpec[] = [
   { key: "subType", include: [["sub type"], ["subtype"]], fallback: 3 },
   { key: "sets", include: [["order qty", "sets"], ["sets"]], exclude: ["wo", "work order"], fallback: 5 },
   { key: "weightMt", include: [["order qty", "weight"], ["weight (mt)"], ["weight"]], exclude: ["wo", "work order", "/ set", "per set", "balance"], fallback: 6 },
+  // WO (Work Order) Order Qty Weight — col J. Requires an explicit "wo"/"work
+  // order" term so it never collides with the col G Order Qty Weight above (which
+  // excludes those very terms).
+  { key: "woOrderQtyMt", include: [["wo order qty", "weight"], ["work order", "weight"], ["wo", "weight"]], exclude: ["/ set", "per set", "balance"], fallback: 9 },
   { key: "bomType", include: [["bom"]], fallback: 10 },
   { key: "releaseMt", include: [["progress", "release"], ["release"]], exclude: ["balance"], fallback: 11 },
   { key: "fabMt", include: [["progress", "fabrication"], ["fabrication (mt)"], ["fabrication"]], exclude: ["balance", "work order", "wo"], fallback: 12 },
   { key: "galvMt", include: [["progress", "galvanis"], ["galvanising (mt)"], ["galvanizing (mt)"], ["galvanis"]], exclude: ["balance", "work order", "wo"], fallback: 13 },
   { key: "fileDespatchMt", include: [["progress", "despatch"], ["progress", "dispatch"], ["despatch"], ["dispatch"]], exclude: ["balance"], fallback: 16 },
+  // File-stated balances (col S / col W). These are the ONLY specs that require a
+  // "balance" term; every other measure spec excludes it, so there is no overlap.
+  { key: "fileBalReleaseMt", include: [["balance", "release"]], fallback: 18 },
+  { key: "fileBalDespatchMt", include: [["balance", "despatch"], ["balance", "dispatch"]], fallback: 22 },
 ];
 
 // Lowercase + collapse whitespace for a header cell ("BOM\nLabel" -> "bom label").
@@ -438,10 +455,13 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
 
     rowsRead++;
     const weightMt = toNumber(cells[cols.weightMt] as Cell);
+    const woOrderQtyMt = toNumber(cells[cols.woOrderQtyMt] as Cell);
     const releaseMt = toNumber(cells[cols.releaseMt] as Cell);
     const fabMt = toNumber(cells[cols.fabMt] as Cell);
     const galvMt = toNumber(cells[cols.galvMt] as Cell);
     const fileDespatchMt = toNumber(cells[cols.fileDespatchMt] as Cell);
+    const fileBalReleaseMt = toNumber(cells[cols.fileBalReleaseMt] as Cell);
+    const fileBalDespatchMt = toNumber(cells[cols.fileBalDespatchMt] as Cell);
     if (weightMt != null) totalWeightMt += weightMt;
     if (releaseMt != null) totalReleaseMt += releaseMt;
     if (fileDespatchMt != null) totalFileDespatchMt += fileDespatchMt;
@@ -453,11 +473,14 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
       subType: cellStr(cells[cols.subType] as Cell) || null,
       sets: toInt(cells[cols.sets] as Cell),
       weightMt,
+      woOrderQtyMt,
       bomType: cellStr(cells[cols.bomType] as Cell) || null,
       releaseMt,
       fabMt,
       galvMt,
       fileDespatchMt,
+      fileBalReleaseMt,
+      fileBalDespatchMt,
     });
   }
 

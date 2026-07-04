@@ -10,6 +10,8 @@ import {
 import {
   loadLatestOrderReview,
   crossCheckDispatch,
+  crossCheckBalance,
+  loadComputedFg,
 } from "../lib/dispatch";
 import { requireAuth } from "./auth";
 
@@ -36,6 +38,15 @@ router.get("/order-status", async (_req, res): Promise<void> => {
       fileImport: null,
       rows: [],
       reconciliation: { tolerancePct: 1, matched: 0, mismatched: 0, rows: [] },
+      balanceReconciliation: {
+        tolerancePct: 1,
+        absFloorMt: 0.05,
+        releaseMatched: 0,
+        releaseMismatched: 0,
+        dispatchMatched: 0,
+        dispatchMismatched: 0,
+        rows: [],
+      },
       imports: [],
     });
     return;
@@ -55,11 +66,22 @@ router.get("/order-status", async (_req, res): Promise<void> => {
       subType: r.subType,
       sets: r.sets,
       weightMt: r.weightMt,
+      woOrderQtyMt: r.woOrderQtyMt,
       bomType: r.bomType,
       releaseMt: r.releaseMt,
       fileFabMt: r.fabMt,
       fileGalvMt: r.galvMt,
       fileDespatchMt: r.fileDespatchMt,
+      fileBalReleaseMt: r.fileBalReleaseMt,
+      fileBalDespatchMt: r.fileBalDespatchMt,
+      // Balance from WO Order Qty (col J) — the ordered base — minus Release (L)
+      // and Despatch (Q). Null WO Order Qty leaves these null (no base to net).
+      releaseBalanceMt:
+        r.woOrderQtyMt == null ? null : r.woOrderQtyMt - (r.releaseMt ?? 0),
+      dispatchBalanceMt:
+        r.woOrderQtyMt == null
+          ? null
+          : r.woOrderQtyMt - (r.fileDespatchMt ?? 0),
       seedMt,
       accruedMt,
       // Computed Dispatch is WIP-derived only (tonnage observed leaving the
@@ -81,6 +103,20 @@ router.get("/order-status", async (_req, res): Promise<void> => {
     dispatchRows,
   );
 
+  // File-vs-computed cross-check for the two order balances (Release balance =
+  // J - L vs file col S; Despatch balance = J - Q vs file col W).
+  const balanceReconciliation = crossCheckBalance(
+    latest.rows.map((r) => ({
+      project: r.project,
+      structure: r.structure,
+      woOrderQtyMt: r.woOrderQtyMt,
+      releaseMt: r.releaseMt,
+      fileDespatchMt: r.fileDespatchMt,
+      fileBalReleaseMt: r.fileBalReleaseMt,
+      fileBalDespatchMt: r.fileBalDespatchMt,
+    })),
+  );
+
   const imports = await db
     .select()
     .from(orderReviewImportsTable)
@@ -92,7 +128,42 @@ router.get("/order-status", async (_req, res): Promise<void> => {
     fileImport: latest.import,
     rows,
     reconciliation,
+    balanceReconciliation,
     imports,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /fg — the stored Computed FG rows (one per project + structure):
+//   Computed FG = Release (col L) - AllActivitiesBalanceWt (newest WIP) - Despatch
+// Blank inputs count as 0; tiny negatives clamp to 0 (flag "minor"), material
+// negatives are kept (flag "material"). Recomputed on every WIP + Order Review
+// ingest; served read-only here. available:false when no Order Review ingested.
+// ---------------------------------------------------------------------------
+router.get("/fg", async (_req, res): Promise<void> => {
+  const latest = await loadLatestOrderReview();
+  if (!latest) {
+    res.json({ available: false, asOnDate: null, rows: [] });
+    return;
+  }
+  const rows = await loadComputedFg();
+  rows.sort(
+    (a, b) =>
+      a.project.localeCompare(b.project) ||
+      a.structure.localeCompare(b.structure),
+  );
+  res.json({
+    available: true,
+    asOnDate: latest.import.asOnDate,
+    rows: rows.map((r) => ({
+      project: r.project,
+      structure: r.structure,
+      releaseMt: r.releaseMt,
+      wipBalanceMt: r.wipBalanceMt,
+      fileDespatchMt: r.fileDespatchMt,
+      computedFgMt: r.computedFgMt,
+      flag: r.flag,
+    })),
   });
 });
 

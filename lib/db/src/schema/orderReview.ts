@@ -98,7 +98,12 @@ export const orderReviewRowsTable = pgTable(
     structure: text("structure").notNull(),
     subType: text("sub_type"),
     sets: integer("sets"),
+    // Order Qty Weight (MT) — col G. The total order weight per structure.
     weightMt: doublePrecision("weight_mt"),
+    // WO (Work Order) Order Qty Weight (MT) — col J. The work-order quantity; the
+    // BASE for the Release Balance (J - Release) and Dispatch Balance (J - Dispatch)
+    // figures on the Order Status page (NOT the Order Qty in col G).
+    woOrderQtyMt: doublePrecision("wo_order_qty_mt"),
     bomType: text("bom_type"),
     releaseMt: doublePrecision("release_mt"),
     // Progress Fabrication / Galvanising (MT) from the file's "Progress" block.
@@ -109,6 +114,12 @@ export const orderReviewRowsTable = pgTable(
     galvMt: doublePrecision("galv_mt"),
     // Despatch MT as stated in the file (cross-checked vs computed dispatch).
     fileDespatchMt: doublePrecision("file_despatch_mt"),
+    // File-stated balance figures (display + cross-check only, never authoritative):
+    //   fileBalReleaseMt  = "Balance Release" (col S)  ~ WO Order Qty - Release
+    //   fileBalDespatchMt = "Balance Despatch" (col W) ~ WO Order Qty - Despatch
+    // Reconciled against the computed balances at a 1% tolerance + small abs floor.
+    fileBalReleaseMt: doublePrecision("file_bal_release_mt"),
+    fileBalDespatchMt: doublePrecision("file_bal_despatch_mt"),
   },
   (t) => [
     uniqueIndex("order_review_rows_project_structure_uq").on(
@@ -181,4 +192,37 @@ export const insertDispatchLedgerSchema = createInsertSchema(
 ).omit({ id: true, createdAt: true });
 export type InsertDispatchLedger = z.infer<typeof insertDispatchLedgerSchema>;
 export type DispatchLedgerRow = typeof dispatchLedgerTable.$inferSelect;
+
+// Computed Finished Goods (FG) tonnage per (project, structure). Additive,
+// display-only overlay — never touches WIP parsing / activity / dedup / ageing /
+// warning / dispatch / milestone math, and never writes the order file's own FG
+// column. Deterministically rebuilt (delete + reinsert) on each recompute from:
+//   computedFgMt = Release (col L) - WIP balance (sum of all-activity balanceWt
+//                  for the key in the newest WIP import, /1000) - Despatch (col Q).
+// Blank inputs count as 0. A tiny negative (within ~1 MT of zero) is clamped to 0
+// and flagged "minor"; a material negative (below -1 MT) is kept and flagged
+// "material" for review. flag is null when the value is non-negative.
+export const computedFgTable = pgTable(
+  "computed_fg",
+  {
+    project: text("project").notNull(),
+    structure: text("structure").notNull(),
+    releaseMt: doublePrecision("release_mt").notNull().default(0),
+    wipBalanceMt: doublePrecision("wip_balance_mt").notNull().default(0),
+    fileDespatchMt: doublePrecision("file_despatch_mt").notNull().default(0),
+    computedFgMt: doublePrecision("computed_fg_mt").notNull().default(0),
+    // null | "minor" (clamped tiny negative) | "material" (kept large negative).
+    flag: text("flag"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.project, t.structure] })],
+);
+
+export const insertComputedFgSchema = createInsertSchema(computedFgTable).omit({
+  updatedAt: true,
+});
+export type InsertComputedFg = z.infer<typeof insertComputedFgSchema>;
+export type ComputedFgRow = typeof computedFgTable.$inferSelect;
 

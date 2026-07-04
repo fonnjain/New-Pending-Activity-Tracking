@@ -1524,11 +1524,16 @@ export const GetOrderStatusResponse = zod.object({
   "subType": zod.string().nullable(),
   "sets": zod.number().nullable(),
   "weightMt": zod.number().nullable(),
+  "woOrderQtyMt": zod.number().nullable().describe('WO Order Qty MT (col J) from the Order Review file — the ordered base for the balance columns.'),
   "bomType": zod.string().nullable(),
   "releaseMt": zod.number().nullable(),
   "fileFabMt": zod.number().nullable().describe('Progress Fabrication MT from the Order Review file (display fallback for structures absent from WIP).'),
   "fileGalvMt": zod.number().nullable().describe('Progress Galvanising MT from the Order Review file (display fallback for structures absent from WIP).'),
   "fileDespatchMt": zod.number().nullable().describe('Despatch MT as stated in the Order Review file.'),
+  "fileBalReleaseMt": zod.number().nullable().describe('Balance Release MT as stated in the Order Review file (col S).'),
+  "fileBalDespatchMt": zod.number().nullable().describe('Balance Despatch MT as stated in the Order Review file (col W).'),
+  "releaseBalanceMt": zod.number().nullable().describe('Computed Release balance = WO Order Qty (col J) - Release (col L). Null when WO Order Qty is blank.'),
+  "dispatchBalanceMt": zod.number().nullable().describe('Computed Despatch balance = WO Order Qty (col J) - File Despatch (col Q). Null when WO Order Qty is blank.'),
   "seedMt": zod.number().describe('One-time dispatch baseline captured from the first Order Review file.'),
   "accruedMt": zod.number().describe('Tonnes that left the Yard across WIP imports after the seed.'),
   "computedDispatchMt": zod.number().describe('WIP-derived dispatch only (equals accruedMt). The Order Review file\/seed never contributes.'),
@@ -1547,6 +1552,29 @@ export const GetOrderStatusResponse = zod.object({
   "diffPct": zod.number().nullable(),
   "status": zod.enum(['match', 'mismatch', 'no_file', 'no_computed'])
 }).describe('File-vs-computed dispatch comparison for one (project, structure).'))
+}),
+  "balanceReconciliation": zod.object({
+  "tolerancePct": zod.number(),
+  "absFloorMt": zod.number(),
+  "releaseMatched": zod.number(),
+  "releaseMismatched": zod.number(),
+  "dispatchMatched": zod.number(),
+  "dispatchMismatched": zod.number(),
+  "rows": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string(),
+  "woOrderQtyMt": zod.number().nullable(),
+  "computedReleaseBalanceMt": zod.number().nullable(),
+  "fileReleaseBalanceMt": zod.number().nullable(),
+  "releaseDiffMt": zod.number().nullable(),
+  "releaseDiffPct": zod.number().nullable(),
+  "releaseStatus": zod.enum(['match', 'mismatch', 'no_file', 'no_computed']),
+  "computedDispatchBalanceMt": zod.number().nullable(),
+  "fileDispatchBalanceMt": zod.number().nullable(),
+  "dispatchDiffMt": zod.number().nullable(),
+  "dispatchDiffPct": zod.number().nullable(),
+  "dispatchStatus": zod.enum(['match', 'mismatch', 'no_file', 'no_computed'])
+}).describe('File-vs-computed comparison of the two order balances for one (project, structure).'))
 }),
   "imports": zod.array(zod.object({
   "id": zod.number(),
@@ -1588,6 +1616,26 @@ export const GetOrderStatusResponse = zod.object({
   "createdAt": zod.string()
 }).describe('One Order Review file upload (rows are upserted, not appended).'))
 }).describe('Order Review overlay joined to computed dispatch.')
+
+
+/**
+ * Returns the stored Computed FG figures, one per (project, structure): Computed FG = Release (col L) - AllActivitiesBalanceWt (newest WIP import) - File Despatch (col Q). Blank inputs count as 0; a tiny negative (>= -1 MT) is clamped to 0 and flagged "minor", a material negative (< -1 MT) is kept and flagged "material". Recomputed on every WIP and Order Review ingest; served read-only here. Purely additive — never changes WIP parsing, activity, dedup, ageing, warning, velocity, dispatch, or milestone state. available:false when no Order Review file has been ingested yet.
+
+ * @summary Get the stored Computed FG overlay (per project + structure)
+ */
+export const GetFgResponse = zod.object({
+  "available": zod.boolean(),
+  "asOnDate": zod.string().nullable(),
+  "rows": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string(),
+  "releaseMt": zod.number().describe('Release (col L) — the FG formula\'s positive term.'),
+  "wipBalanceMt": zod.number().describe('All-activity WIP balance tonnage for this structure in the newest WIP import.'),
+  "fileDespatchMt": zod.number().describe('File Despatch (col Q) subtracted in the FG formula.'),
+  "computedFgMt": zod.number().describe('Computed FG = releaseMt - wipBalanceMt - fileDespatchMt, clamped for minor negatives.'),
+  "flag": zod.union([zod.literal('minor'),zod.literal('material'),zod.literal(null)]).nullable().describe('null = ok; minor = tiny negative clamped to 0; material = real negative kept for review.')
+}).describe('One Computed FG row per (project, structure).'))
+}).describe('Stored Computed FG overlay (per project + structure).')
 
 
 /**

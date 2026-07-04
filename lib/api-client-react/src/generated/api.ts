@@ -37,6 +37,7 @@ import type {
   ErrorResponse,
   FabricationPriority,
   FabricationPriorityInput,
+  FgResponse,
   HealthStatus,
   Import,
   ImportSummary,
@@ -2683,6 +2684,85 @@ export function useGetOrderStatus<TData = Awaited<ReturnType<typeof getOrderStat
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetOrderStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetFgUrl = () => {
+
+
+
+
+  return `/api/fg`
+}
+
+/**
+ * Returns the stored Computed FG figures, one per (project, structure): Computed FG = Release (col L) - AllActivitiesBalanceWt (newest WIP import) - File Despatch (col Q). Blank inputs count as 0; a tiny negative (>= -1 MT) is clamped to 0 and flagged "minor", a material negative (< -1 MT) is kept and flagged "material". Recomputed on every WIP and Order Review ingest; served read-only here. Purely additive — never changes WIP parsing, activity, dedup, ageing, warning, velocity, dispatch, or milestone state. available:false when no Order Review file has been ingested yet.
+
+ * @summary Get the stored Computed FG overlay (per project + structure)
+ */
+export const getFg = async ( options?: RequestInit): Promise<FgResponse> => {
+
+  return customFetch<FgResponse>(getGetFgUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFgQueryKey = () => {
+    return [
+    `/api/fg`
+    ] as const;
+    }
+
+
+export const getGetFgQueryOptions = <TData = Awaited<ReturnType<typeof getFg>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFg>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFgQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFg>>> = ({ signal }) => getFg({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFg>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFgQueryResult = NonNullable<Awaited<ReturnType<typeof getFg>>>
+export type GetFgQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the stored Computed FG overlay (per project + structure)
+ */
+
+export function useGetFg<TData = Awaited<ReturnType<typeof getFg>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFg>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFgQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

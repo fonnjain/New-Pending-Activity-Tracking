@@ -54,8 +54,13 @@ interface DisplayRow {
   bomType: string | null;
   sets: number | null;
   weightMt: number | null;
+  woOrderQtyMt: number | null;
   releaseMt: number | null;
   fileDespatchMt: number | null;
+  // Balances from WO Order Qty (col J): J - Release (L) and J - File Despatch (Q).
+  // Null when WO Order Qty is blank (no ordered base to net against).
+  releaseBalanceMt: number | null;
+  dispatchBalanceMt: number | null;
   // Bundle tonnage is TLT-only. For an out-of-scope (NTLT) structure these are
   // null and rendered "n/a" — NTLT marks never contribute Fab/Galv/Yard math.
   fabMt: number | null;
@@ -199,8 +204,11 @@ export default function OrderStatusView() {
         bomType: file?.bomType ?? null,
         sets: file?.sets ?? null,
         weightMt: file?.weightMt ?? null,
+        woOrderQtyMt: file?.woOrderQtyMt ?? null,
         releaseMt: file?.releaseMt ?? null,
         fileDespatchMt: file?.fileDespatchMt ?? null,
+        releaseBalanceMt: file?.releaseBalanceMt ?? null,
+        dispatchBalanceMt: file?.dispatchBalanceMt ?? null,
         // comp -> live WIP buckets; else in-WIP-but-mode-hidden -> 0; else truly
         // absent -> file Progress (Yard always blank for file-sourced rows).
         fabMt: outOfScope
@@ -253,21 +261,27 @@ export default function OrderStatusView() {
         (acc, r) => {
           acc.sets += r.sets ?? 0;
           acc.weightMt += r.weightMt ?? 0;
+          acc.woOrderQtyMt += r.woOrderQtyMt ?? 0;
           acc.releaseMt += r.releaseMt ?? 0;
+          acc.releaseBalanceMt += r.releaseBalanceMt ?? 0;
           acc.fabMt += r.fabMt ?? 0;
           acc.galvMt += r.galvMt ?? 0;
           acc.yardMt += r.yardMt ?? 0;
           acc.fileDespatchMt += r.fileDespatchMt ?? 0;
+          acc.dispatchBalanceMt += r.dispatchBalanceMt ?? 0;
           return acc;
         },
         {
           sets: 0,
           weightMt: 0,
+          woOrderQtyMt: 0,
           releaseMt: 0,
+          releaseBalanceMt: 0,
           fabMt: 0,
           galvMt: 0,
           yardMt: 0,
           fileDespatchMt: 0,
+          dispatchBalanceMt: 0,
         },
       );
       return { project, list, subtotal };
@@ -279,21 +293,27 @@ export default function OrderStatusView() {
       (acc, r) => {
         acc.sets += r.sets ?? 0;
         acc.weightMt += r.weightMt ?? 0;
+        acc.woOrderQtyMt += r.woOrderQtyMt ?? 0;
         acc.releaseMt += r.releaseMt ?? 0;
+        acc.releaseBalanceMt += r.releaseBalanceMt ?? 0;
         acc.fabMt += r.fabMt ?? 0;
         acc.galvMt += r.galvMt ?? 0;
         acc.yardMt += r.yardMt ?? 0;
         acc.fileDespatchMt += r.fileDespatchMt ?? 0;
+        acc.dispatchBalanceMt += r.dispatchBalanceMt ?? 0;
         return acc;
       },
       {
         sets: 0,
         weightMt: 0,
+        woOrderQtyMt: 0,
         releaseMt: 0,
+        releaseBalanceMt: 0,
         fabMt: 0,
         galvMt: 0,
         yardMt: 0,
         fileDespatchMt: 0,
+        dispatchBalanceMt: 0,
       },
     );
   }, [rows]);
@@ -305,13 +325,16 @@ export default function OrderStatusView() {
       { label: "Sub Type", field: "subType" },
       { label: "Sets", field: "sets", numeric: true, decimals: 0 },
       { label: "Weight (MT)", field: "weightMt", numeric: true, decimals: 3, total: true },
+      { label: "WO Order Qty (MT)", field: "woOrderQtyMt", numeric: true, decimals: 3, total: true },
       { label: "BOM Type", field: "bomType" },
       { label: "Release (MT)", field: "releaseMt", numeric: true, decimals: 3 },
+      { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
       { label: "Scope", field: "scope" },
       { label: "Fabrication (MT)", field: "fabMt", numeric: true, decimals: 3, total: true },
       { label: "Galvanizing (MT)", field: "galvMt", numeric: true, decimals: 3, total: true },
       { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
       { label: "Dispatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
+      { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
     ];
     const out = rows.map((r) => ({
       project: r.project,
@@ -319,13 +342,16 @@ export default function OrderStatusView() {
       subType: r.subType ?? "",
       sets: r.sets ?? "",
       weightMt: r.weightMt ?? "",
+      woOrderQtyMt: r.woOrderQtyMt ?? "",
       bomType: r.bomType ?? "",
       releaseMt: r.releaseMt ?? "",
+      releaseBalanceMt: r.releaseBalanceMt ?? "",
       scope: r.outOfScope ? "NTLT (out of scope)" : "TLT",
       fabMt: r.fabMt ?? "",
       galvMt: r.galvMt ?? "",
       yardMt: r.yardMt ?? "",
       fileDespatchMt: r.fileDespatchMt ?? "",
+      dispatchBalanceMt: r.dispatchBalanceMt ?? "",
     }));
     void exportToXlsx(
       `order_status_${new Date().toISOString().slice(0, 10)}.xlsx`,
@@ -421,12 +447,15 @@ export default function OrderStatusView() {
                     <th className="px-2 py-1.5 font-semibold">Sub Type</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Sets</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Weight</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">WO Order Qty</th>
                     <th className="px-2 py-1.5 font-semibold">BOM Type</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Release</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">Release Bal.</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Fabrication</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Galvanizing</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Yard</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Dispatch</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">Dispatch Bal.</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -439,12 +468,15 @@ export default function OrderStatusView() {
                     <td className="px-2 py-1.5" colSpan={2}>Total ({rows.length})</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{totals.sets.toLocaleString()}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.weightMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.woOrderQtyMt)}</td>
                     <td className="px-2 py-1.5" />
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.releaseMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.releaseBalanceMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.fabMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.galvMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.yardMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.fileDespatchMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.dispatchBalanceMt)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -478,11 +510,14 @@ function ProjectGroup({
     subtotal: {
       sets: number;
       weightMt: number;
+      woOrderQtyMt: number;
       releaseMt: number;
+      releaseBalanceMt: number;
       fabMt: number;
       galvMt: number;
       yardMt: number;
       fileDespatchMt: number;
+      dispatchBalanceMt: number;
     };
   };
 }) {
@@ -511,12 +546,15 @@ function ProjectGroup({
         </td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{subtotal.sets.toLocaleString()}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.weightMt)}</td>
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.woOrderQtyMt)}</td>
         <td className="px-2 py-1.5" />
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.releaseMt)}</td>
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.releaseBalanceMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.fabMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.galvMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.yardMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.fileDespatchMt)}</td>
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.dispatchBalanceMt)}</td>
       </tr>
       {open &&
         list.map((r) => (
@@ -542,12 +580,15 @@ function ProjectGroup({
             <td className="px-2 py-1.5">{r.subType ?? "-"}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{r.sets ?? "-"}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.weightMt)}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.woOrderQtyMt)}</td>
             <td className="px-2 py-1.5">{r.bomType ?? "-"}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.releaseMt)}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.releaseBalanceMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.fabMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.galvMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.yardMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.fileDespatchMt)}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.dispatchBalanceMt)}</td>
           </tr>
         ))}
       {open && (
@@ -556,12 +597,15 @@ function ProjectGroup({
           <td className="px-2 py-1" />
           <td className="px-2 py-1" />
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.weightMt)}</td>
+          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.woOrderQtyMt)}</td>
           <td className="px-2 py-1" />
-          <td className="px-2 py-1" />
+          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.releaseMt)}</td>
+          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.releaseBalanceMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.fabMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.galvMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.yardMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.fileDespatchMt)}</td>
+          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.dispatchBalanceMt)}</td>
         </tr>
       )}
     </>

@@ -47,6 +47,7 @@ function ProductionTracker() {
         <Route path="/plant" component={PlantOperationView} />
         <Route path="/contractor-setup" component={DataView} />
         <Route path="/data" component={DataView} />
+        <Route path="/computed-fg" component={DataView} />
         <Route path="/order-reconciliation" component={DataView} />
         <Route path="/reports" component={ReportsView} />
         <Route path="/thickness" component={DataView} />
@@ -70,6 +71,7 @@ const LEGACY_TRACKER_PATHS = [
   "/plant",
   "/contractor-setup",
   "/data",
+  "/computed-fg",
   "/order-reconciliation",
   "/reports",
   "/thickness",

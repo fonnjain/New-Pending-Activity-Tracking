@@ -1223,6 +1223,11 @@ export interface OrderStatusRow {
   sets: number | null;
   /** @nullable */
   weightMt: number | null;
+  /**
+     * WO Order Qty MT (col J) from the Order Review file — the ordered base for the balance columns.
+     * @nullable
+     */
+  woOrderQtyMt: number | null;
   /** @nullable */
   bomType: string | null;
   /** @nullable */
@@ -1242,6 +1247,26 @@ export interface OrderStatusRow {
      * @nullable
      */
   fileDespatchMt: number | null;
+  /**
+     * Balance Release MT as stated in the Order Review file (col S).
+     * @nullable
+     */
+  fileBalReleaseMt: number | null;
+  /**
+     * Balance Despatch MT as stated in the Order Review file (col W).
+     * @nullable
+     */
+  fileBalDespatchMt: number | null;
+  /**
+     * Computed Release balance = WO Order Qty (col J) - Release (col L). Null when WO Order Qty is blank.
+     * @nullable
+     */
+  releaseBalanceMt: number | null;
+  /**
+     * Computed Despatch balance = WO Order Qty (col J) - File Despatch (col Q). Null when WO Order Qty is blank.
+     * @nullable
+     */
+  dispatchBalanceMt: number | null;
   /** One-time dispatch baseline captured from the first Order Review file. */
   seedMt: number;
   /** Tonnes that left the Yard across WIP imports after the seed. */
@@ -1285,6 +1310,64 @@ export interface DispatchReconciliation {
   rows: DispatchReconciliationRow[];
 }
 
+export type BalanceReconciliationRowReleaseStatus = typeof BalanceReconciliationRowReleaseStatus[keyof typeof BalanceReconciliationRowReleaseStatus];
+
+
+export const BalanceReconciliationRowReleaseStatus = {
+  match: 'match',
+  mismatch: 'mismatch',
+  no_file: 'no_file',
+  no_computed: 'no_computed',
+} as const;
+
+export type BalanceReconciliationRowDispatchStatus = typeof BalanceReconciliationRowDispatchStatus[keyof typeof BalanceReconciliationRowDispatchStatus];
+
+
+export const BalanceReconciliationRowDispatchStatus = {
+  match: 'match',
+  mismatch: 'mismatch',
+  no_file: 'no_file',
+  no_computed: 'no_computed',
+} as const;
+
+/**
+ * File-vs-computed comparison of the two order balances for one (project, structure).
+ */
+export interface BalanceReconciliationRow {
+  project: string;
+  structure: string;
+  /** @nullable */
+  woOrderQtyMt: number | null;
+  /** @nullable */
+  computedReleaseBalanceMt: number | null;
+  /** @nullable */
+  fileReleaseBalanceMt: number | null;
+  /** @nullable */
+  releaseDiffMt: number | null;
+  /** @nullable */
+  releaseDiffPct: number | null;
+  releaseStatus: BalanceReconciliationRowReleaseStatus;
+  /** @nullable */
+  computedDispatchBalanceMt: number | null;
+  /** @nullable */
+  fileDispatchBalanceMt: number | null;
+  /** @nullable */
+  dispatchDiffMt: number | null;
+  /** @nullable */
+  dispatchDiffPct: number | null;
+  dispatchStatus: BalanceReconciliationRowDispatchStatus;
+}
+
+export interface BalanceReconciliation {
+  tolerancePct: number;
+  absFloorMt: number;
+  releaseMatched: number;
+  releaseMismatched: number;
+  dispatchMatched: number;
+  dispatchMismatched: number;
+  rows: BalanceReconciliationRow[];
+}
+
 /**
  * Order Review overlay joined to computed dispatch.
  */
@@ -1295,7 +1378,51 @@ export interface OrderStatusResponse {
   fileImport: OrderReviewImport | null;
   rows: OrderStatusRow[];
   reconciliation: DispatchReconciliation;
+  balanceReconciliation: BalanceReconciliation;
   imports: OrderReviewImport[];
+}
+
+/**
+ * null = ok; minor = tiny negative clamped to 0; material = real negative kept for review.
+ * @nullable
+ */
+export type FgRowFlag = typeof FgRowFlag[keyof typeof FgRowFlag] | null;
+
+
+export const FgRowFlag = {
+  minor: 'minor',
+  material: 'material',
+} as const;
+
+/**
+ * One Computed FG row per (project, structure).
+ */
+export interface FgRow {
+  project: string;
+  structure: string;
+  /** Release (col L) — the FG formula's positive term. */
+  releaseMt: number;
+  /** All-activity WIP balance tonnage for this structure in the newest WIP import. */
+  wipBalanceMt: number;
+  /** File Despatch (col Q) subtracted in the FG formula. */
+  fileDespatchMt: number;
+  /** Computed FG = releaseMt - wipBalanceMt - fileDespatchMt, clamped for minor negatives. */
+  computedFgMt: number;
+  /**
+     * null = ok; minor = tiny negative clamped to 0; material = real negative kept for review.
+     * @nullable
+     */
+  flag: FgRowFlag;
+}
+
+/**
+ * Stored Computed FG overlay (per project + structure).
+ */
+export interface FgResponse {
+  available: boolean;
+  /** @nullable */
+  asOnDate: string | null;
+  rows: FgRow[];
 }
 
 export interface ReviewRequest {

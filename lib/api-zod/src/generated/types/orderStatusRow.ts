@@ -18,6 +18,11 @@ export interface OrderStatusRow {
   sets: number | null;
   /** @nullable */
   weightMt: number | null;
+  /**
+     * WO Order Qty MT (col J) from the Order Review file — the ordered base for the balance columns.
+     * @nullable
+     */
+  woOrderQtyMt: number | null;
   /** @nullable */
   bomType: string | null;
   /** @nullable */
@@ -37,6 +42,26 @@ export interface OrderStatusRow {
      * @nullable
      */
   fileDespatchMt: number | null;
+  /**
+     * Balance Release MT as stated in the Order Review file (col S).
+     * @nullable
+     */
+  fileBalReleaseMt: number | null;
+  /**
+     * Balance Despatch MT as stated in the Order Review file (col W).
+     * @nullable
+     */
+  fileBalDespatchMt: number | null;
+  /**
+     * Computed Release balance = WO Order Qty (col J) - Release (col L). Null when WO Order Qty is blank.
+     * @nullable
+     */
+  releaseBalanceMt: number | null;
+  /**
+     * Computed Despatch balance = WO Order Qty (col J) - File Despatch (col Q). Null when WO Order Qty is blank.
+     * @nullable
+     */
+  dispatchBalanceMt: number | null;
   /** One-time dispatch baseline captured from the first Order Review file. */
   seedMt: number;
   /** Tonnes that left the Yard across WIP imports after the seed. */

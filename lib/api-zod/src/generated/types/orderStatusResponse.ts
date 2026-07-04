@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { BalanceReconciliation } from './balanceReconciliation';
 import type { DispatchReconciliation } from './dispatchReconciliation';
 import type { OrderReviewImport } from './orderReviewImport';
 import type { OrderStatusRow } from './orderStatusRow';
@@ -19,5 +20,6 @@ export interface OrderStatusResponse {
   fileImport: OrderReviewImport | null;
   rows: OrderStatusRow[];
   reconciliation: DispatchReconciliation;
+  balanceReconciliation: BalanceReconciliation;
   imports: OrderReviewImport[];
 }

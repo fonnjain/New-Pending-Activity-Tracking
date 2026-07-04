@@ -850,6 +850,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OrderStatusResponse"
+  /fg:
+    get:
+      operationId: getFg
+      tags: [orderStatus]
+      summary: Get the stored Computed FG overlay (per project + structure)
+      description: >
+        Returns the stored Computed FG figures, one per (project, structure):
+        Computed FG = Release (col L) - AllActivitiesBalanceWt (newest WIP import)
+        - File Despatch (col Q). Blank inputs count as 0; a tiny negative (>= -1 MT)
+        is clamped to 0 and flagged "minor", a material negative (< -1 MT) is kept
+        and flagged "material". Recomputed on every WIP and Order Review ingest;
+        served read-only here. Purely additive — never changes WIP parsing,
+        activity, dedup, ageing, warning, velocity, dispatch, or milestone state.
+        available:false when no Order Review file has been ingested yet.
+      responses:
+        "200":
+          description: Computed FG overlay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FgResponse"
   /order-imports/{id}:
     delete:
       operationId: deleteOrderImport
@@ -2617,6 +2638,9 @@ components:
           type: ["integer", "null"]
         weightMt:
           type: ["number", "null"]
+        woOrderQtyMt:
+          type: ["number", "null"]
+          description: WO Order Qty MT (col J) from the Order Review file — the ordered base for the balance columns.
         bomType:
           type: ["string", "null"]
         releaseMt:
@@ -2630,6 +2654,18 @@ components:
         fileDespatchMt:
           type: ["number", "null"]
           description: Despatch MT as stated in the Order Review file.
+        fileBalReleaseMt:
+          type: ["number", "null"]
+          description: Balance Release MT as stated in the Order Review file (col S).
+        fileBalDespatchMt:
+          type: ["number", "null"]
+          description: Balance Despatch MT as stated in the Order Review file (col W).
+        releaseBalanceMt:
+          type: ["number", "null"]
+          description: Computed Release balance = WO Order Qty (col J) - Release (col L). Null when WO Order Qty is blank.
+        dispatchBalanceMt:
+          type: ["number", "null"]
+          description: Computed Despatch balance = WO Order Qty (col J) - File Despatch (col Q). Null when WO Order Qty is blank.
         seedMt:
           type: number
           description: One-time dispatch baseline captured from the first Order Review file.
@@ -2648,11 +2684,16 @@ components:
         - subType
         - sets
         - weightMt
+        - woOrderQtyMt
         - bomType
         - releaseMt
         - fileFabMt
         - fileGalvMt
         - fileDespatchMt
+        - fileBalReleaseMt
+        - fileBalDespatchMt
+        - releaseBalanceMt
+        - dispatchBalanceMt
         - seedMt
         - accruedMt
         - computedDispatchMt
@@ -2702,6 +2743,79 @@ components:
         - matched
         - mismatched
         - rows
+    BalanceReconciliationRow:
+      type: object
+      description: File-vs-computed comparison of the two order balances for one (project, structure).
+      properties:
+        project:
+          type: string
+        structure:
+          type: string
+        woOrderQtyMt:
+          type: ["number", "null"]
+        computedReleaseBalanceMt:
+          type: ["number", "null"]
+        fileReleaseBalanceMt:
+          type: ["number", "null"]
+        releaseDiffMt:
+          type: ["number", "null"]
+        releaseDiffPct:
+          type: ["number", "null"]
+        releaseStatus:
+          type: string
+          enum: [match, mismatch, no_file, no_computed]
+        computedDispatchBalanceMt:
+          type: ["number", "null"]
+        fileDispatchBalanceMt:
+          type: ["number", "null"]
+        dispatchDiffMt:
+          type: ["number", "null"]
+        dispatchDiffPct:
+          type: ["number", "null"]
+        dispatchStatus:
+          type: string
+          enum: [match, mismatch, no_file, no_computed]
+      required:
+        - project
+        - structure
+        - woOrderQtyMt
+        - computedReleaseBalanceMt
+        - fileReleaseBalanceMt
+        - releaseDiffMt
+        - releaseDiffPct
+        - releaseStatus
+        - computedDispatchBalanceMt
+        - fileDispatchBalanceMt
+        - dispatchDiffMt
+        - dispatchDiffPct
+        - dispatchStatus
+    BalanceReconciliation:
+      type: object
+      properties:
+        tolerancePct:
+          type: number
+        absFloorMt:
+          type: number
+        releaseMatched:
+          type: integer
+        releaseMismatched:
+          type: integer
+        dispatchMatched:
+          type: integer
+        dispatchMismatched:
+          type: integer
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/BalanceReconciliationRow"
+      required:
+        - tolerancePct
+        - absFloorMt
+        - releaseMatched
+        - releaseMismatched
+        - dispatchMatched
+        - dispatchMismatched
+        - rows
     OrderStatusResponse:
       type: object
       description: Order Review overlay joined to computed dispatch.
@@ -2720,6 +2834,8 @@ components:
             $ref: "#/components/schemas/OrderStatusRow"
         reconciliation:
           $ref: "#/components/schemas/DispatchReconciliation"
+        balanceReconciliation:
+          $ref: "#/components/schemas/BalanceReconciliation"
         imports:
           type: array
           items:
@@ -2730,7 +2846,56 @@ components:
         - fileImport
         - rows
         - reconciliation
+        - balanceReconciliation
         - imports
+    FgRow:
+      type: object
+      description: One Computed FG row per (project, structure).
+      properties:
+        project:
+          type: string
+        structure:
+          type: string
+        releaseMt:
+          type: number
+          description: Release (col L) — the FG formula's positive term.
+        wipBalanceMt:
+          type: number
+          description: All-activity WIP balance tonnage for this structure in the newest WIP import.
+        fileDespatchMt:
+          type: number
+          description: File Despatch (col Q) subtracted in the FG formula.
+        computedFgMt:
+          type: number
+          description: Computed FG = releaseMt - wipBalanceMt - fileDespatchMt, clamped for minor negatives.
+        flag:
+          type: ["string", "null"]
+          enum: [minor, material, null]
+          description: "null = ok; minor = tiny negative clamped to 0; material = real negative kept for review."
+      required:
+        - project
+        - structure
+        - releaseMt
+        - wipBalanceMt
+        - fileDespatchMt
+        - computedFgMt
+        - flag
+    FgResponse:
+      type: object
+      description: Stored Computed FG overlay (per project + structure).
+      properties:
+        available:
+          type: boolean
+        asOnDate:
+          type: ["string", "null"]
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/FgRow"
+      required:
+        - available
+        - asOnDate
+        - rows
     ReviewRequest:
       type: object
       properties:

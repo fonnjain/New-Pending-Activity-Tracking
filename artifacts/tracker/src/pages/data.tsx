@@ -1,4 +1,5 @@
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, type CommitResult, type DispatchReconciliationRow } from "@workspace/api-client-react";
+import { useMemo, useState } from "react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetFg, getGetFgQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type FgRow } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { contractorCategoryLabel } from "@workspace/domain";
@@ -20,6 +21,7 @@ import { ThicknessContent } from "@/pages/thickness";
 
 const ADMIN_TABS = [
   { path: "/data", label: "Data" },
+  { path: "/computed-fg", label: "Computed FG" },
   { path: "/order-reconciliation", label: "Order Reconciliation" },
   { path: "/contractor-setup", label: "Contractor Setup" },
   { path: "/warning-parameters", label: "Warning Parameters" },
@@ -46,7 +48,9 @@ function AdminTabbedPage() {
           options={ADMIN_TABS.map((t) => ({ value: t.path, label: t.label }))}
         />
       </div>
-      {active === "/order-reconciliation" ? (
+      {active === "/computed-fg" ? (
+        <ComputedFgContent />
+      ) : active === "/order-reconciliation" ? (
         <OrderReconciliationContent />
       ) : active === "/contractor-setup" ? (
         <ContractorSetupContent />
@@ -504,6 +508,220 @@ const RECON_STATUS_META: Record<
   no_computed: { label: "No computed", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
 };
 
+const FG_FLAG_META: Record<
+  "minor" | "material",
+  { label: string; cls: string }
+> = {
+  minor: { label: "Minor neg (clamped)", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
+  material: { label: "Material neg", cls: "bg-red-500/15 text-red-600 dark:text-red-400" },
+};
+
+type FgSortKey = "structure" | "releaseMt" | "wipBalanceMt" | "fileDespatchMt" | "computedFgMt";
+
+function ComputedFgContent() {
+  const { filters } = useTracker();
+  const { data: fg, isLoading } = useGetFg({ query: { queryKey: getGetFgQueryKey() } });
+  const [sortKey, setSortKey] = useState<FgSortKey>("structure");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const rows = useMemo(() => {
+    const all = fg?.rows ?? [];
+    return filters.job ? all.filter((r) => r.project === filters.job) : all;
+  }, [fg?.rows, filters.job]);
+
+  const groups = useMemo(() => {
+    const byProject = new Map<string, FgRow[]>();
+    for (const r of rows) {
+      const key = r.project || "(Unassigned)";
+      const list = byProject.get(key);
+      if (list) list.push(r);
+      else byProject.set(key, [r]);
+    }
+    const dir = sortDir === "asc" ? 1 : -1;
+    const cmp = (a: FgRow, b: FgRow): number => {
+      if (sortKey === "structure") return a.structure.localeCompare(b.structure) * dir;
+      return ((a[sortKey] ?? 0) - (b[sortKey] ?? 0)) * dir;
+    };
+    return [...byProject.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([project, list]) => {
+        const sorted = [...list].sort(cmp);
+        const subtotal = list.reduce(
+          (acc, r) => ({
+            releaseMt: acc.releaseMt + r.releaseMt,
+            wipBalanceMt: acc.wipBalanceMt + r.wipBalanceMt,
+            fileDespatchMt: acc.fileDespatchMt + r.fileDespatchMt,
+            computedFgMt: acc.computedFgMt + r.computedFgMt,
+          }),
+          { releaseMt: 0, wipBalanceMt: 0, fileDespatchMt: 0, computedFgMt: 0 },
+        );
+        return { project, list: sorted, subtotal };
+      });
+  }, [rows, sortKey, sortDir]);
+
+  const totals = useMemo(
+    () =>
+      rows.reduce(
+        (acc, r) => ({
+          releaseMt: acc.releaseMt + r.releaseMt,
+          wipBalanceMt: acc.wipBalanceMt + r.wipBalanceMt,
+          fileDespatchMt: acc.fileDespatchMt + r.fileDespatchMt,
+          computedFgMt: acc.computedFgMt + r.computedFgMt,
+        }),
+        { releaseMt: 0, wipBalanceMt: 0, fileDespatchMt: 0, computedFgMt: 0 },
+      ),
+    [rows],
+  );
+
+  const toggleSort = (key: FgSortKey) => {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(key);
+      setSortDir(key === "structure" ? "asc" : "desc");
+    }
+  };
+
+  const sortArrow = (key: FgSortKey) => (sortKey === key ? (sortDir === "asc" ? " \u2191" : " \u2193") : "");
+
+  const handleExport = () => {
+    exportToXlsx(
+      "computed-fg.xlsx",
+      [
+        { label: "Project", field: "project" },
+        { label: "Structure", field: "structure" },
+        { label: "Release (MT)", field: "releaseMt", numeric: true, decimals: 3, total: true },
+        { label: "WIP Balance (MT)", field: "wipBalanceMt", numeric: true, decimals: 3, total: true },
+        { label: "File Despatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
+        { label: "Computed FG (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
+        { label: "Flag", field: "flagLabel" },
+      ],
+      rows.map((r) => ({
+        ...r,
+        flagLabel: r.flag ? FG_FLAG_META[r.flag].label : "",
+      })),
+      { sheetName: "Computed FG" },
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Computed FG</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Finished-goods tonnage per structure: Release (col L) minus the
+            all-activity WIP balance (newest WIP import) minus File Despatch (col
+            Q). Tiny negatives (&ge; -1 MT) are clamped to 0 and flagged
+            &quot;minor&quot;; larger negatives are kept and flagged
+            &quot;material&quot; for review.
+          </p>
+        </div>
+        {rows.length > 0 && (
+          <Button variant="outline" size="sm" onClick={handleExport} className="shrink-0">
+            <FileDown className="h-4 w-4 mr-1.5" />
+            Export
+          </Button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <Card>
+          <CardContent className="py-10 text-center text-muted-foreground text-sm">
+            Loading...
+          </CardContent>
+        </Card>
+      ) : !fg?.available ? (
+        <Card>
+          <CardContent className="py-10 text-center text-muted-foreground text-sm">
+            No Computed FG yet. Upload an Order Review file on the Data tab to
+            compute finished-goods figures.
+          </CardContent>
+        </Card>
+      ) : rows.length === 0 ? (
+        <Card>
+          <CardContent className="py-10 text-center text-muted-foreground text-sm">
+            No structures for the selected Job filter.
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b bg-muted/40">
+                  <tr className="text-left">
+                    <th className="px-3 py-2 font-semibold">Project</th>
+                    <th className="px-3 py-2 font-semibold cursor-pointer select-none" onClick={() => toggleSort("structure")}>
+                      Structure{sortArrow("structure")}
+                    </th>
+                    <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("releaseMt")}>
+                      Release (MT){sortArrow("releaseMt")}
+                    </th>
+                    <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("wipBalanceMt")}>
+                      WIP Balance (MT){sortArrow("wipBalanceMt")}
+                    </th>
+                    <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("fileDespatchMt")}>
+                      File Despatch (MT){sortArrow("fileDespatchMt")}
+                    </th>
+                    <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("computedFgMt")}>
+                      Computed FG (MT){sortArrow("computedFgMt")}
+                    </th>
+                    <th className="px-3 py-2 font-semibold">Flag</th>
+                  </tr>
+                </thead>
+                {groups.map((g) => (
+                  <tbody key={g.project} className="border-b last:border-0">
+                    {g.list.map((r, i) => {
+                      const flagMeta = r.flag ? FG_FLAG_META[r.flag] : null;
+                      return (
+                        <tr key={`${r.project}-${r.structure}`} className="border-b last:border-0 hover:bg-muted/30">
+                          <td className="px-3 py-2">{i === 0 ? g.project || "(Unassigned)" : ""}</td>
+                          <td className="px-3 py-2">{r.structure}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.releaseMt)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.wipBalanceMt)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fileDespatchMt)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.computedFgMt)}</td>
+                          <td className="px-3 py-2">
+                            {flagMeta && (
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${flagMeta.cls}`}>
+                                {flagMeta.label}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="bg-muted/20 text-xs font-medium">
+                      <td className="px-3 py-1.5 text-muted-foreground" colSpan={2}>
+                        {g.project || "(Unassigned)"} subtotal ({g.list.length})
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.releaseMt)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.wipBalanceMt)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.fileDespatchMt)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.computedFgMt)}</td>
+                      <td className="px-3 py-1.5" />
+                    </tr>
+                  </tbody>
+                ))}
+                <tfoot className="border-t-2 bg-muted/60 font-semibold">
+                  <tr>
+                    <td className="px-3 py-2" colSpan={2}>Grand total ({rows.length})</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.releaseMt)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.wipBalanceMt)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.fileDespatchMt)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.computedFgMt)}</td>
+                    <td className="px-3 py-2" />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function OrderReconciliationContent() {
   const { data: order, isLoading } = useGetOrderStatus({
     query: { queryKey: getGetOrderStatusQueryKey() },
@@ -702,6 +920,108 @@ function OrderReconciliationContent() {
               )}
             </CardContent>
           </Card>
+
+          {order.balanceReconciliation && (
+            <>
+              <div className="pt-2">
+                <h2 className="text-lg font-bold tracking-tight">Order Balance Reconciliation</h2>
+                <p className="text-muted-foreground text-sm mt-1">
+                  Cross-checks the two order balances computed from Col J (WO
+                  Order Qty) against the file&apos;s own stated balances: Release
+                  Balance (J minus Release) vs file col S, and Dispatch Balance (J
+                  minus File Despatch) vs file col W. Rows differing beyond{" "}
+                  {order.balanceReconciliation.tolerancePct}% (min{" "}
+                  {mt3(order.balanceReconciliation.absFloorMt)} MT) are flagged.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Card>
+                  <CardContent className="py-4">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide">Release Matched</div>
+                    <div className="text-2xl font-bold mt-1 tabular-nums text-emerald-600 dark:text-emerald-400">{order.balanceReconciliation.releaseMatched}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="py-4">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide">Release Mismatched</div>
+                    <div className="text-2xl font-bold mt-1 tabular-nums text-red-600 dark:text-red-400">{order.balanceReconciliation.releaseMismatched}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="py-4">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide">Dispatch Matched</div>
+                    <div className="text-2xl font-bold mt-1 tabular-nums text-emerald-600 dark:text-emerald-400">{order.balanceReconciliation.dispatchMatched}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="py-4">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide">Dispatch Mismatched</div>
+                    <div className="text-2xl font-bold mt-1 tabular-nums text-red-600 dark:text-red-400">{order.balanceReconciliation.dispatchMismatched}</div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardContent className="p-0">
+                  {order.balanceReconciliation.rows.length === 0 ? (
+                    <div className="py-10 text-center text-muted-foreground text-sm">
+                      No structures to reconcile.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="border-b bg-muted/40">
+                          <tr className="text-left">
+                            <th className="px-3 py-2 font-semibold">Project</th>
+                            <th className="px-3 py-2 font-semibold">Structure</th>
+                            <th className="px-3 py-2 font-semibold text-right">WO Order Qty</th>
+                            <th className="px-3 py-2 font-semibold text-right">Rel. Bal (calc)</th>
+                            <th className="px-3 py-2 font-semibold text-right">Rel. Bal (file)</th>
+                            <th className="px-3 py-2 font-semibold text-right">Rel. Diff</th>
+                            <th className="px-3 py-2 font-semibold">Rel. Status</th>
+                            <th className="px-3 py-2 font-semibold text-right">Disp. Bal (calc)</th>
+                            <th className="px-3 py-2 font-semibold text-right">Disp. Bal (file)</th>
+                            <th className="px-3 py-2 font-semibold text-right">Disp. Diff</th>
+                            <th className="px-3 py-2 font-semibold">Disp. Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {order.balanceReconciliation.rows.map((r: BalanceReconciliationRow) => {
+                            const rMeta = RECON_STATUS_META[r.releaseStatus];
+                            const dMeta = RECON_STATUS_META[r.dispatchStatus];
+                            return (
+                              <tr key={`${r.project}-${r.structure}`} className="border-b last:border-0 hover:bg-muted/30">
+                                <td className="px-3 py-2">{r.project}</td>
+                                <td className="px-3 py-2">{r.structure}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{mt3(r.woOrderQtyMt)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{mt3(r.computedReleaseBalanceMt)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fileReleaseBalanceMt)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{mt3(r.releaseDiffMt)}</td>
+                                <td className="px-3 py-2">
+                                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${rMeta.cls}`}>
+                                    {rMeta.label}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums">{mt3(r.computedDispatchBalanceMt)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fileDispatchBalanceMt)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{mt3(r.dispatchDiffMt)}</td>
+                                <td className="px-3 py-2">
+                                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${dMeta.cls}`}>
+                                    {dMeta.label}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
         </>
       )}
     </div>

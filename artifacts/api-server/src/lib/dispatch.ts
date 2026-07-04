@@ -9,8 +9,10 @@ import {
   orderReviewImportsTable,
   orderReviewRowsTable,
   dispatchLedgerTable,
+  computedFgTable,
   type OrderDispatchRow,
   type DispatchLedgerRow,
+  type ComputedFgRow,
   type OrderReviewChangeLog,
   type OrderReviewFieldChange,
 } from "@workspace/db";
@@ -282,6 +284,116 @@ export async function recomputeDispatch(
   });
 }
 
+// FG flag thresholds (metric tonnes). A computed FG within FG_MINOR_FLOOR of zero
+// on the negative side is treated as rounding noise: clamped to 0 and flagged
+// "minor". Anything more negative is a real data discrepancy: kept and flagged
+// "material" for review.
+const FG_MINOR_FLOOR = 1;
+
+export interface FgComputed {
+  computedFgMt: number;
+  flag: "minor" | "material" | null;
+}
+
+// Classify + clamp a raw FG value. Non-negative -> as-is, no flag. Tiny negative
+// (>= -1 MT) -> clamp to 0, flag "minor". Material negative (< -1 MT) -> keep the
+// negative value, flag "material".
+export function classifyFg(rawMt: number): FgComputed {
+  if (rawMt >= 0) return { computedFgMt: rawMt, flag: null };
+  if (rawMt >= -FG_MINOR_FLOOR) return { computedFgMt: 0, flag: "minor" };
+  return { computedFgMt: rawMt, flag: "material" };
+}
+
+// Sum of all-activity WIP balance tonnage per (project, structure) in the newest
+// WIP import (balanceWt * copies / 1000). This is the "AllActivitiesBalanceWt"
+// term of the FG formula. Empty when no WIP import exists. Respects the global
+// WIP valid-from cutoff so the newest in-window import is used (null cutoff is a
+// no-op, byte-identical to using the newest import overall).
+async function loadNewestWipBalanceByKey(): Promise<Map<string, number>> {
+  const cutoff = await loadValidFrom();
+  const [newest] = await db
+    .select({ id: importsTable.id })
+    .from(importsTable)
+    .where(cutoffSql(cutoff))
+    .orderBy(desc(importsTable.id))
+    .limit(1);
+  const byKey = new Map<string, number>();
+  if (!newest) return byKey;
+  const rows = await db
+    .select({
+      job: recordPoolTable.job,
+      structure: recordPoolTable.structure,
+      balanceWt: recordPoolTable.balanceWt,
+      copies: importRowsTable.copies,
+    })
+    .from(importRowsTable)
+    .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+    .where(eq(importRowsTable.importId, newest.id));
+  for (const r of rows) {
+    const key = dispatchKey(r.job, r.structure);
+    const mt = ((r.balanceWt ?? 0) * (r.copies ?? 1)) / 1000;
+    byKey.set(key, (byKey.get(key) ?? 0) + mt);
+  }
+  return byKey;
+}
+
+// Deterministically recompute Computed FG per (project, structure) and rebuild the
+// computed_fg table (delete + reinsert; idempotent). Iterates the current order
+// book (the source of Release + Despatch) and subtracts the newest WIP import's
+// all-activity balance:
+//   FG = Release(L) - AllActivitiesBalanceWt(WIP) - Despatch(Q)
+// Blank inputs count as 0; classifyFg clamps/flags negatives. Purely additive:
+// reads WIP + the order book, writes ONLY computed_fg, never the order file's own
+// FG column or any WIP / dispatch / milestone state. Safe to run best-effort after
+// any WIP commit/delete and after each Order Review ingest.
+export async function recomputeFg(): Promise<void> {
+  const orderRows = await db
+    .select({
+      project: orderReviewRowsTable.project,
+      structure: orderReviewRowsTable.structure,
+      releaseMt: orderReviewRowsTable.releaseMt,
+      fileDespatchMt: orderReviewRowsTable.fileDespatchMt,
+    })
+    .from(orderReviewRowsTable);
+
+  if (orderRows.length === 0) {
+    await db.delete(computedFgTable);
+    return;
+  }
+
+  const wipByKey = await loadNewestWipBalanceByKey();
+
+  const values = orderRows.map((r) => {
+    const release = r.releaseMt ?? 0;
+    const wip = wipByKey.get(dispatchKey(r.project, r.structure)) ?? 0;
+    const despatch = r.fileDespatchMt ?? 0;
+    const { computedFgMt, flag } = classifyFg(release - wip - despatch);
+    return {
+      project: r.project,
+      structure: r.structure,
+      releaseMt: release,
+      wipBalanceMt: wip,
+      fileDespatchMt: despatch,
+      computedFgMt,
+      flag,
+    };
+  });
+
+  await db.transaction(async (tx) => {
+    await tx.delete(computedFgTable);
+    const chunk = 500;
+    for (let i = 0; i < values.length; i += chunk) {
+      await tx.insert(computedFgTable).values(values.slice(i, i + chunk));
+    }
+  });
+}
+
+// The stored Computed FG rows (one per project+structure). Empty when no Order
+// Review file has been ingested / no FG computed yet.
+export async function loadComputedFg(): Promise<ComputedFgRow[]> {
+  return db.select().from(computedFgTable);
+}
+
 export interface DispatchReconciliationRow {
   project: string;
   structure: string;
@@ -384,6 +496,142 @@ export function crossCheckDispatch(
   return { tolerancePct, matched, mismatched, rows };
 }
 
+// One (project, structure) row comparing the file-stated balances (col S / col W)
+// against the balances computed from WO Order Qty (col J) minus Release (col L) /
+// Despatch (col Q). Each leg has its own status.
+export interface BalanceReconciliationRow {
+  project: string;
+  structure: string;
+  woOrderQtyMt: number | null;
+  // Release balance leg: computed (J - L) vs file (col S).
+  computedReleaseBalanceMt: number | null;
+  fileReleaseBalanceMt: number | null;
+  releaseDiffMt: number | null;
+  releaseDiffPct: number | null;
+  releaseStatus: "match" | "mismatch" | "no_file" | "no_computed";
+  // Despatch balance leg: computed (J - Q) vs file (col W).
+  computedDispatchBalanceMt: number | null;
+  fileDispatchBalanceMt: number | null;
+  dispatchDiffMt: number | null;
+  dispatchDiffPct: number | null;
+  dispatchStatus: "match" | "mismatch" | "no_file" | "no_computed";
+}
+
+export interface BalanceReconciliation {
+  tolerancePct: number;
+  absFloorMt: number;
+  releaseMatched: number;
+  releaseMismatched: number;
+  dispatchMatched: number;
+  dispatchMismatched: number;
+  rows: BalanceReconciliationRow[];
+}
+
+interface BalanceLeg {
+  computed: number | null;
+  file: number | null;
+  diffMt: number | null;
+  diffPct: number | null;
+  status: "match" | "mismatch" | "no_file" | "no_computed";
+}
+
+// Classify one balance leg. computed is null when WO Order Qty is missing; file is
+// null when the file balance cell is blank. A leg is a match when EITHER the % diff
+// is within tolerance OR the absolute diff is below the small floor (so near-zero
+// bases don't flag on rounding noise).
+function classifyBalanceLeg(
+  computed: number | null,
+  file: number | null,
+  tolerancePct: number,
+  absFloorMt: number,
+): BalanceLeg {
+  if (computed == null)
+    return { computed, file, diffMt: null, diffPct: null, status: "no_computed" };
+  if (file == null)
+    return { computed, file, diffMt: null, diffPct: null, status: "no_file" };
+  const diffMt = computed - file;
+  const denom = Math.max(Math.abs(file), 1e-9);
+  const diffPct = (diffMt / denom) * 100;
+  const within =
+    Math.abs(diffMt) <= absFloorMt || Math.abs(diffPct) <= tolerancePct;
+  return { computed, file, diffMt, diffPct, status: within ? "match" : "mismatch" };
+}
+
+// Cross-check the file-stated Balance Release (col S) and Balance Despatch (col W)
+// against the balances computed from WO Order Qty (col J): J - Release (col L) and
+// J - Despatch (col Q). Purely a data-quality overlay — reports agreement, never
+// changes any stored figure.
+export function crossCheckBalance(
+  fileRows: {
+    project: string;
+    structure: string;
+    woOrderQtyMt: number | null;
+    releaseMt: number | null;
+    fileDespatchMt: number | null;
+    fileBalReleaseMt: number | null;
+    fileBalDespatchMt: number | null;
+  }[],
+  tolerancePct = 1,
+  absFloorMt = 0.05,
+): BalanceReconciliation {
+  const rows: BalanceReconciliationRow[] = [];
+  let releaseMatched = 0;
+  let releaseMismatched = 0;
+  let dispatchMatched = 0;
+  let dispatchMismatched = 0;
+
+  for (const r of fileRows) {
+    const wo = r.woOrderQtyMt;
+    const computedRelease = wo == null ? null : wo - (r.releaseMt ?? 0);
+    const computedDispatch = wo == null ? null : wo - (r.fileDespatchMt ?? 0);
+    const rel = classifyBalanceLeg(
+      computedRelease,
+      r.fileBalReleaseMt,
+      tolerancePct,
+      absFloorMt,
+    );
+    const dis = classifyBalanceLeg(
+      computedDispatch,
+      r.fileBalDespatchMt,
+      tolerancePct,
+      absFloorMt,
+    );
+    if (rel.status === "match") releaseMatched++;
+    else if (rel.status === "mismatch") releaseMismatched++;
+    if (dis.status === "match") dispatchMatched++;
+    else if (dis.status === "mismatch") dispatchMismatched++;
+    rows.push({
+      project: r.project,
+      structure: r.structure,
+      woOrderQtyMt: wo,
+      computedReleaseBalanceMt: rel.computed,
+      fileReleaseBalanceMt: rel.file,
+      releaseDiffMt: rel.diffMt,
+      releaseDiffPct: rel.diffPct,
+      releaseStatus: rel.status,
+      computedDispatchBalanceMt: dis.computed,
+      fileDispatchBalanceMt: dis.file,
+      dispatchDiffMt: dis.diffMt,
+      dispatchDiffPct: dis.diffPct,
+      dispatchStatus: dis.status,
+    });
+  }
+  rows.sort(
+    (a, b) =>
+      a.project.localeCompare(b.project) ||
+      a.structure.localeCompare(b.structure),
+  );
+  return {
+    tolerancePct,
+    absFloorMt,
+    releaseMatched,
+    releaseMismatched,
+    dispatchMatched,
+    dispatchMismatched,
+    rows,
+  };
+}
+
 // Distinct (project, structure) keys present in the NEWEST WIP import — the same
 // import the Order Status page joins against. Empty when no WIP import exists.
 async function loadNewestWipStructureKeys(): Promise<Set<string>> {
@@ -454,11 +702,14 @@ const ORDER_REVIEW_VALUE_FIELDS = [
   "subType",
   "sets",
   "weightMt",
+  "woOrderQtyMt",
   "bomType",
   "releaseMt",
   "fabMt",
   "galvMt",
   "fileDespatchMt",
+  "fileBalReleaseMt",
+  "fileBalDespatchMt",
 ] as const;
 type OrderReviewValues = Pick<
   ParsedOrderReviewRow,
@@ -493,10 +744,13 @@ function collapseOrderRows(
       a == null && b == null ? null : (a ?? 0) + (b ?? 0);
     prev.sets = addNum(prev.sets, r.sets);
     prev.weightMt = addNum(prev.weightMt, r.weightMt);
+    prev.woOrderQtyMt = addNum(prev.woOrderQtyMt, r.woOrderQtyMt);
     prev.releaseMt = addNum(prev.releaseMt, r.releaseMt);
     prev.fabMt = addNum(prev.fabMt, r.fabMt);
     prev.galvMt = addNum(prev.galvMt, r.galvMt);
     prev.fileDespatchMt = addNum(prev.fileDespatchMt, r.fileDespatchMt);
+    prev.fileBalReleaseMt = addNum(prev.fileBalReleaseMt, r.fileBalReleaseMt);
+    prev.fileBalDespatchMt = addNum(prev.fileBalDespatchMt, r.fileBalDespatchMt);
   }
   return byKey;
 }
@@ -571,11 +825,14 @@ export async function ingestOrderReview(
           subType: r.subType,
           sets: r.sets,
           weightMt: r.weightMt,
+          woOrderQtyMt: r.woOrderQtyMt,
           bomType: r.bomType,
           releaseMt: r.releaseMt,
           fabMt: r.fabMt,
           galvMt: r.galvMt,
           fileDespatchMt: r.fileDespatchMt,
+          fileBalReleaseMt: r.fileBalReleaseMt,
+          fileBalDespatchMt: r.fileBalDespatchMt,
         });
         changeLog.inserted.push({ project: r.project, structure: r.structure });
         continue;
@@ -595,11 +852,14 @@ export async function ingestOrderReview(
           subType: r.subType,
           sets: r.sets,
           weightMt: r.weightMt,
+          woOrderQtyMt: r.woOrderQtyMt,
           bomType: r.bomType,
           releaseMt: r.releaseMt,
           fabMt: r.fabMt,
           galvMt: r.galvMt,
           fileDespatchMt: r.fileDespatchMt,
+          fileBalReleaseMt: r.fileBalReleaseMt,
+          fileBalDespatchMt: r.fileBalDespatchMt,
         })
         .where(eq(orderReviewRowsTable.id, prior.id));
       changeLog.updated.push({
@@ -641,6 +901,13 @@ export async function ingestOrderReview(
 
   const seeded = await seedDispatchFromOrderReview(parsed.rows, parsed.asOnDate);
   await recomputeDispatch();
+  // Refresh Computed FG from the new order book + newest WIP (best-effort; never
+  // fails the ingest). Additive — writes only computed_fg.
+  try {
+    await recomputeFg();
+  } catch {
+    // FG is a display overlay; a failure here must not fail the order ingest.
+  }
 
   return {
     importId: imp.id,
