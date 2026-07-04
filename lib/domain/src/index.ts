@@ -88,8 +88,8 @@ export const PROCESS_STEP_LABELS: Record<ProcessStep, string> = {
 // never changes parsing, Activity values, qty, ageing, or dedup.
 //   Cutting            = first step (C)
 //   Quality Check      = everything between cutting and galvanising (RFI..Q, TS)
-//   Galvanising        = G..GB
-//   Ready for Dispatch = terminal step (Y)
+//   Galvanising        = G..Y (through the terminal Yard step)
+//   Ready for Dispatch = Finished Goods (FG) field, not an activity code
 // TS (Tee Stock) is the last fabrication step and belongs to Quality Check, so
 // the galvanising phase starts at G.
 export type ProcessPhaseKey = "cutting" | "quality" | "galvanising" | "dispatch";
@@ -110,11 +110,18 @@ const NTLT_FAB_CODES = Array.from(
   ),
 );
 
-export const PROCESS_PHASES: {
+export type ProcessPhase = {
   key: ProcessPhaseKey;
   label: string;
   activities: readonly string[];
-}[] = [
+  // Optional override for the small "(...)" sub-label rendered under the phase
+  // heading. When set, the UI shows this verbatim instead of the joined activity
+  // codes. Used by Ready for Dispatch, which reports the Finished Goods (FG)
+  // record field rather than an activity code.
+  subLabel?: string;
+};
+
+export const PROCESS_PHASES: ProcessPhase[] = [
   { key: "cutting", label: "Cutting", activities: [PROCESS_SEQUENCE[0]] },
   {
     key: "quality",
@@ -124,12 +131,17 @@ export const PROCESS_PHASES: {
   {
     key: "galvanising",
     label: "Galvanising",
-    activities: PROCESS_SEQUENCE.slice(GALV_START_INDEX, DISPATCH_INDEX),
+    // G, GB, Y — the Galvanising phase now spans through the terminal Yard step.
+    activities: PROCESS_SEQUENCE.slice(GALV_START_INDEX),
   },
   {
     key: "dispatch",
     label: "Ready for Dispatch",
-    activities: [PROCESS_SEQUENCE[DISPATCH_INDEX]],
+    // Reports the Finished Goods (FG) record field, not an activity code: Y now
+    // rolls into Galvanising, so no activity routes here. The Project-Wise page
+    // fills this column from each record's `fg` value (blank until FG data lands).
+    activities: [],
+    subLabel: "FG",
   },
 ];
 
@@ -148,11 +160,7 @@ export type OrderTypeMode = "ALL" | MarkCategory;
 // Codes are drawn IN SEQUENCE ORDER from the mode's own sequences (TLT = the TLT
 // route; NTLT = the union of the NTLT sequences, deduped first-seen), so e.g. the
 // NTLT Quality Check reads "NTF, NTFSW, NTFW, TS" rather than the combined list.
-export function processPhasesForMode(mode: OrderTypeMode): {
-  key: ProcessPhaseKey;
-  label: string;
-  activities: readonly string[];
-}[] {
+export function processPhasesForMode(mode: OrderTypeMode): ProcessPhase[] {
   if (mode === "ALL") return PROCESS_PHASES;
   const seqs: readonly (readonly string[])[] =
     mode === "TLT"
@@ -178,6 +186,7 @@ export function processPhasesForMode(mode: OrderTypeMode): {
     key: phase.key,
     label: phase.label,
     activities: perPhase.get(phase.key)!,
+    subLabel: phase.subLabel,
   }));
 }
 

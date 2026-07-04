@@ -211,9 +211,17 @@ function JobDashboardContent() {
         const phases = emptyPhases();
         for (const r of recs) {
           const key = processPhase(r.activity);
-          if (!key) continue;
-          phases[key].marks += 1;
-          phases[key].weight += r.balanceWt;
+          if (key) {
+            phases[key].marks += 1;
+            phases[key].weight += r.balanceWt;
+          }
+          // Ready for Dispatch reports Finished Goods (FG) — a separate record
+          // field, independent of the activity-based phase buckets above. Blank
+          // until FG data is captured, so this column stays empty for now.
+          if (r.fg && r.fg.trim() !== "") {
+            phases.dispatch.marks += 1;
+            phases.dispatch.weight += r.balanceWt;
+          }
         }
         return {
         job,
@@ -481,7 +489,11 @@ function JobDashboardContent() {
                     <TableHead key={ph.key} className="text-right align-bottom">
                       <span className="block whitespace-nowrap">{ph.label}</span>
                       <span className="block text-[10px] font-normal text-muted-foreground normal-case leading-tight max-w-[180px] ml-auto">
-                        {ph.activities.length ? `(${ph.activities.join(", ")})` : "-"}
+                        {ph.subLabel
+                          ? `(${ph.subLabel})`
+                          : ph.activities.length
+                            ? `(${ph.activities.join(", ")})`
+                            : "-"}
                       </span>
                       <span className="block text-[10px] font-normal text-muted-foreground normal-case">
                         wt / marks

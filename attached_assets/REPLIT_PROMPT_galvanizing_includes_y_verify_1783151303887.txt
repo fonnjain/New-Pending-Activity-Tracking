@@ -1,0 +1,66 @@
+REPLIT AGENT PROMPT — GALVANIZING GROUPING = G, GB, Y APP-WIDE (with verification)
+==================================================================================
+Everywhere in the app that groups by "Galvanizing", the grouping must now include Y as well
+— i.e. Galvanizing spans G, GB AND Y. Then VERIFY it is applied consistently everywhere and
+that nothing double-counts Y. Deterministic grouping/display change; do not change the
+activity sequence, ageing, dedup, warnings, or completion/dispatch logic.
+
+THE RULE
+  - Any "Galvanizing" GROUPING / stage-group / heading / bundle / filter now covers the
+    activity set { G, GB, Y } (previously { G, GB }).
+  - Y remains a distinct ACTIVITY underneath (sequence unchanged: C,HG,RFI,NH,B,HAB,W,Q,TS,
+    G,GB,Y). This is a GROUPING change — Y still exists on its own for ageing, milestones,
+    dispatch and per-activity views; it now also falls under the Galvanizing group.
+
+APPLY EVERYWHERE GALVANIZING GROUPING APPEARS
+  - The GALVANIZING activity bundle / filter shortcut -> { G, GB, Y }.
+  - Any stage-group HEADING labelled "Galvanizing" (Activity views, dashboards, charts,
+    legends, reports that group by stage) -> includes Y.
+  - Plant Operation Wise "Galvanization" tab/view -> shows G, GB, Y.
+  - Any KPI / rollup / chart segment keyed to the "Galvanizing" group -> includes Y.
+  - Search the codebase for every place that defines or uses the Galvanizing group/bundle
+    (grep for GALVANIZING, "Galvanizing", ["G","GB"], etc.) and update each to { G, GB, Y }
+    via the single shared bundle constant (do not leave stray hard-coded [G,GB] lists).
+
+IMPORTANT EXCEPTION — DO NOT MERGE Y WHERE IT HAS ITS OWN COLUMN (no double-counting)
+  - Tables that have a DEDICATED Yard / Ready-for-Dispatch (Y) column separate from a
+    Galvanizing (G,GB) column — e.g. Order Status (its Yard/Inspection column), Project-Wise
+    stage progress, Contractor stage breakdown — KEEP Y in its own column and keep their
+    Galvanizing column as G, GB there. Do NOT add Y into Galvanizing in those tables, because
+    Y is already counted in its own column; adding it to Galvanizing too would DOUBLE-COUNT.
+  - Rule of thumb: where "Galvanizing" is a GROUPING/heading/bundle that spans stages, it now
+    includes Y. Where Y is a SEPARATE explicit column/metric, it stays separate and
+    Galvanizing there remains G, GB.
+
+DO NOT CHANGE
+  - The activity sequence, ageing, dedup, warning/pre-warning/breach math.
+  - Completion milestones and dispatch tracking (they still key off Y for now; FG is a
+    separate placeholder, blank).
+
+VERIFICATION PASS (run and report PASS/FAIL with the numbers)
+  1) List every place the Galvanizing group/bundle/heading is defined or used; show each now
+     resolves to { G, GB, Y } (or, where Y is a separate column, that it correctly stays
+     G, GB — state which case each site is).
+  2) The Galvanizing bundle/filter returns G, GB and Y marks; the Plant Operation Galvanization
+     view shows all three.
+  3) NO DOUBLE-COUNT: for any table with both a Galvanizing and a separate Yard column,
+     confirm Y is counted once (in the Yard column) and NOT also inside Galvanizing. Show the
+     Galvanizing-group total and confirm it excludes Y in those specific tables.
+  4) CONSERVATION: total weight/marks across stage groups is unchanged overall — Y simply now
+     falls under the Galvanizing group in grouping views (and stays in its own column where it
+     has one). No mark is dropped or duplicated.
+  5) Y still exists as its own activity (ageing/milestones/dispatch unaffected); sequence
+     unchanged.
+
+OUTPUT
+  - A PASS/FAIL table for checks 1-5 with the site list and numbers. Fix any site still using
+    [G,GB] for a grouping (should be [G,GB,Y]) or any table that now double-counts Y (should
+    keep Y separate). End with confirmation that Galvanizing grouping = G,GB,Y everywhere it's
+    a grouping, Y stays separate where it's an explicit column, and nothing double-counts.
+
+ACCEPTANCE
+  - Every Galvanizing GROUPING/heading/bundle/filter spans G, GB, Y.
+  - Tables with a dedicated Yard column keep Y separate (Galvanizing stays G,GB there); no
+    double-counting anywhere.
+  - Y remains a distinct activity; sequence, ageing, dedup, warnings, completion/dispatch
+    unchanged. Verification PASS with numbers.

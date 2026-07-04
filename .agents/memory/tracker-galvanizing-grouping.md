@@ -11,10 +11,19 @@ shortcut and the Plant Operation "Galvanization" tab (which has NO separate Yard
 column). The YARD bundle stays `[Y]`.
 
 **Rule:** any roll-up table that shows a SEPARATE Yard / Ready-for-Dispatch (Y)
-column next to Galvanizing (Order Status, Contractor; Project Wise uses
-PROCESS_PHASES which was left unchanged) must keep its Galvanizing column at
-**G, GB only** by computing `GALVANIZING − YARD`, never the raw GALVANIZING
-bundle — otherwise Y is double-counted in both columns.
+column next to Galvanizing (Order Status, Contractor) must keep its Galvanizing
+column at **G, GB only** by computing `GALVANIZING − YARD`, never the raw
+GALVANIZING bundle — otherwise Y is double-counted in both columns.
+
+**Project Wise exception (PROCESS_PHASES):** the Project-Wise stage table uses
+`PROCESS_PHASES`, NOT the activity bundles. Its Galvanising phase now spans
+**G, GB, Y** (`PROCESS_SEQUENCE.slice(GALV_START_INDEX)`), and its Ready for
+Dispatch column no longer maps to an activity — it reports the Finished Goods
+(FG) record field. No double-count risk because dispatch holds no activity code
+(processPhase never routes there); the page fills dispatch from `r.fg` directly.
+A phase may carry an optional `subLabel` (dispatch = "FG") that overrides the
+joined-activity-codes heading; `processPhasesForMode` carries `subLabel` through
+so it shows in every mode.
 
 **Why:** product decision — where Y already has its own column/metric it stays
 there and is not also folded into Galvanizing. Only single-bucket views (Plant
@@ -30,5 +39,7 @@ pattern for any future "drill matches a sub-set of a visible bundle" case.
 
 **FG placeholder:** `record_pool.fg` is a nullable text column, blank everywhere,
 excluded from `hashRow` (19 source cols only), not in any PROCESS_SEQUENCE or
-ACTIVITY_BUNDLE, surfaced as nullable `fg` on the /records Record schema. Purely
-reserved for future use — nothing reads or writes it.
+ACTIVITY_BUNDLE, surfaced as nullable `fg` on the /records Record schema. Now
+consumed display-only by the Project-Wise Ready for Dispatch column (counts marks
+with non-blank `fg`); still blank in all data, so that column reads "-" until FG
+data is captured.
