@@ -7,13 +7,9 @@ import {
   getGetImportRecordsQueryKey,
   useGetFg,
   getGetFgQueryKey,
-  useRecomputeFg,
-  useGetAuthStatus,
-  getGetAuthStatusQueryKey,
   type OrderStatusRow,
   type Record as WipRecord,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { bundleActivitySet } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,7 +20,6 @@ import {
   AlertTriangle,
   ChevronRight,
   ChevronDown,
-  RefreshCw,
 } from "lucide-react";
 
 // Activity buckets used to roll WIP marks into Fabrication / Galvanizing.
@@ -102,30 +97,6 @@ export default function OrderStatusView() {
   );
 
   const { data: fg } = useGetFg({ query: { queryKey: getGetFgQueryKey() } });
-
-  // Recompute FG on demand (auth-gated). The button only shows for a logged-in
-  // admin; it rebuilds the computed_fg overlay and refreshes the Finished Good
-  // column without needing a file re-upload.
-  const queryClient = useQueryClient();
-  const { data: authStatus } = useGetAuthStatus({
-    query: { queryKey: getGetAuthStatusQueryKey() },
-  });
-  const recompute = useRecomputeFg();
-  const [recomputeMsg, setRecomputeMsg] = useState<string | null>(null);
-  const onRecompute = () => {
-    setRecomputeMsg(null);
-    recompute.mutate(undefined, {
-      onSuccess: (res) => {
-        queryClient.invalidateQueries({ queryKey: getGetFgQueryKey() });
-        setRecomputeMsg(
-          `Finished Good rebuilt: ${res.rows} rows, ${res.totalMt.toFixed(3)} MT total.`,
-        );
-      },
-      onError: () => {
-        setRecomputeMsg("Recompute failed. Please sign in and try again.");
-      },
-    });
-  };
 
   const isNtlt = filters.category === "NTLT";
   const isAll = filters.category === "ALL";
@@ -417,37 +388,17 @@ export default function OrderStatusView() {
             (computed).
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {authStatus?.authenticated && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onRecompute}
-              disabled={recompute.isPending}
-              className="gap-2"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${recompute.isPending ? "animate-spin" : ""}`}
-              />
-              {recompute.isPending ? "Recomputing..." : "Recompute FG"}
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onExport}
-            disabled={rows.length === 0}
-            className="gap-2"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            Export
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onExport}
+          disabled={rows.length === 0}
+          className="gap-2 shrink-0"
+        >
+          <FileSpreadsheet className="h-4 w-4" />
+          Export
+        </Button>
       </div>
-
-      {recomputeMsg && (
-        <div className="text-sm text-muted-foreground">{recomputeMsg}</div>
-      )}
 
       {!available && !loading && (
         <Card>

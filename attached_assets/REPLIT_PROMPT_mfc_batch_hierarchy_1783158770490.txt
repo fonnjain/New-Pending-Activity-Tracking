@@ -1,0 +1,69 @@
+REPLIT AGENT PROMPT — ADD MFC BATCH (WO Batch No.) AS A HIERARCHY LEVEL (Project -> MFC -> Structure -> Mark)
+============================================================================================================
+The WIP file now has two new columns: Work Order No. (col T) and WO Batch No. (col U). WO
+Batch No. is the MFC (Manufacturer Fabrication Clearance) batch letter (A, B, C ...) — MFC
+arrives per project in batches, and fabrication starts per batch. Store both, treat blank as
+"Z", and insert MFC as a new grouping level BETWEEN Project and Structure so the TLT drilldown
+becomes Project -> MFC -> Structure -> Mark. Deterministic; do not change parsing of other
+fields, ageing, dedup logic (see hash note), warnings, or load calculations.
+
+CONTEXT / DATA
+  - Work Order No. (col T): e.g. "WO/25-26/001102", populated on ~all rows. STORE it, but do
+    NOT use it in logic for now (future use).
+  - WO Batch No. (col U): the MFC batch letter (A, B, C ...). Currently sparse (only B, C seen
+    on ~1% of marks). Blank on most rows.
+  - MFC batch is meaningful PER PROJECT (Batch A/B/C of a given project).
+
+1) READ & STORE THE NEW COLUMNS
+  - Map col T -> work_order_no (string, stored, unused for now) and col U -> mfc_batch
+    (string). The file now has 21 columns; header auto-detect still by name.
+  - NORMALIZE mfc_batch: trim/uppercase. If BLANK/empty -> set mfc_batch = "Z" (placeholder
+    so blanks sort AFTER real batches until the WIP starts populating them). Keep a flag/way
+    to know it was originally blank if useful (e.g. mfc_is_blank = true) but display "Z".
+  - Add work_order_no and mfc_batch to record_pool / records (Drizzle migration) and to the
+    API schema (openapi.yaml); regenerate hooks/Zod.
+  - HASH NOTE: these are NEW SOURCE columns. Decide once and be consistent: INCLUDE
+    work_order_no and the RAW (pre-Z) WO Batch value in the across-upload row hash so a real
+    change to a mark's work order / batch is treated as a change. (Do NOT hash the derived
+    "Z" substitution — hash the raw source value; blank stays blank in the hash.)
+
+2) NEW HIERARCHY LEVEL: Project -> MFC -> Structure -> Mark  (TLT)
+  - Insert MFC batch as a grouping level BETWEEN Project and Structure. The TLT drilldown/
+    grouping becomes: Project -> MFC (batch) -> Structure (Alias) -> Mark.
+  - MFC batch is scoped PER PROJECT: within a project, group its structures/marks by their
+    mfc_batch. The same letter under different projects is that project's own batch (do not
+    merge Batch A across projects into one global group).
+  - SORT ORDER of MFC within a project: A, B, C, ... then Z (blank) LAST. (Alphabetical, with
+    Z naturally/forced last since blanks map to Z.)
+  - Update the cascading filters and any Project->Structure->Mark tree/table to include the
+    MFC level: selecting a Project shows its MFC batches; selecting an MFC shows that batch's
+    structures; then marks. Rollups (marks, qty, weight, ageing) available at the MFC level
+    too.
+
+3) SORT BY MFC
+  - Provide a "sort by MFC" option wherever the Project/Structure grouping is shown, ordering
+    batches A -> Z (Z last). Also allow MFC as a filter (pick a batch) where the contractor/
+    activity filters live.
+
+4) SCOPE
+  - Apply to TLT (Project-grouped) where the Project->Structure->Mark hierarchy exists.
+  - NTLT is Section-grouped (no project); if mfc_batch is present on NTLT rows, store it and
+    allow sort/filter, but the primary NTLT grouping stays Section (MFC can be a secondary
+    sort/attribute there). Do not force the Project->MFC hierarchy onto NTLT.
+
+5) DISPLAY
+  - Show MFC batch as a column/level in the relevant tables and the drilldown. Blank-origin
+    rows show "Z".
+  - Rollup headers read like: Project 900 > MFC A > Structure <alias> > marks.
+
+ACCEPTANCE CHECK
+  - work_order_no and mfc_batch stored in DB/API; header auto-detect handles the 21-column
+    file.
+  - Blank WO Batch No. displays/sorts as "Z" (last); real batches A, B, C sort before it.
+  - TLT drilldown/grouping is Project -> MFC -> Structure -> Mark; MFC scoped per project
+    (Batch A of 900 is distinct from Batch A of 933).
+  - Sort-by-MFC (A..Z) and filter-by-MFC available; rollups at the MFC level correct.
+  - Raw work order / batch changes are reflected via the row hash (Z substitution not hashed);
+    dedup otherwise unchanged.
+  - NTLT stays Section-grouped; MFC optional there.
+  - No change to ageing, warnings, load calcs, or other parsing.
