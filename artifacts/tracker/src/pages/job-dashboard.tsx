@@ -15,6 +15,8 @@ import {
 import {
   useGetImportRecords,
   getGetImportRecordsQueryKey,
+  useGetOrderStatus,
+  getGetOrderStatusQueryKey,
 } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
@@ -84,6 +86,28 @@ function JobDashboardContent() {
       queryKey: getGetImportRecordsQueryKey(selectedImportId as number),
     },
   });
+
+  // Order Review figures (Work Order / Release / Dispatch, all MT) aggregated per
+  // project and joined to each Project Wise row by the same primary key used
+  // below. The Order Review sheet is a TLT-only order book: in ALL mode the key
+  // is prefixed "TLT: " to match primaryOf; in NTLT mode nothing matches so
+  // those rows render "-". Dispatch uses the file value (fileDespatchMt), never
+  // the WIP-computed dispatch.
+  const { data: order } = useGetOrderStatus({
+    query: { queryKey: getGetOrderStatusQueryKey() },
+  });
+  const orderByJob = useMemo(() => {
+    const m = new Map<string, { wo: number; rel: number; disp: number }>();
+    for (const r of order?.rows ?? []) {
+      const key = isAll ? `TLT: ${r.project}` : r.project;
+      const agg = m.get(key) ?? { wo: 0, rel: 0, disp: 0 };
+      agg.wo += r.weightMt ?? 0;
+      agg.rel += r.releaseMt ?? 0;
+      agg.disp += r.fileDespatchMt ?? 0;
+      m.set(key, agg);
+    }
+    return m;
+  }, [order, isAll]);
 
   // Scope to the current Order Type mode. The toggle drives both the primary
   // dimension (Project for TLT, Section for NTLT) and the grouping below.
@@ -308,6 +332,21 @@ function JobDashboardContent() {
     return arr;
   }, [byProject, projectSort]);
 
+  const orderTotals = useMemo(() => {
+    return byProject.reduce(
+      (acc, p) => {
+        const o = orderByJob.get(p.job);
+        if (o) {
+          acc.wo += o.wo;
+          acc.rel += o.rel;
+          acc.disp += o.disp;
+        }
+        return acc;
+      },
+      { wo: 0, rel: 0, disp: 0 },
+    );
+  }, [byProject, orderByJob]);
+
   const handleExport = () => {
     const groupLabel = isAll ? "Group" : isNtlt ? "Section" : "Project";
     const sheets: XlsxSheet[] = [
@@ -315,6 +354,9 @@ function JobDashboardContent() {
         name: `By ${groupLabel}`,
         columns: [
           { label: groupLabel, field: "job" },
+          { label: "Work Order (MT)", field: "workOrderMt", numeric: true, decimals: 3, total: true },
+          { label: "Release (MT)", field: "releaseMt", numeric: true, decimals: 3, total: true },
+          { label: "Dispatch (MT)", field: "dispatchMt", numeric: true, decimals: 3, total: true },
           { label: "Structures", field: "structures", numeric: true, decimals: 0 },
           { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
           { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
@@ -327,6 +369,9 @@ function JobDashboardContent() {
         ],
         rows: sortedProjects.map((p) => ({
           job: p.job,
+          workOrderMt: orderByJob.get(p.job)?.wo ?? 0,
+          releaseMt: orderByJob.get(p.job)?.rel ?? 0,
+          dispatchMt: orderByJob.get(p.job)?.disp ?? 0,
           structures: p.structures,
           marks: p.marks,
           qty: p.qty,
@@ -485,9 +530,12 @@ function JobDashboardContent() {
               <TableHeader>
                 <TableRow>
                   <TableHead>{primaryLabel}</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Work Order Qty</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Qty</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Qty</TableHead>
                   {headerPhases.map((ph) => (
                     <TableHead key={ph.key} className="text-right align-bottom">
-                      <span className="block whitespace-nowrap">{ph.label}</span>
+                      <span className="block whitespace-normal leading-tight">{ph.label}</span>
                       <span className="block text-[10px] font-normal text-muted-foreground normal-case leading-tight max-w-[180px] ml-auto">
                         {ph.subLabel
                           ? `(${ph.subLabel})`
@@ -510,13 +558,24 @@ function JobDashboardContent() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sortedProjects.map((p) => (
+                {sortedProjects.map((p) => {
+                  const o = orderByJob.get(p.job);
+                  return (
                   <TableRow
                     key={p.job}
                     className="cursor-pointer hover:bg-muted/40"
                     onClick={() => setSelectedJob(p.job)}
                   >
                     <TableCell className="font-bold text-primary">{p.job}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {o ? formatWeight(o.wo * 1000) : <span className="text-muted-foreground">-</span>}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {o ? formatWeight(o.rel * 1000) : <span className="text-muted-foreground">-</span>}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {o ? formatWeight(o.disp * 1000) : <span className="text-muted-foreground">-</span>}
+                    </TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       const cell = p.phases[ph.key];
                       return (
@@ -546,10 +605,11 @@ function JobDashboardContent() {
                       {p.avgAge !== null ? `${p.avgAge}d` : "-"}
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
                 {byProject.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={PROCESS_PHASES.length + 3} className="text-center py-4 text-muted-foreground">
+                    <TableCell colSpan={PROCESS_PHASES.length + 6} className="text-center py-4 text-muted-foreground">
                       No data for the selected filters.
                     </TableCell>
                   </TableRow>
@@ -559,6 +619,9 @@ function JobDashboardContent() {
                 <TableFooter>
                   <TableRow className="border-t-2">
                     <TableCell className="font-bold uppercase tracking-wider text-xs">Total</TableCell>
+                    <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.wo * 1000)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.rel * 1000)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.disp * 1000)}</TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       const marks = byProject.reduce((s, p) => s + p.phases[ph.key].marks, 0);
                       const weight = byProject.reduce((s, p) => s + p.phases[ph.key].weight, 0);

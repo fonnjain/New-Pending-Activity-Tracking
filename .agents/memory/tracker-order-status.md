@@ -15,6 +15,7 @@ records via ACTIVITY_BUNDLES (so header filters are honoured); Dispatch is serve
 become file-type-aware (see below).
 
 ## Two independent dispatch figures: File Dispatch vs Computed Dispatch
+- **UI shows only File Dispatch.** Order Status page displays a single "Dispatch" column = file value; the Computed Dispatch column + the file-vs-computed reconciliation banner were removed from that page (backend `computedDispatchMt`/`accruedMt`/ledger + Data-page reconciliation are untouched — still computed, just hidden there). Project Wise (job-dashboard) also surfaces order-review Work Order/Release/Dispatch (MT) per project, joined by the same `primaryOf` key (TLT-only: ALL prefixes `TLT: `, NTLT rows show `-`), Dispatch = `fileDespatchMt` never computed.
 - **File Dispatch** = `fileDespatchMt`, the despatch tonnage stated in the Order Review file (live latest file value).
 - **Computed Dispatch** = `accruedMt` ONLY = WIP yard departures (marks that left the Yard bucket
   between consecutive WIP imports, accrued in `dispatch_ledger`). **The Order Review file/seed NEVER

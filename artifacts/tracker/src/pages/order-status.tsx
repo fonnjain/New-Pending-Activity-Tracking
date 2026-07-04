@@ -56,7 +56,6 @@ interface DisplayRow {
   weightMt: number | null;
   releaseMt: number | null;
   fileDespatchMt: number | null;
-  computedDispatchMt: number;
   // Bundle tonnage is TLT-only. For an out-of-scope (NTLT) structure these are
   // null and rendered "n/a" — NTLT marks never contribute Fab/Galv/Yard math.
   fabMt: number | null;
@@ -202,7 +201,6 @@ export default function OrderStatusView() {
         weightMt: file?.weightMt ?? null,
         releaseMt: file?.releaseMt ?? null,
         fileDespatchMt: file?.fileDespatchMt ?? null,
-        computedDispatchMt: file?.computedDispatchMt ?? 0,
         // comp -> live WIP buckets; else in-WIP-but-mode-hidden -> 0; else truly
         // absent -> file Progress (Yard always blank for file-sourced rows).
         fabMt: outOfScope
@@ -260,7 +258,6 @@ export default function OrderStatusView() {
           acc.galvMt += r.galvMt ?? 0;
           acc.yardMt += r.yardMt ?? 0;
           acc.fileDespatchMt += r.fileDespatchMt ?? 0;
-          acc.computedDispatchMt += r.computedDispatchMt;
           return acc;
         },
         {
@@ -271,7 +268,6 @@ export default function OrderStatusView() {
           galvMt: 0,
           yardMt: 0,
           fileDespatchMt: 0,
-          computedDispatchMt: 0,
         },
       );
       return { project, list, subtotal };
@@ -288,7 +284,6 @@ export default function OrderStatusView() {
         acc.galvMt += r.galvMt ?? 0;
         acc.yardMt += r.yardMt ?? 0;
         acc.fileDespatchMt += r.fileDespatchMt ?? 0;
-        acc.computedDispatchMt += r.computedDispatchMt;
         return acc;
       },
       {
@@ -299,7 +294,6 @@ export default function OrderStatusView() {
         galvMt: 0,
         yardMt: 0,
         fileDespatchMt: 0,
-        computedDispatchMt: 0,
       },
     );
   }, [rows]);
@@ -317,8 +311,7 @@ export default function OrderStatusView() {
       { label: "Fabrication (MT)", field: "fabMt", numeric: true, decimals: 3, total: true },
       { label: "Galvanizing (MT)", field: "galvMt", numeric: true, decimals: 3, total: true },
       { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
-      { label: "File Dispatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
-      { label: "Computed Dispatch (MT)", field: "computedDispatchMt", numeric: true, decimals: 3, total: true },
+      { label: "Dispatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
     ];
     const out = rows.map((r) => ({
       project: r.project,
@@ -333,7 +326,6 @@ export default function OrderStatusView() {
       galvMt: r.galvMt ?? "",
       yardMt: r.yardMt ?? "",
       fileDespatchMt: r.fileDespatchMt ?? "",
-      computedDispatchMt: r.computedDispatchMt,
     }));
     void exportToXlsx(
       `order_status_${new Date().toISOString().slice(0, 10)}.xlsx`,
@@ -354,7 +346,7 @@ export default function OrderStatusView() {
           <p className="text-sm text-muted-foreground mt-1">
             Per project and structure: order quantities from the latest Order Review
             file, joined to live Fabrication / Galvanizing / Yard tonnage computed
-            from the selected WIP report, and running Dispatch.
+            from the selected WIP report, and Dispatch (MT) from the file.
           </p>
         </div>
         <Button
@@ -405,22 +397,6 @@ export default function OrderStatusView() {
         </div>
       )}
 
-      {available && order && order.reconciliation.mismatched > 0 && (
-        <Card className="border-amber-500/40">
-          <CardContent className="py-3 flex items-center gap-2 text-sm">
-            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
-            <span>
-              {order.reconciliation.mismatched} structure
-              {order.reconciliation.mismatched === 1 ? "" : "s"} differ between the
-              file dispatch and the computed dispatch beyond the
-              {" "}
-              {order.reconciliation.tolerancePct}% tolerance. See the
-              reconciliation tab on the Data page.
-            </span>
-          </CardContent>
-        </Card>
-      )}
-
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
@@ -441,17 +417,16 @@ export default function OrderStatusView() {
               <table className="w-full text-sm">
                 <thead className="border-b bg-muted/40">
                   <tr className="text-left">
-                    <th className="px-3 py-2 font-semibold">Structure Type</th>
-                    <th className="px-3 py-2 font-semibold">Sub Type</th>
-                    <th className="px-3 py-2 font-semibold text-right">Sets</th>
-                    <th className="px-3 py-2 font-semibold text-right">Weight</th>
-                    <th className="px-3 py-2 font-semibold">BOM Type</th>
-                    <th className="px-3 py-2 font-semibold text-right">Release</th>
-                    <th className="px-3 py-2 font-semibold text-right">Fabrication</th>
-                    <th className="px-3 py-2 font-semibold text-right">Galvanizing</th>
-                    <th className="px-3 py-2 font-semibold text-right">Yard</th>
-                    <th className="px-3 py-2 font-semibold text-right">File Dispatch</th>
-                    <th className="px-3 py-2 font-semibold text-right">Computed Dispatch</th>
+                    <th className="px-2 py-1.5 font-semibold">Structure Type</th>
+                    <th className="px-2 py-1.5 font-semibold">Sub Type</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">Sets</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">Weight</th>
+                    <th className="px-2 py-1.5 font-semibold">BOM Type</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">Release</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">Fabrication</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">Galvanizing</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">Yard</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">Dispatch</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -461,16 +436,15 @@ export default function OrderStatusView() {
                 </tbody>
                 <tfoot className="border-t-2 bg-muted/60 font-semibold">
                   <tr>
-                    <td className="px-3 py-2" colSpan={2}>Total ({rows.length})</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{totals.sets.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{mt(totals.weightMt)}</td>
-                    <td className="px-3 py-2" />
-                    <td className="px-3 py-2 text-right tabular-nums">{mt(totals.releaseMt)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{mt(totals.fabMt)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{mt(totals.galvMt)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{mt(totals.yardMt)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{mt(totals.fileDespatchMt)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{mt(totals.computedDispatchMt)}</td>
+                    <td className="px-2 py-1.5" colSpan={2}>Total ({rows.length})</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{totals.sets.toLocaleString()}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.weightMt)}</td>
+                    <td className="px-2 py-1.5" />
+                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.releaseMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.fabMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.galvMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.yardMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.fileDespatchMt)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -509,7 +483,6 @@ function ProjectGroup({
       galvMt: number;
       yardMt: number;
       fileDespatchMt: number;
-      computedDispatchMt: number;
     };
   };
 }) {
@@ -521,7 +494,7 @@ function ProjectGroup({
         className="border-b border-primary/20 bg-primary/10 hover:bg-primary/15 cursor-pointer"
         onClick={() => setOpen((v) => !v)}
       >
-        <td colSpan={2} className="px-3 py-2">
+        <td colSpan={2} className="px-2 py-1.5">
           <div className="flex items-center gap-2">
             {open ? (
               <ChevronDown className="h-4 w-4 text-primary shrink-0" />
@@ -536,20 +509,19 @@ function ProjectGroup({
             </span>
           </div>
         </td>
-        <td className="px-3 py-2 text-right tabular-nums font-bold">{subtotal.sets.toLocaleString()}</td>
-        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.weightMt)}</td>
-        <td className="px-3 py-2" />
-        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.releaseMt)}</td>
-        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.fabMt)}</td>
-        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.galvMt)}</td>
-        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.yardMt)}</td>
-        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.fileDespatchMt)}</td>
-        <td className="px-3 py-2 text-right tabular-nums font-bold">{mt(subtotal.computedDispatchMt)}</td>
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{subtotal.sets.toLocaleString()}</td>
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.weightMt)}</td>
+        <td className="px-2 py-1.5" />
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.releaseMt)}</td>
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.fabMt)}</td>
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.galvMt)}</td>
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.yardMt)}</td>
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.fileDespatchMt)}</td>
       </tr>
       {open &&
         list.map((r) => (
           <tr key={`${r.project}-${r.structure}`} className="border-b last:border-0 hover:bg-muted/30">
-            <td className="px-3 py-2 pl-9">
+            <td className="px-2 py-1.5 pl-9">
               <span>{r.structure}</span>
               {!r.inFile && (
                 <span className="ml-2 text-[10px] uppercase text-muted-foreground">WIP only</span>
@@ -567,31 +539,29 @@ function ProjectGroup({
                 <span className="ml-2 text-[10px] uppercase text-sky-600 dark:text-sky-400">fab/galv from order sheet</span>
               )}
             </td>
-            <td className="px-3 py-2">{r.subType ?? "-"}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{r.sets ?? "-"}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{mt(r.weightMt)}</td>
-            <td className="px-3 py-2">{r.bomType ?? "-"}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{mt(r.releaseMt)}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.fabMt)}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.galvMt)}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.yardMt)}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{mt(r.fileDespatchMt)}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{mt(r.computedDispatchMt)}</td>
+            <td className="px-2 py-1.5">{r.subType ?? "-"}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{r.sets ?? "-"}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.weightMt)}</td>
+            <td className="px-2 py-1.5">{r.bomType ?? "-"}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.releaseMt)}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.fabMt)}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.galvMt)}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.yardMt)}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.fileDespatchMt)}</td>
           </tr>
         ))}
       {open && (
         <tr className="border-b bg-muted/10 text-xs">
-          <td className="px-3 py-1.5 pl-9 font-medium text-muted-foreground">Subtotal</td>
-          <td className="px-3 py-1.5" />
-          <td className="px-3 py-1.5" />
-          <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.weightMt)}</td>
-          <td className="px-3 py-1.5" />
-          <td className="px-3 py-1.5" />
-          <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.fabMt)}</td>
-          <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.galvMt)}</td>
-          <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.yardMt)}</td>
-          <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.fileDespatchMt)}</td>
-          <td className="px-3 py-1.5 text-right tabular-nums font-medium">{mt(subtotal.computedDispatchMt)}</td>
+          <td className="px-2 py-1 pl-9 font-medium text-muted-foreground">Subtotal</td>
+          <td className="px-2 py-1" />
+          <td className="px-2 py-1" />
+          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.weightMt)}</td>
+          <td className="px-2 py-1" />
+          <td className="px-2 py-1" />
+          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.fabMt)}</td>
+          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.galvMt)}</td>
+          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.yardMt)}</td>
+          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.fileDespatchMt)}</td>
         </tr>
       )}
     </>
