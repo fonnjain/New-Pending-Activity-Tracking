@@ -1639,6 +1639,17 @@ export const GetFgResponse = zod.object({
 
 
 /**
+ * Recomputes and rewrites the Computed FG overlay (the computed_fg table) from the current order book and the newest WIP import, then returns the resulting row count and total tonnage. Use this to populate/refresh Finished Good on demand (e.g. in a freshly deployed environment) without having to re-upload a file. Purely additive — writes only computed_fg; never changes WIP parsing, activity, dedup, ageing, warning, velocity, dispatch, or milestone state. Requires authentication.
+
+ * @summary Rebuild the stored Computed FG overlay (auth required)
+ */
+export const RecomputeFgResponse = zod.object({
+  "rows": zod.number().describe('Number of (project, structure) Computed FG rows written.'),
+  "totalMt": zod.number().describe('Sum of computedFgMt across all rebuilt rows.')
+}).describe('Result of rebuilding the Computed FG overlay.')
+
+
+/**
  * Removes a single Order Review upload from the history log. The Order Review file is a daily snapshot merged (UPSERTed) into one current order book, so deleting a history entry does NOT roll back the current order-book values. Deleting the most recent upload re-points the current snapshot rows to the now-latest remaining upload. Deleting the last remaining upload clears the entire order book (rows + computed dispatch). Purely additive to WIP state — never touches WIP parsing, activity, dedup, ageing, warning, or milestone math.
 
  * @summary Delete one Order Review file from the upload history

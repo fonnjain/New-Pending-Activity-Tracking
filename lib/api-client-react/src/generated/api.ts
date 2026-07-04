@@ -37,6 +37,7 @@ import type {
   ErrorResponse,
   FabricationPriority,
   FabricationPriorityInput,
+  FgRecomputeResult,
   FgResponse,
   HealthStatus,
   Import,
@@ -2774,6 +2775,78 @@ export function useGetFg<TData = Awaited<ReturnType<typeof getFg>>, TError = Err
 
 
 
+
+export const getRecomputeFgUrl = () => {
+
+
+
+
+  return `/api/fg/recompute`
+}
+
+/**
+ * Recomputes and rewrites the Computed FG overlay (the computed_fg table) from the current order book and the newest WIP import, then returns the resulting row count and total tonnage. Use this to populate/refresh Finished Good on demand (e.g. in a freshly deployed environment) without having to re-upload a file. Purely additive — writes only computed_fg; never changes WIP parsing, activity, dedup, ageing, warning, velocity, dispatch, or milestone state. Requires authentication.
+
+ * @summary Rebuild the stored Computed FG overlay (auth required)
+ */
+export const recomputeFg = async ( options?: RequestInit): Promise<FgRecomputeResult> => {
+
+  return customFetch<FgRecomputeResult>(getRecomputeFgUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRecomputeFgMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recomputeFg>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recomputeFg>>, TError,void, TContext> => {
+
+const mutationKey = ['recomputeFg'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recomputeFg>>, void> = () => {
+
+
+          return  recomputeFg(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecomputeFgMutationResult = NonNullable<Awaited<ReturnType<typeof recomputeFg>>>
+
+    export type RecomputeFgMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Rebuild the stored Computed FG overlay (auth required)
+ */
+export const useRecomputeFg = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recomputeFg>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof recomputeFg>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getRecomputeFgMutationOptions(options));
+    }
 
 export const getDeleteOrderImportUrl = (id: number,) => {
 

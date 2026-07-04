@@ -12,6 +12,7 @@ import {
   crossCheckDispatch,
   crossCheckBalance,
   loadComputedFg,
+  recomputeFg,
 } from "../lib/dispatch";
 import { requireAuth } from "./auth";
 
@@ -165,6 +166,21 @@ router.get("/fg", async (_req, res): Promise<void> => {
       flag: r.flag,
     })),
   });
+});
+
+// ---------------------------------------------------------------------------
+// POST /fg/recompute — rebuild the Computed FG overlay on demand (auth-gated).
+// The computed_fg table is a derived overlay that is normally refreshed as a
+// side-effect of a WIP commit/delete or an Order Review ingest. On a freshly
+// deployed environment where none of those has happened yet, the table is empty
+// and Finished Good reads 0. This lets an authenticated admin repopulate it
+// without re-uploading a file. Purely additive: writes only computed_fg.
+// ---------------------------------------------------------------------------
+router.post("/fg/recompute", requireAuth, async (_req, res): Promise<void> => {
+  await recomputeFg();
+  const rows = await loadComputedFg();
+  const totalMt = rows.reduce((s, r) => s + (r.computedFgMt ?? 0), 0);
+  res.json({ rows: rows.length, totalMt });
 });
 
 // ---------------------------------------------------------------------------

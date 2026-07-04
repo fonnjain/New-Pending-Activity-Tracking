@@ -49,6 +49,7 @@ export * from './fabricationPriorityInputPriority';
 export * from './fabricationPriorityInputSection';
 export * from './fabricationPriorityPriority';
 export * from './fabricationPrioritySection';
+export * from './fgRecomputeResult';
 export * from './fgResponse';
 export * from './fgRow';
 export * from './fgRowFlag';

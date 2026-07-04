@@ -38,5 +38,8 @@ or milestones.
 ## Gotcha
 - `recomputeFg`/`recomputeDispatch` only fire on upload/delete/ingest. After
   adding the code to an existing repl, `computed_fg` stays empty until the next
-  trigger — run `recomputeFg()` once (e.g. throwaway tsx script) to backfill, or
-  re-ingest. Empty `/fg` rows on a fresh deploy is this, not a bug.
+  trigger — empty `/fg` rows on a fresh deploy is this, not a bug.
+- Backfill without a re-upload: auth-gated `POST /fg/recompute` (hook
+  `useRecomputeFg`) runs `recomputeFg()` + `loadComputedFg()` and returns
+  `{rows, totalMt}`. Surfaced as the "Recompute FG" button on the Order Status
+  page header (shown only when `useGetAuthStatus().authenticated`).

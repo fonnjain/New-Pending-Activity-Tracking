@@ -871,6 +871,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FgResponse"
+  /fg/recompute:
+    post:
+      operationId: recomputeFg
+      tags: [orderStatus]
+      summary: Rebuild the stored Computed FG overlay (auth required)
+      description: >
+        Recomputes and rewrites the Computed FG overlay (the computed_fg table)
+        from the current order book and the newest WIP import, then returns the
+        resulting row count and total tonnage. Use this to populate/refresh
+        Finished Good on demand (e.g. in a freshly deployed environment) without
+        having to re-upload a file. Purely additive — writes only computed_fg;
+        never changes WIP parsing, activity, dedup, ageing, warning, velocity,
+        dispatch, or milestone state. Requires authentication.
+      responses:
+        "200":
+          description: Computed FG rebuilt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FgRecomputeResult"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /order-imports/{id}:
     delete:
       operationId: deleteOrderImport
@@ -2896,6 +2922,19 @@ components:
         - available
         - asOnDate
         - rows
+    FgRecomputeResult:
+      type: object
+      description: Result of rebuilding the Computed FG overlay.
+      properties:
+        rows:
+          type: integer
+          description: Number of (project, structure) Computed FG rows written.
+        totalMt:
+          type: number
+          description: Sum of computedFgMt across all rebuilt rows.
+      required:
+        - rows
+        - totalMt
     ReviewRequest:
       type: object
       properties:

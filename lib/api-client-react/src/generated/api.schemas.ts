@@ -1425,6 +1425,16 @@ export interface FgResponse {
   rows: FgRow[];
 }
 
+/**
+ * Result of rebuilding the Computed FG overlay.
+ */
+export interface FgRecomputeResult {
+  /** Number of (project, structure) Computed FG rows written. */
+  rows: number;
+  /** Sum of computedFgMt across all rebuilt rows. */
+  totalMt: number;
+}
+
 export interface ReviewRequest {
   /** The import to review. */
   importId: number;
