@@ -117,6 +117,26 @@ export async function recomputeContractorMovement(): Promise<ContractorMovementE
   );
   const bridgeByImport = buildIdentityBridge(identityRowsByImport);
 
+  // A mark whose contractor field is blank as of the LATEST import is
+  // treated as "contractor work is done" -- it has left every contractor's
+  // scope of work entirely. Exclude its full move history (past and
+  // present) from the Contractor Performance ledger so it never appears
+  // under a contractor's breakdown/sub-sheet once it reaches that state.
+  // (A mark simply absent from the latest import -- e.g. dispatched -- is a
+  // different, unrelated case and is left untouched.)
+  const currentlyUnassignedKeys = new Set<string>();
+  const lastIdx = imports.length - 1;
+  if (lastIdx >= 0) {
+    const lastRows = rowsByImport[lastIdx];
+    const lastBridge = bridgeByImport[lastIdx];
+    for (const r of lastRows) {
+      if (!r.activity || !r.markId) continue;
+      if (r.contractor && r.contractor.trim()) continue;
+      const raw = identityRawKey(r.markId, r.jobCardNo);
+      currentlyUnassignedKeys.add(lastBridge.get(raw) ?? raw);
+    }
+  }
+
   const prev = new Map<string, IdentityState>();
   const groups = new Map<string, GroupTotal>();
 
@@ -132,7 +152,7 @@ export async function recomputeContractorMovement(): Promise<ContractorMovementE
       const key = bridge.get(raw) ?? raw;
       const before = prev.get(key);
 
-      if (before && before.activity && before.activity !== r.activity) {
+      if (before && before.activity && before.activity !== r.activity && !currentlyUnassignedKeys.has(key)) {
         const weightKg = (r.balanceWt ?? 0) * (r.copies ?? 1);
         const gk = groupKey(ymd, r.job, before.contractor, before.activity, r.activity);
         const g = groups.get(gk);
