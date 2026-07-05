@@ -18,3 +18,15 @@ id = "QwKduUd3alm8CYy5IsUED"
 uri = "file://docs/DATA_STRUCTURE.xlsx"
 type = "table"
 title = "Data Structure, Inputs & Parameters (Excel)"
+
+[[outputs]]
+id = "WGUDocth8oG1uy9K5GCBt"
+uri = "file://docs/Tracker_Architecture.xlsx"
+type = "table"
+title = "Web App Architecture (Excel)"
+
+[[outputs]]
+id = "sgFyhUraCAT9K1o10StGu"
+uri = "file://docs/Tracker_Formulas_Definitions.docx"
+type = "word_document"
+title = "Formulas, Logic, Definitions & Variables (Word)"
