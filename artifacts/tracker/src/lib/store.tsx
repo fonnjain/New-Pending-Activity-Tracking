@@ -163,6 +163,28 @@ export function dateRangeWindow(code: string | null): { start: Date; end: Date }
     const end = new Date(hi.getFullYear(), hi.getMonth(), hi.getDate() + 1); // exclusive
     return { start: lo, end };
   }
+  // A single calendar month, encoded as "month:YYYY-MM" (e.g. "month:2026-06"
+  // for June 2026). Whole-month window, end exclusive.
+  if (code.startsWith("month:")) {
+    const [, ym] = code.split(":");
+    const [yStr, mStr] = (ym ?? "").split("-");
+    const y = Number(yStr);
+    const m = Number(mStr);
+    if (!y || !m || m < 1 || m > 12) return null;
+    return { start: new Date(y, m - 1, 1), end: new Date(y, m, 1) };
+  }
+  // A single calendar quarter, encoded as "quarter:YYYY-Q" (e.g.
+  // "quarter:2026-2" for Q2 2026 = Apr-Jun 2026). Whole-quarter window, end
+  // exclusive.
+  if (code.startsWith("quarter:")) {
+    const [, yq] = code.split(":");
+    const [yStr, qStr] = (yq ?? "").split("-");
+    const y = Number(yStr);
+    const q = Number(qStr);
+    if (!y || !q || q < 1 || q > 4) return null;
+    const startMonth = (q - 1) * 3;
+    return { start: new Date(y, startMonth, 1), end: new Date(y, startMonth + 3, 1) };
+  }
   const now = new Date();
   const y = now.getFullYear();
   const mo = now.getMonth();
@@ -173,10 +195,6 @@ export function dateRangeWindow(code: string | null): { start: Date; end: Date }
     case "6m": return { start: clampedDate(y, mo - 6, day), end: endExclusive };
     case "9m": return { start: clampedDate(y, mo - 9, day), end: endExclusive };
     case "1y": return { start: clampedDate(y - 1, mo, day), end: endExclusive };
-    case "q1": return { start: new Date(y, 0, 1), end: new Date(y, 3, 1) };
-    case "q2": return { start: new Date(y, 3, 1), end: new Date(y, 6, 1) };
-    case "q3": return { start: new Date(y, 6, 1), end: new Date(y, 9, 1) };
-    case "q4": return { start: new Date(y, 9, 1), end: new Date(y + 1, 0, 1) };
     default: return null;
   }
 }

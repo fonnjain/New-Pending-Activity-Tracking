@@ -62,7 +62,7 @@ import {
   type XlsxGridSheet,
   type XlsxGridBlock,
 } from "@/lib/export";
-import { formatWeight } from "@/lib/utils";
+import { formatWeight, formatWeightMT, formatDate } from "@/lib/utils";
 import { ageingCell } from "@/lib/ageing";
 import { getAgeingColor } from "./overview";
 import { AiTurnaroundReport } from "@/components/ai-turnaround-report";
@@ -1052,7 +1052,7 @@ function CompletionBadge({ remainingKg }: { remainingKg: number }) {
           : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
       }`}
     >
-      {complete ? "Completed" : `Pending (${formatWeight(remainingKg)})`}
+      {complete ? "Completed" : `Pending (${formatWeightMT(remainingKg)})`}
     </span>
   );
 }
@@ -1293,12 +1293,12 @@ export function ContractorPerformanceReport() {
             <div className="text-xs text-muted-foreground">
               {contractors.length.toLocaleString()} contractors • {dates.length.toLocaleString()}{" "}
               days • {totalMarks.toLocaleString()} marks moved •{" "}
-              <span className="font-bold text-foreground">{formatWeight(grandTotal)}</span>
+              <span className="font-bold text-foreground">{formatWeightMT(grandTotal)}</span>
             </div>
 
             <div>
               <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                Summary (weight moved per day)
+                Summary (weight moved per day, in MT)
               </h3>
               <Table containerClassName="max-h-[60vh] border border-border rounded-lg">
                 <TableBody>
@@ -1311,7 +1311,7 @@ export function ContractorPerformanceReport() {
                         key={d}
                         className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap"
                       >
-                        {d}
+                        {formatDate(d)}
                       </TableCell>
                     ))}
                     <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap">
@@ -1333,12 +1333,12 @@ export function ContractorPerformanceReport() {
                         const wt = matrix.get(`${c}|${d}`) ?? 0;
                         return (
                           <TableCell key={d} className="text-right tabular-nums text-xs text-muted-foreground">
-                            {wt ? formatWeight(wt) : "-"}
+                            {wt ? formatWeightMT(wt) : "-"}
                           </TableCell>
                         );
                       })}
                       <TableCell className="text-right tabular-nums text-xs font-bold">
-                        {formatWeight(rowTotals.get(c) ?? 0)}
+                        {formatWeightMT(rowTotals.get(c) ?? 0)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1346,11 +1346,11 @@ export function ContractorPerformanceReport() {
                     <TableCell className="text-xs sticky left-0 bg-muted/30">Total</TableCell>
                     {dates.map((d) => (
                       <TableCell key={d} className="text-right tabular-nums text-xs">
-                        {formatWeight(colTotals.get(d) ?? 0)}
+                        {formatWeightMT(colTotals.get(d) ?? 0)}
                       </TableCell>
                     ))}
                     <TableCell className="text-right tabular-nums text-xs">
-                      {formatWeight(grandTotal)}
+                      {formatWeightMT(grandTotal)}
                     </TableCell>
                   </TableRow>
                 </TableBody>
@@ -1422,7 +1422,7 @@ export function ContractorPerformanceReport() {
                         }`}
                         onClick={() => toggleStage("Fabrication", r.contractor)}
                       >
-                        {r.fab ? formatWeight(r.fab) : "-"}
+                        {r.fab ? formatWeightMT(r.fab) : "-"}
                       </TableCell>
                       <TableCell
                         className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
@@ -1432,10 +1432,10 @@ export function ContractorPerformanceReport() {
                         }`}
                         onClick={() => toggleStage("Galvanizing", r.contractor)}
                       >
-                        {r.galv ? formatWeight(r.galv) : "-"}
+                        {r.galv ? formatWeightMT(r.galv) : "-"}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-xs font-bold">
-                        {formatWeight(r.total)}
+                        {formatWeightMT(r.total)}
                       </TableCell>
                       <TableCell className="text-center">
                         <CompletionBadge remainingKg={fabRemaining} />
@@ -1455,7 +1455,7 @@ export function ContractorPerformanceReport() {
                         }`}
                         onClick={() => toggleStage("Fabrication")}
                       >
-                        {formatWeight(fabTotal)}
+                        {formatWeightMT(fabTotal)}
                       </TableCell>
                       <TableCell
                         className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
@@ -1463,10 +1463,10 @@ export function ContractorPerformanceReport() {
                         }`}
                         onClick={() => toggleStage("Galvanizing")}
                       >
-                        {formatWeight(galvTotal)}
+                        {formatWeightMT(galvTotal)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-xs">
-                        {formatWeight(fabTotal + galvTotal)}
+                        {formatWeightMT(fabTotal + galvTotal)}
                       </TableCell>
                     </TableRow>
                   )}
@@ -1517,7 +1517,7 @@ export function ContractorPerformanceReport() {
                       <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">To</TableCell>
                       <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Stage</TableCell>
                       <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Marks</TableCell>
-                      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Weight</TableCell>
+                      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Weight (MT)</TableCell>
                     </TableRow>
                     {scopedDetailRows.length === 0 && (
                       <TableRow>
@@ -1530,7 +1530,7 @@ export function ContractorPerformanceReport() {
                       const stage = stageFor(e.fromActivity);
                       return (
                         <TableRow key={`${e.date}-${e.project}-${e.contractor}-${e.fromActivity}-${e.toActivity}-${i}`}>
-                          <TableCell className="text-xs whitespace-nowrap">{e.date}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap">{formatDate(e.date)}</TableCell>
                           <TableCell className="text-xs">{e.project}</TableCell>
                           <TableCell className="text-xs">{contractorLabel(e.contractor)}</TableCell>
                           <TableCell className="text-xs">{e.fromActivity}</TableCell>
@@ -1540,7 +1540,7 @@ export function ContractorPerformanceReport() {
                             {e.markCount.toLocaleString()}
                           </TableCell>
                           <TableCell className="text-right tabular-nums text-xs">
-                            {formatWeight(e.weightKg)}
+                            {formatWeightMT(e.weightKg)}
                           </TableCell>
                         </TableRow>
                       );

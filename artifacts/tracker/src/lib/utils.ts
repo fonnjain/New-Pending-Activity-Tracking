@@ -18,6 +18,17 @@ export function formatWeight(kg: number): string {
   })} t`;
 }
 
+// Format a weight (in kilograms) always in metric tons (MT), with two decimal
+// places (e.g. "2.92 MT", "0.85 MT"). Used where a report needs one
+// consistent unit throughout instead of the kg/t auto-switching of
+// formatWeight (e.g. the Contractor Performance report).
+export function formatWeightMT(kg: number): string {
+  return `${(kg / 1000).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} MT`;
+}
+
 // Format any date value as dd-mm-yyyy for display. Accepts a "YYYY-MM-DD" day
 // key (assignDate/lastProductionDate/reportDate — parsed as a plain calendar
 // date, no timezone conversion), a full ISO datetime (createdAt), or a Date

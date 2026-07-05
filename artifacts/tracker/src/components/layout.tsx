@@ -23,16 +23,55 @@ import {
 // still picking). Matches the codes understood by `dateRangeWindow` in
 // lib/store.tsx — this component is purely a UI layer over that existing
 // filter logic.
-const DATE_PRESETS: { value: string; label: string }[] = [
+const RANGE_PRESETS: { value: string; label: string }[] = [
   { value: "3m", label: "Last 3 months" },
   { value: "6m", label: "Last 6 months" },
   { value: "9m", label: "Last 9 months" },
   { value: "1y", label: "Last 1 year" },
-  { value: "q1", label: "Q1 (Jan–Mar)" },
-  { value: "q2", label: "Q2 (Apr–Jun)" },
-  { value: "q3", label: "Q3 (Jul–Sep)" },
-  { value: "q4", label: "Q4 (Oct–Dec)" },
 ];
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// The last `count` individual calendar months, most recent first, relative to
+// today (excludes the current in-progress month). Encoded as "month:YYYY-MM".
+function buildMonthPresets(count: number): { value: string; label: string }[] {
+  const now = new Date();
+  const out: { value: string; label: string }[] = [];
+  for (let i = 1; i <= count; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    out.push({
+      value: `month:${y}-${String(m).padStart(2, "0")}`,
+      label: `${MONTH_NAMES[m - 1]} ${y}`,
+    });
+  }
+  return out;
+}
+
+// The last `count` fully-completed calendar quarters, most recent first,
+// relative to today (excludes the current in-progress quarter). Each label
+// carries its year so there's no ambiguity across year boundaries. Encoded
+// as "quarter:YYYY-Q".
+function buildQuarterPresets(count: number): { value: string; label: string }[] {
+  const now = new Date();
+  let y = now.getFullYear();
+  let q = Math.floor(now.getMonth() / 3) + 1 - 1; // previous (completed) quarter
+  const out: { value: string; label: string }[] = [];
+  for (let i = 0; i < count; i++) {
+    if (q < 1) {
+      q = 4;
+      y -= 1;
+    }
+    const startMonth = (q - 1) * 3;
+    out.push({
+      value: `quarter:${y}-${q}`,
+      label: `Q${q} ${y} (${MONTH_NAMES[startMonth]}–${MONTH_NAMES[startMonth + 2]})`,
+    });
+    q -= 1;
+  }
+  return out;
+}
 
 function dayKey(d: Date): string {
   const y = d.getFullYear();
@@ -41,20 +80,31 @@ function dayKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function dateRangeLabel(code: string | null): string {
+function dateRangeLabel(
+  code: string | null,
+  monthPresets: { value: string; label: string }[],
+  quarterPresets: { value: string; label: string }[],
+): string {
   if (!code) return "All Dates";
   if (code.startsWith("custom:")) {
     const [, s, e] = code.split(":");
     if (!s || !e) return "Custom range…";
     return `${formatDate(s)} – ${formatDate(e)}`;
   }
-  return DATE_PRESETS.find((p) => p.value === code)?.label ?? "All Dates";
+  const all = [...RANGE_PRESETS, ...monthPresets, ...quarterPresets];
+  return all.find((p) => p.value === code)?.label ?? "All Dates";
 }
 
 function DateRangeFilter() {
   const { filters, setFilter } = useTracker();
   const [open, setOpen] = useState(false);
   const [range, setRange] = useState<{ from?: Date; to?: Date }>({});
+
+  // Computed once relative to "today" — at least 6 individual preceding
+  // months and 4 preceding full quarters, both excluding the current
+  // in-progress period.
+  const monthPresets = useMemo(() => buildMonthPresets(6), []);
+  const quarterPresets = useMemo(() => buildQuarterPresets(4), []);
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
@@ -82,6 +132,12 @@ function DateRangeFilter() {
 
   const active = filters.dateRange !== null && dateRangeWindow(filters.dateRange) !== null;
 
+  const sectionHeading = (label: string) => (
+    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-2 pt-2.5 pb-1 first:pt-1">
+      {label}
+    </p>
+  );
+
   return (
     <div className="w-full sm:w-[190px]">
       <Popover open={open} onOpenChange={handleOpenChange}>
@@ -92,16 +148,46 @@ function DateRangeFilter() {
             className="h-9 w-full justify-start gap-2 font-normal"
           >
             <CalendarIcon className="h-4 w-4 shrink-0" />
-            <span className="truncate">{dateRangeLabel(filters.dateRange)}</span>
+            <span className="truncate">{dateRangeLabel(filters.dateRange, monthPresets, quarterPresets)}</span>
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
           <div className="flex flex-col sm:flex-row">
-            <div className="flex flex-col p-2 gap-1 border-b sm:border-b-0 sm:border-r min-w-[160px]">
-              <Button variant="ghost" size="sm" className="justify-start" onClick={() => pickPreset(null)}>
-                All Dates
-              </Button>
-              {DATE_PRESETS.map((p) => (
+            <div className="flex flex-col gap-0.5 border-b sm:border-b-0 sm:border-r min-w-[190px] max-h-[380px] overflow-y-auto px-1 pb-2">
+              <div className="pt-1">
+                <Button variant="ghost" size="sm" className="justify-start w-full" onClick={() => pickPreset(null)}>
+                  All Dates
+                </Button>
+              </div>
+
+              {sectionHeading("Quick ranges")}
+              {RANGE_PRESETS.map((p) => (
+                <Button
+                  key={p.value}
+                  variant={filters.dateRange === p.value ? "secondary" : "ghost"}
+                  size="sm"
+                  className="justify-start"
+                  onClick={() => pickPreset(p.value)}
+                >
+                  {p.label}
+                </Button>
+              ))}
+
+              {sectionHeading("By month")}
+              {monthPresets.map((p) => (
+                <Button
+                  key={p.value}
+                  variant={filters.dateRange === p.value ? "secondary" : "ghost"}
+                  size="sm"
+                  className="justify-start"
+                  onClick={() => pickPreset(p.value)}
+                >
+                  {p.label}
+                </Button>
+              ))}
+
+              {sectionHeading("By quarter")}
+              {quarterPresets.map((p) => (
                 <Button
                   key={p.value}
                   variant={filters.dateRange === p.value ? "secondary" : "ghost"}
