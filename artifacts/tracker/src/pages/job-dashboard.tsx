@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { formatWeight } from "@/lib/utils";
+import { formatWeight, formatDate } from "@/lib/utils";
 import { sortRecords, type RecordSortKey } from "@/lib/sort";
 import { ChevronLeft, ChevronRight, ChevronDown, Search, FileSpreadsheet } from "lucide-react";
 import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
@@ -1133,7 +1133,7 @@ function StructureDrilldown({
                                       <TableCell className="text-right">{r.balanceQty}</TableCell>
                                       <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
                                       <TableCell className="text-xs whitespace-nowrap">{r.contractor || "-"}</TableCell>
-                                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || "-"}</TableCell>
+                                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.assignDate)}</TableCell>
                                       <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
                                         {ageingCell(r)}
                                       </TableCell>

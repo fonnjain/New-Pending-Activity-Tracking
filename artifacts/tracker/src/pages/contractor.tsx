@@ -6,7 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
-import { formatWeight } from "@/lib/utils";
+import { formatWeight, formatDate } from "@/lib/utils";
 import { ChevronDown, ChevronLeft, Search, Building2, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { exportToXlsx, type XlsxColumn } from "@/lib/export";
@@ -443,7 +443,7 @@ function ContractorProjectCard({ project, records }: { project: string, records:
                       <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || '-'}</TableCell>
                       <TableCell className="text-right">{r.balanceQty}</TableCell>
                       <TableCell className="text-right font-bold">{formatWeight(r.balanceWt)}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || '-'}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.assignDate)}</TableCell>
                       <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
                         {ageingCell(r)}
                       </TableCell>
@@ -565,7 +565,7 @@ function ContractorActivityCard({ activity, records }: { activity: string, recor
                       <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || '-'}</TableCell>
                       <TableCell className="text-right">{r.balanceQty}</TableCell>
                       <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || '-'}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.assignDate)}</TableCell>
                       <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
                         {ageingCell(r)}
                       </TableCell>

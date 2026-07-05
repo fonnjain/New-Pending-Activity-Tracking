@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
-import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck } from "lucide-react";
+import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon } from "lucide-react";
 import { useTracker, dateRangeWindow } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
@@ -8,12 +8,127 @@ import { Button } from "@/components/ui/button";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Segmented } from "@/components/ui/segmented";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { formatDate } from "@/lib/utils";
 import { sortActivities, ACTIVITY_BUNDLES, OUT_VENDOR_TYPES } from "@workspace/domain";
 import {
   buildContractorGroups,
   encodeContractorCategory,
   decodeContractorCategory,
 } from "@/lib/contractorFilter";
+
+// Date Range filter: presets encoded as short codes, a custom range as
+// "custom:YYYY-MM-DD:YYYY-MM-DD" (either side may be blank while the user is
+// still picking). Matches the codes understood by `dateRangeWindow` in
+// lib/store.tsx — this component is purely a UI layer over that existing
+// filter logic.
+const DATE_PRESETS: { value: string; label: string }[] = [
+  { value: "3m", label: "Last 3 months" },
+  { value: "6m", label: "Last 6 months" },
+  { value: "9m", label: "Last 9 months" },
+  { value: "1y", label: "Last 1 year" },
+  { value: "q1", label: "Q1 (Jan–Mar)" },
+  { value: "q2", label: "Q2 (Apr–Jun)" },
+  { value: "q3", label: "Q3 (Jul–Sep)" },
+  { value: "q4", label: "Q4 (Oct–Dec)" },
+];
+
+function dayKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function dateRangeLabel(code: string | null): string {
+  if (!code) return "All Dates";
+  if (code.startsWith("custom:")) {
+    const [, s, e] = code.split(":");
+    if (!s || !e) return "Custom range…";
+    return `${formatDate(s)} – ${formatDate(e)}`;
+  }
+  return DATE_PRESETS.find((p) => p.value === code)?.label ?? "All Dates";
+}
+
+function DateRangeFilter() {
+  const { filters, setFilter } = useTracker();
+  const [open, setOpen] = useState(false);
+  const [range, setRange] = useState<{ from?: Date; to?: Date }>({});
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) return;
+    if (filters.dateRange?.startsWith("custom:")) {
+      const [, s, e] = filters.dateRange.split(":");
+      setRange({ from: s ? new Date(s) : undefined, to: e ? new Date(e) : undefined });
+    } else {
+      setRange({});
+    }
+  };
+
+  const pickPreset = (value: string | null) => {
+    setFilter("dateRange", value);
+    setOpen(false);
+  };
+
+  const pickCustom = (next: { from?: Date; to?: Date } | undefined) => {
+    setRange(next ?? {});
+    if (next?.from && next?.to) {
+      setFilter("dateRange", `custom:${dayKey(next.from)}:${dayKey(next.to)}`);
+      setOpen(false);
+    }
+  };
+
+  const active = filters.dateRange !== null && dateRangeWindow(filters.dateRange) !== null;
+
+  return (
+    <div className="w-full sm:w-[190px]">
+      <Popover open={open} onOpenChange={handleOpenChange}>
+        <PopoverTrigger asChild>
+          <Button
+            variant={active ? "secondary" : "outline"}
+            size="sm"
+            className="h-9 w-full justify-start gap-2 font-normal"
+          >
+            <CalendarIcon className="h-4 w-4 shrink-0" />
+            <span className="truncate">{dateRangeLabel(filters.dateRange)}</span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="start">
+          <div className="flex flex-col sm:flex-row">
+            <div className="flex flex-col p-2 gap-1 border-b sm:border-b-0 sm:border-r min-w-[160px]">
+              <Button variant="ghost" size="sm" className="justify-start" onClick={() => pickPreset(null)}>
+                All Dates
+              </Button>
+              {DATE_PRESETS.map((p) => (
+                <Button
+                  key={p.value}
+                  variant={filters.dateRange === p.value ? "secondary" : "ghost"}
+                  size="sm"
+                  className="justify-start"
+                  onClick={() => pickPreset(p.value)}
+                >
+                  {p.label}
+                </Button>
+              ))}
+            </div>
+            <div className="p-2">
+              <p className="text-xs text-muted-foreground px-1 pb-1">Custom range (based on Assign Date)</p>
+              <Calendar
+                mode="range"
+                numberOfMonths={1}
+                selected={range.from ? { from: range.from, to: range.to } : undefined}
+                onSelect={pickCustom}
+                defaultMonth={range.from}
+              />
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
 
 type NavItem = {
   href: string;
@@ -352,6 +467,7 @@ function FilterBar() {
               searchPlaceholder="Search activities or bundles..."
             />
           </div>
+          <DateRangeFilter />
           <div className="flex-1 min-w-[180px] max-w-[340px]">
             <SearchableSelect
               value={

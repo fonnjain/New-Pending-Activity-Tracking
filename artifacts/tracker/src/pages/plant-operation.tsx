@@ -9,7 +9,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Segmented } from "@/components/ui/segmented";
 import { Button } from "@/components/ui/button";
-import { formatWeight } from "@/lib/utils";
+import { formatWeight, formatDate } from "@/lib/utils";
 import { exportToXlsx, type XlsxColumn } from "@/lib/export";
 import { ChevronDown, FileSpreadsheet } from "lucide-react";
 import { bundleActivitySet, compareActivity, getActivityBundle, TLT_OPERATION_BUNDLE_IDS, activityRank, routeIncludesOp } from "@workspace/domain";
@@ -768,7 +768,7 @@ function ContractorGroup({
                   )}
                   <TableCell className="text-right">{r.balanceQty}</TableCell>
                   <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || "-"}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.assignDate)}</TableCell>
                   <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
                     {ageingCell(r)}
                   </TableCell>

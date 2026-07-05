@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   activityRank,
+  bundleActivitySet,
   compareActivity,
   FAB_LOAD_SECTIONS,
   fabLoadColumnsForSection,
@@ -1031,9 +1032,37 @@ function stageFor(fromActivity: string | null | undefined): Stage | null {
   return null;
 }
 
+// Live-balance completion status (additive, separate from the movement-based
+// Stage above). Fabrication activities per the user's spec are C..Q — the
+// TLT_FABRICATION bundle minus its terminal TS step, since TS itself is a
+// Quality gate, not a fabrication op. Galvanizing completion checks GB only
+// (not G, not the wider GALVANIZING bundle which also spans Y).
+const FAB_COMPLETION_SET = new Set(
+  [...(bundleActivitySet("TLT_FABRICATION") ?? [])].filter((c) => c !== "TS"),
+);
+const GALV_COMPLETION_ACTIVITY = "GB";
+
+function CompletionBadge({ remainingKg }: { remainingKg: number }) {
+  const complete = remainingKg <= 0;
+  return (
+    <span
+      className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ${
+        complete
+          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+          : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+      }`}
+    >
+      {complete ? "Completed" : `Pending (${formatWeight(remainingKg)})`}
+    </span>
+  );
+}
+
 export function ContractorPerformanceReport() {
-  const { filters } = useTracker();
+  const { filters, selectedImportId } = useTracker();
   const { data, isLoading } = useGetContractorMovement();
+  const { data: liveRecords = [] } = useGetImportRecords(selectedImportId as number, {
+    query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) },
+  });
   const [contractorFilter, setContractorFilter] = useState<string | null>(null);
   const [stageFilter, setStageFilter] = useState<Stage | null>(null);
 
@@ -1042,6 +1071,26 @@ export function ContractorPerformanceReport() {
     if (!filters.job) return all;
     return all.filter((e) => e.project === filters.job);
   }, [data, filters.job]);
+
+  // Live-balance completion (additive): per contractor, how much balance
+  // weight is still pending in the Fabrication (C..Q) / Galvanizing (GB)
+  // activities right now, from the currently selected import's records.
+  // Honours the global Job filter only, matching the rest of this report.
+  const { fabRemainingByContractor, galvRemainingByContractor } = useMemo(() => {
+    const fabMap = new Map<string, number>();
+    const galvMap = new Map<string, number>();
+    for (const r of liveRecords) {
+      if (filters.job && r.job !== filters.job) continue;
+      const activity = (r.activity ?? "").toUpperCase();
+      const c = contractorLabel(r.contractor);
+      if (FAB_COMPLETION_SET.has(activity)) {
+        fabMap.set(c, (fabMap.get(c) ?? 0) + r.balanceWt);
+      } else if (activity === GALV_COMPLETION_ACTIVITY) {
+        galvMap.set(c, (galvMap.get(c) ?? 0) + r.balanceWt);
+      }
+    }
+    return { fabRemainingByContractor: fabMap, galvRemainingByContractor: galvMap };
+  }, [liveRecords, filters.job]);
 
   const toggleContractor = (c: string) =>
     setContractorFilter((cur) => (cur === c ? null : c));
@@ -1315,7 +1364,12 @@ export function ContractorPerformanceReport() {
               <div className="text-xs text-muted-foreground mb-2">
                 Fabrication counts a move that leaves activity TS (TS is fully
                 done for that mark); Galvanizing counts a move that leaves
-                activity Y (Y is fully done for that mark).
+                activity Y (Y is fully done for that mark). The Status
+                columns are a separate, live-balance check against the
+                currently selected import: Fabrication is Complete when that
+                contractor has zero balance weight left across activities
+                C..Q; Galvanizing is Complete when zero balance weight is
+                left at GB.
               </div>
               <Table containerClassName="max-h-[50vh] border border-border rounded-lg">
                 <TableBody>
@@ -1332,15 +1386,24 @@ export function ContractorPerformanceReport() {
                     <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">
                       Total
                     </TableCell>
+                    <TableCell className="text-center font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+                      Fab. Status
+                    </TableCell>
+                    <TableCell className="text-center font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+                      Galv. Status
+                    </TableCell>
                   </TableRow>
                   {stageRows.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-xs text-muted-foreground py-6">
+                      <TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-6">
                         No TS/Y completions found for the current filter.
                       </TableCell>
                     </TableRow>
                   )}
-                  {stageRows.map((r) => (
+                  {stageRows.map((r) => {
+                    const fabRemaining = fabRemainingByContractor.get(r.contractor) ?? 0;
+                    const galvRemaining = galvRemainingByContractor.get(r.contractor) ?? 0;
+                    return (
                     <TableRow
                       key={r.contractor}
                       className={contractorFilter === r.contractor ? "bg-primary/5" : undefined}
@@ -1374,8 +1437,15 @@ export function ContractorPerformanceReport() {
                       <TableCell className="text-right tabular-nums text-xs font-bold">
                         {formatWeight(r.total)}
                       </TableCell>
+                      <TableCell className="text-center">
+                        <CompletionBadge remainingKg={fabRemaining} />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <CompletionBadge remainingKg={galvRemaining} />
+                      </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                   {stageRows.length > 0 && (
                     <TableRow className="border-t-2 font-bold bg-muted/30 hover:bg-muted/30">
                       <TableCell className="text-xs">Total</TableCell>

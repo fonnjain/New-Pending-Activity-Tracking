@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx, exportToJson, type XlsxColumn } from "@/lib/export";
+import { formatDate } from "@/lib/utils";
 import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { AiReviewPanel } from "@/components/ai-review-panel";
 import { StagedUploadPanel } from "@/components/staged-upload-panel";
@@ -351,7 +352,7 @@ function DataViewContent() {
                       {selectedImportId === s.id && <CheckCircle2 className="w-4 h-4 text-primary" />}
                     </div>
                     <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
-                      <span>{new Date(s.createdAt).toLocaleDateString()}</span>
+                      <span>{formatDate(s.createdAt)}</span>
                       <span>{s.summary.rowsKept.toLocaleString()} rows</span>
                       {s.changeSummary && (
                         <>
@@ -383,8 +384,8 @@ function DataViewContent() {
                   <div className="flex-1 flex flex-col gap-1">
                     <div className="font-bold">{o.label || o.sourceFilename}</div>
                     <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
-                      <span>{new Date(o.createdAt).toLocaleDateString()}</span>
-                      {o.asOnDate && <span>as on {o.asOnDate}</span>}
+                      <span>{formatDate(o.createdAt)}</span>
+                      {o.asOnDate && <span>as on {formatDate(o.asOnDate)}</span>}
                       <span>{o.summary.rowsKept.toLocaleString()} rows</span>
                       {o.changeLog && (
                         <>
@@ -826,7 +827,7 @@ function ComputedFgContent() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
-              Structures{asOnDate ? ` — file as on ${asOnDate}` : ""}
+              Structures{asOnDate ? ` — file as on ${formatDate(asOnDate)}` : ""}
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -937,7 +938,7 @@ function OrderReconciliationContent() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div>
                     <span className="block text-muted-foreground text-xs uppercase mb-1">As On</span>
-                    <span className="font-bold text-lg tabular-nums">{order.fileImport.asOnDate ?? "-"}</span>
+                    <span className="font-bold text-lg tabular-nums">{formatDate(order.fileImport.asOnDate)}</span>
                   </div>
                   <div>
                     <span className="block text-muted-foreground text-xs uppercase mb-1">Rows Kept</span>

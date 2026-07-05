@@ -9,7 +9,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import { ChevronDown, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
-import { formatWeight } from "@/lib/utils";
+import { formatWeight, formatDate } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { compareActivity } from "@workspace/domain";
 
@@ -233,7 +233,7 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
                       <TableCell className="text-right">{r.balanceQty}</TableCell>
                       <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
                       <TableCell className="text-xs whitespace-nowrap">{r.contractor || '-'}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || '-'}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.assignDate)}</TableCell>
                       <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
                         {ageingCell(r)}
                       </TableCell>

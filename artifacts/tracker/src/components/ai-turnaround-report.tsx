@@ -17,6 +17,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { exportAiReportPdf } from "@/lib/export";
+import { formatDateTime } from "@/lib/utils";
 import {
   Sparkles,
   ShieldCheck,
@@ -229,7 +230,7 @@ export function AiTurnaroundReport() {
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             {result.model && <span>Model: {result.model}</span>}
             {result.generatedAt && (
-              <span>Generated: {new Date(result.generatedAt).toLocaleString()}</span>
+              <span>Generated: {formatDateTime(result.generatedAt)}</span>
             )}
             {result.filtered && (
               <span className="text-amber-600 dark:text-amber-400 font-medium">
