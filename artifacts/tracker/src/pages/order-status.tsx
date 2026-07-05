@@ -5,8 +5,6 @@ import {
   getGetOrderStatusQueryKey,
   useGetImportRecords,
   getGetImportRecordsQueryKey,
-  useGetFg,
-  getGetFgQueryKey,
   type OrderStatusRow,
   type Record as WipRecord,
 } from "@workspace/api-client-react";
@@ -61,10 +59,9 @@ interface DisplayRow {
   // null and rendered "n/a" — NTLT marks never contribute Fab/Galv math.
   fabMt: number | null;
   galvMt: number | null;
-  // Finished Good (computed): the stored Computed FG for this (project,
-  // structure) = Release - all-activity WIP balance - Dispatch. Order-book
-  // sourced and category-independent, so shown even for out-of-scope rows; null
-  // when the structure has no computed FG (absent from the order book).
+  // Finished Good Computed WIP = live WIP Galvanizing (G,GB,Y) minus the Order
+  // Review file's Dispatch (col Q, Progress > Despatch). Mirrors galvMt: null
+  // for out-of-scope (NTLT) rows and for structures genuinely absent from WIP.
   computedFgMt: number | null;
   inFile: boolean;
   inWip: boolean;
@@ -96,8 +93,6 @@ export default function OrderStatusView() {
       },
     },
   );
-
-  const { data: fg } = useGetFg({ query: { queryKey: getGetFgQueryKey() } });
 
   const isNtlt = filters.category === "NTLT";
   const isAll = filters.category === "ALL";
@@ -168,16 +163,6 @@ export default function OrderStatusView() {
     return m;
   }, [order]);
 
-  // Computed FG per (project, structure), joined from the /fg endpoint. Stored,
-  // order-book sourced, and category-independent.
-  const fgByKey = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of fg?.rows ?? []) {
-      m.set(keyOf(r.project, r.structure), r.computedFgMt);
-    }
-    return m;
-  }, [fg]);
-
   // Union of file rows and WIP-derived keys, filtered by the active project /
   // structure selections so the table tracks the global filter bar.
   const rows = useMemo<DisplayRow[]>(() => {
@@ -205,6 +190,15 @@ export default function OrderStatusView() {
       // figures are cumulative-done, not current-at-stage, and would misrepresent
       // a live WIP snapshot.
       const noWipData = !outOfScope && !inWipReport;
+      // Same live/absent resolution as the galvMt field below, reused so
+      // Finished Good Computed WIP mirrors it exactly minus file Dispatch.
+      const galvMt = outOfScope
+        ? null
+        : comp
+          ? comp.galvMt
+          : inWipReport
+            ? 0
+            : null;
       out.push({
         project,
         structure,
@@ -226,14 +220,9 @@ export default function OrderStatusView() {
             : inWipReport
               ? 0
               : null,
-        galvMt: outOfScope
-          ? null
-          : comp
-            ? comp.galvMt
-            : inWipReport
-              ? 0
-              : null,
-        computedFgMt: fgByKey.get(k) ?? null,
+        galvMt,
+        computedFgMt:
+          galvMt == null ? null : galvMt - (file?.fileDespatchMt ?? 0),
         inFile: !!file,
         inWip: !!comp,
         outOfScope,
@@ -250,7 +239,6 @@ export default function OrderStatusView() {
   }, [
     dispatchByKey,
     computedByKey,
-    fgByKey,
     ntltKeys,
     wipKeys,
     filters.job,
@@ -341,7 +329,7 @@ export default function OrderStatusView() {
       { label: "Scope", field: "scope" },
       { label: "Fabrication (MT)", field: "fabMt", numeric: true, decimals: 3, total: true },
       { label: "Galvanizing (MT)", field: "galvMt", numeric: true, decimals: 3, total: true },
-      { label: "Finished Good (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
+      { label: "Finished Good Computed WIP (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
       { label: "Dispatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
       { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
     ];
@@ -382,7 +370,7 @@ export default function OrderStatusView() {
             Per project and structure: order quantities from the latest Order Review
             file, joined to live Fabrication / Galvanizing tonnage computed from the
             selected WIP report, Dispatch (MT) from the file, and Finished Good
-            (computed).
+            Computed WIP (live Galvanizing minus file Dispatch).
           </p>
         </div>
         <Button
@@ -429,7 +417,7 @@ export default function OrderStatusView() {
           <KpiTile label="Order Wt (MT)" value={mt(totals.weightMt)} />
           <KpiTile label="In Fabrication (MT)" value={mt(totals.fabMt)} />
           <KpiTile label="In Galvanizing (MT)" value={mt(totals.galvMt)} />
-          <KpiTile label="Finished Good (MT)" value={mt(totals.computedFgMt)} />
+          <KpiTile label="Finished Good Computed WIP (MT)" value={mt(totals.computedFgMt)} />
         </div>
       )}
 
@@ -463,7 +451,7 @@ export default function OrderStatusView() {
                     <th className="px-2 py-1.5 font-semibold text-right">Release Bal.</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Fabrication</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Galvanizing</th>
-                    <th className="px-2 py-1.5 font-semibold text-right">Finished Good</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">Finished Good Computed WIP</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Dispatch</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Dispatch Bal.</th>
                   </tr>
