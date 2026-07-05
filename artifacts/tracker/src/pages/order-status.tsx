@@ -5,6 +5,8 @@ import {
   getGetOrderStatusQueryKey,
   useGetImportRecords,
   getGetImportRecordsQueryKey,
+  useGetAccumulatedWip,
+  getGetAccumulatedWipQueryKey,
   type OrderStatusRow,
   type Record as WipRecord,
 } from "@workspace/api-client-react";
@@ -64,11 +66,11 @@ interface DisplayRow {
   // Purely file-sourced (no WIP dependency); null only when the file has no
   // Galvanising figure for this structure.
   computedFgMt: number | null;
-  // Finished Good WIP Computed = live WIP Galvanizing (activities G,GB,Y,
-  // the same GALV_SET bundle as the Galvanizing column) minus file Dispatch
-  // (col Q). WIP-sourced (not the file's Progress > Galvanising figure);
-  // null whenever Galvanizing itself is null (out of scope or truly absent
-  // from WIP), matching the Galvanizing column's own n/a cases.
+  // Finished Good WIP Computed = Galvanizing WIP Accumulated (lifetime,
+  // per-project) minus total file Dispatch (col Q) for that project, summed
+  // across all its structures. Accumulated WIP has no structure breakdown,
+  // so this is a project-level figure repeated on every structure row of
+  // that project. Null only when the project has no Accumulated WIP entry.
   computedFgWipMt: number | null;
   inFile: boolean;
   inWip: boolean;
@@ -89,6 +91,10 @@ export default function OrderStatusView() {
 
   const { data: order, isLoading: orderLoading } = useGetOrderStatus({
     query: { queryKey: getGetOrderStatusQueryKey() },
+  });
+
+  const { data: accWip, isLoading: accWipLoading } = useGetAccumulatedWip({
+    query: { queryKey: getGetAccumulatedWipQueryKey() },
   });
 
   const { data: records = [], isLoading: recordsLoading } = useGetImportRecords(
@@ -170,6 +176,25 @@ export default function OrderStatusView() {
     return m;
   }, [order]);
 
+  // Galvanizing WIP Accumulated, per project (lifetime throughput; no
+  // structure breakdown exists for this figure).
+  const galvAccByProject = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of accWip?.byProject ?? []) m.set(p.project, p.galvanizingMt);
+    return m;
+  }, [accWip]);
+
+  // Total file Dispatch (col Q), summed across all structures per project —
+  // needed because Accumulated WIP has no per-structure figure to subtract a
+  // per-structure dispatch from.
+  const despatchByProject = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of order?.rows ?? []) {
+      m.set(r.project, (m.get(r.project) ?? 0) + (r.fileDespatchMt ?? 0));
+    }
+    return m;
+  }, [order]);
+
   // Union of file rows and WIP-derived keys, filtered by the active project /
   // structure selections so the table tracks the global filter bar.
   const rows = useMemo<DisplayRow[]>(() => {
@@ -230,8 +255,11 @@ export default function OrderStatusView() {
           file?.fileGalvMt == null
             ? null
             : file.fileGalvMt - (file?.fileDespatchMt ?? 0),
-        computedFgWipMt:
-          galvMt == null ? null : galvMt - (file?.fileDespatchMt ?? 0),
+        computedFgWipMt: (() => {
+          const galvAccMt = galvAccByProject.get(project);
+          if (galvAccMt === undefined) return null;
+          return galvAccMt - (despatchByProject.get(project) ?? 0);
+        })(),
         inFile: !!file,
         inWip: !!comp,
         outOfScope,
@@ -250,6 +278,8 @@ export default function OrderStatusView() {
     computedByKey,
     ntltKeys,
     wipKeys,
+    galvAccByProject,
+    despatchByProject,
     filters.job,
     filters.structure,
   ]);
@@ -273,7 +303,6 @@ export default function OrderStatusView() {
           acc.fabMt += r.fabMt ?? 0;
           acc.galvMt += r.galvMt ?? 0;
           acc.computedFgMt += r.computedFgMt ?? 0;
-          acc.computedFgWipMt += r.computedFgWipMt ?? 0;
           acc.fileDespatchMt += r.fileDespatchMt ?? 0;
           acc.dispatchBalanceMt += r.dispatchBalanceMt ?? 0;
           return acc;
@@ -287,17 +316,20 @@ export default function OrderStatusView() {
           fabMt: 0,
           galvMt: 0,
           computedFgMt: 0,
-          computedFgWipMt: 0,
           fileDespatchMt: 0,
           dispatchBalanceMt: 0,
         },
       );
-      return { project, list, subtotal };
+      // computedFgWipMt is a project-level figure (Accumulated WIP has no
+      // structure breakdown) repeated on every structure row of the project
+      // — take it once, never sum across structure rows.
+      const computedFgWipMt = list[0]?.computedFgWipMt ?? null;
+      return { project, list, subtotal: { ...subtotal, computedFgWipMt } };
     });
   }, [rows]);
 
   const totals = useMemo(() => {
-    return rows.reduce(
+    const base = rows.reduce(
       (acc, r) => {
         acc.sets += r.sets ?? 0;
         acc.weightMt += r.weightMt ?? 0;
@@ -307,7 +339,6 @@ export default function OrderStatusView() {
         acc.fabMt += r.fabMt ?? 0;
         acc.galvMt += r.galvMt ?? 0;
         acc.computedFgMt += r.computedFgMt ?? 0;
-        acc.computedFgWipMt += r.computedFgWipMt ?? 0;
         acc.fileDespatchMt += r.fileDespatchMt ?? 0;
         acc.dispatchBalanceMt += r.dispatchBalanceMt ?? 0;
         return acc;
@@ -321,11 +352,20 @@ export default function OrderStatusView() {
         fabMt: 0,
         galvMt: 0,
         computedFgMt: 0,
-        computedFgWipMt: 0,
         fileDespatchMt: 0,
         dispatchBalanceMt: 0,
       },
     );
+    // Sum the per-project figure once per project (not once per structure
+    // row) — same reasoning as the group subtotal above.
+    const seenProjects = new Set<string>();
+    let computedFgWipMt = 0;
+    for (const r of rows) {
+      if (seenProjects.has(r.project)) continue;
+      seenProjects.add(r.project);
+      computedFgWipMt += r.computedFgWipMt ?? 0;
+    }
+    return { ...base, computedFgWipMt };
   }, [rows]);
 
   function onExport() {
@@ -343,7 +383,7 @@ export default function OrderStatusView() {
       { label: "Fabrication (MT)", field: "fabMt", numeric: true, decimals: 3, total: true },
       { label: "Galvanizing (MT)", field: "galvMt", numeric: true, decimals: 3, total: true },
       { label: "Finished Good Overview Computed (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
-      { label: "Finished Good WIP Computed (MT)", field: "computedFgWipMt", numeric: true, decimals: 3, total: true },
+      { label: "Finished Good WIP Computed (MT)", field: "computedFgWipMt", numeric: true, decimals: 3 },
       { label: "Dispatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
       { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
     ];
@@ -374,7 +414,7 @@ export default function OrderStatusView() {
   }
 
   const available = order?.available ?? false;
-  const loading = orderLoading || recordsLoading;
+  const loading = orderLoading || recordsLoading || accWipLoading;
 
   return (
     <div className="space-y-6">
@@ -534,7 +574,7 @@ function ProjectGroup({
       fabMt: number;
       galvMt: number;
       computedFgMt: number;
-      computedFgWipMt: number;
+      computedFgWipMt: number | null;
       fileDespatchMt: number;
       dispatchBalanceMt: number;
     };

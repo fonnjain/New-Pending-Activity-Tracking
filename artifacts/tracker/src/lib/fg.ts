@@ -3,16 +3,9 @@ import { useTracker } from "@/lib/store";
 import {
   useGetOrderStatus,
   getGetOrderStatusQueryKey,
-  useGetImportRecords,
-  getGetImportRecordsQueryKey,
-  type Record as WipRecord,
+  useGetAccumulatedWip,
+  getGetAccumulatedWipQueryKey,
 } from "@workspace/api-client-react";
-import { bundleActivitySet } from "@workspace/domain";
-
-// Same GALVANIZING bundle (G,GB,Y) used by the Order Status page's live
-// Galvanizing column.
-const GALV_SET = bundleActivitySet("GALVANIZING") ?? new Set<string>();
-const KEY_SEP = "\u0001";
 
 export interface FgComputedRow {
   project: string;
@@ -22,10 +15,12 @@ export interface FgComputedRow {
   // Finished Good Overview Computed = Order Review file Galvanising (col N)
   // minus file Dispatch (col Q). Purely file-sourced.
   computedFgMt: number | null;
-  // Finished Good WIP Computed = live WIP Galvanizing (activities G,GB,Y)
-  // minus file Dispatch (col Q). WIP-sourced; null when the structure has no
-  // TLT WIP presence at all (out of scope / not in WIP), matching the Order
-  // Status page's Galvanizing column n/a cases.
+  // Finished Good WIP Computed = Galvanizing WIP Accumulated (lifetime,
+  // per-project) minus total file Dispatch (col Q) for that project, summed
+  // across all its structures. Accumulated WIP is only tracked per project
+  // (no structure breakdown), so this is a project-level figure repeated on
+  // every structure row of that project — not a per-structure computation.
+  // Null only when the project has no Accumulated WIP entry at all.
   computedFgWipMt: number | null;
 }
 
@@ -40,48 +35,43 @@ export function useFgRows(): {
   rows: FgComputedRow[];
   isLoading: boolean;
 } {
-  const { filters, selectedImportId } = useTracker();
+  const { filters } = useTracker();
 
   const { data: order, isLoading: orderLoading } = useGetOrderStatus({
     query: { queryKey: getGetOrderStatusQueryKey() },
   });
 
-  const { data: records = [], isLoading: recordsLoading } = useGetImportRecords(
-    selectedImportId as number,
-    {
-      query: {
-        enabled: !!selectedImportId,
-        queryKey: getGetImportRecordsQueryKey(selectedImportId as number),
-      },
-    },
-  );
+  const { data: accWip, isLoading: accWipLoading } = useGetAccumulatedWip({
+    query: { queryKey: getGetAccumulatedWipQueryKey() },
+  });
 
-  // Per (project, structure): sum of live WIP Galvanizing tonnage (TLT-only,
-  // G/GB/Y bundle) plus a presence flag so "0 in the bundle" can be told apart
-  // from "not in WIP at all" (the latter stays null / n/a).
-  const { galvByKey, presentKeys } = useMemo(() => {
-    const galv = new Map<string, number>();
-    const present = new Set<string>();
-    for (const r of records as WipRecord[]) {
-      if (r.active === false) continue;
-      const cat = (r.category || "TLT").toUpperCase();
-      if (cat === "NTLT") continue;
-      const key = `${r.job}${KEY_SEP}${r.structure}`;
-      present.add(key);
-      const act = (r.activity || "").toUpperCase();
-      if (GALV_SET.has(act)) {
-        galv.set(key, (galv.get(key) ?? 0) + (r.balanceWt || 0) / 1000);
-      }
+  // Galvanizing WIP Accumulated, per project (lifetime throughput; no
+  // structure breakdown exists for this figure).
+  const galvAccByProject = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of accWip?.byProject ?? []) {
+      m.set(p.project, p.galvanizingMt);
     }
-    return { galvByKey: galv, presentKeys: present };
-  }, [records]);
+    return m;
+  }, [accWip]);
+
+  // Total file Dispatch (col Q), summed across all structures per project —
+  // needed because Accumulated WIP has no per-structure figure to subtract
+  // a per-structure dispatch from.
+  const despatchByProject = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of order?.rows ?? []) {
+      m.set(r.project, (m.get(r.project) ?? 0) + (r.fileDespatchMt ?? 0));
+    }
+    return m;
+  }, [order]);
 
   const rows = useMemo<FgComputedRow[]>(() => {
     const all = order?.rows ?? [];
     const filtered = filters.job ? all.filter((r) => r.project === filters.job) : all;
     return filtered.map((r) => {
-      const key = `${r.project}${KEY_SEP}${r.structure}`;
-      const wipGalvMt = presentKeys.has(key) ? galvByKey.get(key) ?? 0 : null;
+      const galvAccMt = galvAccByProject.get(r.project);
+      const projectDespatchMt = despatchByProject.get(r.project) ?? 0;
       return {
         project: r.project,
         structure: r.structure,
@@ -90,15 +80,15 @@ export function useFgRows(): {
         computedFgMt:
           r.fileGalvMt == null ? null : r.fileGalvMt - (r.fileDespatchMt ?? 0),
         computedFgWipMt:
-          wipGalvMt == null ? null : wipGalvMt - (r.fileDespatchMt ?? 0),
+          galvAccMt === undefined ? null : galvAccMt - projectDespatchMt,
       };
     });
-  }, [order, filters.job, galvByKey, presentKeys]);
+  }, [order, filters.job, galvAccByProject, despatchByProject]);
 
   return {
     available: order?.available ?? false,
     asOnDate: order?.asOnDate ?? null,
     rows,
-    isLoading: orderLoading || recordsLoading,
+    isLoading: orderLoading || accWipLoading,
   };
 }

@@ -664,32 +664,43 @@ function ComputedFgContent() {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([project, list]) => {
         const sorted = [...list].sort(cmp);
-        const subtotal = list.reduce(
+        const base = list.reduce(
           (acc, r) => ({
             releaseMt: acc.releaseMt + (r.releaseMt ?? 0),
             fileDespatchMt: acc.fileDespatchMt + (r.fileDespatchMt ?? 0),
             computedFgMt: acc.computedFgMt + (r.computedFgMt ?? 0),
-            computedFgWipMt: acc.computedFgWipMt + (r.computedFgWipMt ?? 0),
           }),
-          { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0, computedFgWipMt: 0 },
+          { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0 },
         );
+        // computedFgWipMt is a project-level figure (Accumulated WIP has no
+        // structure breakdown) repeated on every structure row of the
+        // project — take it once, never sum across structure rows.
+        const subtotal = { ...base, computedFgWipMt: list[0]?.computedFgWipMt ?? null };
         return { project, list: sorted, subtotal };
       });
   }, [rows, sortKey, sortDir]);
 
-  const totals = useMemo(
-    () =>
-      rows.reduce(
-        (acc, r) => ({
-          releaseMt: acc.releaseMt + (r.releaseMt ?? 0),
-          fileDespatchMt: acc.fileDespatchMt + (r.fileDespatchMt ?? 0),
-          computedFgMt: acc.computedFgMt + (r.computedFgMt ?? 0),
-          computedFgWipMt: acc.computedFgWipMt + (r.computedFgWipMt ?? 0),
-        }),
-        { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0, computedFgWipMt: 0 },
-      ),
-    [rows],
-  );
+  const totals = useMemo(() => {
+    const base = rows.reduce(
+      (acc, r) => ({
+        releaseMt: acc.releaseMt + (r.releaseMt ?? 0),
+        fileDespatchMt: acc.fileDespatchMt + (r.fileDespatchMt ?? 0),
+        computedFgMt: acc.computedFgMt + (r.computedFgMt ?? 0),
+      }),
+      { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0 },
+    );
+    // Sum the per-project figure once per project (not once per structure
+    // row) — same reasoning as the group subtotal above.
+    const seenProjects = new Set<string>();
+    let computedFgWipMt = 0;
+    for (const r of rows) {
+      const key = r.project || "(Unassigned)";
+      if (seenProjects.has(key)) continue;
+      seenProjects.add(key);
+      computedFgWipMt += r.computedFgWipMt ?? 0;
+    }
+    return { ...base, computedFgWipMt };
+  }, [rows]);
 
   const toggleSort = (key: FgSortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -710,7 +721,7 @@ function ComputedFgContent() {
         { label: "Release (MT)", field: "releaseMt", numeric: true, decimals: 3, total: true },
         { label: "File Despatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
         { label: "Finished Good Overview Computed (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
-        { label: "Finished Good WIP Computed (MT)", field: "computedFgWipMt", numeric: true, decimals: 3, total: true },
+        { label: "Finished Good WIP Computed (MT)", field: "computedFgWipMt", numeric: true, decimals: 3 },
       ],
       rows,
       { sheetName: "Computed FG" },

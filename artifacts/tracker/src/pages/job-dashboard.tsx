@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import {
   compareActivity,
   sortActivities,
@@ -44,7 +44,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { formatWeight } from "@/lib/utils";
 import { sortRecords, type RecordSortKey } from "@/lib/sort";
-import { ChevronLeft, Search, FileSpreadsheet } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Search, FileSpreadsheet } from "lucide-react";
 import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 
 const ROW_CAP = 300;
@@ -796,23 +796,145 @@ function JobDetail({
   records: any[];
   onBack: () => void;
 }) {
+  const jobIsNtlt = records.some((r) => (r.category || "TLT") === "NTLT");
+  const isNtlt = jobIsNtlt;
+  const mfcVal = (r: { mfcBatch?: string | null }) => r.mfcBatch || "Z";
+
+  // Drill-down state. TLT: Project -> MFC (only) -> Structure (collapsible
+  // marks). NTLT has no MFC concept, so it goes straight to Structure level.
+  const [selectedMfc, setSelectedMfc] = useState<string | null>(null);
+  const atMfcListLevel = !isNtlt && selectedMfc === null;
+
+  // Step 1 (TLT only): MFC batch rollups for the whole project. No filters,
+  // no marks table -- deliberately just the MFC list per the requested UX.
+  const byMfc = useMemo(() => {
+    if (isNtlt) return [];
+    const groups = new Map<string, any[]>();
+    for (const r of records) {
+      const k = mfcVal(r);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(r);
+    }
+    return Array.from(groups.entries())
+      .map(([batch, recs]) => {
+        const aged = recs.filter((r) => r.ageingDays !== null);
+        return {
+          batch,
+          structures: new Set(recs.map((r) => r.structure).filter(Boolean)).size,
+          marks: recs.length,
+          qty: recs.reduce((s, r) => s + r.balanceQty, 0),
+          weight: recs.reduce((s, r) => s + r.balanceWt, 0),
+          avgAge: aged.length
+            ? Math.round(aged.reduce((s, r) => s + (r.ageingDays || 0), 0) / aged.length)
+            : null,
+        };
+      })
+      .sort((a, b) => a.batch.localeCompare(b.batch));
+  }, [records, isNtlt]);
+
+  if (atMfcListLevel) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors shrink-0 mt-1"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            Back
+          </button>
+          <h2 className="text-xl font-bold tracking-tight truncate">{label} {job}</h2>
+        </div>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+              Select an MFC batch
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>MFC</TableHead>
+                    <TableHead className="text-right">Structures</TableHead>
+                    <TableHead className="text-right">Marks</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="text-right">Wt</TableHead>
+                    <TableHead className="text-right">Avg Ageing</TableHead>
+                    <TableHead className="w-6" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {byMfc.map((m) => (
+                    <TableRow
+                      key={m.batch}
+                      className="cursor-pointer hover:bg-muted/40"
+                      onClick={() => setSelectedMfc(m.batch)}
+                    >
+                      <TableCell className="font-mono font-medium">{m.batch}</TableCell>
+                      <TableCell className="text-right">{m.structures}</TableCell>
+                      <TableCell className="text-right">{m.marks}</TableCell>
+                      <TableCell className="text-right">{m.qty.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{formatWeight(m.weight)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{m.avgAge ?? "-"}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        <ChevronRight className="w-4 h-4" />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {byMfc.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-4 text-muted-foreground">
+                        No MFC batches found for this {label.toLowerCase()}.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <StructureDrilldown
+      job={job}
+      label={label}
+      records={isNtlt ? records : records.filter((r) => mfcVal(r) === selectedMfc)}
+      isNtlt={isNtlt}
+      mfc={selectedMfc}
+      onBack={() => (isNtlt ? onBack() : setSelectedMfc(null))}
+    />
+  );
+}
+
+// Step 2: Structure-level rollups (scoped to the selected MFC for TLT, or the
+// whole project for NTLT which has no MFC level). Rows are collapsible --
+// clicking a structure expands its individual marks inline.
+function StructureDrilldown({
+  job,
+  label,
+  records,
+  isNtlt,
+  mfc,
+  onBack,
+}: {
+  job: string;
+  label: string;
+  records: any[];
+  isNtlt: boolean;
+  mfc: string | null;
+  onBack: () => void;
+}) {
   const [search, setSearch] = useState("");
   const [activity, setActivity] = useState<string | null>(null);
   const [contractor, setContractor] = useState<string | null>(null);
-  const [mfc, setMfc] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<RecordSortKey>("activity");
-  const [showAll, setShowAll] = useState(false);
-
-  const jobIsNtlt = records.some((r) => (r.category || "TLT") === "NTLT");
-  const mfcVal = (r: { mfcBatch?: string | null }) => r.mfcBatch || "Z";
-  // TLT-only MFC batch options within this project, sorted A..Z ("Z" last).
-  const mfcOptions = useMemo(
-    () =>
-      jobIsNtlt
-        ? []
-        : Array.from(new Set(records.map((r) => mfcVal(r)))).sort(),
-    [records, jobIsNtlt],
-  );
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const activityOptions = useMemo(
     () =>
@@ -834,7 +956,6 @@ function JobDetail({
     const q = search.trim().toLowerCase();
     return records.filter((r) => {
       if (activity && r.activity !== activity) return false;
-      if (mfc && mfcVal(r) !== mfc) return false;
       if (!matchesContractorSelection(r.contractor, contractor, categoryMap)) return false;
       if (
         q &&
@@ -845,29 +966,28 @@ function JobDetail({
         return false;
       return true;
     });
-  }, [records, search, activity, mfc, contractor, categoryMap]);
+  }, [records, search, activity, contractor, categoryMap]);
 
-  const sortedRows = useMemo(() => sortRecords(filtered, sortBy), [filtered, sortBy]);
+  const secondaryNoun = isNtlt ? "sub-categories" : "structures";
+  const totalQty = useMemo(() => filtered.reduce((s, r) => s + r.balanceQty, 0), [filtered]);
+  const totalWt = useMemo(() => filtered.reduce((s, r) => s + r.balanceWt, 0), [filtered]);
 
-  const isNtlt = jobIsNtlt;
-
-  // MFC-batch rollups within this project (TLT only): totals per batch so users
-  // can see qty/weight/ageing per MFC. Sorted A..Z with the "Z" bucket last.
-  const byMfc = useMemo(() => {
-    if (isNtlt) return [];
+  // Group into structure rollups; each holds its own sorted mark list for
+  // inline expansion.
+  const byStructure = useMemo(() => {
     const groups = new Map<string, any[]>();
     for (const r of filtered) {
-      const k = mfcVal(r);
+      const k = r.structure || "-";
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k)!.push(r);
     }
     return Array.from(groups.entries())
-      .map(([batch, recs]) => {
+      .map(([structure, recs]) => {
         const aged = recs.filter((r) => r.ageingDays !== null);
         return {
-          batch,
-          structures: new Set(recs.map((r) => r.structure).filter(Boolean)).size,
-          marks: recs.length,
+          structure,
+          marks: recs,
+          count: recs.length,
           qty: recs.reduce((s, r) => s + r.balanceQty, 0),
           weight: recs.reduce((s, r) => s + r.balanceWt, 0),
           avgAge: aged.length
@@ -875,22 +995,17 @@ function JobDetail({
             : null,
         };
       })
-      .sort((a, b) => a.batch.localeCompare(b.batch));
-  }, [filtered, isNtlt]);
-  const secondaryNoun = isNtlt ? "sub-categories" : "structures";
-  const structureCount = useMemo(
-    () =>
-      new Set(
-        filtered
-          .map((r) => (isNtlt ? r.ntltSubtype : r.structure))
-          .filter(Boolean),
-      ).size,
-    [filtered, isNtlt],
-  );
-  const totalQty = useMemo(() => filtered.reduce((s, r) => s + r.balanceQty, 0), [filtered]);
-  const totalWt = useMemo(() => filtered.reduce((s, r) => s + r.balanceWt, 0), [filtered]);
+      .sort((a, b) => a.structure.localeCompare(b.structure));
+  }, [filtered]);
 
-  const visibleRows = showAll ? sortedRows : sortedRows.slice(0, ROW_CAP);
+  const toggleExpanded = (structure: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(structure)) next.delete(structure);
+      else next.add(structure);
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -904,9 +1019,12 @@ function JobDetail({
           Back
         </button>
         <div className="min-w-0">
-          <h2 className="text-xl font-bold tracking-tight truncate">{label} {job}</h2>
+          <h2 className="text-xl font-bold tracking-tight truncate">
+            {label} {job}
+            {mfc && <span className="text-muted-foreground font-medium"> &middot; MFC {mfc}</span>}
+          </h2>
           <p className="text-xs text-muted-foreground">
-            {structureCount} {secondaryNoun} • {filtered.length.toLocaleString()} marks •{" "}
+            {byStructure.length} {secondaryNoun} • {filtered.length.toLocaleString()} marks •{" "}
             {totalQty.toLocaleString()} pcs • <span className="font-bold text-foreground">{formatWeight(totalWt)}</span>
           </p>
         </div>
@@ -922,7 +1040,7 @@ function JobDetail({
             className="pl-9"
           />
         </div>
-        <div className={`grid grid-cols-1 sm:grid-cols-2 ${isNtlt ? "" : "lg:grid-cols-3"} gap-3`}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1">
             <label className="text-xs font-semibold text-muted-foreground uppercase">
               Activity
@@ -936,21 +1054,6 @@ function JobDetail({
               disabled={activityOptions.length === 0}
             />
           </div>
-          {!isNtlt && (
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">
-                MFC
-              </label>
-              <SearchableSelect
-                value={mfc}
-                onChange={setMfc}
-                options={mfcOptions}
-                allLabel="All MFC"
-                searchPlaceholder="Search MFC..."
-                disabled={mfcOptions.length === 0}
-              />
-            </div>
-          )}
           <div className="space-y-1">
             <label className="text-xs font-semibold text-muted-foreground uppercase">
               Contractor
@@ -966,48 +1069,6 @@ function JobDetail({
         </div>
       </div>
 
-      {!isNtlt && byMfc.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
-              By MFC Batch
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>MFC</TableHead>
-                    <TableHead className="text-right">Structures</TableHead>
-                    <TableHead className="text-right">Marks</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Wt</TableHead>
-                    <TableHead className="text-right">Avg Ageing</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {byMfc.map((m) => (
-                    <TableRow
-                      key={m.batch}
-                      className="cursor-pointer"
-                      onClick={() => setMfc(mfc === m.batch ? null : m.batch)}
-                    >
-                      <TableCell className="font-mono font-medium">{m.batch}</TableCell>
-                      <TableCell className="text-right">{m.structures}</TableCell>
-                      <TableCell className="text-right">{m.marks}</TableCell>
-                      <TableCell className="text-right">{m.qty.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{formatWeight(m.weight)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{m.avgAge ?? "-"}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       <Card>
         <CardContent className="p-0">
           <div className="flex items-center justify-end px-4 py-3 border-b">
@@ -1017,38 +1078,79 @@ function JobDetail({
             <Table>
               <TableHeader>
                 <TableRow>
-                  {!isNtlt && <TableHead>MFC</TableHead>}
-                  <TableHead>Structure</TableHead>
-                  <TableHead>Mark</TableHead>
-                  <TableHead>Activity</TableHead>
-                  <TableHead>Section</TableHead>
+                  <TableHead>{isNtlt ? "Sub-category" : "Structure"}</TableHead>
+                  <TableHead className="text-right">Marks</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
                   <TableHead className="text-right">Wt</TableHead>
-                  <TableHead>Contractor</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead className="text-right">Ageing</TableHead>
+                  <TableHead className="text-right">Avg Ageing</TableHead>
+                  <TableHead className="w-6" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visibleRows.map((r) => (
-                  <TableRow key={r.id}>
-                    {!isNtlt && <TableCell className="font-mono whitespace-nowrap">{mfcVal(r)}</TableCell>}
-                    <TableCell className="font-medium whitespace-nowrap">{r.structure || "-"}</TableCell>
-                    <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
-                    <TableCell className="whitespace-nowrap">{r.activity || "-"}</TableCell>
-                    <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || "-"}</TableCell>
-                    <TableCell className="text-right">{r.balanceQty}</TableCell>
-                    <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
-                    <TableCell className="text-xs whitespace-nowrap">{r.contractor || "-"}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || "-"}</TableCell>
-                    <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
-                      {ageingCell(r)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {sortedRows.length === 0 && (
+                {byStructure.map((s) => {
+                  const isOpen = expanded.has(s.structure);
+                  const sortedMarks = sortRecords(s.marks, sortBy);
+                  return (
+                    <Fragment key={s.structure}>
+                      <TableRow
+                        className="cursor-pointer hover:bg-muted/40"
+                        onClick={() => toggleExpanded(s.structure)}
+                      >
+                        <TableCell className="font-medium whitespace-nowrap">{s.structure}</TableCell>
+                        <TableCell className="text-right">{s.count}</TableCell>
+                        <TableCell className="text-right">{s.qty.toLocaleString()}</TableCell>
+                        <TableCell className="text-right">{formatWeight(s.weight)}</TableCell>
+                        <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(s.avgAge)}`}>
+                          {s.avgAge !== null ? `${s.avgAge}d` : "-"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                        </TableCell>
+                      </TableRow>
+                      {isOpen && (
+                        <TableRow key={`${s.structure}-detail`} className="bg-muted/20">
+                          <TableCell colSpan={6} className="p-0">
+                            <div className="overflow-x-auto">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead className="pl-8">Mark</TableHead>
+                                    <TableHead>Activity</TableHead>
+                                    <TableHead>Section</TableHead>
+                                    <TableHead className="text-right">Qty</TableHead>
+                                    <TableHead className="text-right">Wt</TableHead>
+                                    <TableHead>Contractor</TableHead>
+                                    <TableHead>Date</TableHead>
+                                    <TableHead className="text-right">Ageing</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {sortedMarks.map((r) => (
+                                    <TableRow key={r.id}>
+                                      <TableCell className="pl-8 font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
+                                      <TableCell className="whitespace-nowrap">{r.activity || "-"}</TableCell>
+                                      <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || "-"}</TableCell>
+                                      <TableCell className="text-right">{r.balanceQty}</TableCell>
+                                      <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
+                                      <TableCell className="text-xs whitespace-nowrap">{r.contractor || "-"}</TableCell>
+                                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{r.assignDate || "-"}</TableCell>
+                                      <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
+                                        {ageingCell(r)}
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  );
+                })}
+                {byStructure.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={isNtlt ? 9 : 10} className="text-center py-4 text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center py-4 text-muted-foreground">
                       No marks found for this {label.toLowerCase()}.
                     </TableCell>
                   </TableRow>
@@ -1056,34 +1158,6 @@ function JobDetail({
               </TableBody>
             </Table>
           </div>
-          {sortedRows.length > ROW_CAP && (
-            <div className="p-3 text-center text-xs text-muted-foreground border-t">
-              {showAll ? (
-                <span>
-                  Showing all {sortedRows.length.toLocaleString()} marks.{" "}
-                  <button
-                    type="button"
-                    onClick={() => setShowAll(false)}
-                    className="text-primary font-medium hover:underline"
-                  >
-                    Show less
-                  </button>
-                </span>
-              ) : (
-                <span>
-                  Showing first {ROW_CAP.toLocaleString()} of {sortedRows.length.toLocaleString()} marks.{" "}
-                  <button
-                    type="button"
-                    onClick={() => setShowAll(true)}
-                    className="text-primary font-medium hover:underline"
-                  >
-                    Show all
-                  </button>{" "}
-                  or use the search to narrow down.
-                </span>
-              )}
-            </div>
-          )}
         </CardContent>
       </Card>
     </div>
