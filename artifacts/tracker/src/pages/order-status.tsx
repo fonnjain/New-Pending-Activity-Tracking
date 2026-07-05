@@ -70,10 +70,11 @@ interface DisplayRow {
   inWip: boolean;
   // The structure has NTLT marks whose bundle math is intentionally suppressed.
   outOfScope: boolean;
-  // Fab/Galv shown for this row come from the Order Review file's Progress block
-  // (the structure is absent from WIP), not from live WIP marks. Tagged in the UI
-  // because file figures are cumulative-done, not current-at-stage like WIP.
-  bundleFromFile: boolean;
+  // Structure has no marks in WIP at all, so Fabrication/Galvanizing cannot be
+  // computed live and show as "n/a" (no fallback to the Order Review file's
+  // Progress block — those figures are cumulative-done, not current-at-stage,
+  // and would misrepresent a live WIP snapshot).
+  noWipData: boolean;
   // The order row exists in the order book but was absent from the latest Order
   // Review upload (kept, never deleted — flagged for review).
   notInLatest: boolean;
@@ -199,15 +200,11 @@ export default function OrderStatusView() {
       // mode's computed buckets". A structure present in WIP must never use the
       // file fallback even when the active mode hides its marks.
       const inWipReport = wipKeys.has(k);
-      // When a structure is genuinely absent from WIP, fall back to the order
-      // file's Progress Fabrication / Galvanising so it no longer reads 0. Tagged
-      // so the file-sourced (cumulative-done) figures aren't read as live WIP
-      // balances.
-      const bundleFromFile =
-        !outOfScope &&
-        !inWipReport &&
-        !!file &&
-        (file.fileFabMt != null || file.fileGalvMt != null);
+      // Structure genuinely absent from WIP -> Fab/Galv cannot be computed live.
+      // No fallback to the order file's Progress Fabrication / Galvanising: those
+      // figures are cumulative-done, not current-at-stage, and would misrepresent
+      // a live WIP snapshot.
+      const noWipData = !outOfScope && !inWipReport;
       out.push({
         project,
         structure,
@@ -221,26 +218,26 @@ export default function OrderStatusView() {
         releaseBalanceMt: file?.releaseBalanceMt ?? null,
         dispatchBalanceMt: file?.dispatchBalanceMt ?? null,
         // comp -> live WIP buckets; else in-WIP-but-mode-hidden -> 0; else truly
-        // absent -> file Progress.
+        // absent from WIP -> null (n/a), never the file's Progress figures.
         fabMt: outOfScope
           ? null
           : comp
             ? comp.fabMt
             : inWipReport
               ? 0
-              : file?.fileFabMt ?? null,
+              : null,
         galvMt: outOfScope
           ? null
           : comp
             ? comp.galvMt
             : inWipReport
               ? 0
-              : file?.fileGalvMt ?? null,
+              : null,
         computedFgMt: fgByKey.get(k) ?? null,
         inFile: !!file,
         inWip: !!comp,
         outOfScope,
-        bundleFromFile,
+        noWipData,
         notInLatest: file?.notInLatest ?? false,
       });
     }
@@ -586,8 +583,8 @@ function ProjectGroup({
               {r.notInLatest && (
                 <span className="ml-2 text-[10px] uppercase text-rose-600 dark:text-rose-400">not in latest file</span>
               )}
-              {r.bundleFromFile && (
-                <span className="ml-2 text-[10px] uppercase text-sky-600 dark:text-sky-400">fab/galv from order sheet</span>
+              {r.noWipData && (
+                <span className="ml-2 text-[10px] uppercase text-muted-foreground">not in WIP - fab/galv n/a</span>
               )}
             </td>
             <td className="px-2 py-1.5">{r.subType ?? "-"}</td>
