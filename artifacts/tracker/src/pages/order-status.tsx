@@ -59,9 +59,10 @@ interface DisplayRow {
   // null and rendered "n/a" — NTLT marks never contribute Fab/Galv math.
   fabMt: number | null;
   galvMt: number | null;
-  // Finished Good Computed WIP = live WIP Galvanizing (G,GB,Y) minus the Order
-  // Review file's Dispatch (col Q, Progress > Despatch). Mirrors galvMt: null
-  // for out-of-scope (NTLT) rows and for structures genuinely absent from WIP.
+  // Finished Good Overview Computed = Order Review file Galvanising (col N,
+  // Progress > Galvanising) minus file Dispatch (col Q, Progress > Despatch).
+  // Purely file-sourced (no WIP dependency); null only when the file has no
+  // Galvanising figure for this structure.
   computedFgMt: number | null;
   inFile: boolean;
   inWip: boolean;
@@ -190,8 +191,6 @@ export default function OrderStatusView() {
       // figures are cumulative-done, not current-at-stage, and would misrepresent
       // a live WIP snapshot.
       const noWipData = !outOfScope && !inWipReport;
-      // Same live/absent resolution as the galvMt field below, reused so
-      // Finished Good Computed WIP mirrors it exactly minus file Dispatch.
       const galvMt = outOfScope
         ? null
         : comp
@@ -222,7 +221,9 @@ export default function OrderStatusView() {
               : null,
         galvMt,
         computedFgMt:
-          galvMt == null ? null : galvMt - (file?.fileDespatchMt ?? 0),
+          file?.fileGalvMt == null
+            ? null
+            : file.fileGalvMt - (file?.fileDespatchMt ?? 0),
         inFile: !!file,
         inWip: !!comp,
         outOfScope,
@@ -329,7 +330,7 @@ export default function OrderStatusView() {
       { label: "Scope", field: "scope" },
       { label: "Fabrication (MT)", field: "fabMt", numeric: true, decimals: 3, total: true },
       { label: "Galvanizing (MT)", field: "galvMt", numeric: true, decimals: 3, total: true },
-      { label: "Finished Good Computed WIP (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
+      { label: "Finished Good Overview Computed (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
       { label: "Dispatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
       { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
     ];
@@ -370,7 +371,7 @@ export default function OrderStatusView() {
             Per project and structure: order quantities from the latest Order Review
             file, joined to live Fabrication / Galvanizing tonnage computed from the
             selected WIP report, Dispatch (MT) from the file, and Finished Good
-            Computed WIP (live Galvanizing minus file Dispatch).
+            Overview Computed (file Galvanising minus file Dispatch).
           </p>
         </div>
         <Button
@@ -417,7 +418,7 @@ export default function OrderStatusView() {
           <KpiTile label="Order Wt (MT)" value={mt(totals.weightMt)} />
           <KpiTile label="In Fabrication (MT)" value={mt(totals.fabMt)} />
           <KpiTile label="In Galvanizing (MT)" value={mt(totals.galvMt)} />
-          <KpiTile label="Finished Good Computed WIP (MT)" value={mt(totals.computedFgMt)} />
+          <KpiTile label="Finished Good Overview Computed (MT)" value={mt(totals.computedFgMt)} />
         </div>
       )}
 
@@ -451,7 +452,7 @@ export default function OrderStatusView() {
                     <th className="px-2 py-1.5 font-semibold text-right">Release Bal.</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Fabrication</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Galvanizing</th>
-                    <th className="px-2 py-1.5 font-semibold text-right">Finished Good Computed WIP</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">Finished Good Overview Computed</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Dispatch</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Dispatch Bal.</th>
                   </tr>
