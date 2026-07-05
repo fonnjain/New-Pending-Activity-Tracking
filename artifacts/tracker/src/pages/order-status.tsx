@@ -176,24 +176,17 @@ export default function OrderStatusView() {
     return m;
   }, [order]);
 
-  // Galvanizing WIP Accumulated, per project (lifetime throughput; no
-  // structure breakdown exists for this figure).
-  const galvAccByProject = useMemo(() => {
+  // Galvanizing WIP Accumulated, structure-wise (the underlying engine is
+  // mark-wise, rolled up structure-wise then project-wise). Keyed the same
+  // way as dispatchByKey/computedByKey so this is a true per-structure
+  // figure, not a project total repeated on every row.
+  const galvAccByKey = useMemo(() => {
     const m = new Map<string, number>();
-    for (const p of accWip?.byProject ?? []) m.set(p.project, p.galvanizingMt);
-    return m;
-  }, [accWip]);
-
-  // Total file Dispatch (col Q), summed across all structures per project —
-  // needed because Accumulated WIP has no per-structure figure to subtract a
-  // per-structure dispatch from.
-  const despatchByProject = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of order?.rows ?? []) {
-      m.set(r.project, (m.get(r.project) ?? 0) + (r.fileDespatchMt ?? 0));
+    for (const s of accWip?.byStructure ?? []) {
+      m.set(keyOf(s.project, s.structure), s.galvanizingMt);
     }
     return m;
-  }, [order]);
+  }, [accWip]);
 
   // Union of file rows and WIP-derived keys, filtered by the active project /
   // structure selections so the table tracks the global filter bar.
@@ -256,9 +249,9 @@ export default function OrderStatusView() {
             ? null
             : file.fileGalvMt - (file?.fileDespatchMt ?? 0),
         computedFgWipMt: (() => {
-          const galvAccMt = galvAccByProject.get(project);
+          const galvAccMt = galvAccByKey.get(k);
           if (galvAccMt === undefined) return null;
-          return galvAccMt - (despatchByProject.get(project) ?? 0);
+          return galvAccMt - (file?.fileDespatchMt ?? 0);
         })(),
         inFile: !!file,
         inWip: !!comp,
@@ -278,8 +271,7 @@ export default function OrderStatusView() {
     computedByKey,
     ntltKeys,
     wipKeys,
-    galvAccByProject,
-    despatchByProject,
+    galvAccByKey,
     filters.job,
     filters.structure,
   ]);
@@ -305,6 +297,7 @@ export default function OrderStatusView() {
           acc.computedFgMt += r.computedFgMt ?? 0;
           acc.fileDespatchMt += r.fileDespatchMt ?? 0;
           acc.dispatchBalanceMt += r.dispatchBalanceMt ?? 0;
+          acc.computedFgWipMt += r.computedFgWipMt ?? 0;
           return acc;
         },
         {
@@ -318,13 +311,10 @@ export default function OrderStatusView() {
           computedFgMt: 0,
           fileDespatchMt: 0,
           dispatchBalanceMt: 0,
+          computedFgWipMt: 0,
         },
       );
-      // computedFgWipMt is a project-level figure (Accumulated WIP has no
-      // structure breakdown) repeated on every structure row of the project
-      // — take it once, never sum across structure rows.
-      const computedFgWipMt = list[0]?.computedFgWipMt ?? null;
-      return { project, list, subtotal: { ...subtotal, computedFgWipMt } };
+      return { project, list, subtotal };
     });
   }, [rows]);
 
@@ -341,6 +331,7 @@ export default function OrderStatusView() {
         acc.computedFgMt += r.computedFgMt ?? 0;
         acc.fileDespatchMt += r.fileDespatchMt ?? 0;
         acc.dispatchBalanceMt += r.dispatchBalanceMt ?? 0;
+        acc.computedFgWipMt += r.computedFgWipMt ?? 0;
         return acc;
       },
       {
@@ -354,18 +345,10 @@ export default function OrderStatusView() {
         computedFgMt: 0,
         fileDespatchMt: 0,
         dispatchBalanceMt: 0,
+        computedFgWipMt: 0,
       },
     );
-    // Sum the per-project figure once per project (not once per structure
-    // row) — same reasoning as the group subtotal above.
-    const seenProjects = new Set<string>();
-    let computedFgWipMt = 0;
-    for (const r of rows) {
-      if (seenProjects.has(r.project)) continue;
-      seenProjects.add(r.project);
-      computedFgWipMt += r.computedFgWipMt ?? 0;
-    }
-    return { ...base, computedFgWipMt };
+    return base;
   }, [rows]);
 
   function onExport() {

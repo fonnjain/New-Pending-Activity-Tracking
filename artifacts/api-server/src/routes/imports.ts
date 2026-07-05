@@ -1972,8 +1972,10 @@ router.get("/milestones", async (_req, res): Promise<void> => {
 });
 
 // Permanent lifetime accumulated-WIP totals (Fabrication / Galvanizing).
-// Recomputed deterministically from the full WIP import history on each read
-// (and on each upload/delete/settings change). Purely additive.
+// Computed mark-wise, rolled up structure-wise (byStructure) then
+// project-wise (byProject). Recomputed deterministically from the full WIP
+// import history on each read (and on each upload/delete/settings change).
+// Purely additive.
 router.get("/accumulated-wip", async (_req, res): Promise<void> => {
   const result = await recomputeAccumulatedWip();
   res.json({ ...result, generatedAt: new Date().toISOString() });

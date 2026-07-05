@@ -2555,9 +2555,32 @@ components:
       required:
         - fabricationMt
         - galvanizingMt
+    AccumulatedWipStructure:
+      type: object
+      description: >
+        Lifetime accumulated WIP totals for one project+structure -- the
+        structure-wise rollup of the mark-wise ledger, sitting between the
+        mark-level events and the project-wise byProject totals.
+      properties:
+        project:
+          type: string
+        structure:
+          type: string
+        fabricationMt:
+          type: number
+        galvanizingMt:
+          type: number
+      required:
+        - project
+        - structure
+        - fabricationMt
+        - galvanizingMt
     AccumulatedWipResponse:
       type: object
-      description: Lifetime accumulated WIP throughput totals (overall + per-project).
+      description: >
+        Lifetime accumulated WIP throughput totals, computed mark-wise then
+        rolled up structure-wise (byStructure) then project-wise (byProject),
+        plus the overall (all-project) sum.
       properties:
         overall:
           $ref: "#/components/schemas/AccumulatedWipTotals"
@@ -2565,11 +2588,16 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AccumulatedWipProject"
+        byStructure:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccumulatedWipStructure"
         generatedAt:
           type: string
       required:
         - overall
         - byProject
+        - byStructure
         - generatedAt
     ContractorMovementEntry:
       type: object

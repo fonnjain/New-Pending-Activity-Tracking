@@ -1489,8 +1489,14 @@ export const GetAccumulatedWipResponse = zod.object({
   "fabricationMt": zod.number().describe('Tonnage added each time a mark left TS into G (TLT projects only).'),
   "galvanizingMt": zod.number().describe('Tonnage added each time a mark left Y (dispatched\/completed).')
 }).describe('Lifetime accumulated WIP totals for one project.')),
+  "byStructure": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string(),
+  "fabricationMt": zod.number(),
+  "galvanizingMt": zod.number()
+}).describe('Lifetime accumulated WIP totals for one project+structure -- the structure-wise rollup of the mark-wise ledger, sitting between the mark-level events and the project-wise byProject totals.\n')),
   "generatedAt": zod.string()
-}).describe('Lifetime accumulated WIP throughput totals (overall + per-project).')
+}).describe('Lifetime accumulated WIP throughput totals, computed mark-wise then rolled up structure-wise (byStructure) then project-wise (byProject), plus the overall (all-project) sum.\n')
 
 
 /**

@@ -489,6 +489,7 @@ function CutoffCard() {
 function AccumulatedWipContent() {
   const { data, isLoading } = useGetAccumulatedWip();
   const byProject = useMemo(() => data?.byProject ?? [], [data]);
+  const byStructure = useMemo(() => data?.byStructure ?? [], [data]);
 
   const handleExport = () => {
     exportToXlsx(
@@ -500,6 +501,20 @@ function AccumulatedWipContent() {
       ],
       byProject,
       { sheetName: "Accumulated WIP" },
+    );
+  };
+
+  const handleExportByStructure = () => {
+    exportToXlsx(
+      "accumulated-wip-by-structure.xlsx",
+      [
+        { label: "Project", field: "project" },
+        { label: "Structure", field: "structure" },
+        { label: "Fabrication WIP Accumulated (MT)", field: "fabricationMt", numeric: true, decimals: 3, total: true },
+        { label: "Galvanizing WIP Accumulated (MT)", field: "galvanizingMt", numeric: true, decimals: 3, total: true },
+      ],
+      byStructure,
+      { sheetName: "Accumulated WIP by Structure" },
     );
   };
 
@@ -603,6 +618,58 @@ function AccumulatedWipContent() {
               </CardContent>
             </Card>
           )}
+
+          {byStructure.length > 0 && (
+            <Card>
+              <CardHeader className="flex items-start justify-between gap-3 flex-row">
+                <CardTitle className="text-base">By structure</CardTitle>
+                <Button variant="outline" size="sm" onClick={handleExportByStructure} className="shrink-0">
+                  <FileDown className="h-4 w-4 mr-1.5" />
+                  Export
+                </Button>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-auto max-h-[70vh]">
+                  <table className="w-full text-sm">
+                    <thead className="border-b bg-muted sticky top-0 z-10">
+                      <tr className="text-left">
+                        <th className="px-3 py-2 font-semibold">Project</th>
+                        <th className="px-3 py-2 font-semibold">Structure</th>
+                        <th className="px-3 py-2 font-semibold text-right">
+                          Fabrication WIP Accumulated (MT)
+                        </th>
+                        <th className="px-3 py-2 font-semibold text-right">
+                          Galvanizing WIP Accumulated (MT)
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {byStructure.map((r) => (
+                        <tr
+                          key={`${r.project}\u0001${r.structure}`}
+                          className="border-b last:border-0 hover:bg-muted/30"
+                        >
+                          <td className="px-3 py-2">{r.project}</td>
+                          <td className="px-3 py-2">{r.structure}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fabricationMt)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.galvanizingMt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="border-t-2 bg-muted font-semibold sticky bottom-0 z-10">
+                      <tr>
+                        <td className="px-3 py-2" colSpan={2}>
+                          Grand total ({byStructure.length})
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">{mt3(data?.overall.fabricationMt)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{mt3(data?.overall.galvanizingMt)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </>
       )}
     </div>
@@ -664,42 +731,29 @@ function ComputedFgContent() {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([project, list]) => {
         const sorted = [...list].sort(cmp);
-        const base = list.reduce(
+        const subtotal = list.reduce(
           (acc, r) => ({
             releaseMt: acc.releaseMt + (r.releaseMt ?? 0),
             fileDespatchMt: acc.fileDespatchMt + (r.fileDespatchMt ?? 0),
             computedFgMt: acc.computedFgMt + (r.computedFgMt ?? 0),
+            computedFgWipMt: acc.computedFgWipMt + (r.computedFgWipMt ?? 0),
           }),
-          { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0 },
+          { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0, computedFgWipMt: 0 },
         );
-        // computedFgWipMt is a project-level figure (Accumulated WIP has no
-        // structure breakdown) repeated on every structure row of the
-        // project — take it once, never sum across structure rows.
-        const subtotal = { ...base, computedFgWipMt: list[0]?.computedFgWipMt ?? null };
         return { project, list: sorted, subtotal };
       });
   }, [rows, sortKey, sortDir]);
 
   const totals = useMemo(() => {
-    const base = rows.reduce(
+    return rows.reduce(
       (acc, r) => ({
         releaseMt: acc.releaseMt + (r.releaseMt ?? 0),
         fileDespatchMt: acc.fileDespatchMt + (r.fileDespatchMt ?? 0),
         computedFgMt: acc.computedFgMt + (r.computedFgMt ?? 0),
+        computedFgWipMt: acc.computedFgWipMt + (r.computedFgWipMt ?? 0),
       }),
-      { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0 },
+      { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0, computedFgWipMt: 0 },
     );
-    // Sum the per-project figure once per project (not once per structure
-    // row) — same reasoning as the group subtotal above.
-    const seenProjects = new Set<string>();
-    let computedFgWipMt = 0;
-    for (const r of rows) {
-      const key = r.project || "(Unassigned)";
-      if (seenProjects.has(key)) continue;
-      seenProjects.add(key);
-      computedFgWipMt += r.computedFgWipMt ?? 0;
-    }
-    return { ...base, computedFgWipMt };
   }, [rows]);
 
   const toggleSort = (key: FgSortKey) => {

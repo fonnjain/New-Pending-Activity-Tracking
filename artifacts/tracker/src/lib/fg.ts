@@ -15,12 +15,12 @@ export interface FgComputedRow {
   // Finished Good Overview Computed = Order Review file Galvanising (col N)
   // minus file Dispatch (col Q). Purely file-sourced.
   computedFgMt: number | null;
-  // Finished Good WIP Computed = Galvanizing WIP Accumulated (lifetime,
-  // per-project) minus total file Dispatch (col Q) for that project, summed
-  // across all its structures. Accumulated WIP is only tracked per project
-  // (no structure breakdown), so this is a project-level figure repeated on
-  // every structure row of that project — not a per-structure computation.
-  // Null only when the project has no Accumulated WIP entry at all.
+  // Finished Good WIP Computed = Galvanizing WIP Accumulated minus file
+  // Dispatch (col Q), computed STRUCTURE-wise (the underlying Accumulated
+  // WIP engine is mark-wise, rolled up structure-wise then project-wise;
+  // file Dispatch is available structure-wise too, so this figure is a true
+  // per-structure computation, not a repeated project total). Null only when
+  // the structure has no Accumulated WIP entry at all.
   computedFgWipMt: number | null;
 }
 
@@ -45,33 +45,23 @@ export function useFgRows(): {
     query: { queryKey: getGetAccumulatedWipQueryKey() },
   });
 
-  // Galvanizing WIP Accumulated, per project (lifetime throughput; no
-  // structure breakdown exists for this figure).
-  const galvAccByProject = useMemo(() => {
+  // Galvanizing WIP Accumulated, structure-wise (the mark-wise engine rolled
+  // up to project -> structure). Keyed by project+structure so the
+  // per-structure figure below is a true structure-level computation, not a
+  // project total repeated on every row.
+  const galvAccByStructure = useMemo(() => {
     const m = new Map<string, number>();
-    for (const p of accWip?.byProject ?? []) {
-      m.set(p.project, p.galvanizingMt);
+    for (const s of accWip?.byStructure ?? []) {
+      m.set(`${s.project}\u0001${s.structure}`, s.galvanizingMt);
     }
     return m;
   }, [accWip]);
-
-  // Total file Dispatch (col Q), summed across all structures per project —
-  // needed because Accumulated WIP has no per-structure figure to subtract
-  // a per-structure dispatch from.
-  const despatchByProject = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of order?.rows ?? []) {
-      m.set(r.project, (m.get(r.project) ?? 0) + (r.fileDespatchMt ?? 0));
-    }
-    return m;
-  }, [order]);
 
   const rows = useMemo<FgComputedRow[]>(() => {
     const all = order?.rows ?? [];
     const filtered = filters.job ? all.filter((r) => r.project === filters.job) : all;
     return filtered.map((r) => {
-      const galvAccMt = galvAccByProject.get(r.project);
-      const projectDespatchMt = despatchByProject.get(r.project) ?? 0;
+      const galvAccMt = galvAccByStructure.get(`${r.project}\u0001${r.structure}`);
       return {
         project: r.project,
         structure: r.structure,
@@ -80,10 +70,10 @@ export function useFgRows(): {
         computedFgMt:
           r.fileGalvMt == null ? null : r.fileGalvMt - (r.fileDespatchMt ?? 0),
         computedFgWipMt:
-          galvAccMt === undefined ? null : galvAccMt - projectDespatchMt,
+          galvAccMt === undefined ? null : galvAccMt - (r.fileDespatchMt ?? 0),
       };
     });
-  }, [order, filters.job, galvAccByProject, despatchByProject]);
+  }, [order, filters.job, galvAccByStructure]);
 
   return {
     available: order?.available ?? false,

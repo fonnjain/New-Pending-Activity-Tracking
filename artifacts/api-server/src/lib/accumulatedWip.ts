@@ -52,6 +52,7 @@ function importYmd(reportDate: string | null, createdAt: Date | string): string 
 
 interface IdentityState {
   job: string;
+  structure: string;
   category: string | null;
   activity: string | null;
   weightMt: number;
@@ -59,6 +60,7 @@ interface IdentityState {
 
 interface LedgerEntry {
   project: string;
+  structure: string;
   kind: "fabrication" | "galvanizing";
   markId: string;
   jobCardNo: string | null;
@@ -73,18 +75,52 @@ export interface AccumulatedWipTotals {
   galvanizingMt: number;
 }
 
+// Structure-wise rollup of the mark-wise ledger -- the middle tier of the
+// mark -> structure -> project hierarchy. `byProject` (above) is itself the
+// project-wise rollup of these rows.
+export interface AccumulatedWipStructureTotals {
+  project: string;
+  structure: string;
+  fabricationMt: number;
+  galvanizingMt: number;
+}
+
 export interface AccumulatedWipResult {
   overall: { fabricationMt: number; galvanizingMt: number };
   byProject: AccumulatedWipTotals[];
+  byStructure: AccumulatedWipStructureTotals[];
+}
+
+// Key used for the structure-level totals map: project + structure.
+function structKey(project: string, structure: string): string {
+  return `${project}\u0001${structure}`;
 }
 
 function toResult(
   totals: Map<string, { fabricationMt: number; galvanizingMt: number }>,
 ): AccumulatedWipResult {
-  const byProject = Array.from(totals.entries())
-    .map(([project, t]) => ({ project, ...t }))
+  const byStructure = Array.from(totals.entries())
+    .map(([key, t]) => {
+      const [project, structure] = key.split("\u0001");
+      return { project, structure, ...t };
+    })
     .filter((p) => p.fabricationMt !== 0 || p.galvanizingMt !== 0)
+    .sort((a, b) => a.project.localeCompare(b.project) || a.structure.localeCompare(b.structure));
+
+  const projectMap = new Map<string, { fabricationMt: number; galvanizingMt: number }>();
+  for (const s of byStructure) {
+    let t = projectMap.get(s.project);
+    if (!t) {
+      t = { fabricationMt: 0, galvanizingMt: 0 };
+      projectMap.set(s.project, t);
+    }
+    t.fabricationMt += s.fabricationMt;
+    t.galvanizingMt += s.galvanizingMt;
+  }
+  const byProject = Array.from(projectMap.entries())
+    .map(([project, t]) => ({ project, ...t }))
     .sort((a, b) => a.project.localeCompare(b.project));
+
   const overall = byProject.reduce(
     (acc, p) => {
       acc.fabricationMt += p.fabricationMt;
@@ -93,7 +129,7 @@ function toResult(
     },
     { fabricationMt: 0, galvanizingMt: 0 },
   );
-  return { overall, byProject };
+  return { overall, byProject, byStructure };
 }
 
 // Deterministically recompute both lifetime accumulated-WIP totals + rebuild
@@ -110,18 +146,23 @@ export async function recomputeAccumulatedWip(): Promise<AccumulatedWipResult> {
     .orderBy(asc(importsTable.id));
 
   const prev = new Map<string, IdentityState>();
+  // Keyed by structKey(project, structure) -- the structure-wise rollup of
+  // the mark-wise deltas booked below. Project-wise totals are derived from
+  // this map afterwards (see toResult).
   const totals = new Map<string, { fabricationMt: number; galvanizingMt: number }>();
   const ledgerEntries: LedgerEntry[] = [];
 
   const addTotal = (
     project: string,
+    structure: string,
     kind: "fabricationMt" | "galvanizingMt",
     deltaMt: number,
   ) => {
-    let t = totals.get(project);
+    const key = structKey(project, structure);
+    let t = totals.get(key);
     if (!t) {
       t = { fabricationMt: 0, galvanizingMt: 0 };
-      totals.set(project, t);
+      totals.set(key, t);
     }
     t[kind] += deltaMt;
   };
@@ -130,6 +171,7 @@ export async function recomputeAccumulatedWip(): Promise<AccumulatedWipResult> {
     const rows = await db
       .select({
         job: recordPoolTable.job,
+        structure: recordPoolTable.structure,
         markId: recordPoolTable.markId,
         jobCardNo: recordPoolTable.jobCardNo,
         activity: recordPoolTable.activity,
@@ -155,14 +197,17 @@ export async function recomputeAccumulatedWip(): Promise<AccumulatedWipResult> {
       // at TS, any drop in its Balance Wt is accumulated -- whether it's still
       // sitting at TS with a smaller balance (partial completion) or it has
       // moved on to a later activity (its remaining TS balance is now 0).
+      // Booked mark-wise (per identity) against the mark's OWN structure --
+      // its structure-wise/project-wise totals are the rollup of these events.
       if (before && before.category === "TLT" && before.activity === "TS") {
         const stillAtTs = r.activity === "TS";
         const remainingMt = stillAtTs ? weightMt : 0;
         const deltaMt = before.weightMt - remainingMt;
         if (deltaMt > 0) {
-          addTotal(before.job, "fabricationMt", deltaMt);
+          addTotal(before.job, before.structure, "fabricationMt", deltaMt);
           ledgerEntries.push({
             project: before.job,
+            structure: before.structure,
             kind: "fabrication",
             markId: r.markId,
             jobCardNo: r.jobCardNo,
@@ -180,9 +225,10 @@ export async function recomputeAccumulatedWip(): Promise<AccumulatedWipResult> {
         const remainingMt = stillAtY ? weightMt : 0;
         const deltaMt = before.weightMt - remainingMt;
         if (deltaMt > 0) {
-          addTotal(before.job, "galvanizingMt", deltaMt);
+          addTotal(before.job, before.structure, "galvanizingMt", deltaMt);
           ledgerEntries.push({
             project: before.job,
+            structure: before.structure,
             kind: "galvanizing",
             markId: r.markId,
             jobCardNo: r.jobCardNo,
@@ -193,7 +239,7 @@ export async function recomputeAccumulatedWip(): Promise<AccumulatedWipResult> {
         }
       }
 
-      prev.set(key, { job: r.job, category: r.category, activity: r.activity, weightMt });
+      prev.set(key, { job: r.job, structure: r.structure, category: r.category, activity: r.activity, weightMt });
     }
 
     // Identities absent from this import entirely: their remaining balance at
@@ -202,9 +248,10 @@ export async function recomputeAccumulatedWip(): Promise<AccumulatedWipResult> {
       if (present.has(key)) continue;
       const [markId, jobCardNo] = key.split("\u0001");
       if (st.activity === "TS" && st.category === "TLT" && st.weightMt > 0) {
-        addTotal(st.job, "fabricationMt", st.weightMt);
+        addTotal(st.job, st.structure, "fabricationMt", st.weightMt);
         ledgerEntries.push({
           project: st.job,
+          structure: st.structure,
           kind: "fabrication",
           markId,
           jobCardNo: jobCardNo || null,
@@ -214,9 +261,10 @@ export async function recomputeAccumulatedWip(): Promise<AccumulatedWipResult> {
         });
       }
       if (st.activity === "Y" && st.weightMt > 0) {
-        addTotal(st.job, "galvanizingMt", st.weightMt);
+        addTotal(st.job, st.structure, "galvanizingMt", st.weightMt);
         ledgerEntries.push({
           project: st.job,
+          structure: st.structure,
           kind: "galvanizing",
           markId,
           jobCardNo: jobCardNo || null,
@@ -240,6 +288,7 @@ export async function recomputeAccumulatedWip(): Promise<AccumulatedWipResult> {
       await tx.insert(accumulatedWipLedgerTable).values(
         ledgerEntries.slice(i, i + chunk).map((e) => ({
           project: e.project,
+          structure: e.structure,
           kind: e.kind,
           markId: e.markId,
           jobCardNo: e.jobCardNo,
@@ -252,12 +301,16 @@ export async function recomputeAccumulatedWip(): Promise<AccumulatedWipResult> {
 
     const upserts = Array.from(totals.entries())
       .filter(([, t]) => t.fabricationMt !== 0 || t.galvanizingMt !== 0)
-      .map(([project, t]) => ({
-        project,
-        fabricationMt: t.fabricationMt,
-        galvanizingMt: t.galvanizingMt,
-        updatedAt: new Date(),
-      }));
+      .map(([key, t]) => {
+        const [project, structure] = key.split("\u0001");
+        return {
+          project,
+          structure,
+          fabricationMt: t.fabricationMt,
+          galvanizingMt: t.galvanizingMt,
+          updatedAt: new Date(),
+        };
+      });
     for (let i = 0; i < upserts.length; i += chunk) {
       await tx.insert(accumulatedWipTable).values(upserts.slice(i, i + chunk));
     }
@@ -271,7 +324,10 @@ export async function recomputeAccumulatedWip(): Promise<AccumulatedWipResult> {
 export async function loadAccumulatedWip(): Promise<AccumulatedWipResult> {
   const rows = await db.select().from(accumulatedWipTable);
   const totals = new Map<string, { fabricationMt: number; galvanizingMt: number }>(
-    rows.map((r) => [r.project, { fabricationMt: r.fabricationMt, galvanizingMt: r.galvanizingMt }]),
+    rows.map((r) => [
+      structKey(r.project, r.structure),
+      { fabricationMt: r.fabricationMt, galvanizingMt: r.galvanizingMt },
+    ]),
   );
   return toResult(totals);
 }

@@ -6,13 +6,16 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AccumulatedWipProject } from './accumulatedWipProject';
+import type { AccumulatedWipStructure } from './accumulatedWipStructure';
 import type { AccumulatedWipTotals } from './accumulatedWipTotals';
 
 /**
- * Lifetime accumulated WIP throughput totals (overall + per-project).
+ * Lifetime accumulated WIP throughput totals, computed mark-wise then rolled up structure-wise (byStructure) then project-wise (byProject), plus the overall (all-project) sum.
+
  */
 export interface AccumulatedWipResponse {
   overall: AccumulatedWipTotals;
   byProject: AccumulatedWipProject[];
+  byStructure: AccumulatedWipStructure[];
   generatedAt: string;
 }

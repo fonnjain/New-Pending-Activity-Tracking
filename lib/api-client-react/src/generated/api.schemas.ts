@@ -1240,11 +1240,24 @@ export interface AccumulatedWipTotals {
 }
 
 /**
- * Lifetime accumulated WIP throughput totals (overall + per-project).
+ * Lifetime accumulated WIP totals for one project+structure -- the structure-wise rollup of the mark-wise ledger, sitting between the mark-level events and the project-wise byProject totals.
+
+ */
+export interface AccumulatedWipStructure {
+  project: string;
+  structure: string;
+  fabricationMt: number;
+  galvanizingMt: number;
+}
+
+/**
+ * Lifetime accumulated WIP throughput totals, computed mark-wise then rolled up structure-wise (byStructure) then project-wise (byProject), plus the overall (all-project) sum.
+
  */
 export interface AccumulatedWipResponse {
   overall: AccumulatedWipTotals;
   byProject: AccumulatedWipProject[];
+  byStructure: AccumulatedWipStructure[];
   generatedAt: string;
 }
 

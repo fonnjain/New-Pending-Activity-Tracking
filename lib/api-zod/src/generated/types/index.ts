@@ -9,6 +9,7 @@
 export * from './acceptedSuggestion';
 export * from './accumulatedWipProject';
 export * from './accumulatedWipResponse';
+export * from './accumulatedWipStructure';
 export * from './accumulatedWipTotals';
 export * from './activityConfig';
 export * from './aiStatus';

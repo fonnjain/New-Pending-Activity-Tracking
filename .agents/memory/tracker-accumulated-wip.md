@@ -53,3 +53,20 @@ don't assume it's automatically a bug either way.
 admin sub-tab requires an entry in BOTH, or the tab renders a 404 (the
 `Switch`/`Route` in `App.tsx` never matches, so `NotFound` wins) even though
 the tab button itself highlights correctly.
+
+**Rolled up mark → structure → project.** The underlying ledger is mark-wise;
+totals are aggregated to `byStructure` (keyed `project\u0001structure`) first,
+then `byProject` is derived by summing `byStructure` — never compute project
+totals independently, or the two views can drift. Consumers that need a
+per-structure figure (e.g. Finished Good WIP = Galvanizing WIP Accumulated
+minus file Dispatch) MUST join on `byStructure`, not repeat a project total
+across every structure row — Dispatch is available structure-wise, so there's
+no reason to fall back to a coarser join.
+
+**Adding a NOT NULL column to a table that's fully rebuilt each recompute:**
+`drizzle-kit push` can fail combining "add column" + "set not null" in one
+statement against existing rows (`ATExecSetNotNull` error even though the
+column doesn't exist yet in the error's frame). Since this table has no
+durable data (TRUNCATE + reinsert every recompute), the fix is to just drop
+the table(s) via raw SQL first, then re-run push — don't fight drizzle-kit's
+statement ordering for tables that regenerate themselves.
