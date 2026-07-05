@@ -1622,37 +1622,6 @@ export const GetOrderStatusResponse = zod.object({
 
 
 /**
- * Returns the stored Computed FG figures, one per (project, structure): Computed FG = Release (col L) - AllActivitiesBalanceWt (newest WIP import) - File Despatch (col Q). Blank inputs count as 0; a tiny negative (>= -1 MT) is clamped to 0 and flagged "minor", a material negative (< -1 MT) is kept and flagged "material". Recomputed on every WIP and Order Review ingest; served read-only here. Purely additive — never changes WIP parsing, activity, dedup, ageing, warning, velocity, dispatch, or milestone state. available:false when no Order Review file has been ingested yet.
-
- * @summary Get the stored Computed FG overlay (per project + structure)
- */
-export const GetFgResponse = zod.object({
-  "available": zod.boolean(),
-  "asOnDate": zod.string().nullable(),
-  "rows": zod.array(zod.object({
-  "project": zod.string(),
-  "structure": zod.string(),
-  "releaseMt": zod.number().describe('Release (col L) — the FG formula\'s positive term.'),
-  "wipBalanceMt": zod.number().describe('All-activity WIP balance tonnage for this structure in the newest WIP import.'),
-  "fileDespatchMt": zod.number().describe('File Despatch (col Q) subtracted in the FG formula.'),
-  "computedFgMt": zod.number().describe('Computed FG = releaseMt - wipBalanceMt - fileDespatchMt, clamped for minor negatives.'),
-  "flag": zod.union([zod.literal('minor'),zod.literal('material'),zod.literal(null)]).nullable().describe('null = ok; minor = tiny negative clamped to 0; material = real negative kept for review.')
-}).describe('One Computed FG row per (project, structure).'))
-}).describe('Stored Computed FG overlay (per project + structure).')
-
-
-/**
- * Recomputes and rewrites the Computed FG overlay (the computed_fg table) from the current order book and the newest WIP import, then returns the resulting row count and total tonnage. Use this to populate/refresh Finished Good on demand (e.g. in a freshly deployed environment) without having to re-upload a file. Purely additive — writes only computed_fg; never changes WIP parsing, activity, dedup, ageing, warning, velocity, dispatch, or milestone state. Requires authentication.
-
- * @summary Rebuild the stored Computed FG overlay (auth required)
- */
-export const RecomputeFgResponse = zod.object({
-  "rows": zod.number().describe('Number of (project, structure) Computed FG rows written.'),
-  "totalMt": zod.number().describe('Sum of computedFgMt across all rebuilt rows.')
-}).describe('Result of rebuilding the Computed FG overlay.')
-
-
-/**
  * Removes a single Order Review upload from the history log. The Order Review file is a daily snapshot merged (UPSERTed) into one current order book, so deleting a history entry does NOT roll back the current order-book values. Deleting the most recent upload re-points the current snapshot rows to the now-latest remaining upload. Deleting the last remaining upload clears the entire order book (rows + computed dispatch). Purely additive to WIP state — never touches WIP parsing, activity, dedup, ageing, warning, or milestone math.
 
  * @summary Delete one Order Review file from the upload history

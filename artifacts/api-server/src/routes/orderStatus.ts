@@ -11,8 +11,6 @@ import {
   loadLatestOrderReview,
   crossCheckDispatch,
   crossCheckBalance,
-  loadComputedFg,
-  recomputeFg,
 } from "../lib/dispatch";
 import { requireAuth } from "./auth";
 
@@ -132,55 +130,6 @@ router.get("/order-status", async (_req, res): Promise<void> => {
     balanceReconciliation,
     imports,
   });
-});
-
-// ---------------------------------------------------------------------------
-// GET /fg — the stored Computed FG rows (one per project + structure):
-//   Computed FG = Release (col L) - AllActivitiesBalanceWt (newest WIP) - Despatch
-// Blank inputs count as 0; tiny negatives clamp to 0 (flag "minor"), material
-// negatives are kept (flag "material"). Recomputed on every WIP + Order Review
-// ingest; served read-only here. available:false when no Order Review ingested.
-// ---------------------------------------------------------------------------
-router.get("/fg", async (_req, res): Promise<void> => {
-  const latest = await loadLatestOrderReview();
-  if (!latest) {
-    res.json({ available: false, asOnDate: null, rows: [] });
-    return;
-  }
-  const rows = await loadComputedFg();
-  rows.sort(
-    (a, b) =>
-      a.project.localeCompare(b.project) ||
-      a.structure.localeCompare(b.structure),
-  );
-  res.json({
-    available: true,
-    asOnDate: latest.import.asOnDate,
-    rows: rows.map((r) => ({
-      project: r.project,
-      structure: r.structure,
-      releaseMt: r.releaseMt,
-      wipBalanceMt: r.wipBalanceMt,
-      fileDespatchMt: r.fileDespatchMt,
-      computedFgMt: r.computedFgMt,
-      flag: r.flag,
-    })),
-  });
-});
-
-// ---------------------------------------------------------------------------
-// POST /fg/recompute — rebuild the Computed FG overlay on demand (auth-gated).
-// The computed_fg table is a derived overlay that is normally refreshed as a
-// side-effect of a WIP commit/delete or an Order Review ingest. On a freshly
-// deployed environment where none of those has happened yet, the table is empty
-// and Finished Good reads 0. This lets an authenticated admin repopulate it
-// without re-uploading a file. Purely additive: writes only computed_fg.
-// ---------------------------------------------------------------------------
-router.post("/fg/recompute", requireAuth, async (_req, res): Promise<void> => {
-  await recomputeFg();
-  const rows = await loadComputedFg();
-  const totalMt = rows.reduce((s, r) => s + (r.computedFgMt ?? 0), 0);
-  res.json({ rows: rows.length, totalMt });
 });
 
 // ---------------------------------------------------------------------------

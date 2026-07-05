@@ -1391,59 +1391,6 @@ export interface OrderStatusResponse {
   imports: OrderReviewImport[];
 }
 
-/**
- * null = ok; minor = tiny negative clamped to 0; material = real negative kept for review.
- * @nullable
- */
-export type FgRowFlag = typeof FgRowFlag[keyof typeof FgRowFlag] | null;
-
-
-export const FgRowFlag = {
-  minor: 'minor',
-  material: 'material',
-} as const;
-
-/**
- * One Computed FG row per (project, structure).
- */
-export interface FgRow {
-  project: string;
-  structure: string;
-  /** Release (col L) — the FG formula's positive term. */
-  releaseMt: number;
-  /** All-activity WIP balance tonnage for this structure in the newest WIP import. */
-  wipBalanceMt: number;
-  /** File Despatch (col Q) subtracted in the FG formula. */
-  fileDespatchMt: number;
-  /** Computed FG = releaseMt - wipBalanceMt - fileDespatchMt, clamped for minor negatives. */
-  computedFgMt: number;
-  /**
-     * null = ok; minor = tiny negative clamped to 0; material = real negative kept for review.
-     * @nullable
-     */
-  flag: FgRowFlag;
-}
-
-/**
- * Stored Computed FG overlay (per project + structure).
- */
-export interface FgResponse {
-  available: boolean;
-  /** @nullable */
-  asOnDate: string | null;
-  rows: FgRow[];
-}
-
-/**
- * Result of rebuilding the Computed FG overlay.
- */
-export interface FgRecomputeResult {
-  /** Number of (project, structure) Computed FG rows written. */
-  rows: number;
-  /** Sum of computedFgMt across all rebuilt rows. */
-  totalMt: number;
-}
-
 export interface ReviewRequest {
   /** The import to review. */
   importId: number;

@@ -53,7 +53,6 @@ import {
 import { recomputeMilestones } from "../lib/milestones";
 import {
   recomputeDispatch,
-  recomputeFg,
   ingestOrderReview,
   computeWipCoverage,
 } from "../lib/dispatch";
@@ -568,13 +567,6 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
   } catch (err) {
     req.log.warn({ err }, "Dispatch recompute failed after import");
   }
-  // Refresh Computed FG (display overlay; best-effort).
-  try {
-    await recomputeFg();
-  } catch (err) {
-    req.log.warn({ err }, "FG recompute failed after import");
-  }
-
   res.status(201).json(result);
 });
 
@@ -1221,13 +1213,6 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   } catch (err) {
     req.log.warn({ err }, "Dispatch recompute failed after commit");
   }
-  // Refresh Computed FG (display overlay; best-effort).
-  try {
-    await recomputeFg();
-  } catch (err) {
-    req.log.warn({ err }, "FG recompute failed after commit");
-  }
-
   res.status(201).json({ kind: "wip", ...result });
 });
 
@@ -1355,14 +1340,6 @@ router.delete("/imports/:id", requireAuth, async (req, res): Promise<void> => {
   } catch (err) {
     req.log.warn({ err }, "Dispatch recompute failed after import delete");
   }
-  // Refresh computed FG after the deletion (best-effort). FG depends on the
-  // newest WIP import, so deleting an import can change the source snapshot.
-  try {
-    await recomputeFg();
-  } catch (err) {
-    req.log.warn({ err }, "FG recompute failed after import delete");
-  }
-
   res.sendStatus(204);
 });
 

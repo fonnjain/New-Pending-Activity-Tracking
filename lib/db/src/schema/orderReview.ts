@@ -192,37 +192,3 @@ export const insertDispatchLedgerSchema = createInsertSchema(
 ).omit({ id: true, createdAt: true });
 export type InsertDispatchLedger = z.infer<typeof insertDispatchLedgerSchema>;
 export type DispatchLedgerRow = typeof dispatchLedgerTable.$inferSelect;
-
-// Computed Finished Goods (FG) tonnage per (project, structure). Additive,
-// display-only overlay — never touches WIP parsing / activity / dedup / ageing /
-// warning / dispatch / milestone math, and never writes the order file's own FG
-// column. Deterministically rebuilt (delete + reinsert) on each recompute from:
-//   computedFgMt = Release (col L) - WIP balance (sum of all-activity balanceWt
-//                  for the key in the newest WIP import, /1000) - Despatch (col Q).
-// Blank inputs count as 0. A tiny negative (within ~1 MT of zero) is clamped to 0
-// and flagged "minor"; a material negative (below -1 MT) is kept and flagged
-// "material" for review. flag is null when the value is non-negative.
-export const computedFgTable = pgTable(
-  "computed_fg",
-  {
-    project: text("project").notNull(),
-    structure: text("structure").notNull(),
-    releaseMt: doublePrecision("release_mt").notNull().default(0),
-    wipBalanceMt: doublePrecision("wip_balance_mt").notNull().default(0),
-    fileDespatchMt: doublePrecision("file_despatch_mt").notNull().default(0),
-    computedFgMt: doublePrecision("computed_fg_mt").notNull().default(0),
-    // null | "minor" (clamped tiny negative) | "material" (kept large negative).
-    flag: text("flag"),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [primaryKey({ columns: [t.project, t.structure] })],
-);
-
-export const insertComputedFgSchema = createInsertSchema(computedFgTable).omit({
-  updatedAt: true,
-});
-export type InsertComputedFg = z.infer<typeof insertComputedFgSchema>;
-export type ComputedFgRow = typeof computedFgTable.$inferSelect;
-

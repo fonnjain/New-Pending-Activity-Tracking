@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetFg, getGetFgQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type FgRow } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
+import { useFgRows, type FgComputedRow } from "@/lib/fg";
 import { contractorCategoryLabel } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -508,29 +509,20 @@ const RECON_STATUS_META: Record<
   no_computed: { label: "No computed", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
 };
 
-const FG_FLAG_META: Record<
-  "minor" | "material",
-  { label: string; cls: string }
-> = {
-  minor: { label: "Minor neg (clamped)", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
-  material: { label: "Material neg", cls: "bg-red-500/15 text-red-600 dark:text-red-400" },
-};
-
-type FgSortKey = "structure" | "releaseMt" | "wipBalanceMt" | "fileDespatchMt" | "computedFgMt";
+type FgSortKey =
+  | "structure"
+  | "releaseMt"
+  | "fileDespatchMt"
+  | "computedFgMt"
+  | "computedFgWipMt";
 
 function ComputedFgContent() {
-  const { filters } = useTracker();
-  const { data: fg, isLoading } = useGetFg({ query: { queryKey: getGetFgQueryKey() } });
+  const { available, asOnDate, rows, isLoading } = useFgRows();
   const [sortKey, setSortKey] = useState<FgSortKey>("structure");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
-  const rows = useMemo(() => {
-    const all = fg?.rows ?? [];
-    return filters.job ? all.filter((r) => r.project === filters.job) : all;
-  }, [fg?.rows, filters.job]);
-
   const groups = useMemo(() => {
-    const byProject = new Map<string, FgRow[]>();
+    const byProject = new Map<string, FgComputedRow[]>();
     for (const r of rows) {
       const key = r.project || "(Unassigned)";
       const list = byProject.get(key);
@@ -538,7 +530,7 @@ function ComputedFgContent() {
       else byProject.set(key, [r]);
     }
     const dir = sortDir === "asc" ? 1 : -1;
-    const cmp = (a: FgRow, b: FgRow): number => {
+    const cmp = (a: FgComputedRow, b: FgComputedRow): number => {
       if (sortKey === "structure") return a.structure.localeCompare(b.structure) * dir;
       return ((a[sortKey] ?? 0) - (b[sortKey] ?? 0)) * dir;
     };
@@ -548,12 +540,12 @@ function ComputedFgContent() {
         const sorted = [...list].sort(cmp);
         const subtotal = list.reduce(
           (acc, r) => ({
-            releaseMt: acc.releaseMt + r.releaseMt,
-            wipBalanceMt: acc.wipBalanceMt + r.wipBalanceMt,
-            fileDespatchMt: acc.fileDespatchMt + r.fileDespatchMt,
-            computedFgMt: acc.computedFgMt + r.computedFgMt,
+            releaseMt: acc.releaseMt + (r.releaseMt ?? 0),
+            fileDespatchMt: acc.fileDespatchMt + (r.fileDespatchMt ?? 0),
+            computedFgMt: acc.computedFgMt + (r.computedFgMt ?? 0),
+            computedFgWipMt: acc.computedFgWipMt + (r.computedFgWipMt ?? 0),
           }),
-          { releaseMt: 0, wipBalanceMt: 0, fileDespatchMt: 0, computedFgMt: 0 },
+          { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0, computedFgWipMt: 0 },
         );
         return { project, list: sorted, subtotal };
       });
@@ -563,12 +555,12 @@ function ComputedFgContent() {
     () =>
       rows.reduce(
         (acc, r) => ({
-          releaseMt: acc.releaseMt + r.releaseMt,
-          wipBalanceMt: acc.wipBalanceMt + r.wipBalanceMt,
-          fileDespatchMt: acc.fileDespatchMt + r.fileDespatchMt,
-          computedFgMt: acc.computedFgMt + r.computedFgMt,
+          releaseMt: acc.releaseMt + (r.releaseMt ?? 0),
+          fileDespatchMt: acc.fileDespatchMt + (r.fileDespatchMt ?? 0),
+          computedFgMt: acc.computedFgMt + (r.computedFgMt ?? 0),
+          computedFgWipMt: acc.computedFgWipMt + (r.computedFgWipMt ?? 0),
         }),
-        { releaseMt: 0, wipBalanceMt: 0, fileDespatchMt: 0, computedFgMt: 0 },
+        { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0, computedFgWipMt: 0 },
       ),
     [rows],
   );
@@ -590,15 +582,11 @@ function ComputedFgContent() {
         { label: "Project", field: "project" },
         { label: "Structure", field: "structure" },
         { label: "Release (MT)", field: "releaseMt", numeric: true, decimals: 3, total: true },
-        { label: "WIP Balance (MT)", field: "wipBalanceMt", numeric: true, decimals: 3, total: true },
         { label: "File Despatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
-        { label: "Computed FG (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
-        { label: "Flag", field: "flagLabel" },
+        { label: "Finished Good Overview Computed (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
+        { label: "Finished Good WIP Computed (MT)", field: "computedFgWipMt", numeric: true, decimals: 3, total: true },
       ],
-      rows.map((r) => ({
-        ...r,
-        flagLabel: r.flag ? FG_FLAG_META[r.flag].label : "",
-      })),
+      rows,
       { sheetName: "Computed FG" },
     );
   };
@@ -609,11 +597,11 @@ function ComputedFgContent() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Computed FG</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Finished-goods tonnage per structure: Release (col L) minus the
-            all-activity WIP balance (newest WIP import) minus File Despatch (col
-            Q). Tiny negatives (&ge; -1 MT) are clamped to 0 and flagged
-            &quot;minor&quot;; larger negatives are kept and flagged
-            &quot;material&quot; for review.
+            Two finished-goods figures per structure, sourced from the latest
+            Order Review file and, for the WIP figure, the selected WIP report:
+            Finished Good Overview Computed (file Galvanising minus file
+            Dispatch) and Finished Good WIP Computed (live WIP Galvanizing
+            minus file Dispatch).
           </p>
         </div>
         {rows.length > 0 && (
@@ -630,7 +618,7 @@ function ComputedFgContent() {
             Loading...
           </CardContent>
         </Card>
-      ) : !fg?.available ? (
+      ) : !available ? (
         <Card>
           <CardContent className="py-10 text-center text-muted-foreground text-sm">
             No Computed FG yet. Upload an Order Review file on the Data tab to
@@ -645,6 +633,11 @@ function ComputedFgContent() {
         </Card>
       ) : (
         <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              Structures{asOnDate ? ` — file as on ${asOnDate}` : ""}
+            </CardTitle>
+          </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-auto max-h-[70vh]">
               <table className="w-full text-sm">
@@ -657,49 +650,37 @@ function ComputedFgContent() {
                     <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("releaseMt")}>
                       Release (MT){sortArrow("releaseMt")}
                     </th>
-                    <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("wipBalanceMt")}>
-                      WIP Balance (MT){sortArrow("wipBalanceMt")}
-                    </th>
                     <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("fileDespatchMt")}>
                       File Despatch (MT){sortArrow("fileDespatchMt")}
                     </th>
                     <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("computedFgMt")}>
-                      Computed FG (MT){sortArrow("computedFgMt")}
+                      Finished Good Overview Computed (MT){sortArrow("computedFgMt")}
                     </th>
-                    <th className="px-3 py-2 font-semibold">Flag</th>
+                    <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("computedFgWipMt")}>
+                      Finished Good WIP Computed (MT){sortArrow("computedFgWipMt")}
+                    </th>
                   </tr>
                 </thead>
                 {groups.map((g) => (
                   <tbody key={g.project} className="border-b last:border-0">
-                    {g.list.map((r, i) => {
-                      const flagMeta = r.flag ? FG_FLAG_META[r.flag] : null;
-                      return (
-                        <tr key={`${r.project}-${r.structure}`} className="border-b last:border-0 hover:bg-muted/30">
-                          <td className="px-3 py-2">{i === 0 ? g.project || "(Unassigned)" : ""}</td>
-                          <td className="px-3 py-2">{r.structure}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.releaseMt)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.wipBalanceMt)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fileDespatchMt)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.computedFgMt)}</td>
-                          <td className="px-3 py-2">
-                            {flagMeta && (
-                              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${flagMeta.cls}`}>
-                                {flagMeta.label}
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {g.list.map((r, i) => (
+                      <tr key={`${r.project}-${r.structure}`} className="border-b last:border-0 hover:bg-muted/30">
+                        <td className="px-3 py-2">{i === 0 ? g.project || "(Unassigned)" : ""}</td>
+                        <td className="px-3 py-2">{r.structure}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{mt3(r.releaseMt)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fileDespatchMt)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{mt3(r.computedFgMt)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{mt3(r.computedFgWipMt)}</td>
+                      </tr>
+                    ))}
                     <tr className="bg-muted/20 text-xs font-medium">
                       <td className="px-3 py-1.5 text-muted-foreground" colSpan={2}>
                         {g.project || "(Unassigned)"} subtotal ({g.list.length})
                       </td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.releaseMt)}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.wipBalanceMt)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.fileDespatchMt)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.computedFgMt)}</td>
-                      <td className="px-3 py-1.5" />
+                      <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.computedFgWipMt)}</td>
                     </tr>
                   </tbody>
                 ))}
@@ -707,10 +688,9 @@ function ComputedFgContent() {
                   <tr>
                     <td className="px-3 py-2" colSpan={2}>Grand total ({rows.length})</td>
                     <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.releaseMt)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.wipBalanceMt)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.fileDespatchMt)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.computedFgMt)}</td>
-                    <td className="px-3 py-2" />
+                    <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.computedFgWipMt)}</td>
                   </tr>
                 </tfoot>
               </table>
