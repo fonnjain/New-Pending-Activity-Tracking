@@ -1017,8 +1017,8 @@ function JobDetail({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Structure</TableHead>
                   {!isNtlt && <TableHead>MFC</TableHead>}
+                  <TableHead>Structure</TableHead>
                   <TableHead>Mark</TableHead>
                   <TableHead>Activity</TableHead>
                   <TableHead>Section</TableHead>
@@ -1032,8 +1032,8 @@ function JobDetail({
               <TableBody>
                 {visibleRows.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell className="font-medium whitespace-nowrap">{r.structure || "-"}</TableCell>
                     {!isNtlt && <TableCell className="font-mono whitespace-nowrap">{mfcVal(r)}</TableCell>}
+                    <TableCell className="font-medium whitespace-nowrap">{r.structure || "-"}</TableCell>
                     <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
                     <TableCell className="whitespace-nowrap">{r.activity || "-"}</TableCell>
                     <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || "-"}</TableCell>
