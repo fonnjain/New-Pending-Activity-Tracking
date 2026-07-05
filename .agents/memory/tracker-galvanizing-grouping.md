@@ -23,9 +23,12 @@ there is no longer a Y column beside it.
 **Project Wise exception (PROCESS_PHASES):** the Project-Wise stage table uses
 `PROCESS_PHASES`, NOT the activity bundles. Its Galvanising phase now spans
 **G, GB, Y** (`PROCESS_SEQUENCE.slice(GALV_START_INDEX)`), and its Ready for
-Dispatch column no longer maps to an activity — it reports the Finished Goods
-(FG) record field. No double-count risk because dispatch holds no activity code
-(processPhase never routes there); the page fills dispatch from `r.fg` directly.
+Dispatch column no longer maps to an activity — it reports Finished Good WIP
+Computed (see `tracker-computed-fg.md`), rolled up per project via
+`useFgRows()`. No double-count risk because dispatch holds no activity code
+(processPhase never routes there); the column shows "-" only when the project
+has no Order Status file entry at all (matches the Work Order/Dispatch columns'
+fallback), not a marks-count gate like the other phases.
 A phase may carry an optional `subLabel` (dispatch = "FG") that overrides the
 joined-activity-codes heading; `processPhasesForMode` carries `subLabel` through
 so it shows in every mode.
@@ -42,9 +45,8 @@ are still resolvable by `getActivityBundle`/`bundleActivitySet` but are excluded
 from the activity dropdown (layout.tsx filters `!b.hidden`). Use this same
 pattern for any future "drill matches a sub-set of a visible bundle" case.
 
-**FG placeholder:** `record_pool.fg` is a nullable text column, blank everywhere,
-excluded from `hashRow` (19 source cols only), not in any PROCESS_SEQUENCE or
-ACTIVITY_BUNDLE, surfaced as nullable `fg` on the /records Record schema. Now
-consumed display-only by the Project-Wise Ready for Dispatch column (counts marks
-with non-blank `fg`); still blank in all data, so that column reads "-" until FG
-data is captured.
+**Unused FG record field:** `record_pool.fg` is a separate nullable text column,
+blank everywhere, excluded from `hashRow` (19 source cols only), not in any
+PROCESS_SEQUENCE or ACTIVITY_BUNDLE, surfaced as nullable `fg` on the /records
+Record schema. It is NOT what drives the Project-Wise Ready for Dispatch column
+(that reads `useFgRows()` — see above); this raw field remains unused/reserved.

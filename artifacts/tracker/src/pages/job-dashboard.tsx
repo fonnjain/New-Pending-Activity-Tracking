@@ -8,6 +8,7 @@ import {
   type ProcessPhaseKey,
 } from "@workspace/domain";
 import { useTracker, useContractorCategoryMap } from "@/lib/store";
+import { useFgRows } from "@/lib/fg";
 import {
   buildContractorGroups,
   matchesContractorSelection,
@@ -108,6 +109,20 @@ function JobDashboardContent() {
     }
     return m;
   }, [order, isAll]);
+
+  // Finished Good WIP Computed (live WIP Galvanizing minus file Dispatch), the
+  // same shared figure shown on the Order Status / Data pages, rolled up per
+  // project for the "Ready for Dispatch" phase column. Sourced from
+  // `useFgRows()` so all three surfaces are always in agreement.
+  const { rows: fgRows } = useFgRows();
+  const fgWipByJob = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of fgRows) {
+      const key = isAll ? `TLT: ${r.project}` : r.project;
+      m.set(key, (m.get(key) ?? 0) + (r.computedFgWipMt ?? 0));
+    }
+    return m;
+  }, [fgRows, isAll]);
 
   // Scope to the current Order Type mode. The toggle drives both the primary
   // dimension (Project for TLT, Section for NTLT) and the grouping below.
@@ -272,13 +287,9 @@ function JobDashboardContent() {
             phases[key].marks += 1;
             phases[key].weight += r.balanceWt;
           }
-          // Ready for Dispatch reports Finished Goods (FG) — a separate record
-          // field, independent of the activity-based phase buckets above. Blank
-          // until FG data is captured, so this column stays empty for now.
-          if (r.fg && r.fg.trim() !== "") {
-            phases.dispatch.marks += 1;
-            phases.dispatch.weight += r.balanceWt;
-          }
+          // Ready for Dispatch (FG) is NOT an activity-based bucket: it's
+          // filled in below from `fgWipByJob` (Finished Good WIP Computed),
+          // the same figure shown on the Order Status / Data pages.
         }
         return {
         job,
@@ -373,12 +384,13 @@ function JobDashboardContent() {
           acc.wo += o.wo;
           acc.rel += o.rel;
           acc.disp += o.disp;
+          acc.fg += fgWipByJob.get(p.job) ?? 0;
         }
         return acc;
       },
-      { wo: 0, rel: 0, disp: 0 },
+      { wo: 0, rel: 0, disp: 0, fg: 0 },
     );
-  }, [byProject, orderByJob]);
+  }, [byProject, orderByJob, fgWipByJob]);
 
   const handleExport = () => {
     const groupLabel = isAll ? "Group" : isNtlt ? "Section" : "Project";
@@ -391,6 +403,7 @@ function JobDashboardContent() {
           { label: "Dispatch (MT)", field: "dispatchMt", numeric: true, decimals: 3, total: true },
           { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
           { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
+          { label: "Finished Good WIP Computed (MT)", field: "fgWipMt", numeric: true, decimals: 3, total: true },
           { label: "Structures", field: "structures", numeric: true, decimals: 0 },
           { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
           { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
@@ -407,6 +420,7 @@ function JobDashboardContent() {
           dispatchMt: orderByJob.get(p.job)?.disp ?? 0,
           dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
           releaseBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.rel ?? 0),
+          fgWipMt: orderByJob.has(p.job) ? (fgWipByJob.get(p.job) ?? 0) : "",
           structures: p.structures,
           marks: p.marks,
           qty: p.qty,
@@ -631,6 +645,21 @@ function JobDashboardContent() {
                       {o ? formatWeight((o.wo - o.rel) * 1000) : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     {PROCESS_PHASES.map((ph) => {
+                      if (ph.key === "dispatch") {
+                        // Ready for Dispatch (FG) = Finished Good WIP Computed,
+                        // the same figure shown on Order Status / Data — not an
+                        // activity-based mark count, so no "N marks" caption.
+                        const fg = fgWipByJob.get(p.job);
+                        return (
+                          <TableCell key={ph.key} className="text-right tabular-nums">
+                            {o ? (
+                              <span className="font-bold">{formatWeight((fg ?? 0) * 1000)}</span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                        );
+                      }
                       const cell = p.phases[ph.key];
                       return (
                         <TableCell key={ph.key} className="text-right tabular-nums">
@@ -678,6 +707,13 @@ function JobDashboardContent() {
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.disp) * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.rel) * 1000)}</TableCell>
                     {PROCESS_PHASES.map((ph) => {
+                      if (ph.key === "dispatch") {
+                        return (
+                          <TableCell key={ph.key} className="text-right tabular-nums">
+                            <span className="font-bold">{formatWeight(orderTotals.fg * 1000)}</span>
+                          </TableCell>
+                        );
+                      }
                       const marks = byProject.reduce((s, p) => s + p.phases[ph.key].marks, 0);
                       const weight = byProject.reduce((s, p) => s + p.phases[ph.key].weight, 0);
                       return (

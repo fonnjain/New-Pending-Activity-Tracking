@@ -137,9 +137,10 @@ export const PROCESS_PHASES: ProcessPhase[] = [
   {
     key: "dispatch",
     label: "Ready for Dispatch",
-    // Reports the Finished Goods (FG) record field, not an activity code: Y now
-    // rolls into Galvanising, so no activity routes here. The Project-Wise page
-    // fills this column from each record's `fg` value (blank until FG data lands).
+    // Reports Finished Good WIP Computed (live WIP Galvanizing minus file
+    // Dispatch, from Order Status), not an activity code: Y now rolls into
+    // Galvanising, so no activity routes here. The Project-Wise page fills
+    // this column per-project from `useFgRows()`, not from any WIP record field.
     activities: [],
     subLabel: "FG",
   },
