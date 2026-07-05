@@ -24,6 +24,9 @@ import {
 // lib/store.tsx — this component is purely a UI layer over that existing
 // filter logic.
 const RANGE_PRESETS: { value: string; label: string }[] = [
+  { value: "1d", label: "Last 1 day" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "15d", label: "Last 15 days" },
   { value: "3m", label: "Last 3 months" },
   { value: "6m", label: "Last 6 months" },
   { value: "9m", label: "Last 9 months" },

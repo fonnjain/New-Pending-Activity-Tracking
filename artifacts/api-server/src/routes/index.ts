@@ -8,6 +8,7 @@ import thicknessRouter from "./thickness";
 import contractorCategoriesRouter from "./contractorCategories";
 import fabricationPrioritiesRouter from "./fabricationPriorities";
 import orderStatusRouter from "./orderStatus";
+import adminRouter from "./admin";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(thicknessRouter);
 router.use(contractorCategoriesRouter);
 router.use(fabricationPrioritiesRouter);
 router.use(orderStatusRouter);
+router.use(adminRouter);
 
 export default router;

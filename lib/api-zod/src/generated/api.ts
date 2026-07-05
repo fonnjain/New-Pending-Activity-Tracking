@@ -1519,6 +1519,21 @@ export const GetContractorMovementResponse = zod.object({
 
 
 /**
+ * Re-runs, on demand, every deterministic recompute and backfill pass the app otherwise runs automatically (best-effort after upload/delete/ settings changes, or once at boot): classification backfill, hole- operation backfill, milestones, accumulated WIP, contractor movement, and dispatch. Every pass is a pure re-derivation from permanent append-only history or raw stored columns — nothing here is authoritative or destructive, so running it repeatedly is always safe and idempotent. Exists purely as a manual fallback (e.g. a prior automatic pass failed silently, or the server restarted mid-backfill); normal operation never requires it. Requires auth.
+
+ * @summary Manually trigger every deterministic recompute/backfill pass
+ */
+export const AdminRecomputeResponse = zod.object({
+  "classificationBackfilled": zod.number().describe('Record-pool rows whose classification columns were backfilled.'),
+  "holeOperationBackfilled": zod.number().describe('Record-pool rows whose hole-operation columns were backfilled.'),
+  "milestonesCount": zod.number().describe('Per-project milestone rows after recompute.'),
+  "accumulatedWipProjects": zod.number().describe('Projects covered by the recomputed accumulated-WIP totals.'),
+  "contractorMovementEntries": zod.number().describe('Contractor movement ledger entries after recompute.'),
+  "generatedAt": zod.string()
+}).describe('Result summary of a manual admin recompute run.')
+
+
+/**
  * Returns the latest "Order Review" file ingest (the second input file) as per-(project, structure) rows, joined to the computed running Dispatch tonnage (seed baseline + Yard-departure accruals), plus a file-vs-computed dispatch reconciliation at a 1% tolerance. Fabrication / Galvanizing / Yard tonnages are computed client-side from the selected WIP import's records (ACTIVITY_BUNDLES) so header filters are honoured. Purely additive and read-only — never changes WIP parsing, activity, dedup, ageing, warning, velocity, or milestone state. available:false when no Order Review file has been ingested yet.
 
  * @summary Get the latest Order Review rows joined to computed dispatch

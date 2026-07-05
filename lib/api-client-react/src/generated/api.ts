@@ -21,6 +21,7 @@ import type {
 
 import type {
   AccumulatedWipResponse,
+  AdminRecomputeResult,
   AiStatus,
   AuthCredentials,
   AuthStatus,
@@ -2775,6 +2776,78 @@ export function useGetContractorMovement<TData = Awaited<ReturnType<typeof getCo
 
 
 
+
+export const getAdminRecomputeUrl = () => {
+
+
+
+
+  return `/api/admin/recompute`
+}
+
+/**
+ * Re-runs, on demand, every deterministic recompute and backfill pass the app otherwise runs automatically (best-effort after upload/delete/ settings changes, or once at boot): classification backfill, hole- operation backfill, milestones, accumulated WIP, contractor movement, and dispatch. Every pass is a pure re-derivation from permanent append-only history or raw stored columns — nothing here is authoritative or destructive, so running it repeatedly is always safe and idempotent. Exists purely as a manual fallback (e.g. a prior automatic pass failed silently, or the server restarted mid-backfill); normal operation never requires it. Requires auth.
+
+ * @summary Manually trigger every deterministic recompute/backfill pass
+ */
+export const adminRecompute = async ( options?: RequestInit): Promise<AdminRecomputeResult> => {
+
+  return customFetch<AdminRecomputeResult>(getAdminRecomputeUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getAdminRecomputeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adminRecompute>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof adminRecompute>>, TError,void, TContext> => {
+
+const mutationKey = ['adminRecompute'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof adminRecompute>>, void> = () => {
+
+
+          return  adminRecompute(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AdminRecomputeMutationResult = NonNullable<Awaited<ReturnType<typeof adminRecompute>>>
+
+    export type AdminRecomputeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Manually trigger every deterministic recompute/backfill pass
+ */
+export const useAdminRecompute = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adminRecompute>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof adminRecompute>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getAdminRecomputeMutationOptions(options));
+    }
 
 export const getGetOrderStatusUrl = () => {
 

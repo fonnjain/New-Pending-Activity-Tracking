@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetAccumulatedWip, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetAccumulatedWip, getGetAccumulatedWipQueryKey, getGetMilestonesQueryKey, useAdminRecompute, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
 import { contractorCategoryLabel } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle } from "lucide-react";
+import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx, exportToJson, type XlsxColumn } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
@@ -90,8 +90,27 @@ function DataViewContent() {
   const deleteImport = useDeleteImport();
   const deleteAll = useDeleteAllImports();
   const deleteOrderImport = useDeleteOrderImport();
+  const adminRecompute = useAdminRecompute();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const handleRecompute = () => {
+    adminRecompute.mutate(undefined, {
+      onSuccess: (res) => {
+        toast({
+          title: "Recompute complete",
+          description: `${res.classificationBackfilled.toLocaleString()} classification, ${res.holeOperationBackfilled.toLocaleString()} hole-operation rows backfilled. ${res.milestonesCount.toLocaleString()} milestones, ${res.accumulatedWipProjects.toLocaleString()} WIP projects, ${res.contractorMovementEntries.toLocaleString()} contractor movement entries recomputed.`,
+        });
+        queryClient.invalidateQueries({ queryKey: getListImportsQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetAccumulatedWipQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetMilestonesQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetOrderStatusQueryKey() });
+      },
+      onError: (err) => {
+        toast({ variant: "destructive", title: "Recompute failed", description: err?.message || "Unknown error" });
+      },
+    });
+  };
 
   const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
@@ -219,7 +238,19 @@ function DataViewContent() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">Data</h1>
-        <LogoutButton />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRecompute}
+            disabled={adminRecompute.isPending}
+            className="h-8 gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${adminRecompute.isPending ? "animate-spin" : ""}`} />
+            {adminRecompute.isPending ? "Recomputing..." : "Recompute"}
+          </Button>
+          <LogoutButton />
+        </div>
       </div>
       <div className="bg-primary/10 border border-primary/20 rounded-md p-4 flex gap-4 text-sm items-start">
         <div className="text-primary mt-0.5 font-bold">i</div>

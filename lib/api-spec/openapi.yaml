@@ -18,6 +18,8 @@ tags:
     description: Optional, advisory-only AI assists (sanitize suggestions and consistency review)
   - name: settings
     description: App-level turnaround-warning configuration (ideal days, grace bands)
+  - name: admin
+    description: Manual maintenance triggers for otherwise-automatic recompute/backfill passes
 paths:
   /settings:
     get:
@@ -873,6 +875,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ContractorMovementResponse"
+  /admin/recompute:
+    post:
+      operationId: adminRecompute
+      tags: [admin]
+      summary: Manually trigger every deterministic recompute/backfill pass
+      description: >
+        Re-runs, on demand, every deterministic recompute and backfill pass the
+        app otherwise runs automatically (best-effort after upload/delete/
+        settings changes, or once at boot): classification backfill, hole-
+        operation backfill, milestones, accumulated WIP, contractor movement,
+        and dispatch. Every pass is a pure re-derivation from permanent
+        append-only history or raw stored columns — nothing here is
+        authoritative or destructive, so running it repeatedly is always safe
+        and idempotent. Exists purely as a manual fallback (e.g. a prior
+        automatic pass failed silently, or the server restarted mid-backfill);
+        normal operation never requires it. Requires auth.
+      responses:
+        "200":
+          description: Recompute summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRecomputeResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /order-status:
     get:
       operationId: getOrderStatus
@@ -2643,6 +2674,34 @@ components:
           type: string
       required:
         - entries
+        - generatedAt
+    AdminRecomputeResult:
+      type: object
+      description: Result summary of a manual admin recompute run.
+      properties:
+        classificationBackfilled:
+          type: integer
+          description: Record-pool rows whose classification columns were backfilled.
+        holeOperationBackfilled:
+          type: integer
+          description: Record-pool rows whose hole-operation columns were backfilled.
+        milestonesCount:
+          type: integer
+          description: Per-project milestone rows after recompute.
+        accumulatedWipProjects:
+          type: integer
+          description: Projects covered by the recomputed accumulated-WIP totals.
+        contractorMovementEntries:
+          type: integer
+          description: Contractor movement ledger entries after recompute.
+        generatedAt:
+          type: string
+      required:
+        - classificationBackfilled
+        - holeOperationBackfilled
+        - milestonesCount
+        - accumulatedWipProjects
+        - contractorMovementEntries
         - generatedAt
     OrderReviewFieldChange:
       type: object

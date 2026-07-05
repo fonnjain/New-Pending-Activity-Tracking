@@ -1285,6 +1285,23 @@ export interface ContractorMovementResponse {
 }
 
 /**
+ * Result summary of a manual admin recompute run.
+ */
+export interface AdminRecomputeResult {
+  /** Record-pool rows whose classification columns were backfilled. */
+  classificationBackfilled: number;
+  /** Record-pool rows whose hole-operation columns were backfilled. */
+  holeOperationBackfilled: number;
+  /** Per-project milestone rows after recompute. */
+  milestonesCount: number;
+  /** Projects covered by the recomputed accumulated-WIP totals. */
+  accumulatedWipProjects: number;
+  /** Contractor movement ledger entries after recompute. */
+  contractorMovementEntries: number;
+  generatedAt: string;
+}
+
+/**
  * One (project, structure) order row joined to computed dispatch.
  */
 export interface OrderStatusRow {

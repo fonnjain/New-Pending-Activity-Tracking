@@ -14,6 +14,7 @@ import {
   routeIncludesOp,
   scopeFor,
   sequenceFor,
+  sortActivities,
   type FabLoadColumn,
   type FabLoadSection,
 } from "@workspace/domain";
@@ -1037,16 +1038,17 @@ function contractorLabel(c: string | null): string {
   return c && c.trim() ? c : UNASSIGNED_CONTRACTOR;
 }
 
-// Bifurcation: a move is a Fabrication completion when it leaves TS (TS is
-// done for that mark) and a Galvanizing completion when it leaves Y (Y is
-// done for that mark). Every other from-activity is neither.
-type Stage = "Fabrication" | "Galvanizing";
+// Bifurcation: every move is a completion of whichever activity it LEFT (the
+// FROM activity is fully done for that mark once it moves on). A stage is
+// simply that from-activity's code, so the breakdown spans the full process
+// (C, RFI, NH, ... Y) rather than only the two Fabrication/Galvanizing
+// milestones. Blank from-activity (shouldn't happen on a real move) has no
+// stage.
+type Stage = string;
 
 function stageFor(fromActivity: string | null | undefined): Stage | null {
-  const a = (fromActivity ?? "").toUpperCase();
-  if (a === "TS") return "Fabrication";
-  if (a === "Y") return "Galvanizing";
-  return null;
+  const a = (fromActivity ?? "").toUpperCase().trim();
+  return a || null;
 }
 
 // Live-balance completion status (additive, separate from the movement-based
@@ -1058,6 +1060,13 @@ const FAB_COMPLETION_SET = new Set(
   [...(bundleActivitySet("TLT_FABRICATION") ?? [])].filter((c) => c !== "TS"),
 );
 const GALV_COMPLETION_ACTIVITY = "GB";
+
+// Stage-summary subtotal grouping: which activity columns roll up into the
+// Fabrication vs Galvanizing subtotal. Uses the same bundle definitions as
+// everywhere else (TLT_FABRICATION = C..TS, GALVANIZING = G/GB/Y) so this
+// stays consistent with every other Fab/Galv split in the app.
+const STAGE_FAB_SET = bundleActivitySet("TLT_FABRICATION") ?? new Set<string>();
+const STAGE_GALV_SET = bundleActivitySet("GALVANIZING") ?? new Set<string>();
 
 function CompletionBadge({ remainingKg }: { remainingKg: number }) {
   const complete = remainingKg <= 0;
@@ -1232,30 +1241,60 @@ export function ContractorPerformanceReport() {
     [entries],
   );
 
-  // Fabrication/Galvanizing bifurcation: per-contractor + overall totals for
-  // moves that left TS (Fabrication done) or left Y (Galvanizing done).
-  const { stageRows, fabTotal, galvTotal } = useMemo(() => {
-    const map = new Map<string, { fab: number; galv: number }>();
-    let fab = 0;
-    let galv = 0;
+  // Per-activity bifurcation: for every contractor, the weight moved OUT of
+  // each activity (that activity is done for those marks), across the full
+  // process — not just Fabrication (TS) / Galvanizing (Y). Activities are
+  // ordered by the canonical TLT sequence (unknown codes sort after known,
+  // never dropped), mirroring the Activity Wise page.
+  const {
+    stageActivities,
+    stageMatrix,
+    stageColTotals,
+    stageRowTotals,
+    stageGrandTotal,
+    stageFabByContractor,
+    stageGalvByContractor,
+    stageFabTotal,
+    stageGalvTotal,
+  } = useMemo(() => {
+    const actSet = new Set<string>();
+    const cellWt = new Map<string, number>(); // `${contractor}|${activity}` -> kg
+    const rowTot = new Map<string, number>();
+    const colTot = new Map<string, number>();
+    const fabByContractor = new Map<string, number>();
+    const galvByContractor = new Map<string, number>();
+    let grand = 0;
+    let fabTot = 0;
+    let galvTot = 0;
     for (const e of entries) {
       const stage = stageFor(e.fromActivity);
       if (!stage) continue;
       const c = contractorLabel(e.contractor);
-      const t = map.get(c) ?? { fab: 0, galv: 0 };
-      if (stage === "Fabrication") {
-        t.fab += e.weightKg;
-        fab += e.weightKg;
-      } else {
-        t.galv += e.weightKg;
-        galv += e.weightKg;
+      actSet.add(stage);
+      const key = `${c}|${stage}`;
+      cellWt.set(key, (cellWt.get(key) ?? 0) + e.weightKg);
+      rowTot.set(c, (rowTot.get(c) ?? 0) + e.weightKg);
+      colTot.set(stage, (colTot.get(stage) ?? 0) + e.weightKg);
+      grand += e.weightKg;
+      if (STAGE_FAB_SET.has(stage)) {
+        fabByContractor.set(c, (fabByContractor.get(c) ?? 0) + e.weightKg);
+        fabTot += e.weightKg;
+      } else if (STAGE_GALV_SET.has(stage)) {
+        galvByContractor.set(c, (galvByContractor.get(c) ?? 0) + e.weightKg);
+        galvTot += e.weightKg;
       }
-      map.set(c, t);
     }
-    const rows = Array.from(map.entries())
-      .map(([contractor, t]) => ({ contractor, ...t, total: t.fab + t.galv }))
-      .sort((a, b) => b.total - a.total || a.contractor.localeCompare(b.contractor));
-    return { stageRows: rows, fabTotal: fab, galvTotal: galv };
+    return {
+      stageActivities: sortActivities([...actSet]),
+      stageMatrix: cellWt,
+      stageColTotals: colTot,
+      stageRowTotals: rowTot,
+      stageGrandTotal: grand,
+      stageFabByContractor: fabByContractor,
+      stageGalvByContractor: galvByContractor,
+      stageFabTotal: fabTot,
+      stageGalvTotal: galvTot,
+    };
   }, [entries]);
 
   // Detail log scoped by the clickable contractor/stage filters above it.
@@ -1305,20 +1344,24 @@ export function ContractorPerformanceReport() {
       { label: "Weight (MT)", field: "weightKg", numeric: true, decimals: 2, total: true },
     ];
 
-    // Stage summary sheet: Fabrication (left TS) / Galvanizing (left Y) totals
-    // per contractor, in MT.
+    // Stage summary sheet: weight moved out of each activity (that activity
+    // is done for those marks), per contractor, in MT — one column per
+    // activity present, TLT-sequence ordered, plus a Total column.
     const stageColumns: XlsxColumn[] = [
       { label: "Contractor", field: "contractor" },
-      { label: "Fabrication Wt (MT)", field: "fab", numeric: true, decimals: 2, total: true },
-      { label: "Galvanizing Wt (MT)", field: "galv", numeric: true, decimals: 2, total: true },
-      { label: "Total (MT)", field: "total", numeric: true, decimals: 2, total: true },
+      ...stageActivities.map((a) => ({ label: a, field: a, numeric: true, decimals: 2, total: true })),
+      { label: "Fabrication Subtotal (MT)", field: "__fabSubtotal", numeric: true, decimals: 2, total: true },
+      { label: "Galvanization Subtotal (MT)", field: "__galvSubtotal", numeric: true, decimals: 2, total: true },
+      { label: "Total (MT)", field: "__total", numeric: true, decimals: 2, total: true },
     ];
-    const stageRowsMt = stageRows.map((r) => ({
-      contractor: r.contractor,
-      fab: r.fab / 1000,
-      galv: r.galv / 1000,
-      total: r.total / 1000,
-    }));
+    const stageRowsMt = contractors.map((c) => {
+      const row: Record<string, string | number> = { contractor: c };
+      for (const a of stageActivities) row[a] = (stageMatrix.get(`${c}|${a}`) ?? 0) / 1000;
+      row.__fabSubtotal = (stageFabByContractor.get(c) ?? 0) / 1000;
+      row.__galvSubtotal = (stageGalvByContractor.get(c) ?? 0) / 1000;
+      row.__total = (stageRowTotals.get(c) ?? 0) / 1000;
+      return row;
+    });
 
     // Detail: one worksheet per contractor (sheet names are sanitized +
     // de-duplicated by exportToXlsxSheets), each scoped to that contractor's
@@ -1484,115 +1527,130 @@ export function ContractorPerformanceReport() {
 
               <TabsContent value="stage" className="space-y-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Fabrication / Galvanizing completed (click to filter the detail log)
+                  Weight moved out of each activity, per contractor, in MT (click a
+                  cell to filter the detail log)
                 </h3>
                 <div className="text-xs text-muted-foreground">
-                  Fabrication counts a move that leaves activity TS (TS is fully
-                  done for that mark); Galvanizing counts a move that leaves
-                  activity Y (Y is fully done for that mark). The Status
-                  columns are a separate, live-balance check against the
-                  currently selected import: Fabrication is Complete when that
-                  contractor has zero balance weight left across activities
-                  C..Q; Galvanizing is Complete when zero balance weight is
-                  left at GB.
+                  Each activity column counts a move that LEFT that activity (it's
+                  fully done for those marks) — the same breakdown as the Activity
+                  Wise page, ordered by the process sequence. Fabrication Subtotal
+                  sums the C..TS columns and Galvanization Subtotal sums the
+                  G/GB/Y columns (the same split used everywhere else in the
+                  app); Total is the grand sum. The two Status columns are a
+                  separate, live-balance check against the currently selected
+                  import: Fabrication is Complete when that contractor has zero
+                  balance weight left across activities C..Q; Galvanizing is
+                  Complete when zero balance weight is left at GB.
                 </div>
-                <Table containerClassName="max-h-[50vh] border border-border rounded-lg">
+                <Table containerClassName="max-h-[60vh] border border-border rounded-lg">
                   <TableBody>
                     <TableRow className="bg-muted/60 hover:bg-muted/60 sticky top-0 z-10">
-                      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+                      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground sticky left-0 bg-muted/60">
                         Contractor
                       </TableCell>
-                      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">
-                        Fabrication (left TS)
+                      {stageActivities.map((a) => (
+                        <TableCell
+                          key={a}
+                          className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap"
+                        >
+                          {a}
+                        </TableCell>
+                      ))}
+                      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap">
+                        Fabrication Subtotal
                       </TableCell>
-                      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">
-                        Galvanizing (left Y)
+                      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap">
+                        Galvanization Subtotal
                       </TableCell>
-                      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+                      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap">
                         Total
                       </TableCell>
-                      <TableCell className="text-center font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+                      <TableCell className="text-center font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap">
                         Fab. Status
                       </TableCell>
-                      <TableCell className="text-center font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+                      <TableCell className="text-center font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap">
                         Galv. Status
                       </TableCell>
                     </TableRow>
-                    {stageRows.length === 0 && (
+                    {contractors.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-6">
-                          No TS/Y completions found for the current filter.
+                        <TableCell
+                          colSpan={stageActivities.length + 6}
+                          className="text-center text-xs text-muted-foreground py-6"
+                        >
+                          No activity completions found for the current filter.
                         </TableCell>
                       </TableRow>
                     )}
-                    {stageRows.map((r) => {
-                      const fabRemaining = fabRemainingByContractor.get(r.contractor) ?? 0;
-                      const galvRemaining = galvRemainingByContractor.get(r.contractor) ?? 0;
+                    {contractors.map((c) => {
+                      const fabRemaining = fabRemainingByContractor.get(c) ?? 0;
+                      const galvRemaining = galvRemainingByContractor.get(c) ?? 0;
                       return (
-                      <TableRow
-                        key={r.contractor}
-                        className={contractorFilter === r.contractor ? "bg-primary/5" : undefined}
-                      >
-                        <TableCell
-                          className="font-medium text-xs cursor-pointer hover:text-primary hover:underline"
-                          onClick={() => toggleContractor(r.contractor)}
-                        >
-                          {r.contractor}
-                        </TableCell>
-                        <TableCell
-                          className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
-                            stageFilter === "Fabrication" && contractorFilter === r.contractor
-                              ? "font-bold text-primary"
-                              : "text-muted-foreground"
-                          }`}
-                          onClick={() => toggleStage("Fabrication", r.contractor)}
-                        >
-                          {r.fab ? formatWeightMT(r.fab) : "-"}
-                        </TableCell>
-                        <TableCell
-                          className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
-                            stageFilter === "Galvanizing" && contractorFilter === r.contractor
-                              ? "font-bold text-primary"
-                              : "text-muted-foreground"
-                          }`}
-                          onClick={() => toggleStage("Galvanizing", r.contractor)}
-                        >
-                          {r.galv ? formatWeightMT(r.galv) : "-"}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-xs font-bold">
-                          {formatWeightMT(r.total)}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <CompletionBadge remainingKg={fabRemaining} />
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <CompletionBadge remainingKg={galvRemaining} />
-                        </TableCell>
-                      </TableRow>
+                        <TableRow key={c} className={contractorFilter === c ? "bg-primary/5" : undefined}>
+                          <TableCell
+                            className="font-medium text-xs sticky left-0 bg-background cursor-pointer hover:text-primary hover:underline"
+                            onClick={() => toggleContractor(c)}
+                          >
+                            {c}
+                          </TableCell>
+                          {stageActivities.map((a) => {
+                            const wt = stageMatrix.get(`${c}|${a}`) ?? 0;
+                            return (
+                              <TableCell
+                                key={a}
+                                className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
+                                  stageFilter === a && contractorFilter === c
+                                    ? "font-bold text-primary"
+                                    : "text-muted-foreground"
+                                }`}
+                                onClick={() => toggleStage(a, c)}
+                              >
+                                {wt ? formatWeightMT(wt) : "-"}
+                              </TableCell>
+                            );
+                          })}
+                          <TableCell className="text-right tabular-nums text-xs font-semibold">
+                            {formatWeightMT(stageFabByContractor.get(c) ?? 0)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-xs font-semibold">
+                            {formatWeightMT(stageGalvByContractor.get(c) ?? 0)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-xs font-bold">
+                            {formatWeightMT(stageRowTotals.get(c) ?? 0)}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <CompletionBadge remainingKg={fabRemaining} />
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <CompletionBadge remainingKg={galvRemaining} />
+                          </TableCell>
+                        </TableRow>
                       );
                     })}
-                    {stageRows.length > 0 && (
+                    {contractors.length > 0 && (
                       <TableRow className="border-t-2 font-bold bg-muted/30 hover:bg-muted/30">
-                        <TableCell className="text-xs">Total</TableCell>
-                        <TableCell
-                          className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
-                            stageFilter === "Fabrication" && contractorFilter === null ? "text-primary" : ""
-                          }`}
-                          onClick={() => toggleStage("Fabrication")}
-                        >
-                          {formatWeightMT(fabTotal)}
-                        </TableCell>
-                        <TableCell
-                          className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
-                            stageFilter === "Galvanizing" && contractorFilter === null ? "text-primary" : ""
-                          }`}
-                          onClick={() => toggleStage("Galvanizing")}
-                        >
-                          {formatWeightMT(galvTotal)}
+                        <TableCell className="text-xs sticky left-0 bg-muted/30">Total</TableCell>
+                        {stageActivities.map((a) => (
+                          <TableCell
+                            key={a}
+                            className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
+                              stageFilter === a && contractorFilter === null ? "text-primary" : ""
+                            }`}
+                            onClick={() => toggleStage(a)}
+                          >
+                            {formatWeightMT(stageColTotals.get(a) ?? 0)}
+                          </TableCell>
+                        ))}
+                        <TableCell className="text-right tabular-nums text-xs">
+                          {formatWeightMT(stageFabTotal)}
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-xs">
-                          {formatWeightMT(fabTotal + galvTotal)}
+                          {formatWeightMT(stageGalvTotal)}
                         </TableCell>
+                        <TableCell className="text-right tabular-nums text-xs">
+                          {formatWeightMT(stageGrandTotal)}
+                        </TableCell>
+                        <TableCell colSpan={2} />
                       </TableRow>
                     )}
                   </TableBody>

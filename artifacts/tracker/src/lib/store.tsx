@@ -191,6 +191,9 @@ export function dateRangeWindow(code: string | null): { start: Date; end: Date }
   const day = now.getDate();
   const endExclusive = new Date(y, mo, day + 1); // start of tomorrow (local)
   switch (code) {
+    case "1d": return { start: new Date(y, mo, day), end: endExclusive };
+    case "7d": return { start: new Date(y, mo, day - 6), end: endExclusive };
+    case "15d": return { start: new Date(y, mo, day - 14), end: endExclusive };
     case "3m": return { start: clampedDate(y, mo - 3, day), end: endExclusive };
     case "6m": return { start: clampedDate(y, mo - 6, day), end: endExclusive };
     case "9m": return { start: clampedDate(y, mo - 9, day), end: endExclusive };
