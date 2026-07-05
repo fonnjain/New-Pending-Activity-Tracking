@@ -16,13 +16,17 @@ import { z } from "zod/v4";
 // replay of the WIP import history (mirrors the order-dispatch engine), from
 // the very first WIP file (no cutoff -- these are lifetime throughput
 // counters, not a point-in-time balance).
-//   fabricationMt  = tonnes added each time a mark left TS into G (TLT
-//                    projects only -- the quality -> galvanising boundary).
-//   galvanizingMt  = tonnes added each time a mark left Y (dispatched /
-//                    completed).
-// "Each time" is intentional: a mark that re-enters an earlier activity and
-// crosses the same boundary again later is counted again (cumulative
-// historical throughput, not a net/point-in-time status).
+//   fabricationMt  = tonnes added every time a mark's Balance Wt, while at
+//                    TS, drops between two consecutive WIP imports it
+//                    appears in -- a partial reduction while still at TS, or
+//                    the full remaining balance once it leaves TS (moves on
+//                    or disappears). TLT projects only (the quality ->
+//                    galvanising boundary).
+//   galvanizingMt  = same shape, keyed off Y instead of TS; no category
+//                    restriction.
+// "Each time" is intentional: a mark that re-enters TS/Y and its balance
+// goes down again later is counted again (cumulative historical throughput,
+// not a net/point-in-time status).
 export const accumulatedWipTable = pgTable("accumulated_wip", {
   // Project key = the record's `job`. "(Unassigned)" is never stored here.
   project: text("project").primaryKey(),
@@ -46,7 +50,8 @@ export type AccumulatedWipRow = typeof accumulatedWipTable.$inferSelect;
 export const accumulatedWipLedgerTable = pgTable("accumulated_wip_ledger", {
   id: serial("id").primaryKey(),
   project: text("project").notNull(),
-  // "fabrication" (TS -> G, TLT only) | "galvanizing" (left Y).
+  // "fabrication" (Balance Wt drop while at TS, TLT only) | "galvanizing"
+  // (Balance Wt drop while at Y).
   kind: text("kind").notNull(),
   markId: text("mark_id").notNull(),
   jobCardNo: text("job_card_no"),

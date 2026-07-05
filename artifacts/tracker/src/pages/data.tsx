@@ -510,11 +510,12 @@ function AccumulatedWipContent() {
           <h1 className="text-2xl font-bold tracking-tight">Accumulated</h1>
           <p className="text-muted-foreground text-sm mt-1">
             Two lifetime throughput totals, replayed from the full WIP import
-            history: Fabrication WIP Accumulated (tonnage added each time a
-            mark left TS into G, TLT projects only) and Galvanizing WIP
-            Accumulated (tonnage added each time a mark left Y / was
-            dispatched). A mark that re-enters and crosses the same boundary
-            again later is counted again.
+            history: Fabrication WIP Accumulated (tonnage added every time a
+            mark's balance weight drops while sitting at TS, TLT projects
+            only) and Galvanizing WIP Accumulated (tonnage added every time a
+            mark's balance weight drops while sitting at Y). A mark that
+            re-enters TS/Y and its balance drops again later is counted
+            again.
           </p>
         </div>
         {byProject.length > 0 && (

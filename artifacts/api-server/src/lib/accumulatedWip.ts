@@ -15,19 +15,27 @@ import {
 // import history (no cutoff -- these are cumulative "ever produced" totals,
 // not a point-in-time balance, mirroring the Computed Dispatch engine):
 //
-//   Fabrication WIP Accumulated  = tonnes added each time a mark's identity
-//     was at TS in one WIP import and at G in the very next one it appears
-//     in, TLT projects only (the quality -> galvanising boundary).
-//   Galvanizing WIP Accumulated  = tonnes added each time a mark's identity
-//     was at Y in a WIP import and is absent from the next one (left Y --
-//     dispatched/completed).
+//   Fabrication WIP Accumulated  = tonnes added every time a mark's Balance
+//     Wt, while its identity was AT TS, goes down between two consecutive WIP
+//     imports it appears in -- whether it partially reduces while still
+//     sitting at TS (some pieces move on) or the identity leaves TS entirely
+//     (moves to a later activity, or disappears), which zeroes out its
+//     remaining TS balance. TLT projects only (the quality -> galvanising
+//     boundary).
+//   Galvanizing WIP Accumulated  = tonnes added every time a mark's Balance
+//     Wt, while its identity was AT Y, goes down between two consecutive WIP
+//     imports it appears in -- a partial reduction while still at Y, or the
+//     full remaining balance when the identity leaves Y (moves on or is
+//     dispatched/absent). No category restriction.
 //
-// "Each time" is load-bearing: a mark that re-enters an earlier activity and
-// crosses the same boundary again later is counted again. Like the milestone
-// and dispatch engines, recompute() replays the whole history and rebuilds the
-// stored totals + ledger from scratch each time, so it is idempotent and safe
-// to call best-effort after every WIP commit/delete. It NEVER mutates WIP
-// parsing, activity, dedup, ageing, warning, milestone, or dispatch state.
+// "Each time" is load-bearing: a mark that re-enters TS/Y and its balance
+// goes down again later is counted again -- this is a lifetime *throughput*
+// counter (cumulative weight that has ever left the stage), not a net/
+// point-in-time balance. Like the milestone and dispatch engines, recompute()
+// replays the whole history and rebuilds the stored totals + ledger from
+// scratch each time, so it is idempotent and safe to call best-effort after
+// every WIP commit/delete. It NEVER mutates WIP parsing, activity, dedup,
+// ageing, warning, milestone, or dispatch state.
 
 const UNASSIGNED = "(Unassigned)";
 
@@ -143,36 +151,70 @@ export async function recomputeAccumulatedWip(): Promise<AccumulatedWipResult> {
       const weightMt = ((r.balanceWt ?? 0) * (r.copies ?? 1)) / 1000;
       const before = prev.get(key);
 
-      // Fabrication WIP: TLT-only, TS -> G transition between two consecutive
-      // WIP imports this identity appears in.
-      if (
-        before &&
-        before.category === "TLT" &&
-        r.category === "TLT" &&
-        before.activity === "TS" &&
-        r.activity === "G"
-      ) {
-        addTotal(r.job, "fabricationMt", weightMt);
-        ledgerEntries.push({
-          project: r.job,
-          kind: "fabrication",
-          markId: r.markId,
-          jobCardNo: r.jobCardNo,
-          entryDate: ymd,
-          deltaMt: weightMt,
-          importId: imp.id,
-        });
+      // Fabrication WIP: TLT-only. While an identity's LAST recorded state was
+      // at TS, any drop in its Balance Wt is accumulated -- whether it's still
+      // sitting at TS with a smaller balance (partial completion) or it has
+      // moved on to a later activity (its remaining TS balance is now 0).
+      if (before && before.category === "TLT" && before.activity === "TS") {
+        const stillAtTs = r.activity === "TS";
+        const remainingMt = stillAtTs ? weightMt : 0;
+        const deltaMt = before.weightMt - remainingMt;
+        if (deltaMt > 0) {
+          addTotal(before.job, "fabricationMt", deltaMt);
+          ledgerEntries.push({
+            project: before.job,
+            kind: "fabrication",
+            markId: r.markId,
+            jobCardNo: r.jobCardNo,
+            entryDate: ymd,
+            deltaMt,
+            importId: imp.id,
+          });
+        }
+      }
+
+      // Galvanizing WIP: same shape, keyed off Y instead of TS. No category
+      // restriction.
+      if (before && before.activity === "Y") {
+        const stillAtY = r.activity === "Y";
+        const remainingMt = stillAtY ? weightMt : 0;
+        const deltaMt = before.weightMt - remainingMt;
+        if (deltaMt > 0) {
+          addTotal(before.job, "galvanizingMt", deltaMt);
+          ledgerEntries.push({
+            project: before.job,
+            kind: "galvanizing",
+            markId: r.markId,
+            jobCardNo: r.jobCardNo,
+            entryDate: ymd,
+            deltaMt,
+            importId: imp.id,
+          });
+        }
       }
 
       prev.set(key, { job: r.job, category: r.category, activity: r.activity, weightMt });
     }
 
-    // Galvanizing WIP: an identity at Y in the PREVIOUS import is now absent
-    // (left Y -- dispatched/completed). Uses the weight last recorded at Y.
+    // Identities absent from this import entirely: their remaining balance at
+    // TS/Y (whichever they were last at) has gone fully to zero.
     for (const [key, st] of prev) {
-      if (st.activity === "Y" && !present.has(key)) {
+      if (present.has(key)) continue;
+      const [markId, jobCardNo] = key.split("\u0001");
+      if (st.activity === "TS" && st.category === "TLT" && st.weightMt > 0) {
+        addTotal(st.job, "fabricationMt", st.weightMt);
+        ledgerEntries.push({
+          project: st.job,
+          kind: "fabrication",
+          markId,
+          jobCardNo: jobCardNo || null,
+          entryDate: ymd,
+          deltaMt: st.weightMt,
+          importId: imp.id,
+        });
+      }
+      if (st.activity === "Y" && st.weightMt > 0) {
         addTotal(st.job, "galvanizingMt", st.weightMt);
-        const [markId, jobCardNo] = key.split("\u0001");
         ledgerEntries.push({
           project: st.job,
           kind: "galvanizing",
@@ -182,11 +224,10 @@ export async function recomputeAccumulatedWip(): Promise<AccumulatedWipResult> {
           deltaMt: st.weightMt,
           importId: imp.id,
         });
-        // Consumed: this identity has left the report entirely, so it can't
-        // leave Y again unless it reappears (a fresh present-row overwrites
-        // this entry in the loop above on some later import).
-        prev.delete(key);
       }
+      // Consumed: this identity has left the report entirely, so any later
+      // reappearance (a fresh present-row) starts fresh in the loop above.
+      prev.delete(key);
     }
   }
 
