@@ -6,6 +6,7 @@ import {
   recordPoolTable,
   contractorMovementTable,
 } from "@workspace/db";
+import { buildIdentityBridge, identityRawKey, type IdentityRow } from "./identityBridge";
 
 // ---------------------------------------------------------------------------
 // Contractor Performance engine (additive, deterministic, idempotent)
@@ -22,10 +23,6 @@ import {
 // imports an identity appears in (arrival at/departure from the dataset
 // entirely -- e.g. dispatch -- is NOT a "move" here; that's covered by the
 // dispatch / accumulated-WIP reports).
-
-function identityKey(markId: string, jobCardNo: string | null): string {
-  return `${markId}\u0001${jobCardNo ?? ""}`;
-}
 
 // The ledger date for an import: its report date (YYYY-MM-DD), else the UTC
 // day of created_at. Matches the convention used by accumulatedWip.ts /
@@ -80,8 +77,21 @@ export async function recomputeContractorMovement(): Promise<ContractorMovementE
     .from(importsTable)
     .orderBy(asc(importsTable.id));
 
-  const prev = new Map<string, IdentityState>();
-  const groups = new Map<string, GroupTotal>();
+  // Fetch every import's rows once, up front, so we can build a
+  // job-card-reassignment bridge across the *entire* history before doing
+  // the actual move detection (a mark's job card can be reissued more than
+  // once over its lifetime). See identityBridge.ts.
+  const rowsByImport: Array<
+    Array<{
+      job: string;
+      markId: string | null;
+      jobCardNo: string | null;
+      activity: string | null;
+      contractor: string | null;
+      balanceWt: number | null;
+      copies: number | null;
+    }>
+  > = [];
 
   for (const imp of imports) {
     const rows = await db
@@ -97,12 +107,29 @@ export async function recomputeContractorMovement(): Promise<ContractorMovementE
       .from(importRowsTable)
       .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
       .where(eq(importRowsTable.importId, imp.id));
+    rowsByImport.push(rows);
+  }
 
+  const identityRowsByImport: IdentityRow[][] = rowsByImport.map((rows) =>
+    rows
+      .filter((r) => r.activity && r.markId)
+      .map((r) => ({ markId: r.markId as string, jobCardNo: r.jobCardNo })),
+  );
+  const bridgeByImport = buildIdentityBridge(identityRowsByImport);
+
+  const prev = new Map<string, IdentityState>();
+  const groups = new Map<string, GroupTotal>();
+
+  for (let i = 0; i < imports.length; i++) {
+    const imp = imports[i];
+    const rows = rowsByImport[i];
+    const bridge = bridgeByImport[i];
     const ymd = importYmd(imp.reportDate, imp.createdAt);
 
     for (const r of rows) {
       if (!r.activity || !r.markId) continue;
-      const key = identityKey(r.markId, r.jobCardNo);
+      const raw = identityRawKey(r.markId, r.jobCardNo);
+      const key = bridge.get(raw) ?? raw;
       const before = prev.get(key);
 
       if (before && before.activity && before.activity !== r.activity) {

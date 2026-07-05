@@ -1,4 +1,5 @@
 import { computeRoute } from "./parse";
+import { buildIdentityBridge, identityRawKey, type IdentityRow } from "./identityBridge";
 
 // Minimal view of a pool row needed for diffing.
 export interface PoolRowLite {
@@ -74,13 +75,16 @@ interface Agg {
 function identityKey(r: PoolRowLite): string {
   // markId is the canonical mark key (= mark_number) and already encodes
   // job / suffix / alias / mNo, so it subsumes the old job+structure+markTail.
-  return [r.markId, r.jobCardNo ?? ""].join("\u0001");
+  return identityRawKey(r.markId, r.jobCardNo);
 }
 
-function aggregate(membership: MembershipRow[]): Map<string, Agg> {
+function aggregate(
+  membership: MembershipRow[],
+  keyOf: (row: PoolRowLite) => string = identityKey,
+): Map<string, Agg> {
   const map = new Map<string, Agg>();
   for (const { row, copies } of membership) {
-    const key = identityKey(row);
+    const key = keyOf(row);
     let a = map.get(key);
     if (!a) {
       a = {
@@ -144,8 +148,24 @@ export function buildChangeSet(
 ): ChangeSet {
   const { addedRows, unchangedRows } = multisetCounts(prev, next);
 
+  const prevRows: IdentityRow[] = prev.map((m) => ({
+    markId: m.row.markId,
+    jobCardNo: m.row.jobCardNo,
+  }));
+  const nextRows: IdentityRow[] = next.map((m) => ({
+    markId: m.row.markId,
+    jobCardNo: m.row.jobCardNo,
+  }));
+  // Bridges unambiguous job-card reissues (same mark, real activity
+  // progress) so they land as a "moved activity" instead of a false
+  // completed+new-mark pair. See identityBridge.ts.
+  const [, nextBridge] = buildIdentityBridge([prevRows, nextRows]);
+  const bridgedKeyOf = (row: PoolRowLite): string =>
+    nextBridge.get(identityRawKey(row.markId, row.jobCardNo)) ??
+    identityRawKey(row.markId, row.jobCardNo);
+
   const prevAgg = aggregate(prev);
-  const nextAgg = aggregate(next);
+  const nextAgg = aggregate(next, bridgedKeyOf);
 
   const movedActivity: ChangeItem[] = [];
   const qtyChanged: ChangeItem[] = [];
