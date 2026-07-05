@@ -32,7 +32,9 @@ import {
   useUpsertFabricationPriority,
   useDeleteFabricationPriority,
   getListFabricationPrioritiesQueryKey,
+  useGetContractorMovement,
   type Record as ApiRecord,
+  type ContractorMovementEntry,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTracker, useFilteredRecords } from "@/lib/store";
@@ -68,7 +70,7 @@ import { FileSpreadsheet, Check, Eye, EyeOff } from "lucide-react";
 
 type SortKey = "activity" | "ageing" | "contractor";
 
-type ReportType = "jobwise" | "fabload" | "plantop" | "ai";
+type ReportType = "jobwise" | "fabload" | "plantop" | "contractorperf" | "ai";
 
 const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
   {
@@ -88,6 +90,12 @@ const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
     name: "Plant Operation Wise",
     description:
       "Work grouped by plant operation, showing load and progress across each stage of the process.",
+  },
+  {
+    id: "contractorperf",
+    name: "Contractor Performance",
+    description:
+      "Daily marks/weight moved from one activity to the next, credited to the contractor who released each stage.",
   },
   {
     id: "ai",
@@ -995,6 +1003,265 @@ function FabricationLoadReport() {
   );
 }
 
+// --- "Contractor Performance" report -----------------------------------
+// Daily log of how many marks (and how much weight) moved from one activity
+// to the next, credited to the contractor of the FROM activity — the one who
+// completed and released that stage. Sourced from the deterministic
+// full-history contractor-movement ledger (GET /contractor-movement), not the
+// currently selected import's records, so it always reflects the full
+// history regardless of which import is selected. Honours the global Job
+// filter only (there is no single "activity"/"contractor" record to filter
+// by — every entry is itself a from/to pair).
+
+const UNASSIGNED_CONTRACTOR = "Unassigned";
+
+function contractorLabel(c: string | null): string {
+  return c && c.trim() ? c : UNASSIGNED_CONTRACTOR;
+}
+
+function ContractorPerformanceReport() {
+  const { filters } = useTracker();
+  const { data, isLoading } = useGetContractorMovement();
+
+  const entries = useMemo(() => {
+    const all = data?.entries ?? [];
+    if (!filters.job) return all;
+    return all.filter((e) => e.project === filters.job);
+  }, [data, filters.job]);
+
+  // Chronological date columns + contractors sorted by total weight desc
+  // (ties broken alphabetically; Unassigned always last).
+  const { dates, contractors, matrix, rowTotals, colTotals, grandTotal } =
+    useMemo(() => {
+      const dateSet = new Set<string>();
+      const contractorSet = new Set<string>();
+      const cellWt = new Map<string, number>(); // `${contractor}|${date}` -> kg
+      const rowTot = new Map<string, number>();
+      const colTot = new Map<string, number>();
+      let grand = 0;
+
+      for (const e of entries) {
+        const c = contractorLabel(e.contractor);
+        dateSet.add(e.date);
+        contractorSet.add(c);
+        const key = `${c}|${e.date}`;
+        cellWt.set(key, (cellWt.get(key) ?? 0) + e.weightKg);
+        rowTot.set(c, (rowTot.get(c) ?? 0) + e.weightKg);
+        colTot.set(e.date, (colTot.get(e.date) ?? 0) + e.weightKg);
+        grand += e.weightKg;
+      }
+
+      const sortedDates = [...dateSet].sort();
+      const sortedContractors = [...contractorSet].sort((a, b) => {
+        if (a === UNASSIGNED_CONTRACTOR) return 1;
+        if (b === UNASSIGNED_CONTRACTOR) return -1;
+        return (rowTot.get(b) ?? 0) - (rowTot.get(a) ?? 0) || a.localeCompare(b);
+      });
+
+      return {
+        dates: sortedDates,
+        contractors: sortedContractors,
+        matrix: cellWt,
+        rowTotals: rowTot,
+        colTotals: colTot,
+        grandTotal: grand,
+      };
+    }, [entries]);
+
+  // Detail log rows: newest date first, then project/contractor/activity.
+  const detailRows = useMemo(
+    () =>
+      [...entries].sort(
+        (a, b) =>
+          b.date.localeCompare(a.date) ||
+          a.project.localeCompare(b.project) ||
+          contractorLabel(a.contractor).localeCompare(contractorLabel(b.contractor)),
+      ),
+    [entries],
+  );
+
+  const totalMarks = entries.reduce((s, e) => s + e.markCount, 0);
+
+  const handleExcel = () => {
+    if (!entries.length) return;
+    const date = new Date().toISOString().slice(0, 10);
+    const tag = (filters.job ?? "all").replace(/[^\w-]+/g, "-");
+
+    // Summary sheet: contractors as rows, dates as columns, weight (kg) totals.
+    const summaryColumns: XlsxColumn[] = [
+      { label: "Contractor", field: "contractor" },
+      ...dates.map((d) => ({ label: d, field: d, numeric: true, decimals: 0, total: true })),
+      { label: "Total (kg)", field: "__total", numeric: true, decimals: 0, total: true },
+    ];
+    const summaryRows = contractors.map((c) => {
+      const row: Record<string, string | number> = { contractor: c };
+      for (const d of dates) row[d] = matrix.get(`${c}|${d}`) ?? 0;
+      row.__total = rowTotals.get(c) ?? 0;
+      return row;
+    });
+
+    // Detail sheet: one row per day/contractor/activity-move.
+    const detailColumns: XlsxColumn[] = [
+      { label: "Date", field: "date" },
+      { label: "Project", field: "project" },
+      { label: "Contractor", field: "contractorLabel" },
+      { label: "From Activity", field: "fromActivity" },
+      { label: "To Activity", field: "toActivity" },
+      { label: "Mark Count", field: "markCount", numeric: true, decimals: 0, total: true },
+      { label: "Weight (kg)", field: "weightKg", numeric: true, decimals: 0, total: true },
+    ];
+    const detailXlsxRows = detailRows.map((e) => ({
+      ...e,
+      contractorLabel: contractorLabel(e.contractor),
+    }));
+
+    exportToXlsxSheets(`contractor_performance_${tag}_${date}.xlsx`, [
+      { name: "Summary", columns: summaryColumns, rows: summaryRows },
+      { name: "Detail", columns: detailColumns, rows: detailXlsxRows },
+    ]);
+  };
+
+  return (
+    <Card className="border-border">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex flex-wrap items-center justify-between gap-3">
+          Contractor Performance
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5"
+            disabled={!entries.length}
+            onClick={handleExcel}
+          >
+            <FileSpreadsheet className="w-4 h-4" /> Export Excel
+          </Button>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="text-xs text-muted-foreground">
+          Daily marks and weight moved from one activity to the next, credited to
+          the contractor who completed and released the FROM activity. Sourced
+          from the full import history (not just the selected import); honours
+          the global Job filter only.
+        </div>
+
+        {isLoading ? (
+          <div className="text-sm text-muted-foreground py-8 text-center">Loading...</div>
+        ) : !entries.length ? (
+          <div className="text-sm text-muted-foreground py-8 text-center">
+            No activity movements found for the current filter.
+          </div>
+        ) : (
+          <>
+            <div className="text-xs text-muted-foreground">
+              {contractors.length.toLocaleString()} contractors • {dates.length.toLocaleString()}{" "}
+              days • {totalMarks.toLocaleString()} marks moved •{" "}
+              <span className="font-bold text-foreground">{formatWeight(grandTotal)}</span>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                Summary (weight moved per day)
+              </h3>
+              <Table containerClassName="max-h-[60vh] border border-border rounded-lg">
+                <TableBody>
+                  <TableRow className="bg-muted/60 hover:bg-muted/60 sticky top-0 z-10">
+                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground sticky left-0 bg-muted/60">
+                      Contractor
+                    </TableCell>
+                    {dates.map((d) => (
+                      <TableCell
+                        key={d}
+                        className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap"
+                      >
+                        {d}
+                      </TableCell>
+                    ))}
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap">
+                      Total
+                    </TableCell>
+                  </TableRow>
+                  {contractors.map((c) => (
+                    <TableRow key={c}>
+                      <TableCell className="font-medium text-xs sticky left-0 bg-background">
+                        {c}
+                      </TableCell>
+                      {dates.map((d) => {
+                        const wt = matrix.get(`${c}|${d}`) ?? 0;
+                        return (
+                          <TableCell key={d} className="text-right tabular-nums text-xs text-muted-foreground">
+                            {wt ? formatWeight(wt) : "-"}
+                          </TableCell>
+                        );
+                      })}
+                      <TableCell className="text-right tabular-nums text-xs font-bold">
+                        {formatWeight(rowTotals.get(c) ?? 0)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="border-t-2 font-bold bg-muted/30 hover:bg-muted/30">
+                    <TableCell className="text-xs sticky left-0 bg-muted/30">Total</TableCell>
+                    {dates.map((d) => (
+                      <TableCell key={d} className="text-right tabular-nums text-xs">
+                        {formatWeight(colTotals.get(d) ?? 0)}
+                      </TableCell>
+                    ))}
+                    <TableCell className="text-right tabular-nums text-xs">
+                      {formatWeight(grandTotal)}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                Detail log ({detailRows.length.toLocaleString()} moves)
+              </h3>
+              <div className="overflow-x-auto border border-border rounded-lg">
+                <Table containerClassName="max-h-[60vh]">
+                  <TableBody>
+                    <TableRow className="bg-muted/60 hover:bg-muted/60 sticky top-0">
+                      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Date</TableCell>
+                      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Project</TableCell>
+                      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Contractor</TableCell>
+                      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">From</TableCell>
+                      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">To</TableCell>
+                      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Marks</TableCell>
+                      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Weight</TableCell>
+                    </TableRow>
+                    {detailRows.slice(0, TABLE_CAP).map((e, i) => (
+                      <TableRow key={`${e.date}-${e.project}-${e.contractor}-${e.fromActivity}-${e.toActivity}-${i}`}>
+                        <TableCell className="text-xs whitespace-nowrap">{e.date}</TableCell>
+                        <TableCell className="text-xs">{e.project}</TableCell>
+                        <TableCell className="text-xs">{contractorLabel(e.contractor)}</TableCell>
+                        <TableCell className="text-xs">{e.fromActivity}</TableCell>
+                        <TableCell className="text-xs">{e.toActivity}</TableCell>
+                        <TableCell className="text-right tabular-nums text-xs">
+                          {e.markCount.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-xs">
+                          {formatWeight(e.weightKg)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {detailRows.length > TABLE_CAP && (
+                <div className="text-xs text-muted-foreground mt-2">
+                  Showing first {TABLE_CAP.toLocaleString()} of {detailRows.length.toLocaleString()}{" "}
+                  moves. Export to Excel for the full set.
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function ReportsView() {
   const [reportType, setReportType] = useState<ReportType>("jobwise");
   return (
@@ -1039,6 +1306,8 @@ export default function ReportsView() {
         <FabricationLoadReport />
       ) : reportType === "plantop" ? (
         <PlantOperationView />
+      ) : reportType === "contractorperf" ? (
+        <ContractorPerformanceReport />
       ) : (
         <AiTurnaroundReport />
       )}

@@ -852,6 +852,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AccumulatedWipResponse"
+  /contractor-movement:
+    get:
+      operationId: getContractorMovement
+      tags: [imports]
+      summary: Get the Contractor Performance daily activity-movement ledger
+      description: >
+        Deterministically recomputes, from the full append-only import
+        history (no cutoff), a daily log of how much work (mark count +
+        weight) moved from one activity to the next. Credit for a move is
+        attributed to the contractor of the FROM activity — the one who
+        completed and released that stage. One entry per (date, project,
+        contractor, fromActivity, toActivity), already aggregated. Purely
+        additive — never changes parsing, activity values, dedup, ageing,
+        warning, milestone, or dispatch state.
+      responses:
+        "200":
+          description: Contractor movement ledger entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorMovementResponse"
   /order-status:
     get:
       operationId: getOrderStatus
@@ -2549,6 +2570,51 @@ components:
       required:
         - overall
         - byProject
+        - generatedAt
+    ContractorMovementEntry:
+      type: object
+      description: >
+        One aggregated activity move: how many marks (and how much weight)
+        moved from `fromActivity` to `toActivity` on `date`, within
+        `project`, credited to `contractor` (the contractor of the FROM
+        activity). Null contractor displays as "Unassigned".
+      properties:
+        date:
+          type: string
+          description: YYYY-MM-DD.
+        project:
+          type: string
+        contractor:
+          type: string
+          nullable: true
+        fromActivity:
+          type: string
+        toActivity:
+          type: string
+        markCount:
+          type: integer
+        weightKg:
+          type: number
+      required:
+        - date
+        - project
+        - contractor
+        - fromActivity
+        - toActivity
+        - markCount
+        - weightKg
+    ContractorMovementResponse:
+      type: object
+      description: Contractor Performance daily activity-movement ledger.
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContractorMovementEntry"
+        generatedAt:
+          type: string
+      required:
+        - entries
         - generatedAt
     OrderReviewFieldChange:
       type: object

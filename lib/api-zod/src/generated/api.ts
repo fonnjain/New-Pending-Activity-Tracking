@@ -1494,6 +1494,25 @@ export const GetAccumulatedWipResponse = zod.object({
 
 
 /**
+ * Deterministically recomputes, from the full append-only import history (no cutoff), a daily log of how much work (mark count + weight) moved from one activity to the next. Credit for a move is attributed to the contractor of the FROM activity — the one who completed and released that stage. One entry per (date, project, contractor, fromActivity, toActivity), already aggregated. Purely additive — never changes parsing, activity values, dedup, ageing, warning, milestone, or dispatch state.
+
+ * @summary Get the Contractor Performance daily activity-movement ledger
+ */
+export const GetContractorMovementResponse = zod.object({
+  "entries": zod.array(zod.object({
+  "date": zod.string().describe('YYYY-MM-DD.'),
+  "project": zod.string(),
+  "contractor": zod.string().nullable(),
+  "fromActivity": zod.string(),
+  "toActivity": zod.string(),
+  "markCount": zod.number(),
+  "weightKg": zod.number()
+}).describe('One aggregated activity move: how many marks (and how much weight) moved from `fromActivity` to `toActivity` on `date`, within `project`, credited to `contractor` (the contractor of the FROM activity). Null contractor displays as \"Unassigned\".\n')),
+  "generatedAt": zod.string()
+}).describe('Contractor Performance daily activity-movement ledger.')
+
+
+/**
  * Returns the latest "Order Review" file ingest (the second input file) as per-(project, structure) rows, joined to the computed running Dispatch tonnage (seed baseline + Yard-departure accruals), plus a file-vs-computed dispatch reconciliation at a 1% tolerance. Fabrication / Galvanizing / Yard tonnages are computed client-side from the selected WIP import's records (ACTIVITY_BUNDLES) so header filters are honoured. Purely additive and read-only — never changes WIP parsing, activity, dedup, ageing, warning, velocity, or milestone state. available:false when no Order Review file has been ingested yet.
 
  * @summary Get the latest Order Review rows joined to computed dispatch

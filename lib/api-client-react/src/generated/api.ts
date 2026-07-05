@@ -30,6 +30,7 @@ import type {
   CompareImportsParams,
   ContractorCategory,
   ContractorCategoryInput,
+  ContractorMovementResponse,
   DeleteAllResult,
   DeleteContractorCategoryParams,
   DeleteFabricationPriorityParams,
@@ -2684,6 +2685,85 @@ export function useGetAccumulatedWip<TData = Awaited<ReturnType<typeof getAccumu
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAccumulatedWipQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetContractorMovementUrl = () => {
+
+
+
+
+  return `/api/contractor-movement`
+}
+
+/**
+ * Deterministically recomputes, from the full append-only import history (no cutoff), a daily log of how much work (mark count + weight) moved from one activity to the next. Credit for a move is attributed to the contractor of the FROM activity — the one who completed and released that stage. One entry per (date, project, contractor, fromActivity, toActivity), already aggregated. Purely additive — never changes parsing, activity values, dedup, ageing, warning, milestone, or dispatch state.
+
+ * @summary Get the Contractor Performance daily activity-movement ledger
+ */
+export const getContractorMovement = async ( options?: RequestInit): Promise<ContractorMovementResponse> => {
+
+  return customFetch<ContractorMovementResponse>(getGetContractorMovementUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetContractorMovementQueryKey = () => {
+    return [
+    `/api/contractor-movement`
+    ] as const;
+    }
+
+
+export const getGetContractorMovementQueryOptions = <TData = Awaited<ReturnType<typeof getContractorMovement>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getContractorMovement>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetContractorMovementQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getContractorMovement>>> = ({ signal }) => getContractorMovement({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getContractorMovement>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetContractorMovementQueryResult = NonNullable<Awaited<ReturnType<typeof getContractorMovement>>>
+export type GetContractorMovementQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the Contractor Performance daily activity-movement ledger
+ */
+
+export function useGetContractorMovement<TData = Awaited<ReturnType<typeof getContractorMovement>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getContractorMovement>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetContractorMovementQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

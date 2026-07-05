@@ -35,6 +35,8 @@ export * from './contractorCategoryInput';
 export * from './contractorCategoryInputCategory';
 export * from './contractorCategoryInputOutVendorTypeItem';
 export * from './contractorCategoryOutVendorTypeItem';
+export * from './contractorMovementEntry';
+export * from './contractorMovementResponse';
 export * from './deleteAllResult';
 export * from './deleteContractorCategoryParams';
 export * from './deleteFabricationPriorityParams';

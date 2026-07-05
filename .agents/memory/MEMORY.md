@@ -18,3 +18,4 @@
 - [MFC batch grouping + 21-col hash](tracker-mfc-grouping.md) — WIP file gained col T Work Order No. + col U MFC batch; hash now 21 cols (raw pre-Z batch); MFC is an additive TLT grouping level Project→MFC→Structure→Mark.
 - [Finished Good figures + order balances](tracker-computed-fg.md) — two client-side FG figures (Overview=file Galv−Dispatch, WIP=live WIP Galv−Dispatch) via shared useFgRows hook; old server-stored computed_fg feature removed; order balances base on Col J.
 - [Accumulated WIP throughput](tracker-accumulated-wip.md) — lifetime "each time it crosses" counters (TS→G fabrication, left-Y galvanizing) rebuilt full-history each recompute, no cutoff; re-crossings double-count by design.
+- [Contractor Performance movement ledger](tracker-contractor-movement.md) — daily activity-to-activity moves credited to the FROM contractor; full-history replay like Accumulated WIP, all categories (no TLT restriction), two-sheet Excel export.

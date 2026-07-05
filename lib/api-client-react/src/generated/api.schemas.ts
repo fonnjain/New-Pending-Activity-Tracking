@@ -1249,6 +1249,29 @@ export interface AccumulatedWipResponse {
 }
 
 /**
+ * One aggregated activity move: how many marks (and how much weight) moved from `fromActivity` to `toActivity` on `date`, within `project`, credited to `contractor` (the contractor of the FROM activity). Null contractor displays as "Unassigned".
+
+ */
+export interface ContractorMovementEntry {
+  /** YYYY-MM-DD. */
+  date: string;
+  project: string;
+  contractor: string | null;
+  fromActivity: string;
+  toActivity: string;
+  markCount: number;
+  weightKg: number;
+}
+
+/**
+ * Contractor Performance daily activity-movement ledger.
+ */
+export interface ContractorMovementResponse {
+  entries: ContractorMovementEntry[];
+  generatedAt: string;
+}
+
+/**
  * One (project, structure) order row joined to computed dispatch.
  */
 export interface OrderStatusRow {

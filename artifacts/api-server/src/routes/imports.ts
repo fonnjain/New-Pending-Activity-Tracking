@@ -57,6 +57,7 @@ import {
   computeWipCoverage,
 } from "../lib/dispatch";
 import { recomputeAccumulatedWip } from "../lib/accumulatedWip";
+import { recomputeContractorMovement } from "../lib/contractorMovement";
 import { cutoffSql, loadValidFrom, importDayKey } from "../lib/cutoff";
 import {
   detectFileType,
@@ -573,6 +574,12 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
     await recomputeAccumulatedWip();
   } catch (err) {
     req.log.warn({ err }, "Accumulated WIP recompute failed after import");
+  }
+  // Refresh contractor movement ledger (best-effort).
+  try {
+    await recomputeContractorMovement();
+  } catch (err) {
+    req.log.warn({ err }, "Contractor movement recompute failed after import");
   }
   res.status(201).json(result);
 });
@@ -1226,6 +1233,12 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   } catch (err) {
     req.log.warn({ err }, "Accumulated WIP recompute failed after commit");
   }
+  // Refresh contractor movement ledger (best-effort).
+  try {
+    await recomputeContractorMovement();
+  } catch (err) {
+    req.log.warn({ err }, "Contractor movement recompute failed after commit");
+  }
   res.status(201).json({ kind: "wip", ...result });
 });
 
@@ -1358,6 +1371,12 @@ router.delete("/imports/:id", requireAuth, async (req, res): Promise<void> => {
     await recomputeAccumulatedWip();
   } catch (err) {
     req.log.warn({ err }, "Accumulated WIP recompute failed after import delete");
+  }
+  // Refresh contractor movement ledger after the deletion (best-effort).
+  try {
+    await recomputeContractorMovement();
+  } catch (err) {
+    req.log.warn({ err }, "Contractor movement recompute failed after import delete");
   }
   res.sendStatus(204);
 });
@@ -1958,6 +1977,15 @@ router.get("/milestones", async (_req, res): Promise<void> => {
 router.get("/accumulated-wip", async (_req, res): Promise<void> => {
   const result = await recomputeAccumulatedWip();
   res.json({ ...result, generatedAt: new Date().toISOString() });
+});
+
+// Contractor Performance report: a daily log of how much work (marks +
+// weight) moved from one activity to the next, credited to the contractor of
+// the FROM activity. Recomputed deterministically from the full import
+// history on each read (and on each upload/delete/settings change).
+router.get("/contractor-movement", async (_req, res): Promise<void> => {
+  const entries = await recomputeContractorMovement();
+  res.json({ entries, generatedAt: new Date().toISOString() });
 });
 
 export default router;
