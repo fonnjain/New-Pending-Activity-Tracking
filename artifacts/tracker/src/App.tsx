@@ -11,7 +11,6 @@ import MasterHome from "@/pages/master-home";
 import Overview from "@/pages/overview";
 import TurnaroundView from "@/pages/turnaround";
 import StuckProjectsView from "@/pages/stuck-projects";
-import CompletedView from "@/pages/completed";
 import JobDashboard from "@/pages/job-dashboard";
 import ActivityView from "@/pages/activity";
 import ContractorView from "@/pages/contractor";
@@ -39,7 +38,6 @@ function ProductionTracker() {
         <Route path="/" component={Overview} />
         <Route path="/turnaround" component={TurnaroundView} />
         <Route path="/stuck" component={StuckProjectsView} />
-        <Route path="/completed" component={CompletedView} />
         <Route path="/order-status" component={OrderStatusView} />
         <Route path="/jobs" component={JobDashboard} />
         <Route path="/activity" component={ActivityView} />
@@ -63,7 +61,6 @@ function ProductionTracker() {
 const LEGACY_TRACKER_PATHS = [
   "/turnaround",
   "/stuck",
-  "/completed",
   "/order-status",
   "/jobs",
   "/activity",
