@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetAccumulatedWip, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
@@ -24,6 +24,7 @@ const ADMIN_TABS = [
   { path: "/data", label: "Data" },
   { path: "/computed-fg", label: "Computed FG" },
   { path: "/order-reconciliation", label: "Order Reconciliation" },
+  { path: "/accumulated-wip", label: "Accumulated" },
   { path: "/contractor-setup", label: "Contractor Setup" },
   { path: "/warning-parameters", label: "Warning Parameters" },
   { path: "/thickness", label: "Thickness" },
@@ -53,6 +54,8 @@ function AdminTabbedPage() {
         <ComputedFgContent />
       ) : active === "/order-reconciliation" ? (
         <OrderReconciliationContent />
+      ) : active === "/accumulated-wip" ? (
+        <AccumulatedWipContent />
       ) : active === "/contractor-setup" ? (
         <ContractorSetupContent />
       ) : active === "/warning-parameters" ? (
@@ -480,6 +483,128 @@ function CutoffCard() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function AccumulatedWipContent() {
+  const { data, isLoading } = useGetAccumulatedWip();
+  const byProject = useMemo(() => data?.byProject ?? [], [data]);
+
+  const handleExport = () => {
+    exportToXlsx(
+      "accumulated-wip.xlsx",
+      [
+        { label: "Project", field: "project" },
+        { label: "Fabrication WIP Accumulated (MT)", field: "fabricationMt", numeric: true, decimals: 3, total: true },
+        { label: "Galvanizing WIP Accumulated (MT)", field: "galvanizingMt", numeric: true, decimals: 3, total: true },
+      ],
+      byProject,
+      { sheetName: "Accumulated WIP" },
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Accumulated</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Two lifetime throughput totals, replayed from the full WIP import
+            history: Fabrication WIP Accumulated (tonnage added each time a
+            mark left TS into G, TLT projects only) and Galvanizing WIP
+            Accumulated (tonnage added each time a mark left Y / was
+            dispatched). A mark that re-enters and crosses the same boundary
+            again later is counted again.
+          </p>
+        </div>
+        {byProject.length > 0 && (
+          <Button variant="outline" size="sm" onClick={handleExport} className="shrink-0">
+            <FileDown className="h-4 w-4 mr-1.5" />
+            Export
+          </Button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <Card>
+          <CardContent className="py-10 text-center text-muted-foreground text-sm">
+            Loading...
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Fabrication WIP Accumulated</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold tabular-nums">
+                  {mt3(data?.overall.fabricationMt)} MT
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Galvanizing WIP Accumulated</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold tabular-nums">
+                  {mt3(data?.overall.galvanizingMt)} MT
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {byProject.length === 0 ? (
+            <Card>
+              <CardContent className="py-10 text-center text-muted-foreground text-sm">
+                No accumulated WIP yet.
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">By project</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-auto max-h-[70vh]">
+                  <table className="w-full text-sm">
+                    <thead className="border-b bg-muted sticky top-0 z-10">
+                      <tr className="text-left">
+                        <th className="px-3 py-2 font-semibold">Project</th>
+                        <th className="px-3 py-2 font-semibold text-right">
+                          Fabrication WIP Accumulated (MT)
+                        </th>
+                        <th className="px-3 py-2 font-semibold text-right">
+                          Galvanizing WIP Accumulated (MT)
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {byProject.map((r) => (
+                        <tr key={r.project} className="border-b last:border-0 hover:bg-muted/30">
+                          <td className="px-3 py-2">{r.project}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fabricationMt)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.galvanizingMt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="border-t-2 bg-muted font-semibold sticky bottom-0 z-10">
+                      <tr>
+                        <td className="px-3 py-2">Grand total ({byProject.length})</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{mt3(data?.overall.fabricationMt)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{mt3(data?.overall.galvanizingMt)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 

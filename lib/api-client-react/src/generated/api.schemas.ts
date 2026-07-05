@@ -1221,6 +1221,34 @@ export interface MilestonesResponse {
 }
 
 /**
+ * Lifetime accumulated WIP totals for one project.
+ */
+export interface AccumulatedWipProject {
+  project: string;
+  /** Tonnage added each time a mark left TS into G (TLT projects only). */
+  fabricationMt: number;
+  /** Tonnage added each time a mark left Y (dispatched/completed). */
+  galvanizingMt: number;
+}
+
+/**
+ * Overall (all-project) lifetime accumulated WIP totals.
+ */
+export interface AccumulatedWipTotals {
+  fabricationMt: number;
+  galvanizingMt: number;
+}
+
+/**
+ * Lifetime accumulated WIP throughput totals (overall + per-project).
+ */
+export interface AccumulatedWipResponse {
+  overall: AccumulatedWipTotals;
+  byProject: AccumulatedWipProject[];
+  generatedAt: string;
+}
+
+/**
  * One (project, structure) order row joined to computed dispatch.
  */
 export interface OrderStatusRow {

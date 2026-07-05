@@ -1475,6 +1475,25 @@ export const GetMilestonesResponse = zod.object({
 
 
 /**
+ * Deterministically recomputes, from the full append-only WIP import history (no cutoff — a lifetime throughput counter, not a point-in-time balance), two cumulative figures: Fabrication WIP Accumulated (tonnage added each time a mark left TS into G, TLT projects only) and Galvanizing WIP Accumulated (tonnage added each time a mark left Y / was dispatched). "Each time" is intentional — a mark that re-enters an earlier activity and crosses the same boundary again later is counted again. Returns both the overall sum and a per-project breakdown. Purely additive — never changes parsing, activity values, dedup, ageing, warning, milestone, or dispatch state.
+
+ * @summary Get lifetime accumulated WIP throughput totals (Fabrication / Galvanizing)
+ */
+export const GetAccumulatedWipResponse = zod.object({
+  "overall": zod.object({
+  "fabricationMt": zod.number(),
+  "galvanizingMt": zod.number()
+}).describe('Overall (all-project) lifetime accumulated WIP totals.'),
+  "byProject": zod.array(zod.object({
+  "project": zod.string(),
+  "fabricationMt": zod.number().describe('Tonnage added each time a mark left TS into G (TLT projects only).'),
+  "galvanizingMt": zod.number().describe('Tonnage added each time a mark left Y (dispatched\/completed).')
+}).describe('Lifetime accumulated WIP totals for one project.')),
+  "generatedAt": zod.string()
+}).describe('Lifetime accumulated WIP throughput totals (overall + per-project).')
+
+
+/**
  * Returns the latest "Order Review" file ingest (the second input file) as per-(project, structure) rows, joined to the computed running Dispatch tonnage (seed baseline + Yard-departure accruals), plus a file-vs-computed dispatch reconciliation at a 1% tolerance. Fabrication / Galvanizing / Yard tonnages are computed client-side from the selected WIP import's records (ACTIVITY_BUNDLES) so header filters are honoured. Purely additive and read-only — never changes WIP parsing, activity, dedup, ageing, warning, velocity, or milestone state. available:false when no Order Review file has been ingested yet.
 
  * @summary Get the latest Order Review rows joined to computed dispatch

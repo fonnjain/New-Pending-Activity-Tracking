@@ -22,16 +22,19 @@ there is no longer a Y column beside it.
 
 **Project Wise exception (PROCESS_PHASES):** the Project-Wise stage table uses
 `PROCESS_PHASES`, NOT the activity bundles. Its Galvanising phase now spans
-**G, GB, Y** (`PROCESS_SEQUENCE.slice(GALV_START_INDEX)`), and its Ready for
-Dispatch column no longer maps to an activity — it reports Finished Good WIP
-Computed (see `tracker-computed-fg.md`), rolled up per project via
-`useFgRows()`. No double-count risk because dispatch holds no activity code
-(processPhase never routes there); the column shows "-" only when the project
-has no Order Status file entry at all (matches the Work Order/Dispatch columns'
-fallback), not a marks-count gate like the other phases.
+**G, GB, Y** (`PROCESS_SEQUENCE.slice(GALV_START_INDEX)`).
 A phase may carry an optional `subLabel` (dispatch = "FG") that overrides the
 joined-activity-codes heading; `processPhasesForMode` carries `subLabel` through
 so it shows in every mode.
+
+**Ready for Dispatch (FG) column — currently unwired (2026-07-05):** the
+Project-Wise Ready-for-Dispatch/FG column was previously wired to
+`useFgRows()` (Finished Good WIP Computed, see `tracker-computed-fg.md`) but
+the user asked to stop using that data there; it now always renders a plain
+"-" and the Excel export no longer includes it. `useFgRows()` itself and the
+Computed FG tab are untouched — only this one column's wiring was reverted.
+Before re-wiring this column to any FG/dispatch source, confirm with the user
+first (this was an explicit, deliberate rollback, not a bug).
 
 **Why:** product decision — where Y already has its own column/metric it stays
 there and is not also folded into Galvanizing. Only single-bucket views (Plant

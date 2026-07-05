@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AccumulatedWipResponse,
   AiStatus,
   AuthCredentials,
   AuthStatus,
@@ -2604,6 +2605,85 @@ export function useGetMilestones<TData = Awaited<ReturnType<typeof getMilestones
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetMilestonesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetAccumulatedWipUrl = () => {
+
+
+
+
+  return `/api/accumulated-wip`
+}
+
+/**
+ * Deterministically recomputes, from the full append-only WIP import history (no cutoff — a lifetime throughput counter, not a point-in-time balance), two cumulative figures: Fabrication WIP Accumulated (tonnage added each time a mark left TS into G, TLT projects only) and Galvanizing WIP Accumulated (tonnage added each time a mark left Y / was dispatched). "Each time" is intentional — a mark that re-enters an earlier activity and crosses the same boundary again later is counted again. Returns both the overall sum and a per-project breakdown. Purely additive — never changes parsing, activity values, dedup, ageing, warning, milestone, or dispatch state.
+
+ * @summary Get lifetime accumulated WIP throughput totals (Fabrication / Galvanizing)
+ */
+export const getAccumulatedWip = async ( options?: RequestInit): Promise<AccumulatedWipResponse> => {
+
+  return customFetch<AccumulatedWipResponse>(getGetAccumulatedWipUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAccumulatedWipQueryKey = () => {
+    return [
+    `/api/accumulated-wip`
+    ] as const;
+    }
+
+
+export const getGetAccumulatedWipQueryOptions = <TData = Awaited<ReturnType<typeof getAccumulatedWip>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAccumulatedWip>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAccumulatedWipQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAccumulatedWip>>> = ({ signal }) => getAccumulatedWip({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAccumulatedWip>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAccumulatedWipQueryResult = NonNullable<Awaited<ReturnType<typeof getAccumulatedWip>>>
+export type GetAccumulatedWipQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get lifetime accumulated WIP throughput totals (Fabrication / Galvanizing)
+ */
+
+export function useGetAccumulatedWip<TData = Awaited<ReturnType<typeof getAccumulatedWip>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAccumulatedWip>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAccumulatedWipQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

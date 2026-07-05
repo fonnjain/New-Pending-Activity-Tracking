@@ -828,6 +828,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MilestonesResponse"
+  /accumulated-wip:
+    get:
+      operationId: getAccumulatedWip
+      tags: [imports]
+      summary: Get lifetime accumulated WIP throughput totals (Fabrication / Galvanizing)
+      description: >
+        Deterministically recomputes, from the full append-only WIP import
+        history (no cutoff — a lifetime throughput counter, not a
+        point-in-time balance), two cumulative figures: Fabrication WIP
+        Accumulated (tonnage added each time a mark left TS into G, TLT
+        projects only) and Galvanizing WIP Accumulated (tonnage added each
+        time a mark left Y / was dispatched). "Each time" is intentional —
+        a mark that re-enters an earlier activity and crosses the same
+        boundary again later is counted again. Returns both the overall sum
+        and a per-project breakdown. Purely additive — never changes
+        parsing, activity values, dedup, ageing, warning, milestone, or
+        dispatch state.
+      responses:
+        "200":
+          description: Lifetime accumulated WIP totals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccumulatedWipResponse"
   /order-status:
     get:
       operationId: getOrderStatus
@@ -2482,6 +2506,49 @@ components:
           type: string
       required:
         - items
+        - generatedAt
+    AccumulatedWipProject:
+      type: object
+      description: Lifetime accumulated WIP totals for one project.
+      properties:
+        project:
+          type: string
+        fabricationMt:
+          type: number
+          description: Tonnage added each time a mark left TS into G (TLT projects only).
+        galvanizingMt:
+          type: number
+          description: Tonnage added each time a mark left Y (dispatched/completed).
+      required:
+        - project
+        - fabricationMt
+        - galvanizingMt
+    AccumulatedWipTotals:
+      type: object
+      description: Overall (all-project) lifetime accumulated WIP totals.
+      properties:
+        fabricationMt:
+          type: number
+        galvanizingMt:
+          type: number
+      required:
+        - fabricationMt
+        - galvanizingMt
+    AccumulatedWipResponse:
+      type: object
+      description: Lifetime accumulated WIP throughput totals (overall + per-project).
+      properties:
+        overall:
+          $ref: "#/components/schemas/AccumulatedWipTotals"
+        byProject:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccumulatedWipProject"
+        generatedAt:
+          type: string
+      required:
+        - overall
+        - byProject
         - generatedAt
     OrderReviewFieldChange:
       type: object

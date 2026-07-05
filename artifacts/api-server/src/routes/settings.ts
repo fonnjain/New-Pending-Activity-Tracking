@@ -6,6 +6,7 @@ import { UpdateSettingsBody } from "@workspace/api-zod";
 import { requireAuth } from "./auth";
 import { recomputeMilestones } from "../lib/milestones";
 import { recomputeDispatch } from "../lib/dispatch";
+import { recomputeAccumulatedWip } from "../lib/accumulatedWip";
 
 const router: IRouter = Router();
 
@@ -75,6 +76,7 @@ router.put("/settings", requireAuth, async (req, res): Promise<void> => {
   try {
     await recomputeDispatch();
     await recomputeMilestones();
+    await recomputeAccumulatedWip();
   } catch (err) {
     req.log.warn({ err }, "Post-settings recompute failed (non-fatal)");
   }
