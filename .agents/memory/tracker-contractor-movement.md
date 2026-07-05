@@ -24,6 +24,18 @@ contractor-performance view, not a TLT planning tool.
 **Frontend scope:** sourced from a dedicated `GET /contractor-movement`
 endpoint (full history, independent of the currently selected import), so it
 honours only the global Job filter — there's no single activity/contractor
-per entry to filter by since every row IS a from/to pair. Two-sheet Excel
-export (Summary matrix: contractor rows × date columns; Detail: one row per
-move) via the shared `exportToXlsxSheets`/`XlsxColumn` helpers.
+per entry to filter by since every row IS a from/to pair. Excel export has one
+sheet per contractor (Detail) plus Summary + Stage Summary sheets, all via the
+shared `exportToXlsxSheets`/`XlsxColumn` helpers (sheet name dedup/sanitize is
+already built into that helper — never re-derive it).
+
+**Fabrication/Galvanizing bifurcation is a pure display-layer classification,
+not a stored field.** `stageFor(fromActivity)`: leaving `TS` → "Fabrication",
+leaving `Y` → "Galvanizing", everything else → no stage. Never add a stage
+column to the DB/engine — it's derived at read time from the existing
+`fromActivity` on each ledger entry so it can't drift from the underlying
+move data. `ContractorPerformanceReport` is exported (not page-local) so it
+can be reused verbatim on the Reports page AND the Contractor Wise page,
+with local `contractorFilter`/`stageFilter` state driving click-to-filter on
+every table inside the component (summary row, stage-totals cell, detail
+rows all share the same two filters).

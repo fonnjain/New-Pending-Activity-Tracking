@@ -1019,15 +1019,49 @@ function contractorLabel(c: string | null): string {
   return c && c.trim() ? c : UNASSIGNED_CONTRACTOR;
 }
 
-function ContractorPerformanceReport() {
+// Bifurcation: a move is a Fabrication completion when it leaves TS (TS is
+// done for that mark) and a Galvanizing completion when it leaves Y (Y is
+// done for that mark). Every other from-activity is neither.
+type Stage = "Fabrication" | "Galvanizing";
+
+function stageFor(fromActivity: string | null | undefined): Stage | null {
+  const a = (fromActivity ?? "").toUpperCase();
+  if (a === "TS") return "Fabrication";
+  if (a === "Y") return "Galvanizing";
+  return null;
+}
+
+export function ContractorPerformanceReport() {
   const { filters } = useTracker();
   const { data, isLoading } = useGetContractorMovement();
+  const [contractorFilter, setContractorFilter] = useState<string | null>(null);
+  const [stageFilter, setStageFilter] = useState<Stage | null>(null);
 
   const entries = useMemo(() => {
     const all = data?.entries ?? [];
     if (!filters.job) return all;
     return all.filter((e) => e.project === filters.job);
   }, [data, filters.job]);
+
+  const toggleContractor = (c: string) =>
+    setContractorFilter((cur) => (cur === c ? null : c));
+  // Clicking a stage cell for a specific contractor selects that exact
+  // combination (or clears it if already selected); clicking a stage total
+  // (no contractor) filters to that stage across every contractor.
+  const toggleStage = (s: Stage, c?: string) => {
+    const alreadySelected = stageFilter === s && (c === undefined ? contractorFilter === null : contractorFilter === c);
+    if (alreadySelected) {
+      setStageFilter(null);
+      setContractorFilter(null);
+    } else {
+      setStageFilter(s);
+      setContractorFilter(c ?? null);
+    }
+  };
+  const clearFilters = () => {
+    setContractorFilter(null);
+    setStageFilter(null);
+  };
 
   // Chronological date columns + contractors sorted by total weight desc
   // (ties broken alphabetically; Unassigned always last).
@@ -1080,6 +1114,43 @@ function ContractorPerformanceReport() {
     [entries],
   );
 
+  // Fabrication/Galvanizing bifurcation: per-contractor + overall totals for
+  // moves that left TS (Fabrication done) or left Y (Galvanizing done).
+  const { stageRows, fabTotal, galvTotal } = useMemo(() => {
+    const map = new Map<string, { fab: number; galv: number }>();
+    let fab = 0;
+    let galv = 0;
+    for (const e of entries) {
+      const stage = stageFor(e.fromActivity);
+      if (!stage) continue;
+      const c = contractorLabel(e.contractor);
+      const t = map.get(c) ?? { fab: 0, galv: 0 };
+      if (stage === "Fabrication") {
+        t.fab += e.weightKg;
+        fab += e.weightKg;
+      } else {
+        t.galv += e.weightKg;
+        galv += e.weightKg;
+      }
+      map.set(c, t);
+    }
+    const rows = Array.from(map.entries())
+      .map(([contractor, t]) => ({ contractor, ...t, total: t.fab + t.galv }))
+      .sort((a, b) => b.total - a.total || a.contractor.localeCompare(b.contractor));
+    return { stageRows: rows, fabTotal: fab, galvTotal: galv };
+  }, [entries]);
+
+  // Detail log scoped by the clickable contractor/stage filters above it.
+  const scopedDetailRows = useMemo(
+    () =>
+      detailRows.filter(
+        (e) =>
+          (!contractorFilter || contractorLabel(e.contractor) === contractorFilter) &&
+          (!stageFilter || stageFor(e.fromActivity) === stageFilter),
+      ),
+    [detailRows, contractorFilter, stageFilter],
+  );
+
   const totalMarks = entries.reduce((s, e) => s + e.markCount, 0);
 
   const handleExcel = () => {
@@ -1104,20 +1175,37 @@ function ContractorPerformanceReport() {
     const detailColumns: XlsxColumn[] = [
       { label: "Date", field: "date" },
       { label: "Project", field: "project" },
-      { label: "Contractor", field: "contractorLabel" },
       { label: "From Activity", field: "fromActivity" },
       { label: "To Activity", field: "toActivity" },
+      { label: "Stage", field: "stage" },
       { label: "Mark Count", field: "markCount", numeric: true, decimals: 0, total: true },
       { label: "Weight (kg)", field: "weightKg", numeric: true, decimals: 0, total: true },
     ];
-    const detailXlsxRows = detailRows.map((e) => ({
-      ...e,
-      contractorLabel: contractorLabel(e.contractor),
+
+    // Stage summary sheet: Fabrication (left TS) / Galvanizing (left Y) totals
+    // per contractor.
+    const stageColumns: XlsxColumn[] = [
+      { label: "Contractor", field: "contractor" },
+      { label: "Fabrication Wt (kg)", field: "fab", numeric: true, decimals: 0, total: true },
+      { label: "Galvanizing Wt (kg)", field: "galv", numeric: true, decimals: 0, total: true },
+      { label: "Total (kg)", field: "total", numeric: true, decimals: 0, total: true },
+    ];
+
+    // Detail: one worksheet per contractor (sheet names are sanitized +
+    // de-duplicated by exportToXlsxSheets), each scoped to that contractor's
+    // moves only, newest first, tagged with the Fabrication/Galvanizing stage.
+    const contractorSheets = contractors.map((c) => ({
+      name: c,
+      columns: detailColumns,
+      rows: detailRows
+        .filter((e) => contractorLabel(e.contractor) === c)
+        .map((e) => ({ ...e, stage: stageFor(e.fromActivity) ?? "-" })),
     }));
 
     exportToXlsxSheets(`contractor_performance_${tag}_${date}.xlsx`, [
       { name: "Summary", columns: summaryColumns, rows: summaryRows },
-      { name: "Detail", columns: detailColumns, rows: detailXlsxRows },
+      { name: "Stage Summary", columns: stageColumns, rows: stageRows },
+      ...contractorSheets,
     ]);
   };
 
@@ -1182,8 +1270,14 @@ function ContractorPerformanceReport() {
                     </TableCell>
                   </TableRow>
                   {contractors.map((c) => (
-                    <TableRow key={c}>
-                      <TableCell className="font-medium text-xs sticky left-0 bg-background">
+                    <TableRow
+                      key={c}
+                      className={contractorFilter === c ? "bg-primary/5" : undefined}
+                    >
+                      <TableCell
+                        className="font-medium text-xs sticky left-0 bg-background cursor-pointer hover:text-primary hover:underline"
+                        onClick={() => toggleContractor(c)}
+                      >
                         {c}
                       </TableCell>
                       {dates.map((d) => {
@@ -1216,8 +1310,132 @@ function ContractorPerformanceReport() {
 
             <div>
               <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                Detail log ({detailRows.length.toLocaleString()} moves)
+                Fabrication / Galvanizing completed (click to filter the detail log)
               </h3>
+              <div className="text-xs text-muted-foreground mb-2">
+                Fabrication counts a move that leaves activity TS (TS is fully
+                done for that mark); Galvanizing counts a move that leaves
+                activity Y (Y is fully done for that mark).
+              </div>
+              <Table containerClassName="max-h-[50vh] border border-border rounded-lg">
+                <TableBody>
+                  <TableRow className="bg-muted/60 hover:bg-muted/60 sticky top-0 z-10">
+                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+                      Contractor
+                    </TableCell>
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+                      Fabrication (left TS)
+                    </TableCell>
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+                      Galvanizing (left Y)
+                    </TableCell>
+                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+                      Total
+                    </TableCell>
+                  </TableRow>
+                  {stageRows.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-xs text-muted-foreground py-6">
+                        No TS/Y completions found for the current filter.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {stageRows.map((r) => (
+                    <TableRow
+                      key={r.contractor}
+                      className={contractorFilter === r.contractor ? "bg-primary/5" : undefined}
+                    >
+                      <TableCell
+                        className="font-medium text-xs cursor-pointer hover:text-primary hover:underline"
+                        onClick={() => toggleContractor(r.contractor)}
+                      >
+                        {r.contractor}
+                      </TableCell>
+                      <TableCell
+                        className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
+                          stageFilter === "Fabrication" && contractorFilter === r.contractor
+                            ? "font-bold text-primary"
+                            : "text-muted-foreground"
+                        }`}
+                        onClick={() => toggleStage("Fabrication", r.contractor)}
+                      >
+                        {r.fab ? formatWeight(r.fab) : "-"}
+                      </TableCell>
+                      <TableCell
+                        className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
+                          stageFilter === "Galvanizing" && contractorFilter === r.contractor
+                            ? "font-bold text-primary"
+                            : "text-muted-foreground"
+                        }`}
+                        onClick={() => toggleStage("Galvanizing", r.contractor)}
+                      >
+                        {r.galv ? formatWeight(r.galv) : "-"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-xs font-bold">
+                        {formatWeight(r.total)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {stageRows.length > 0 && (
+                    <TableRow className="border-t-2 font-bold bg-muted/30 hover:bg-muted/30">
+                      <TableCell className="text-xs">Total</TableCell>
+                      <TableCell
+                        className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
+                          stageFilter === "Fabrication" && contractorFilter === null ? "text-primary" : ""
+                        }`}
+                        onClick={() => toggleStage("Fabrication")}
+                      >
+                        {formatWeight(fabTotal)}
+                      </TableCell>
+                      <TableCell
+                        className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
+                          stageFilter === "Galvanizing" && contractorFilter === null ? "text-primary" : ""
+                        }`}
+                        onClick={() => toggleStage("Galvanizing")}
+                      >
+                        {formatWeight(galvTotal)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-xs">
+                        {formatWeight(fabTotal + galvTotal)}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Detail log ({scopedDetailRows.length.toLocaleString()}
+                  {scopedDetailRows.length !== detailRows.length
+                    ? ` of ${detailRows.length.toLocaleString()}`
+                    : ""}{" "}
+                  moves)
+                </h3>
+                {(contractorFilter || stageFilter) && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-muted-foreground">Filtered by:</span>
+                    {contractorFilter && (
+                      <span className="rounded bg-primary/10 text-primary px-1.5 py-0.5 font-medium">
+                        {contractorFilter}
+                      </span>
+                    )}
+                    {stageFilter && (
+                      <span className="rounded bg-primary/10 text-primary px-1.5 py-0.5 font-medium">
+                        {stageFilter}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="text-muted-foreground hover:text-foreground underline"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+              </div>
               <div className="overflow-x-auto border border-border rounded-lg">
                 <Table containerClassName="max-h-[60vh]">
                   <TableBody>
@@ -1227,30 +1445,42 @@ function ContractorPerformanceReport() {
                       <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Contractor</TableCell>
                       <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">From</TableCell>
                       <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">To</TableCell>
+                      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Stage</TableCell>
                       <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Marks</TableCell>
                       <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Weight</TableCell>
                     </TableRow>
-                    {detailRows.slice(0, TABLE_CAP).map((e, i) => (
-                      <TableRow key={`${e.date}-${e.project}-${e.contractor}-${e.fromActivity}-${e.toActivity}-${i}`}>
-                        <TableCell className="text-xs whitespace-nowrap">{e.date}</TableCell>
-                        <TableCell className="text-xs">{e.project}</TableCell>
-                        <TableCell className="text-xs">{contractorLabel(e.contractor)}</TableCell>
-                        <TableCell className="text-xs">{e.fromActivity}</TableCell>
-                        <TableCell className="text-xs">{e.toActivity}</TableCell>
-                        <TableCell className="text-right tabular-nums text-xs">
-                          {e.markCount.toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-xs">
-                          {formatWeight(e.weightKg)}
+                    {scopedDetailRows.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center text-xs text-muted-foreground py-6">
+                          No moves match the current filter.
                         </TableCell>
                       </TableRow>
-                    ))}
+                    )}
+                    {scopedDetailRows.slice(0, TABLE_CAP).map((e, i) => {
+                      const stage = stageFor(e.fromActivity);
+                      return (
+                        <TableRow key={`${e.date}-${e.project}-${e.contractor}-${e.fromActivity}-${e.toActivity}-${i}`}>
+                          <TableCell className="text-xs whitespace-nowrap">{e.date}</TableCell>
+                          <TableCell className="text-xs">{e.project}</TableCell>
+                          <TableCell className="text-xs">{contractorLabel(e.contractor)}</TableCell>
+                          <TableCell className="text-xs">{e.fromActivity}</TableCell>
+                          <TableCell className="text-xs">{e.toActivity}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{stage ?? "-"}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs">
+                            {e.markCount.toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-xs">
+                            {formatWeight(e.weightKg)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
-              {detailRows.length > TABLE_CAP && (
+              {scopedDetailRows.length > TABLE_CAP && (
                 <div className="text-xs text-muted-foreground mt-2">
-                  Showing first {TABLE_CAP.toLocaleString()} of {detailRows.length.toLocaleString()}{" "}
+                  Showing first {TABLE_CAP.toLocaleString()} of {scopedDetailRows.length.toLocaleString()}{" "}
                   moves. Export to Excel for the full set.
                 </div>
               )}

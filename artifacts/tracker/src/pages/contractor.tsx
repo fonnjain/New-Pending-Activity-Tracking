@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { exportToXlsx, type XlsxColumn } from "@/lib/export";
 import { useMemo, useRef, useState } from "react";
 import { compareActivity, contractorCategoryLabel, outVendorTypeLabel, bundleActivitySet } from "@workspace/domain";
+import { ContractorPerformanceReport } from "./reports";
 
 // Activity scopes for the per-contractor load split, sliced from the canonical
 // bundles in @workspace/domain. Display/aggregation only.
@@ -266,6 +267,8 @@ function ContractorContent() {
           </div>
         </CardContent>
       </Card>
+
+      <ContractorPerformanceReport />
     </div>
   );
 }
