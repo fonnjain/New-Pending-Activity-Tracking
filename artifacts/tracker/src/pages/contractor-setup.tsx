@@ -17,6 +17,7 @@ import {
   type OutVendorType,
 } from "@workspace/domain";
 import { LoginGate, LogoutButton } from "@/components/login-gate";
+import { exportToXlsx, type XlsxColumn } from "@/lib/export";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
   Table,
@@ -36,7 +37,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Users, Trash2, Search } from "lucide-react";
+import { Users, Trash2, Search, FileSpreadsheet } from "lucide-react";
 
 interface RowState {
   displayName: string;
@@ -140,6 +141,30 @@ export function ContractorSetupContent() {
     return c;
   }, [rows]);
 
+  const categoryLabel = (v: ContractorCategory) =>
+    CONTRACTOR_CATEGORIES.find((c) => c.value === v)?.label ?? v;
+  const outVendorLabel = (v: OutVendorType) =>
+    OUT_VENDOR_TYPES.find((t) => t.value === v)?.label ?? v;
+
+  const handleExport = () => {
+    const columns: XlsxColumn[] = [
+      { label: "Contractor", field: "contractor" },
+      { label: "Type", field: "type" },
+      { label: "Out-vendor Tags", field: "outVendorTags" },
+    ];
+    const exportRows = filtered.map((r) => ({
+      contractor: r.displayName,
+      type: categoryLabel(r.category),
+      outVendorTags:
+        r.category === "OUT_VENDOR" && r.outVendorType.length
+          ? r.outVendorType.map(outVendorLabel).join(", ")
+          : "-",
+    }));
+    exportToXlsx("contractor-setup.xlsx", columns, exportRows, {
+      sheetName: "Contractor Setup",
+    });
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
@@ -147,7 +172,18 @@ export function ContractorSetupContent() {
           <Users className="w-5 h-5 text-muted-foreground" />
           <h1 className="text-xl font-bold tracking-tight">Contractor Setup</h1>
         </div>
-        <LogoutButton />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            disabled={filtered.length === 0}
+          >
+            <FileSpreadsheet className="w-4 h-4 mr-1.5" />
+            Export Excel
+          </Button>
+          <LogoutButton />
+        </div>
       </div>
 
       <p className="text-sm text-muted-foreground">
