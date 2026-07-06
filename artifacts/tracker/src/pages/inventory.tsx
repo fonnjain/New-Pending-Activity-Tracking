@@ -753,7 +753,7 @@ export default function InventoryView() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold flex items-center gap-2">
           <Boxes className="h-5 w-5 text-primary" />
-          Inventory
+          Bucket List
         </h1>
         <div className="flex items-center gap-3">
           {asOnDate && (

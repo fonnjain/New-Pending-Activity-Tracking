@@ -234,7 +234,7 @@ const navItems: NavItem[] = [
   { href: "/contractor", icon: Users, label: "Contractor Wise", short: "Contractors" },
   { href: "/plant", icon: Factory, label: "Plant Operation Wise", short: "Plant Ops" },
   { href: "/order-status", icon: PackageCheck, label: "Order Status", short: "Orders" },
-  { href: "/inventory", icon: Boxes, label: "Inventory", short: "Inventory" },
+  { href: "/inventory", icon: Boxes, label: "Bucket List", short: "Bucket List" },
   { href: "/reports", icon: FileText, label: "Reports", short: "Reports" },
   { href: "/turnaround", icon: Timer, label: "Turn Around Time", short: "Turnaround" },
   { href: "/stuck", icon: Gauge, label: "Stuck Projects", short: "Stuck" },
