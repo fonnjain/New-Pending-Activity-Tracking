@@ -1,11 +1,17 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
-import { useListImports, useListContractorCategories, type Record } from "@workspace/api-client-react";
+import { useListImports, useListContractorCategories, useGetCurrentJobs, type Record } from "@workspace/api-client-react";
 import { getActivityBundle, normalizeContractorName, filterRecords, parseAssignDateMs, dateToDayKey, type RecordFilters } from "@workspace/domain";
 
 // Sentinel prefix that marks an activity-bundle selection inside the single
 // `filters.activity` slot. A plain activity code (e.g. "Y") is matched exactly;
 // a "bundle:<id>" value is resolved to the bundle's member set and OR-matched.
 const BUNDLE_PREFIX = "bundle:";
+
+// Sentinel stored in `filters.job` for the "Current Jobs" set-membership mode
+// (an uploaded list of project codes, not a real job value). Resolved into
+// `RecordFilters.jobIn` by resolveActiveFilters; never itself matched against
+// a record's `job` field.
+export const CURRENT_JOBS_FILTER_VALUE = "__CURRENT_JOBS__";
 
 export interface Filters {
   category: string; // "TLT" | "NTLT" (Order type) — a MODE, never null
@@ -252,20 +258,37 @@ export function contractorCategoryFor(
   return hit ?? { category: "UNCLASSIFIED", outVendorType: [], displayName: contractor ?? "" };
 }
 
+// Live "Current Jobs" list (uploaded project codes) as a Set, plus its raw
+// meta. Powers the "Current Jobs" Job filter option; empty when nothing has
+// been uploaded (or after a clear) -- selecting it then legitimately yields
+// zero records rather than falling back to "All".
+export function useCurrentJobsSet() {
+  const { data } = useGetCurrentJobs();
+  const set = useMemo(() => new Set(data?.codes ?? []), [data]);
+  return { set, meta: data?.meta ?? null };
+}
+
 // Resolve the active filters into the shared RecordFilters shape plus the
 // concrete date window (epoch ms, computed from LOCAL today). The server
 // summary endpoint receives this resolved window so both sides classify dates
-// identically regardless of server timezone.
-export function resolveActiveFilters(filters: Filters): {
+// identically regardless of server timezone. `currentJobsSet` resolves the
+// CURRENT_JOBS_FILTER_VALUE sentinel into a set-membership filter; omit it
+// (or pass null/undefined) when the sentinel can't be active for the caller.
+export function resolveActiveFilters(
+  filters: Filters,
+  currentJobsSet?: ReadonlySet<string> | null,
+): {
   filters: RecordFilters;
   dateWindow: { start: number; end: number } | null;
 } {
   const win = dateRangeWindow(filters.dateRange);
+  const isCurrentJobs = filters.job === CURRENT_JOBS_FILTER_VALUE;
   return {
     filters: {
       category: filters.category,
       ntltSubtype: filters.ntltSubtype,
-      job: filters.job,
+      job: isCurrentJobs ? null : filters.job,
+      jobIn: isCurrentJobs ? (currentJobsSet ?? new Set<string>()) : null,
       section: filters.section,
       mfcBatch: filters.mfcBatch,
       structure: filters.structure,
@@ -284,10 +307,11 @@ export function resolveActiveFilters(filters: Filters): {
 export function useFilteredRecords(records: Record[] | undefined) {
   const { filters } = useTracker();
   const categoryMap = useContractorCategoryMap();
+  const { set: currentJobsSet } = useCurrentJobsSet();
 
   return useMemo(() => {
     if (!records) return [];
-    const { filters: rf, dateWindow } = resolveActiveFilters(filters);
+    const { filters: rf, dateWindow } = resolveActiveFilters(filters, currentJobsSet);
     return filterRecords(records, rf, { dateWindow, categoryMap });
-  }, [records, filters, categoryMap]);
+  }, [records, filters, categoryMap, currentJobsSet]);
 }

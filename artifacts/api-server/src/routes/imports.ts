@@ -1471,6 +1471,7 @@ router.post("/imports/:id/summary", async (req, res): Promise<void> => {
     category: f.category,
     ntltSubtype: f.ntltSubtype ?? null,
     job: f.job ?? null,
+    jobIn: f.jobIn && f.jobIn.length > 0 ? new Set(f.jobIn) : null,
     section: f.section ?? null,
     mfcBatch: f.mfcBatch ?? null,
     structure: f.structure ?? null,

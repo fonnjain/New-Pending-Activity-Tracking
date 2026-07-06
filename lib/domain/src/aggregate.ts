@@ -57,6 +57,12 @@ export interface RecordFilters {
   category: string; // "ALL" | "TLT" | "NTLT"
   ntltSubtype: string | null;
   job: string | null;
+  // Set-membership job filter ("Current Jobs" mode). Additive and optional --
+  // when present it is checked INSTEAD of the single-value `job` equality
+  // above (the two are mutually exclusive in practice: callers resolve the
+  // "Current Jobs" sentinel into `jobIn` and clear `job`, or vice versa).
+  // undefined/null behaves exactly as before everywhere.
+  jobIn?: ReadonlySet<string> | null;
   section: string | null;
   // MFC batch (WO Batch No.) filter. Compared against (r.mfcBatch || "Z").
   mfcBatch: string | null;
@@ -182,6 +188,7 @@ export function filterRecords<T extends AggRecord>(
     if (r.active === false) return false;
     if (filters.ntltSubtype && r.ntltSubtype !== filters.ntltSubtype) return false;
     if (filters.job && r.job !== filters.job) return false;
+    if (filters.jobIn && (!r.job || !filters.jobIn.has(r.job))) return false;
     if (filters.section && r.groupKey !== filters.section) return false;
     if (filters.mfcBatch && (r.mfcBatch || "Z") !== filters.mfcBatch) return false;
     if (filters.structure && r.structure !== filters.structure) return false;

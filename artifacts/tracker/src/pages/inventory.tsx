@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useTracker } from "@/lib/store";
+import { useTracker, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
 import {
   useGetAuthStatus,
   useListInventoryManualA,
@@ -430,8 +430,12 @@ export default function InventoryView() {
   const canEdit = !!authStatus?.authenticated;
 
   const jobFilter = filters.job;
-  const applyJobFilter = (rows: InventoryStructureCard[]): InventoryStructureCard[] =>
-    jobFilter ? rows.filter((r) => r.project === jobFilter) : rows;
+  const isCurrentJobs = jobFilter === CURRENT_JOBS_FILTER_VALUE;
+  const { set: currentJobsSet, meta: currentJobsMeta } = useCurrentJobsSet();
+  const applyJobFilter = (rows: InventoryStructureCard[]): InventoryStructureCard[] => {
+    if (isCurrentJobs) return rows.filter((r) => currentJobsSet.has(r.project));
+    return jobFilter ? rows.filter((r) => r.project === jobFilter) : rows;
+  };
 
   const bInHouse = applyJobFilter(buckets.b.inHouse);
   const bOutVendor = applyJobFilter(buckets.b.outVendor);
@@ -515,8 +519,10 @@ export default function InventoryView() {
   // Export honours the current Job filter (applyJobFilter is already applied
   // to buckets B/C/D above); manual Buckets A/E are filtered the same way so
   // a filtered export never leaks other projects' manual entries.
-  const applyJobFilterManual = (entries: InventoryManualEntry[]): InventoryManualEntry[] =>
-    jobFilter ? entries.filter((e) => e.projectCode === jobFilter) : entries;
+  const applyJobFilterManual = (entries: InventoryManualEntry[]): InventoryManualEntry[] => {
+    if (isCurrentJobs) return entries.filter((e) => currentJobsSet.has(e.projectCode));
+    return jobFilter ? entries.filter((e) => e.projectCode === jobFilter) : entries;
+  };
 
   const structureRows = (side: InventorySide, rows: InventoryStructureCard[], columns: ColumnDef[]) =>
     rows.map((r) => {
@@ -623,7 +629,7 @@ export default function InventoryView() {
       },
     ];
     const date = new Date().toISOString().slice(0, 10);
-    const tag = jobFilter ? jobFilter.replace(/[^\w-]+/g, "-") : "all";
+    const tag = isCurrentJobs ? "current-jobs" : jobFilter ? jobFilter.replace(/[^\w-]+/g, "-") : "all";
     void exportToXlsxSheets(`inventory_${tag}_${date}.xlsx`, sheets);
   };
 
@@ -649,6 +655,19 @@ export default function InventoryView() {
           </Button>
         </div>
       </div>
+
+      {isCurrentJobs && currentJobsSet.size === 0 && (
+        <Card className="border-amber-500/40">
+          <CardContent className="py-4 flex items-center gap-2 text-sm">
+            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+            <span>
+              No Current Jobs list has been uploaded (or it&apos;s empty), so
+              the Current Jobs filter matches nothing. Upload a project-code
+              list on the Data page.
+            </span>
+          </CardContent>
+        </Card>
+      )}
 
       {!available && (
         <Card className="border-amber-500/40">

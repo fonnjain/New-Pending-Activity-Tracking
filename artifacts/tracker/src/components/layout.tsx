@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes } from "lucide-react";
-import { useTracker, dateRangeWindow } from "@/lib/store";
+import { useTracker, dateRangeWindow, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -394,6 +394,17 @@ function FilterBar() {
     [modeRecords]
   );
 
+  // "Current Jobs" is a separate top-of-list group (a set-membership mode, not
+  // a real job value) so it never collides with an actual project code.
+  const { set: currentJobsSet } = useCurrentJobsSet();
+  const jobGroups = useMemo(
+    () => [
+      { options: [{ value: CURRENT_JOBS_FILTER_VALUE, label: "Current Jobs" }] },
+      { heading: "Projects", options: jobs.map(j => ({ value: j, label: j })) },
+    ],
+    [jobs]
+  );
+
   // NTLT primary dimension = Section (the cleaned group_key), narrowed to the
   // active sub-category so only relevant sections are offered.
   const sections = useMemo(
@@ -529,7 +540,7 @@ function FilterBar() {
               <SearchableSelect
                 value={filters.job}
                 onChange={(v) => setFilter("job", v)}
-                options={jobs}
+                groups={jobGroups}
                 allLabel="All Jobs"
                 searchPlaceholder="Search jobs..."
               />
@@ -659,6 +670,14 @@ function FilterBar() {
           </div>
         </CollapsibleContent>
       </Collapsible>
+      {!isNtlt && filters.job === CURRENT_JOBS_FILTER_VALUE && currentJobsSet.size === 0 && (
+        <div className="bg-amber-500/10 border-t border-amber-500/25 text-amber-800 dark:text-amber-300 text-xs md:text-sm px-4 md:px-6 py-2 flex items-center gap-2">
+          <Filter className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            No Current Jobs list has been uploaded yet (or it was cleared). Upload one on the Data tab, or switch the Job filter back to All.
+          </span>
+        </div>
+      )}
     </div>
   );
 }

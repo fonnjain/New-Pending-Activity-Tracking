@@ -1107,6 +1107,65 @@ paths:
       responses:
         "204":
           description: Deleted
+  /current-jobs/upload:
+    post:
+      operationId: uploadCurrentJobs
+      tags: [currentJobs]
+      summary: Upload a "Current Jobs" list (project codes only)
+      description: >
+        Parses the first column of the first sheet as a plain list of project
+        codes, normalizes them with the same rules used for WIP/Order Review
+        project codes, and REPLACES the current list in full (not append).
+        Matched/unmatched are computed against the latest WIP import UNION the
+        latest Order Review import, for display only -- unmatched codes are
+        still stored and still usable by the filter. Requires authentication.
+        Purely additive: never touches WIP/Order Review parsing, hash/dedup
+        identity, Activity, qty, or ageing.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/CurrentJobsUpload"
+      responses:
+        "200":
+          description: Replaced Current Jobs list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentJobsUploadResponse"
+        "400":
+          description: Invalid or empty file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /current-jobs:
+    get:
+      operationId: getCurrentJobs
+      tags: [currentJobs]
+      summary: Get the current "Current Jobs" list
+      description: >
+        Returns the persisted list of project codes (empty array if none
+        uploaded or after a clear) plus provenance for the most recent upload.
+        Public (read-only) -- drives the "Current Jobs" Job filter option.
+      responses:
+        "200":
+          description: Current Jobs list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentJobsState"
+    delete:
+      operationId: clearCurrentJobs
+      tags: [currentJobs]
+      summary: Clear the Current Jobs list
+      description: >
+        Empties the current list (upload history/provenance is untouched).
+        Requires authentication.
+      responses:
+        "204":
+          description: Cleared
   /imports/{id}/changes:
     get:
       operationId: getImportChanges
@@ -1889,6 +1948,11 @@ components:
           type: ["string", "null"]
         job:
           type: ["string", "null"]
+        jobIn:
+          type: ["array", "null"]
+          items:
+            type: string
+          description: Set-membership job filter ("Current Jobs" mode). When present, checked INSTEAD of `job`.
         section:
           type: ["string", "null"]
         mfcBatch:
@@ -2519,6 +2583,90 @@ components:
       required:
         - projectCode
         - side
+    CurrentJobsUpload:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+      required:
+        - file
+    CurrentJobsUploadResponse:
+      type: object
+      description: >
+        Result of a Current Jobs upload -- the full replaced list plus
+        provenance/match info for the upload that produced it.
+      properties:
+        id:
+          type: integer
+        fileName:
+          type: string
+        uploadedAt:
+          type: string
+        codeCount:
+          type: integer
+        matchedCount:
+          type: integer
+          description: How many uploaded codes matched a project known to the latest WIP or Order Review import.
+        unmatched:
+          type: array
+          items:
+            type: string
+          description: Uploaded codes that matched neither the latest WIP nor Order Review import. Still stored and still usable by the filter.
+        codes:
+          type: array
+          items:
+            type: string
+      required:
+        - id
+        - fileName
+        - uploadedAt
+        - codeCount
+        - matchedCount
+        - unmatched
+        - codes
+    CurrentJobsMeta:
+      type: object
+      description: Provenance for the most recent Current Jobs upload.
+      properties:
+        id:
+          type: integer
+        fileName:
+          type: string
+        uploadedAt:
+          type: string
+        codeCount:
+          type: integer
+        matchedCount:
+          type: integer
+        unmatched:
+          type: array
+          items:
+            type: string
+      required:
+        - id
+        - fileName
+        - uploadedAt
+        - codeCount
+        - matchedCount
+        - unmatched
+    CurrentJobsState:
+      type: object
+      description: >
+        The current Current Jobs list (empty if none uploaded or after a
+        clear) plus provenance for the most recent upload.
+      properties:
+        codes:
+          type: array
+          items:
+            type: string
+        meta:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/CurrentJobsMeta"
+      required:
+        - codes
+        - meta
     TurnaroundSettings:
       type: object
       description: App-level turnaround-warning configuration. Singleton; global per-activity ideal days, grace cells and pre-warning thresholds keyed by canonical activity code, plus optional sparse per-project overrides and the stalled-mark threshold.

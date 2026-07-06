@@ -1,0 +1,123 @@
+TASK: Add a third upload type "Current Jobs" (a list of project codes) on the Data page,
+and a "Current Jobs" option in the Jobs filter dropdown that restricts every page to only
+those projects.
+
+=====================================================================
+CONTEXT
+=====================================================================
+VTPL Balance & Activity Tracker. Deterministic engine is authoritative. This change is
+STRICTLY ADDITIVE. It must NOT touch WIP/Order-Review parsing, the hash/dedup identity,
+Activity values, qty, ageing, or any existing bucket/sequence logic. It only ADDS:
+  - one new file type + upload endpoint,
+  - two small tables,
+  - one new value ("Current Jobs") in the existing Jobs filter.
+
+The app already has a Jobs filter (the "Job" dropdown) with "All" plus individual jobs,
+used across pages. We are adding ONE more selectable value to that same control.
+
+=====================================================================
+THE FILE
+=====================================================================
+- Content: a LIST OF PROJECT CODES ONLY (one column). Accept .xlsx and .xls.
+- Parse: take the first column of the first sheet; skip blank cells and any obvious
+  header cell (e.g. a cell literally reading "Project", "Project Code", "Code", "Job").
+- Normalize EACH code with the EXISTING project-code normalizer (strip trailing "." and
+  trailing ".0"). Do NOT create a new normalizer.
+- De-duplicate within the file (a code listed twice counts once).
+- This file has NO structures, NO weights — codes only.
+
+=====================================================================
+REPLACE SEMANTICS
+=====================================================================
+- Each upload REPLACES the previous Current Jobs list entirely (not append).
+- Keep it simple: on commit, clear existing current_jobs rows and insert the new set,
+  in one transaction. Record the upload in a small header table for provenance/timestamp.
+
+=====================================================================
+DATA MODEL (two new tables; additive; NOT hashed)
+=====================================================================
+  current_jobs_import
+    id            serial PK
+    fileName      text
+    uploadedAt    timestamptz NOT NULL default now()
+    codeCount     integer NOT NULL           -- distinct normalized codes stored
+    matchedCount  integer NOT NULL           -- how many matched a known project
+    unmatched     jsonb                        -- array of codes not found in WIP/OrderReview
+
+  current_jobs
+    id            serial PK
+    projectCode   text NOT NULL              -- normalized
+    UNIQUE(projectCode)
+
+"Known project" for matching = the set of normalized projects present in the latest WIP
+import (record_pool) UNION the latest Order Review import (order_review_rows). Store ALL
+uploaded codes in current_jobs regardless of match (so the filter still works if a code is
+valid but not yet in a file); record the unmatched ones on current_jobs_import.unmatched
+and surface a small non-blocking notice in the UI ("N codes not found in current data").
+
+=====================================================================
+UPLOAD UI (Data page)
+=====================================================================
+- Add a THIRD file selector + upload button on the Data page, labeled "Current Jobs",
+  visually consistent with the existing WIP and Order Review upload controls.
+- After upload show: fileName, uploadedAt, "X codes (Y matched, Z not found)".
+- Follow the SAME upload pattern the other two files use. If the app uses the staged
+  flow (stage/validate/commit/discard) for the other uploads, mirror it; if it uses a
+  direct upload, mirror that. Do NOT invent a new pattern.
+
+=====================================================================
+ENDPOINTS (mirror existing conventions; Zod-validated; Orval-regenerated)
+=====================================================================
+  POST   /current-jobs/upload      uploadCurrentJobs     (auth required)  -- parse+replace
+  GET    /current-jobs             getCurrentJobs        (public)         -- {codes[], meta}
+  DELETE /current-jobs             clearCurrentJobs      (auth required)  -- empties the list
+Add to openapi.yaml and regenerate hooks.
+
+=====================================================================
+JOBS DROPDOWN — new "Current Jobs" option
+=====================================================================
+- Add ONE new selectable value "Current Jobs" to the EXISTING Job filter dropdown,
+  sitting ALONGSIDE the existing options (keep "All", keep every individual job; just add
+  this one entry — do NOT remove or reorder the others). Reasonable placement: right after
+  "All".
+- Selecting "Current Jobs" sets the active filter so that EVERY page shows ONLY projects
+  whose normalized project code is in the current_jobs list. This must flow through the
+  SAME filtering mechanism the Job dropdown already uses (same store/selector/URL param),
+  so all pages (Overview, Turnaround, Stuck, Completed, Activity, Job-wise, Contractor,
+  Ageing, Reports, Order Status, and the new Inventory page) honour it automatically.
+- Implementation guidance: the existing Job filter likely matches a single job value. For
+  "Current Jobs", the predicate becomes "project code ∈ currentJobsSet" instead of a single
+  equality. Implement this as a filter MODE so you don't special-case it in every page:
+  resolve the Job selection to a set of allowed project codes once, then filter by set
+  membership. "All" = no restriction; a single job = that job's projects; "Current Jobs"
+  = the current_jobs set.
+- If the Current Jobs list is EMPTY (never uploaded, or cleared), "Current Jobs" should
+  still appear but selecting it yields an empty result with a clear empty-state message
+  ("No Current Jobs list uploaded — upload one on the Data page"). Do NOT fall back to All.
+- Persist the selected filter the same way the Job dropdown already persists (URL/query or
+  store); no new persistence mechanism.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT alter WIP/Order Review parsing, hashing, dedup, ageing, Activity, or qty.
+- Do NOT change how the Job dropdown filters existing single-job selections; only ADD the
+  new set-membership mode.
+- Do NOT introduce a second normalizer or a second Job-filter mechanism.
+- Do NOT make "Current Jobs" the default selection; default stays whatever it is today.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- Upload a codes file → current_jobs holds the distinct normalized codes; import header
+  shows codeCount / matchedCount / unmatched.
+- Re-upload a different codes file → list is fully REPLACED (old codes gone), header updated.
+- Jobs dropdown shows "Current Jobs" alongside "All" + individual jobs; other options
+  unchanged and in the same order.
+- Selecting "Current Jobs" filters ALL pages to only those projects; switching back to
+  "All" or a single job behaves exactly as before.
+- Trailing-dot codes (e.g. "824.", "898.") match "824","898"; a code not in WIP/Order
+  Review is stored, counted as unmatched, and shown in the notice but does NOT error.
+- Empty Current Jobs list + selecting "Current Jobs" → empty state message, not a crash,
+  not a fallback to All.
+- Report: codeCount, matchedCount, and the unmatched list from your test upload.

@@ -569,6 +569,11 @@ export interface SummaryFilters {
   ntltSubtype?: string | null;
   /** @nullable */
   job?: string | null;
+  /**
+     * Set-membership job filter ("Current Jobs" mode). When present, checked INSTEAD of `job`.
+     * @nullable
+     */
+  jobIn?: string[] | null;
   /** @nullable */
   section?: string | null;
   /** @nullable */
@@ -1042,6 +1047,47 @@ export interface InventoryManualEntryInput {
   woOrderQtyMt?: number | null;
   side: InventoryManualEntryInputSide;
   note?: string | null;
+}
+
+export interface CurrentJobsUpload {
+  file: Blob;
+}
+
+/**
+ * Result of a Current Jobs upload -- the full replaced list plus provenance/match info for the upload that produced it.
+
+ */
+export interface CurrentJobsUploadResponse {
+  id: number;
+  fileName: string;
+  uploadedAt: string;
+  codeCount: number;
+  /** How many uploaded codes matched a project known to the latest WIP or Order Review import. */
+  matchedCount: number;
+  /** Uploaded codes that matched neither the latest WIP nor Order Review import. Still stored and still usable by the filter. */
+  unmatched: string[];
+  codes: string[];
+}
+
+/**
+ * Provenance for the most recent Current Jobs upload.
+ */
+export interface CurrentJobsMeta {
+  id: number;
+  fileName: string;
+  uploadedAt: string;
+  codeCount: number;
+  matchedCount: number;
+  unmatched: string[];
+}
+
+/**
+ * The current Current Jobs list (empty if none uploaded or after a clear) plus provenance for the most recent upload.
+
+ */
+export interface CurrentJobsState {
+  codes: string[];
+  meta: CurrentJobsMeta | null;
 }
 
 /**

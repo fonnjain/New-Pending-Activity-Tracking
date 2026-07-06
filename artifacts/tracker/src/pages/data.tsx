@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetAccumulatedWip, getGetAccumulatedWipQueryKey, getGetMilestonesQueryKey, useAdminRecompute, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetAccumulatedWip, getGetAccumulatedWipQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
 import { contractorCategoryLabel } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw } from "lucide-react";
+import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, ListChecks } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx, exportToJson, type XlsxColumn } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
@@ -272,6 +272,8 @@ function DataViewContent() {
         />
       </div>
 
+      <CurrentJobsCard />
+
       {selectedImportId && <AiSanitizePanel importId={selectedImportId} />}
 
       {selectedImportId && (
@@ -512,6 +514,134 @@ function CutoffCard() {
           <p className="text-xs text-amber-700 dark:text-amber-400">
             Active: imports dated before {cutoff} are hidden everywhere.
           </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// "Current Jobs" — a small, direct (non-staged) upload: a plain list of
+// project codes (.xlsx/.xls) that powers a set-membership "Current Jobs"
+// option in the existing Job filter. Each upload REPLACES the list; it never
+// touches WIP/Order Review parsing, hash/dedup, Activity, qty, or ageing.
+function CurrentJobsCard() {
+  const { data, refetch } = useGetCurrentJobs();
+  const upload = useUploadCurrentJobs();
+  const clear = useClearCurrentJobs();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const meta = data?.meta ?? null;
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    upload.mutate(
+      { data: { file } },
+      {
+        onSuccess: (res) => {
+          toast({
+            title: "Current Jobs list uploaded",
+            description: `${res.codeCount.toLocaleString()} codes, ${res.matchedCount.toLocaleString()} matched known projects${res.unmatched.length > 0 ? `, ${res.unmatched.length.toLocaleString()} unmatched` : ""}.`,
+          });
+          queryClient.invalidateQueries({ queryKey: getGetCurrentJobsQueryKey() });
+        },
+        onError: (err) => {
+          toast({
+            variant: "destructive",
+            title: "Could not upload Current Jobs list",
+            description: err?.data?.error || err?.message || "Unknown error",
+          });
+        },
+      },
+    );
+    e.target.value = "";
+  };
+
+  const handleClear = () => {
+    if (!confirm("Clear the Current Jobs list? The \"Current Jobs\" Job filter will then match nothing until a new list is uploaded.")) return;
+    clear.mutate(undefined, {
+      onSuccess: () => {
+        toast({ title: "Current Jobs list cleared" });
+        queryClient.invalidateQueries({ queryKey: getGetCurrentJobsQueryKey() });
+        refetch();
+      },
+      onError: (err) => {
+        toast({ variant: "destructive", title: "Clear failed", description: err?.message || "Unknown error" });
+      },
+    });
+  };
+
+  return (
+    <Card className="border-emerald-500/40 bg-emerald-500/5">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <ListChecks className="w-4 h-4" /> Current Jobs
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Upload a plain list of project codes (.xlsx/.xls). This powers a "Current Jobs" option in the
+          Job filter that restricts every page to only these projects. Each upload replaces the previous list.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button asChild className="h-9 gap-2" disabled={upload.isPending}>
+            <label className="cursor-pointer">
+              <ListChecks className="w-4 h-4" />
+              {upload.isPending ? "Uploading..." : "Upload Current Jobs list"}
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={handleFileChange}
+                disabled={upload.isPending}
+              />
+            </label>
+          </Button>
+          {meta && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-2 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+              onClick={handleClear}
+              disabled={clear.isPending}
+            >
+              <Trash2 className="w-4 h-4" />
+              {clear.isPending ? "Clearing..." : "Clear list"}
+            </Button>
+          )}
+        </div>
+        {meta ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pt-1">
+            <div>
+              <span className="block text-muted-foreground text-xs uppercase mb-1">File</span>
+              <span className="font-bold truncate block" title={meta.fileName}>{meta.fileName}</span>
+            </div>
+            <div>
+              <span className="block text-muted-foreground text-xs uppercase mb-1">Uploaded</span>
+              <span className="font-bold tabular-nums">{formatDate(meta.uploadedAt)}</span>
+            </div>
+            <div>
+              <span className="block text-muted-foreground text-xs uppercase mb-1">Codes</span>
+              <span className="font-bold text-lg tabular-nums text-primary">{meta.codeCount.toLocaleString()}</span>
+            </div>
+            <div>
+              <span className="block text-muted-foreground text-xs uppercase mb-1">Matched Known Projects</span>
+              <span className="font-bold text-lg tabular-nums">{meta.matchedCount.toLocaleString()}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No Current Jobs list uploaded yet.</p>
+        )}
+        {meta && meta.unmatched.length > 0 && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>
+              {meta.unmatched.length.toLocaleString()} code{meta.unmatched.length === 1 ? "" : "s"} did not match any
+              known project from the latest WIP or Order Review import (still stored and usable by the filter):{" "}
+              <span className="font-mono">{meta.unmatched.join(", ")}</span>
+            </span>
+          </div>
         )}
       </CardContent>
     </Card>

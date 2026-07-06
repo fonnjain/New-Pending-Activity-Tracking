@@ -17,6 +17,11 @@ export interface SummaryFilters {
   ntltSubtype?: string | null;
   /** @nullable */
   job?: string | null;
+  /**
+     * Set-membership job filter ("Current Jobs" mode). When present, checked INSTEAD of `job`.
+     * @nullable
+     */
+  jobIn?: string[] | null;
   /** @nullable */
   section?: string | null;
   /** @nullable */

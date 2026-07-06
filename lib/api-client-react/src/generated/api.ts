@@ -32,6 +32,9 @@ import type {
   ContractorCategory,
   ContractorCategoryInput,
   ContractorMovementResponse,
+  CurrentJobsState,
+  CurrentJobsUpload,
+  CurrentJobsUploadResponse,
   DeleteAllResult,
   DeleteContractorCategoryParams,
   DeleteFabricationPriorityParams,
@@ -3544,6 +3547,232 @@ export const useDeleteInventoryManualE = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteInventoryManualEMutationOptions(options));
+    }
+
+export const getUploadCurrentJobsUrl = () => {
+
+
+
+
+  return `/api/current-jobs/upload`
+}
+
+/**
+ * Parses the first column of the first sheet as a plain list of project codes, normalizes them with the same rules used for WIP/Order Review project codes, and REPLACES the current list in full (not append). Matched/unmatched are computed against the latest WIP import UNION the latest Order Review import, for display only -- unmatched codes are still stored and still usable by the filter. Requires authentication. Purely additive: never touches WIP/Order Review parsing, hash/dedup identity, Activity, qty, or ageing.
+
+ * @summary Upload a "Current Jobs" list (project codes only)
+ */
+export const uploadCurrentJobs = async (currentJobsUpload: CurrentJobsUpload, options?: RequestInit): Promise<CurrentJobsUploadResponse> => {
+    const formData = new FormData();
+formData.append(`file`, currentJobsUpload.file);
+
+  return customFetch<CurrentJobsUploadResponse>(getUploadCurrentJobsUrl(),
+  {
+    ...options,
+    method: 'POST'
+    ,
+    body:
+      formData,
+  }
+);}
+
+
+
+
+export const getUploadCurrentJobsMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadCurrentJobs>>, TError,{data: BodyType<CurrentJobsUpload>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadCurrentJobs>>, TError,{data: BodyType<CurrentJobsUpload>}, TContext> => {
+
+const mutationKey = ['uploadCurrentJobs'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadCurrentJobs>>, {data: BodyType<CurrentJobsUpload>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  uploadCurrentJobs(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadCurrentJobsMutationResult = NonNullable<Awaited<ReturnType<typeof uploadCurrentJobs>>>
+    export type UploadCurrentJobsMutationBody = BodyType<CurrentJobsUpload>
+    export type UploadCurrentJobsMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Upload a "Current Jobs" list (project codes only)
+ */
+export const useUploadCurrentJobs = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadCurrentJobs>>, TError,{data: BodyType<CurrentJobsUpload>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof uploadCurrentJobs>>,
+        TError,
+        {data: BodyType<CurrentJobsUpload>},
+        TContext
+      > => {
+      return useMutation(getUploadCurrentJobsMutationOptions(options));
+    }
+
+export const getGetCurrentJobsUrl = () => {
+
+
+
+
+  return `/api/current-jobs`
+}
+
+/**
+ * Returns the persisted list of project codes (empty array if none uploaded or after a clear) plus provenance for the most recent upload. Public (read-only) -- drives the "Current Jobs" Job filter option.
+
+ * @summary Get the current "Current Jobs" list
+ */
+export const getCurrentJobs = async ( options?: RequestInit): Promise<CurrentJobsState> => {
+
+  return customFetch<CurrentJobsState>(getGetCurrentJobsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCurrentJobsQueryKey = () => {
+    return [
+    `/api/current-jobs`
+    ] as const;
+    }
+
+
+export const getGetCurrentJobsQueryOptions = <TData = Awaited<ReturnType<typeof getCurrentJobs>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCurrentJobs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCurrentJobsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCurrentJobs>>> = ({ signal }) => getCurrentJobs({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCurrentJobs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCurrentJobsQueryResult = NonNullable<Awaited<ReturnType<typeof getCurrentJobs>>>
+export type GetCurrentJobsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the current "Current Jobs" list
+ */
+
+export function useGetCurrentJobs<TData = Awaited<ReturnType<typeof getCurrentJobs>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCurrentJobs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCurrentJobsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getClearCurrentJobsUrl = () => {
+
+
+
+
+  return `/api/current-jobs`
+}
+
+/**
+ * Empties the current list (upload history/provenance is untouched). Requires authentication.
+
+ * @summary Clear the Current Jobs list
+ */
+export const clearCurrentJobs = async ( options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getClearCurrentJobsUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getClearCurrentJobsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearCurrentJobs>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof clearCurrentJobs>>, TError,void, TContext> => {
+
+const mutationKey = ['clearCurrentJobs'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearCurrentJobs>>, void> = () => {
+
+
+          return  clearCurrentJobs(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClearCurrentJobsMutationResult = NonNullable<Awaited<ReturnType<typeof clearCurrentJobs>>>
+
+    export type ClearCurrentJobsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Clear the Current Jobs list
+ */
+export const useClearCurrentJobs = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearCurrentJobs>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof clearCurrentJobs>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getClearCurrentJobsMutationOptions(options));
     }
 
 export const getGetImportChangesUrl = (id: number,) => {

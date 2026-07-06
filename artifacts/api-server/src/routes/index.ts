@@ -10,6 +10,7 @@ import fabricationPrioritiesRouter from "./fabricationPriorities";
 import orderStatusRouter from "./orderStatus";
 import adminRouter from "./admin";
 import inventoryRouter from "./inventory";
+import currentJobsRouter from "./currentJobs";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use(fabricationPrioritiesRouter);
 router.use(orderStatusRouter);
 router.use(adminRouter);
 router.use(inventoryRouter);
+router.use(currentJobsRouter);
 
 export default router;

@@ -1312,6 +1312,7 @@ export const GetImportSummaryBody = zod.object({
   "category": zod.string().describe('Order-type mode — \"ALL\" | \"TLT\" | \"NTLT\".'),
   "ntltSubtype": zod.string().nullish(),
   "job": zod.string().nullish(),
+  "jobIn": zod.array(zod.string()).nullish().describe('Set-membership job filter (\"Current Jobs\" mode). When present, checked INSTEAD of `job`.'),
   "section": zod.string().nullish(),
   "mfcBatch": zod.string().nullish(),
   "structure": zod.string().nullish(),
@@ -1811,6 +1812,44 @@ export const UpsertInventoryManualEResponse = zod.object({
 export const DeleteInventoryManualEQueryParams = zod.object({
   "id": zod.coerce.number()
 })
+
+
+/**
+ * Parses the first column of the first sheet as a plain list of project codes, normalizes them with the same rules used for WIP/Order Review project codes, and REPLACES the current list in full (not append). Matched/unmatched are computed against the latest WIP import UNION the latest Order Review import, for display only -- unmatched codes are still stored and still usable by the filter. Requires authentication. Purely additive: never touches WIP/Order Review parsing, hash/dedup identity, Activity, qty, or ageing.
+
+ * @summary Upload a "Current Jobs" list (project codes only)
+ */
+export const UploadCurrentJobsBody = zod.object({
+  "file": zod.instanceof(File)
+})
+
+export const UploadCurrentJobsResponse = zod.object({
+  "id": zod.number(),
+  "fileName": zod.string(),
+  "uploadedAt": zod.string(),
+  "codeCount": zod.number(),
+  "matchedCount": zod.number().describe('How many uploaded codes matched a project known to the latest WIP or Order Review import.'),
+  "unmatched": zod.array(zod.string()).describe('Uploaded codes that matched neither the latest WIP nor Order Review import. Still stored and still usable by the filter.'),
+  "codes": zod.array(zod.string())
+}).describe('Result of a Current Jobs upload -- the full replaced list plus provenance\/match info for the upload that produced it.\n')
+
+
+/**
+ * Returns the persisted list of project codes (empty array if none uploaded or after a clear) plus provenance for the most recent upload. Public (read-only) -- drives the "Current Jobs" Job filter option.
+
+ * @summary Get the current "Current Jobs" list
+ */
+export const GetCurrentJobsResponse = zod.object({
+  "codes": zod.array(zod.string()),
+  "meta": zod.object({
+  "id": zod.number(),
+  "fileName": zod.string(),
+  "uploadedAt": zod.string(),
+  "codeCount": zod.number(),
+  "matchedCount": zod.number(),
+  "unmatched": zod.array(zod.string())
+}).describe('Provenance for the most recent Current Jobs upload.').nullable()
+}).describe('The current Current Jobs list (empty if none uploaded or after a clear) plus provenance for the most recent upload.\n')
 
 
 /**

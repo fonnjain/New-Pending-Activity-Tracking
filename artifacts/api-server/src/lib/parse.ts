@@ -139,7 +139,7 @@ export function classifyMark(input: {
   return { classification: c, conflict };
 }
 
-function normalizeProject(value: Cell): string {
+export function normalizeProject(value: Cell): string {
   let s = cellToString(value);
   if (!s) return "";
   // "920.0" -> "920", "794." -> "794"
