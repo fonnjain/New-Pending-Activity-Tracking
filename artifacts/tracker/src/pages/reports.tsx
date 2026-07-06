@@ -9,6 +9,7 @@ import {
   fabLoadColumnsForSection,
   FAB_PRIORITIES,
   lifecycleStatus,
+  matchesContractorCategoryFilter,
   migrateTurnaroundSettings,
   normalizeActivity,
   routeIncludesOp,
@@ -1122,7 +1123,7 @@ export function ContractorPerformanceReport() {
       if (filters.contractor && contractorLabel(e.contractor) !== filters.contractor) return false;
       if (filters.contractorCategory) {
         const info = contractorCategoryFor(e.contractor, categoryMap);
-        if (info.category !== filters.contractorCategory) return false;
+        if (!matchesContractorCategoryFilter(info.category, filters.contractorCategory)) return false;
         if (filters.outVendorType && !info.outVendorType.includes(filters.outVendorType)) return false;
       }
 
