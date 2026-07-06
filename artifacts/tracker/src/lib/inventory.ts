@@ -254,6 +254,46 @@ export function aggregateProjectColumns(
   };
 }
 
+export interface BucketSummary {
+  releaseBalanceMt: number;
+  underProductionMt: number;
+  yardMt: number;
+  operationWeightMt: number;
+  grandTotalMt: number;
+}
+
+// Per-bucket footer summary (spec-mandated 5 lines). `clampRelease` is false
+// only for Bucket B (raw Col S, always > 0 there); true for C/D/E, whose
+// Total Release Balance is therefore always 0 (clamped max(0, S) summed).
+// Under Production = Sum(Fab + Galva); Total Yard = Sum(Col N); Operation
+// Weight = Under Production + Total Yard; Grand Total = Total Release
+// Balance + Operation Weight. Nulls contribute 0 (same as sumColumn).
+export function computeBucketSummary(
+  rows: InventoryStructureCard[],
+  clampRelease: boolean,
+): BucketSummary {
+  const releaseBalanceMt = sumColumn(rows, (r) =>
+    releaseBalanceDisplay(r.fileBalReleaseMt, clampRelease),
+  );
+  const underProductionMt = sumColumn(rows, (r) => fabPlusGalva(r.balFabMt, r.balGalvMt));
+  const yardMt = sumColumn(rows, (r) => r.galvMt);
+  const operationWeightMt = underProductionMt + yardMt;
+  const grandTotalMt = releaseBalanceMt + operationWeightMt;
+  return { releaseBalanceMt, underProductionMt, yardMt, operationWeightMt, grandTotalMt };
+}
+
+// Bucket E's summary sums the same five lines, but over the manually-added
+// projects' AGGREGATED Order Review values (aggregateProjectColumns already
+// applies the Release Balance clamp), not raw per-structure rows.
+export function computeManualESummary(aggregates: ProjectAggregate[]): BucketSummary {
+  const releaseBalanceMt = aggregates.reduce((s, a) => s + (a.releaseBalanceMt ?? 0), 0);
+  const underProductionMt = aggregates.reduce((s, a) => s + (a.fabGalvaMt ?? 0), 0);
+  const yardMt = aggregates.reduce((s, a) => s + (a.yardMt ?? 0), 0);
+  const operationWeightMt = underProductionMt + yardMt;
+  const grandTotalMt = releaseBalanceMt + operationWeightMt;
+  return { releaseBalanceMt, underProductionMt, yardMt, operationWeightMt, grandTotalMt };
+}
+
 export interface InventoryPageData {
   available: boolean;
   asOnDate: string | null;
@@ -294,8 +334,8 @@ export function useInventoryData(): InventoryPageData {
 
 export const BUCKET_LABELS: Record<"a" | "b" | "c" | "d" | "e", string> = {
   a: "Project to Start",
-  b: "In Progress (Balance Pending)",
-  c: "Balance Complete / Nil",
-  d: "New Inspection Booked",
-  e: "Material Ready, Not Dispatched",
+  b: "Raw Material Incomplete",
+  c: "RM Complete \u2013 Material Under Production",
+  d: "Dispatch Clearance Recd But Production Not Complete",
+  e: "Material Ready But Not Dispatched",
 };

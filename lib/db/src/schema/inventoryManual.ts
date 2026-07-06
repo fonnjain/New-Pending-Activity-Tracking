@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, doublePrecision } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -15,6 +15,12 @@ import { z } from "zod/v4";
 export const inventoryManualATable = pgTable("inventory_manual_a", {
   id: serial("id").primaryKey(),
   projectCode: text("project_code").notNull(),
+  // Work Order Qty weight (MT), manually typed. Bucket A projects are BRAND
+  // NEW (not in WIP or Order Review yet), so nothing can be auto-filled --
+  // the user types the project's WO Order Qty weight directly. Drives the
+  // single Bucket A summary line ("Under Production Weight" = sum across all
+  // A entries). Not used by Bucket E (E aggregates real Order Review data).
+  woOrderQtyMt: doublePrecision("wo_order_qty_mt"),
   side: text("side").notNull(),
   note: text("note"),
   createdAt: timestamp("created_at", { withTimezone: true })

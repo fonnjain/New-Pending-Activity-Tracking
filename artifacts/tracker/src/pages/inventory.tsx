@@ -20,12 +20,16 @@ import {
   fabPlusGalva,
   sumColumnOrNull,
   aggregateProjectColumns,
+  computeBucketSummary,
+  computeManualESummary,
   type InventoryStructureCard,
   type InventorySide,
+  type BucketSummary,
 } from "@/lib/inventory";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Segmented } from "@/components/ui/segmented";
 import { Boxes, ChevronRight, ChevronDown, Trash2, AlertTriangle } from "lucide-react";
@@ -96,18 +100,46 @@ const BUCKET_CD_COLUMNS: ColumnDef[] = [
   YARD_COLUMN,
 ];
 
+// Five-line footer shown on every side of Buckets B/C/D/E (spec-mandated).
+// Total Release Balance, Under Production (Fab+Galva), Total Yard, Operation
+// Weight (Under Production + Yard), Grand Total (Release Balance + Operation).
+// Shown PER SIDE (not combined) because mixed structures legitimately appear
+// on both sides, so a naive combined total would double-count them.
+function SummaryFooter({ summary }: { summary: BucketSummary }) {
+  const lines: [string, number][] = [
+    ["Total Release Balance", summary.releaseBalanceMt],
+    ["Under Production", summary.underProductionMt],
+    ["Total Yard", summary.yardMt],
+    ["Operation Weight", summary.operationWeightMt],
+    ["Grand Total Weight", summary.grandTotalMt],
+  ];
+  return (
+    <div className="px-3 py-2 border-t bg-muted/20 space-y-0.5">
+      {lines.map(([label, value]) => (
+        <div key={label} className="flex items-center justify-between text-[11px]">
+          <span className="text-muted-foreground">{label}</span>
+          <span className="tabular-nums font-medium">{mt(value)} MT</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AutoBucketSide({
   side,
   rows,
   columns,
+  clampRelease,
 }: {
   side: InventorySide;
   rows: InventoryStructureCard[];
   columns: ColumnDef[];
+  clampRelease: boolean;
 }) {
   const groups = useMemo(() => groupByProject(rows), [rows]);
   const totalWeight = groups.reduce((s, g) => s + g.weightMt, 0);
   const totalCount = groups.reduce((s, g) => s + g.count, 0);
+  const summary = useMemo(() => computeBucketSummary(rows, clampRelease), [rows, clampRelease]);
 
   return (
     <div className="border rounded-md">
@@ -130,6 +162,7 @@ function AutoBucketSide({
           ))
         )}
       </div>
+      <SummaryFooter summary={summary} />
     </div>
   );
 }
@@ -213,12 +246,14 @@ function ManualEntryList({
   canEdit,
   deletingId,
   rawRows,
+  showWeight,
 }: {
   entries: InventoryManualEntry[];
   onDelete: (id: number) => void;
   canEdit: boolean;
   deletingId: number | null;
   rawRows?: Parameters<typeof aggregateProjectColumns>[0];
+  showWeight?: boolean;
 }) {
   if (entries.length === 0) {
     return <div className="py-4 text-center text-xs text-muted-foreground">No entries.</div>;
@@ -232,6 +267,11 @@ function ManualEntryList({
             <div className="flex items-center justify-between">
               <span className="truncate">{e.projectCode}</span>
               <div className="flex items-center gap-2 shrink-0">
+                {showWeight && (
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {mt(e.woOrderQtyMt)} MT
+                  </span>
+                )}
                 {e.note && <span className="text-xs text-muted-foreground">{e.note}</span>}
                 {canEdit && (
                   <Button
@@ -274,6 +314,8 @@ function ManualBucketSide({
   canEdit,
   deletingId,
   rawRows,
+  showWeight,
+  summary,
 }: {
   side: InventorySide;
   entries: InventoryManualEntry[];
@@ -281,6 +323,8 @@ function ManualBucketSide({
   canEdit: boolean;
   deletingId: number | null;
   rawRows?: Parameters<typeof aggregateProjectColumns>[0];
+  showWeight?: boolean;
+  summary?: BucketSummary;
 }) {
   const filtered = entries.filter((e) => e.side === side);
   return (
@@ -299,7 +343,9 @@ function ManualBucketSide({
         canEdit={canEdit}
         deletingId={deletingId}
         rawRows={rawRows}
+        showWeight={showWeight}
       />
+      {summary && <SummaryFooter summary={summary} />}
     </div>
   );
 }
@@ -312,28 +358,39 @@ function ManualAddForm({
 }: {
   mode: "a" | "e";
   knownProjects: string[];
-  onAdd: (projectCode: string, side: InventorySide) => void;
+  onAdd: (projectCode: string, side: InventorySide, woOrderQtyMt: number | null) => void;
   isPending: boolean;
 }) {
   const [projectCode, setProjectCode] = useState("");
   const [side, setSide] = useState<InventorySide>("in_house");
+  const [woOrderQtyMt, setWoOrderQtyMt] = useState<number | "">("");
 
   const submit = () => {
     const code = projectCode.trim();
     if (!code) return;
-    onAdd(code, side);
+    if (mode === "a" && woOrderQtyMt === "") return;
+    onAdd(code, side, mode === "a" ? (woOrderQtyMt as number) : null);
     setProjectCode("");
+    setWoOrderQtyMt("");
   };
 
   return (
     <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b">
       {mode === "a" ? (
-        <Input
-          placeholder="Project code"
-          value={projectCode}
-          onChange={(e) => setProjectCode(e.target.value)}
-          className="h-8 w-40"
-        />
+        <>
+          <Input
+            placeholder="Project code"
+            value={projectCode}
+            onChange={(e) => setProjectCode(e.target.value)}
+            className="h-8 w-40"
+          />
+          <NumberInput
+            placeholder="WO Qty (MT)"
+            value={woOrderQtyMt}
+            onValueChange={(raw) => setWoOrderQtyMt(raw === "" ? "" : Number(raw))}
+            className="h-8 w-28"
+          />
+        </>
       ) : (
         <div className="w-52">
           <SearchableSelect
@@ -352,7 +409,12 @@ function ManualAddForm({
           { value: "out_vendor", label: "Out-Vendor" },
         ]}
       />
-      <Button size="sm" className="h-8" disabled={!projectCode.trim() || isPending} onClick={submit}>
+      <Button
+        size="sm"
+        className="h-8"
+        disabled={!projectCode.trim() || (mode === "a" && woOrderQtyMt === "") || isPending}
+        onClick={submit}
+      >
         Add
       </Button>
     </div>
@@ -390,9 +452,9 @@ export default function InventoryView() {
   const [deletingAId, setDeletingAId] = useState<number | null>(null);
   const [deletingEId, setDeletingEId] = useState<number | null>(null);
 
-  const addA = (projectCode: string, side: InventorySide) => {
+  const addA = (projectCode: string, side: InventorySide, woOrderQtyMt: number | null) => {
     upsertA.mutate(
-      { data: { projectCode, side } },
+      { data: { projectCode, side, woOrderQtyMt } },
       { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListInventoryManualAQueryKey() }) },
     );
   };
@@ -414,6 +476,28 @@ export default function InventoryView() {
       { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListInventoryManualEQueryKey() }) },
     );
   };
+  const addESlot = (projectCode: string, side: InventorySide, _woOrderQtyMt: number | null) =>
+    addE(projectCode, side);
+
+  const manualAWeightSum = manualA.reduce((s, e) => s + (e.woOrderQtyMt ?? 0), 0);
+  const manualEInHouseSummary = useMemo(
+    () =>
+      computeManualESummary(
+        manualE
+          .filter((e) => e.side === "in_house")
+          .map((e) => aggregateProjectColumns(rawRows, e.projectCode)),
+      ),
+    [manualE, rawRows],
+  );
+  const manualEOutVendorSummary = useMemo(
+    () =>
+      computeManualESummary(
+        manualE
+          .filter((e) => e.side === "out_vendor")
+          .map((e) => aggregateProjectColumns(rawRows, e.projectCode)),
+      ),
+    [manualE, rawRows],
+  );
   const removeE = (id: number) => {
     setDeletingEId(id);
     deleteE.mutate(
@@ -486,8 +570,12 @@ export default function InventoryView() {
             <ManualAddForm mode="a" knownProjects={knownProjects} onAdd={addA} isPending={upsertA.isPending} />
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <ManualBucketSide side="in_house" entries={manualA} onDelete={removeA} canEdit={canEdit} deletingId={deletingAId} />
-            <ManualBucketSide side="out_vendor" entries={manualA} onDelete={removeA} canEdit={canEdit} deletingId={deletingAId} />
+            <ManualBucketSide side="in_house" entries={manualA} onDelete={removeA} canEdit={canEdit} deletingId={deletingAId} showWeight />
+            <ManualBucketSide side="out_vendor" entries={manualA} onDelete={removeA} canEdit={canEdit} deletingId={deletingAId} showWeight />
+          </div>
+          <div className="flex items-center justify-between text-xs px-1">
+            <span className="text-muted-foreground">Under Production Weight</span>
+            <span className="tabular-nums font-medium">{mt(manualAWeightSum)} MT</span>
           </div>
         </CardContent>
       </Card>
@@ -502,8 +590,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide side="in_house" rows={bInHouse} columns={BUCKET_B_COLUMNS} />
-              <AutoBucketSide side="out_vendor" rows={bOutVendor} columns={BUCKET_B_COLUMNS} />
+              <AutoBucketSide side="in_house" rows={bInHouse} columns={BUCKET_B_COLUMNS} clampRelease={false} />
+              <AutoBucketSide side="out_vendor" rows={bOutVendor} columns={BUCKET_B_COLUMNS} clampRelease={false} />
             </div>
           )}
         </CardContent>
@@ -519,8 +607,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide side="in_house" rows={cInHouse} columns={BUCKET_CD_COLUMNS} />
-              <AutoBucketSide side="out_vendor" rows={cOutVendor} columns={BUCKET_CD_COLUMNS} />
+              <AutoBucketSide side="in_house" rows={cInHouse} columns={BUCKET_CD_COLUMNS} clampRelease />
+              <AutoBucketSide side="out_vendor" rows={cOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease />
             </div>
           )}
         </CardContent>
@@ -536,8 +624,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide side="in_house" rows={dInHouse} columns={BUCKET_CD_COLUMNS} />
-              <AutoBucketSide side="out_vendor" rows={dOutVendor} columns={BUCKET_CD_COLUMNS} />
+              <AutoBucketSide side="in_house" rows={dInHouse} columns={BUCKET_CD_COLUMNS} clampRelease />
+              <AutoBucketSide side="out_vendor" rows={dOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease />
             </div>
           )}
         </CardContent>
@@ -550,11 +638,11 @@ export default function InventoryView() {
         </CardHeader>
         <CardContent className="space-y-3">
           {canEdit && (
-            <ManualAddForm mode="e" knownProjects={knownProjects} onAdd={addE} isPending={upsertE.isPending} />
+            <ManualAddForm mode="e" knownProjects={knownProjects} onAdd={addESlot} isPending={upsertE.isPending} />
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <ManualBucketSide side="in_house" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} rawRows={rawRows} />
-            <ManualBucketSide side="out_vendor" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} rawRows={rawRows} />
+            <ManualBucketSide side="in_house" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} rawRows={rawRows} summary={manualEInHouseSummary} />
+            <ManualBucketSide side="out_vendor" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} rawRows={rawRows} summary={manualEOutVendorSummary} />
           </div>
         </CardContent>
       </Card>

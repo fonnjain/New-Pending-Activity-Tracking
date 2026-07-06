@@ -1723,6 +1723,7 @@ export const GetInventoryBucketsResponse = zod.object({
 export const ListInventoryManualAResponseItem = zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
+  "woOrderQtyMt": zod.number().nullable().describe('Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries.'),
   "side": zod.enum(['in_house', 'out_vendor']),
   "note": zod.string().nullable(),
   "createdAt": zod.string()
@@ -1738,6 +1739,7 @@ export const ListInventoryManualAResponse = zod.array(ListInventoryManualARespon
 export const UpsertInventoryManualABody = zod.object({
   "id": zod.number().optional().describe('Omit to insert a new entry; supply to update an existing one.'),
   "projectCode": zod.string(),
+  "woOrderQtyMt": zod.number().nullish().describe('Bucket A only -- manually typed Work Order Qty weight (MT). Ignored for Bucket E entries.'),
   "side": zod.enum(['in_house', 'out_vendor']),
   "note": zod.string().nullish()
 })
@@ -1745,6 +1747,7 @@ export const UpsertInventoryManualABody = zod.object({
 export const UpsertInventoryManualAResponse = zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
+  "woOrderQtyMt": zod.number().nullable().describe('Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries.'),
   "side": zod.enum(['in_house', 'out_vendor']),
   "note": zod.string().nullable(),
   "createdAt": zod.string()
@@ -1769,6 +1772,7 @@ export const DeleteInventoryManualAQueryParams = zod.object({
 export const ListInventoryManualEResponseItem = zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
+  "woOrderQtyMt": zod.number().nullable().describe('Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries.'),
   "side": zod.enum(['in_house', 'out_vendor']),
   "note": zod.string().nullable(),
   "createdAt": zod.string()
@@ -1784,6 +1788,7 @@ export const ListInventoryManualEResponse = zod.array(ListInventoryManualERespon
 export const UpsertInventoryManualEBody = zod.object({
   "id": zod.number().optional().describe('Omit to insert a new entry; supply to update an existing one.'),
   "projectCode": zod.string(),
+  "woOrderQtyMt": zod.number().nullish().describe('Bucket A only -- manually typed Work Order Qty weight (MT). Ignored for Bucket E entries.'),
   "side": zod.enum(['in_house', 'out_vendor']),
   "note": zod.string().nullish()
 })
@@ -1791,6 +1796,7 @@ export const UpsertInventoryManualEBody = zod.object({
 export const UpsertInventoryManualEResponse = zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
+  "woOrderQtyMt": zod.number().nullable().describe('Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries.'),
   "side": zod.enum(['in_house', 'out_vendor']),
   "note": zod.string().nullable(),
   "createdAt": zod.string()

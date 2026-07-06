@@ -1019,6 +1019,8 @@ export const InventoryManualEntrySide = {
 export interface InventoryManualEntry {
   id: number;
   projectCode: string;
+  /** Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries. */
+  woOrderQtyMt: number | null;
   side: InventoryManualEntrySide;
   note: string | null;
   createdAt: string;
@@ -1036,6 +1038,8 @@ export interface InventoryManualEntryInput {
   /** Omit to insert a new entry; supply to update an existing one. */
   id?: number;
   projectCode: string;
+  /** Bucket A only -- manually typed Work Order Qty weight (MT). Ignored for Bucket E entries. */
+  woOrderQtyMt?: number | null;
   side: InventoryManualEntryInputSide;
   note?: string | null;
 }

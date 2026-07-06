@@ -2479,6 +2479,10 @@ components:
           type: integer
         projectCode:
           type: string
+        woOrderQtyMt:
+          type: number
+          nullable: true
+          description: Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries.
         side:
           type: string
           enum: [in_house, out_vendor]
@@ -2490,6 +2494,7 @@ components:
       required:
         - id
         - projectCode
+        - woOrderQtyMt
         - side
         - note
         - createdAt
@@ -2501,6 +2506,10 @@ components:
           description: Omit to insert a new entry; supply to update an existing one.
         projectCode:
           type: string
+        woOrderQtyMt:
+          type: number
+          nullable: true
+          description: Bucket A only -- manually typed Work Order Qty weight (MT). Ignored for Bucket E entries.
         side:
           type: string
           enum: [in_house, out_vendor]

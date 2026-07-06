@@ -134,6 +134,7 @@ router.put("/inventory-manual/a", requireAuth, async (req, res): Promise<void> =
   }
   const values = {
     projectCode,
+    woOrderQtyMt: parsed.data.woOrderQtyMt ?? null,
     side: parsed.data.side,
     note: parsed.data.note ?? null,
   };
