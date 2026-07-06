@@ -9,6 +9,7 @@ import contractorCategoriesRouter from "./contractorCategories";
 import fabricationPrioritiesRouter from "./fabricationPriorities";
 import orderStatusRouter from "./orderStatus";
 import adminRouter from "./admin";
+import inventoryRouter from "./inventory";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(contractorCategoriesRouter);
 router.use(fabricationPrioritiesRouter);
 router.use(orderStatusRouter);
 router.use(adminRouter);
+router.use(inventoryRouter);
 
 export default router;

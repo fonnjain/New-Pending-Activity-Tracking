@@ -13,3 +13,4 @@ export * from "./fabricationPriorities";
 export * from "./orderReview";
 export * from "./accumulatedWip";
 export * from "./contractorMovement";
+export * from "./inventoryManual";

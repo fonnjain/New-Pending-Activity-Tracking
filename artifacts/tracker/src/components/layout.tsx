@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
-import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon } from "lucide-react";
+import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes } from "lucide-react";
 import { useTracker, dateRangeWindow } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
@@ -234,6 +234,7 @@ const navItems: NavItem[] = [
   { href: "/contractor", icon: Users, label: "Contractor Wise", short: "Contractors" },
   { href: "/plant", icon: Factory, label: "Plant Operation Wise", short: "Plant Ops" },
   { href: "/order-status", icon: PackageCheck, label: "Order Status", short: "Orders" },
+  { href: "/inventory", icon: Boxes, label: "Inventory", short: "Inventory" },
   { href: "/reports", icon: FileText, label: "Reports", short: "Reports" },
   { href: "/turnaround", icon: Timer, label: "Turn Around Time", short: "Turnaround" },
   { href: "/stuck", icon: Gauge, label: "Stuck Projects", short: "Stuck" },

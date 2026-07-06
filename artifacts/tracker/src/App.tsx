@@ -18,6 +18,7 @@ import PlantOperationView from "@/pages/plant-operation";
 import DataView from "@/pages/data";
 import ReportsView from "@/pages/reports";
 import OrderStatusView from "@/pages/order-status";
+import InventoryView from "@/pages/inventory";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +40,7 @@ function ProductionTracker() {
         <Route path="/turnaround" component={TurnaroundView} />
         <Route path="/stuck" component={StuckProjectsView} />
         <Route path="/order-status" component={OrderStatusView} />
+        <Route path="/inventory" component={InventoryView} />
         <Route path="/jobs" component={JobDashboard} />
         <Route path="/activity" component={ActivityView} />
         <Route path="/contractor" component={ContractorView} />

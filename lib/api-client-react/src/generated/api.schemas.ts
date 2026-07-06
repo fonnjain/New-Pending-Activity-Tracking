@@ -973,6 +973,68 @@ export interface FabricationPriorityInput {
 }
 
 /**
+ * One (project, structure) row from the latest Order Review snapshot, joined to the distinct contractors touching that structure in the newest WIP import. Raw only — the client derives B/C/D membership and in-house/out-vendor sides from these fields.
+
+ */
+export interface InventoryBucketRow {
+  project: string;
+  structure: string | null;
+  subType: string | null;
+  weightMt: number | null;
+  woOrderQtyMt: number | null;
+  /** Balance -> Release (Col S). Drives Bucket B (>0) / Bucket C (<=0). */
+  fileBalReleaseMt: number | null;
+  /** Progress -> Inspection (Col O). Drives Bucket D (>0). */
+  inspectionMt: number | null;
+  /** Distinct contractor names touching this structure in the newest WIP import. */
+  contractors: string[];
+  /** True when this row was last touched by an earlier Order Review upload, not the newest one. */
+  notInLatest: boolean;
+}
+
+export interface InventoryBucketsResponse {
+  available: boolean;
+  asOnDate: string | null;
+  rows: InventoryBucketRow[];
+}
+
+export type InventoryManualEntrySide = typeof InventoryManualEntrySide[keyof typeof InventoryManualEntrySide];
+
+
+export const InventoryManualEntrySide = {
+  in_house: 'in_house',
+  out_vendor: 'out_vendor',
+} as const;
+
+/**
+ * One persisted manual entry for Inventory Bucket A ("Project to Start") or Bucket E ("Material Ready But Not Dispatched"). Never derived; never cleared by a WIP or Order Review re-upload.
+
+ */
+export interface InventoryManualEntry {
+  id: number;
+  projectCode: string;
+  side: InventoryManualEntrySide;
+  note: string | null;
+  createdAt: string;
+}
+
+export type InventoryManualEntryInputSide = typeof InventoryManualEntryInputSide[keyof typeof InventoryManualEntryInputSide];
+
+
+export const InventoryManualEntryInputSide = {
+  in_house: 'in_house',
+  out_vendor: 'out_vendor',
+} as const;
+
+export interface InventoryManualEntryInput {
+  /** Omit to insert a new entry; supply to update an existing one. */
+  id?: number;
+  projectCode: string;
+  side: InventoryManualEntryInputSide;
+  note?: string | null;
+}
+
+/**
  * Global ("All Projects") per-activity config keyed by canonical activity code (PROCESS_SEQUENCE). This is the TLT category.
  */
 export type TurnaroundSettingsActivities = {[key: string]: ActivityConfig};
@@ -1734,5 +1796,13 @@ all?: boolean;
 export type CompareImportsParams = {
 from: number;
 to: number;
+};
+
+export type DeleteInventoryManualAParams = {
+id: number;
+};
+
+export type DeleteInventoryManualEParams = {
+id: number;
 };
 

@@ -35,6 +35,8 @@ import type {
   DeleteAllResult,
   DeleteContractorCategoryParams,
   DeleteFabricationPriorityParams,
+  DeleteInventoryManualAParams,
+  DeleteInventoryManualEParams,
   DeleteManualThicknessParams,
   DeleteRsjThicknessParams,
   ErrorResponse,
@@ -44,6 +46,9 @@ import type {
   Import,
   ImportSummary,
   ImportUpload,
+  InventoryBucketsResponse,
+  InventoryManualEntry,
+  InventoryManualEntryInput,
   ListImportsParams,
   ManualThickness,
   ManualThicknessInput,
@@ -2998,6 +3003,547 @@ export const useDeleteOrderImport = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getDeleteOrderImportMutationOptions(options));
+    }
+
+export const getGetInventoryBucketsUrl = () => {
+
+
+
+
+  return `/api/inventory/buckets`
+}
+
+/**
+ * Returns one row per (project, structure) from the latest Order Review snapshot, each carrying the two driving numbers (fileBalReleaseMt = Balance->Release Col S, inspectionMt = Progress->Inspection Col O) plus the distinct contractor names touching that structure in the newest WIP import. Server work is kept to this join only — the B/C/D numeric filters, null-exclusion flagging, and in-house/out-vendor side classification (contractor_categories + hardcoded name overrides) are computed client-side so the page's own filters stay in sync with the rest of the app. Purely additive and read-only; available:false when no Order Review file has been ingested yet.
+
+ * @summary Get the raw rows behind the Inventory page's auto buckets (B/C/D)
+ */
+export const getInventoryBuckets = async ( options?: RequestInit): Promise<InventoryBucketsResponse> => {
+
+  return customFetch<InventoryBucketsResponse>(getGetInventoryBucketsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetInventoryBucketsQueryKey = () => {
+    return [
+    `/api/inventory/buckets`
+    ] as const;
+    }
+
+
+export const getGetInventoryBucketsQueryOptions = <TData = Awaited<ReturnType<typeof getInventoryBuckets>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInventoryBuckets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetInventoryBucketsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getInventoryBuckets>>> = ({ signal }) => getInventoryBuckets({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getInventoryBuckets>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetInventoryBucketsQueryResult = NonNullable<Awaited<ReturnType<typeof getInventoryBuckets>>>
+export type GetInventoryBucketsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the raw rows behind the Inventory page's auto buckets (B/C/D)
+ */
+
+export function useGetInventoryBuckets<TData = Awaited<ReturnType<typeof getInventoryBuckets>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInventoryBuckets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetInventoryBucketsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListInventoryManualAUrl = () => {
+
+
+
+
+  return `/api/inventory-manual/a`
+}
+
+/**
+ * Returns the persisted Bucket A list (free-text project entries the user maintains directly on the Inventory page). Survives re-uploads of both WIP and Order Review files. Public (read-only).
+
+ * @summary List manual Bucket A ("Project to Start") entries
+ */
+export const listInventoryManualA = async ( options?: RequestInit): Promise<InventoryManualEntry[]> => {
+
+  return customFetch<InventoryManualEntry[]>(getListInventoryManualAUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListInventoryManualAQueryKey = () => {
+    return [
+    `/api/inventory-manual/a`
+    ] as const;
+    }
+
+
+export const getListInventoryManualAQueryOptions = <TData = Awaited<ReturnType<typeof listInventoryManualA>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventoryManualA>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListInventoryManualAQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInventoryManualA>>> = ({ signal }) => listInventoryManualA({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listInventoryManualA>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListInventoryManualAQueryResult = NonNullable<Awaited<ReturnType<typeof listInventoryManualA>>>
+export type ListInventoryManualAQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manual Bucket A ("Project to Start") entries
+ */
+
+export function useListInventoryManualA<TData = Awaited<ReturnType<typeof listInventoryManualA>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventoryManualA>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListInventoryManualAQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpsertInventoryManualAUrl = () => {
+
+
+
+
+  return `/api/inventory-manual/a`
+}
+
+/**
+ * Inserts a new Bucket A entry, or updates one in place when `id` is supplied. Requires authentication.
+
+ * @summary Add or update a manual Bucket A entry
+ */
+export const upsertInventoryManualA = async (inventoryManualEntryInput: InventoryManualEntryInput, options?: RequestInit): Promise<InventoryManualEntry> => {
+
+  return customFetch<InventoryManualEntry>(getUpsertInventoryManualAUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      inventoryManualEntryInput,)
+  }
+);}
+
+
+
+
+export const getUpsertInventoryManualAMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryManualA>>, TError,{data: BodyType<InventoryManualEntryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryManualA>>, TError,{data: BodyType<InventoryManualEntryInput>}, TContext> => {
+
+const mutationKey = ['upsertInventoryManualA'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertInventoryManualA>>, {data: BodyType<InventoryManualEntryInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  upsertInventoryManualA(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpsertInventoryManualAMutationResult = NonNullable<Awaited<ReturnType<typeof upsertInventoryManualA>>>
+    export type UpsertInventoryManualAMutationBody = BodyType<InventoryManualEntryInput>
+    export type UpsertInventoryManualAMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Add or update a manual Bucket A entry
+ */
+export const useUpsertInventoryManualA = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryManualA>>, TError,{data: BodyType<InventoryManualEntryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof upsertInventoryManualA>>,
+        TError,
+        {data: BodyType<InventoryManualEntryInput>},
+        TContext
+      > => {
+      return useMutation(getUpsertInventoryManualAMutationOptions(options));
+    }
+
+export const getDeleteInventoryManualAUrl = (params: DeleteInventoryManualAParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/inventory-manual/a?${stringifiedParams}` : `/api/inventory-manual/a`
+}
+
+/**
+ * Removes one Bucket A entry by id. Requires authentication.
+
+ * @summary Remove a manual Bucket A entry
+ */
+export const deleteInventoryManualA = async (params: DeleteInventoryManualAParams, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteInventoryManualAUrl(params),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteInventoryManualAMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryManualA>>, TError,{params: DeleteInventoryManualAParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryManualA>>, TError,{params: DeleteInventoryManualAParams}, TContext> => {
+
+const mutationKey = ['deleteInventoryManualA'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteInventoryManualA>>, {params: DeleteInventoryManualAParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  deleteInventoryManualA(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteInventoryManualAMutationResult = NonNullable<Awaited<ReturnType<typeof deleteInventoryManualA>>>
+
+    export type DeleteInventoryManualAMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove a manual Bucket A entry
+ */
+export const useDeleteInventoryManualA = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryManualA>>, TError,{params: DeleteInventoryManualAParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteInventoryManualA>>,
+        TError,
+        {params: DeleteInventoryManualAParams},
+        TContext
+      > => {
+      return useMutation(getDeleteInventoryManualAMutationOptions(options));
+    }
+
+export const getListInventoryManualEUrl = () => {
+
+
+
+
+  return `/api/inventory-manual/e`
+}
+
+/**
+ * Returns the persisted Bucket E list (dropdown-picked project entries the user maintains directly on the Inventory page). Survives re-uploads of both WIP and Order Review files. Public (read-only).
+
+ * @summary List manual Bucket E ("Material Ready But Not Dispatched") entries
+ */
+export const listInventoryManualE = async ( options?: RequestInit): Promise<InventoryManualEntry[]> => {
+
+  return customFetch<InventoryManualEntry[]>(getListInventoryManualEUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListInventoryManualEQueryKey = () => {
+    return [
+    `/api/inventory-manual/e`
+    ] as const;
+    }
+
+
+export const getListInventoryManualEQueryOptions = <TData = Awaited<ReturnType<typeof listInventoryManualE>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventoryManualE>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListInventoryManualEQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInventoryManualE>>> = ({ signal }) => listInventoryManualE({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listInventoryManualE>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListInventoryManualEQueryResult = NonNullable<Awaited<ReturnType<typeof listInventoryManualE>>>
+export type ListInventoryManualEQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manual Bucket E ("Material Ready But Not Dispatched") entries
+ */
+
+export function useListInventoryManualE<TData = Awaited<ReturnType<typeof listInventoryManualE>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventoryManualE>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListInventoryManualEQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpsertInventoryManualEUrl = () => {
+
+
+
+
+  return `/api/inventory-manual/e`
+}
+
+/**
+ * Inserts a new Bucket E entry, or updates one in place when `id` is supplied. Requires authentication.
+
+ * @summary Add or update a manual Bucket E entry
+ */
+export const upsertInventoryManualE = async (inventoryManualEntryInput: InventoryManualEntryInput, options?: RequestInit): Promise<InventoryManualEntry> => {
+
+  return customFetch<InventoryManualEntry>(getUpsertInventoryManualEUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      inventoryManualEntryInput,)
+  }
+);}
+
+
+
+
+export const getUpsertInventoryManualEMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryManualE>>, TError,{data: BodyType<InventoryManualEntryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryManualE>>, TError,{data: BodyType<InventoryManualEntryInput>}, TContext> => {
+
+const mutationKey = ['upsertInventoryManualE'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertInventoryManualE>>, {data: BodyType<InventoryManualEntryInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  upsertInventoryManualE(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpsertInventoryManualEMutationResult = NonNullable<Awaited<ReturnType<typeof upsertInventoryManualE>>>
+    export type UpsertInventoryManualEMutationBody = BodyType<InventoryManualEntryInput>
+    export type UpsertInventoryManualEMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Add or update a manual Bucket E entry
+ */
+export const useUpsertInventoryManualE = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryManualE>>, TError,{data: BodyType<InventoryManualEntryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof upsertInventoryManualE>>,
+        TError,
+        {data: BodyType<InventoryManualEntryInput>},
+        TContext
+      > => {
+      return useMutation(getUpsertInventoryManualEMutationOptions(options));
+    }
+
+export const getDeleteInventoryManualEUrl = (params: DeleteInventoryManualEParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/inventory-manual/e?${stringifiedParams}` : `/api/inventory-manual/e`
+}
+
+/**
+ * Removes one Bucket E entry by id. Requires authentication.
+
+ * @summary Remove a manual Bucket E entry
+ */
+export const deleteInventoryManualE = async (params: DeleteInventoryManualEParams, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteInventoryManualEUrl(params),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteInventoryManualEMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryManualE>>, TError,{params: DeleteInventoryManualEParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryManualE>>, TError,{params: DeleteInventoryManualEParams}, TContext> => {
+
+const mutationKey = ['deleteInventoryManualE'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteInventoryManualE>>, {params: DeleteInventoryManualEParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  deleteInventoryManualE(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteInventoryManualEMutationResult = NonNullable<Awaited<ReturnType<typeof deleteInventoryManualE>>>
+
+    export type DeleteInventoryManualEMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove a manual Bucket E entry
+ */
+export const useDeleteInventoryManualE = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryManualE>>, TError,{params: DeleteInventoryManualEParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteInventoryManualE>>,
+        TError,
+        {params: DeleteInventoryManualEParams},
+        TContext
+      > => {
+      return useMutation(getDeleteInventoryManualEMutationOptions(options));
     }
 
 export const getGetImportChangesUrl = (id: number,) => {

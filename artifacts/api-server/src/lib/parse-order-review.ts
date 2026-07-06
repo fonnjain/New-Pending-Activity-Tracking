@@ -29,6 +29,8 @@ export interface ParsedOrderReviewRow {
   releaseMt: number | null;
   fabMt: number | null;
   galvMt: number | null;
+  // Progress Inspection (MT) — col O.
+  inspectionMt: number | null;
   fileDespatchMt: number | null;
   // File-stated balances: Balance Release (col S), Balance Despatch (col W).
   fileBalReleaseMt: number | null;
@@ -186,6 +188,7 @@ interface ColumnIndex {
   releaseMt: number;
   fabMt: number;
   galvMt: number;
+  inspectionMt: number;
   fileDespatchMt: number;
   fileBalReleaseMt: number;
   fileBalDespatchMt: number;
@@ -223,6 +226,7 @@ const HEADER_SPECS: HeaderSpec[] = [
   { key: "releaseMt", include: [["progress", "release"], ["release"]], exclude: ["balance"], fallback: 11 },
   { key: "fabMt", include: [["progress", "fabrication"], ["fabrication (mt)"], ["fabrication"]], exclude: ["balance", "work order", "wo"], fallback: 12 },
   { key: "galvMt", include: [["progress", "galvanis"], ["galvanising (mt)"], ["galvanizing (mt)"], ["galvanis"]], exclude: ["balance", "work order", "wo"], fallback: 13 },
+  { key: "inspectionMt", include: [["progress", "inspection"], ["inspection (mt)"], ["inspection"]], exclude: ["balance", "work order", "wo"], fallback: 14 },
   { key: "fileDespatchMt", include: [["progress", "despatch"], ["progress", "dispatch"], ["despatch"], ["dispatch"]], exclude: ["balance"], fallback: 16 },
   // File-stated balances (col S / col W). These are the ONLY specs that require a
   // "balance" term; every other measure spec excludes it, so there is no overlap.
@@ -459,6 +463,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     const releaseMt = toNumber(cells[cols.releaseMt] as Cell);
     const fabMt = toNumber(cells[cols.fabMt] as Cell);
     const galvMt = toNumber(cells[cols.galvMt] as Cell);
+    const inspectionMt = toNumber(cells[cols.inspectionMt] as Cell);
     const fileDespatchMt = toNumber(cells[cols.fileDespatchMt] as Cell);
     const fileBalReleaseMt = toNumber(cells[cols.fileBalReleaseMt] as Cell);
     const fileBalDespatchMt = toNumber(cells[cols.fileBalDespatchMt] as Cell);
@@ -478,6 +483,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
       releaseMt,
       fabMt,
       galvMt,
+      inspectionMt,
       fileDespatchMt,
       fileBalReleaseMt,
       fileBalDespatchMt,

@@ -1,0 +1,258 @@
+TASK: Add a new "Inventory" page — a 5-bucket board (A–E) of Projects/Structures.
+
+=====================================================================
+CONTEXT (read before coding)
+=====================================================================
+This is the VTPL Balance & Activity Tracker. The deterministic engine is
+authoritative; nothing here may change parsing, Activity values, qty, dedup/hash
+identity, or ageing math. This feature is STRICTLY ADDITIVE and READ-ONLY over
+existing data (it only READS order_review_rows + record_pool + contractor_categories;
+it only WRITES to two NEW tables for the manual buckets).
+
+The page has FIVE buckets. EVERY bucket is split into two sides: IN-HOUSE and
+OUT-VENDOR (two columns / two sub-lists per bucket).
+
+  A — "Project to Start"                         (MANUAL entry)
+  B — "Raw Material Incomplete"                   (AUTO from Order Review)
+  C — "RM Complete – Material Under Production"    (AUTO from Order Review)
+  D — "Dispatch Clearance Recd But Production Not Complete" (AUTO from Order Review)
+  E — "Material Ready But Not Dispatched"          (MANUAL entry)
+
+Buckets B, C, D MAY OVERLAP — a structure can appear in more than one of them
+simultaneously. Do NOT apply any precedence/de-dup across B/C/D.
+
+=====================================================================
+BUCKET DEFINITIONS (exact)
+=====================================================================
+Data source for B/C/D is the LATEST Order Review import (order_review_rows for the
+newest order_review_imports.id), one row per (project, structure). Column meaning
+(already parsed into order_review_rows — DO NOT re-read the raw file):
+  - structure          = Order Review Col C (Tower Type code = WIP Alias; the JOIN key)
+  - fileBalReleaseMt   = Order Review Col S  (Balance → Release MT)
+  - Progress→Inspection (MT) = Order Review Col O.
+       IMPORTANT: verify the field name for Col O "Progress → Inspection (MT)" in
+       order_review_rows. The schema doc lists releaseMt/fabMt/galvMt (Progress block)
+       and fileBalReleaseMt/fileBalDespatchMt (Balance block). If a Progress-Inspection
+       column is NOT already persisted, ADD it to the Order Review parser + schema as
+       `inspectionMt double precision` (Progress block, Col O), additively, and
+       backfill on next Order Review upload. Do NOT confuse it with the BALANCE
+       inspection column (Col V). Col O = PROGRESS inspection (cumulative done).
+
+  B  → fileBalReleaseMt >  0
+  C  → fileBalReleaseMt <= 0        (numeric; null balance release = EXCLUDE, flag it)
+  D  → inspectionMt (Col O Progress) > 0
+
+Rows where the relevant column is null/blank are EXCLUDED from that bucket and counted
+in a small "excluded (no data)" footer per bucket — never silently dropped.
+
+Project codes: normalize with the EXISTING normalizer (strip trailing dot / .0) before
+grouping and before joining to WIP. Do NOT introduce a new normalizer.
+
+=====================================================================
+IN-HOUSE vs OUT-VENDOR classification for B/C/D  (FINALIZED)
+=====================================================================
+Order Review has NO contractor column. Classify each (project, structure) by joining
+to its WIP marks in record_pool (latest import) on normalized project + structure==alias,
+then mapping each mark's contractor to a SIDE.
+
+Side is derived from contractor_categories PLUS these explicit overrides. IMPORTANT:
+the standard rule "In-house = CNC OR Sub-contractor, else Out-vendor" is NOT sufficient
+because several UNCLASSIFIED contractors are assigned by hand. Use this EXACT mapping.
+Seed/confirm contractor_categories from the user's list (54 contractors) and apply:
+
+  SIDE = IN-HOUSE when contractor is:
+     - any CNC                         (CNC APM 1010/1616/2020/2020 (A), CNC TADM 2532)
+     - any Sub-contractor              (all rows tagged Sub-contractor)
+     - UNIT-I, UNIT-II                 (Unclassified, but user says these are In-house)
+     - DUMMY CONTRACTOR, NO CONTRACTOR (Unclassified placeholders → In-house)
+
+  SIDE = OUT-VENDOR when contractor is:
+     - any Out-vendor (FAB and/or GALVA tag)
+     - DASHMESH ENTERPRISES GP-2       (Unclassified → Out-vendor, user-specified)
+     - OUT FAB                         (Unclassified → Out-vendor, user-specified)
+     - S .R . BROTHERS & CO.           (Unclassified → Out-vendor, user-specified)
+
+  Any contractor not in the list (future new name) → DEFAULT IN-HOUSE (safe default,
+  matches the mark-less rule below); flag it so the user can classify it later.
+
+Contractor-name matching against WIP: match on the FULL contractor string WITH suffixes
+(UNIT-II / (JW) / GP-2 / (A) etc.) — NEVER merge distinct names. (Verified: all 44
+distinct WIP contractors match a setup name exactly, so an exact normalized-string match
+is correct; do NOT fuzzy-merge.)
+
+Placement rules for a (project, structure):
+  1. NO matching WIP marks (no contractor available) → IN-HOUSE.
+        (~64% of Order Review structures have no live WIP marks — expected; they are
+        fully released/dispatched or not yet started.)
+  2. All marks IN-HOUSE                      → IN-HOUSE side only.
+  3. All marks OUT-VENDOR                    → OUT-VENDOR side only.
+  4. MIXED (marks on both sides)             → SHOW IN BOTH SIDES.
+        The structure appears under IN-HOUSE *and* under OUT-VENDOR, badged "(mixed)"
+        on both. (Verified ~362 of 786 marked structures are mixed, so this is common.)
+        In rollups, count/weight it on whichever side(s) it shows; do NOT split the
+        weight — show the full structure weight on each side it appears, and label the
+        project rollup so double-counting across the two SIDES is transparent (a
+        per-side subtotal, not a single combined total that would hide it).
+
+Keep this in ONE clearly-commented helper `classifyStructureSides(structureMarks)`
+returning a set {IN_HOUSE?, OUT_VENDOR?} so any future change lives in one place.
+
+=====================================================================
+GROUPING / DISPLAY
+=====================================================================
+- B, C, D: group by PROJECT, ROLLUP + EXPANDABLE. Each bucket side (In-house / Out-vendor)
+  shows project rows; clicking a project row expands to its structures (structure code +
+  subType). Rollup numbers are the SUM of the per-structure column values below.
+- A: MANUAL list, split In-house / Out-vendor. No structures, no data columns.
+- E: MANUAL project (dropdown), split In-house / Out-vendor. E AGGREGATES all structures
+  of the chosen project from the latest Order Review (sum of the columns below across
+  that project's structures). The project is always a KNOWN project (WIP ∪ Order Review),
+  never new, so values always resolve.
+- All weights in tonnes (MT) to 3 dp.
+- Respect the global Job filter if one is selected (like other pages). Not gated by the
+  TLT/NTLT toggle unless trivial and matching sibling pages; default: show all.
+
+------------------------------------------------------------------
+PER-BUCKET DATA COLUMNS  (all values from the LATEST Order Review import,
+per project+structure; rollup = sum across the project's structures)
+------------------------------------------------------------------
+Order Review columns (already parsed into order_review_rows — DO NOT re-read raw file;
+add any genuinely-missing field additively as noted):
+   Col N = PROGRESS  → Galvanising (MT)         [this is the "Yard" column]
+   Col S = BALANCE   → Release (MT)             = fileBalReleaseMt
+   Col T = BALANCE   → Fabrication (MT)         [add `balFabMt` if not persisted]
+   Col U = BALANCE   → Galvanising (MT)         [add `balGalvMt` if not persisted]
+   (Col N Progress-Galv may need a `progGalvMt` field; add additively if missing.
+    NOTE: Col N is PROGRESS galvanising, NOT the Balance-Galvanising Col U — do not
+    confuse the two. "Yard" = Col N Progress galv.)
+
+Columns shown per bucket (a "—" means the column is not shown for that bucket):
+
+  Bucket A:  (no data columns — manual project name only)
+
+  Bucket B:  Release Balance | Fab+Galva | Yard
+             Release Balance = Col S            (in B this is always > 0; show raw value)
+             Fab+Galva       = Col T + Col U    (Balance Fab + Balance Galv)
+             Yard            = Col N            (Progress Galv)
+
+  Bucket C:  Release Balance | Fab | Galva | Yard
+             Release Balance = Col S CLAMPED TO 0   (C is defined by S<=0, so always show 0)
+             Fab             = Col T            (Balance Fab)
+             Galva           = Col U            (Balance Galv)
+             Yard            = Col N            (Progress Galv)
+
+  Bucket D:  Release Balance | Fab | Galva | Yard
+             Release Balance = Col S CLAMPED TO 0   (show 0 whenever S<=0; hide negatives)
+             Fab             = Col T
+             Galva           = Col U
+             Yard            = Col N
+
+  Bucket E:  Release Balance | Fab+Galva | Yard   (aggregated over the project's structures)
+             Release Balance = Col S CLAMPED TO 0   (show 0 whenever S<=0)
+             Fab+Galva       = Col T + Col U
+             Yard            = Col N
+
+CLAMP RULE (C, D, E Release Balance): displayReleaseBalance = max(0, ColS). Show 0 whenever
+Col S <= 0; never display a negative. Bucket B shows the raw Col S (always > 0 there).
+This is DISPLAY-ONLY — it does NOT change the membership filters (B: S>0, C: S<=0), which
+still use the true numeric Col S.
+
+Null handling: a null Order Review cell contributes 0 to a sum and displays "-" (not 0)
+at the structure level; note null-heavy structures in the per-bucket "excluded (no data)"
+footer already specified. Fab+Galva with both T and U null → "-", not 0.
+
+=====================================================================
+MANUAL BUCKETS A & E (persisted, survive re-uploads)
+=====================================================================
+Two NEW tables (additive; NOT hashed; unrelated to record_pool identity):
+
+  inventory_manual_a
+    id            serial PK
+    projectCode   text  NOT NULL      -- FREE TEXT (Bucket A: user types any project code)
+    side          text  NOT NULL      -- 'in_house' | 'out_vendor'
+    note          text
+    createdAt     timestamptz NOT NULL default now()
+
+  inventory_manual_e
+    id            serial PK
+    projectCode   text  NOT NULL      -- chosen from a DROPDOWN of KNOWN projects
+    side          text  NOT NULL      -- 'in_house' | 'out_vendor'
+    note          text
+    createdAt     timestamptz NOT NULL default now()
+
+Bucket A entry form: a text input for Project code + a side selector (In-house/Out-vendor)
+  + an "Add" button. Appends a row; list is removable (delete button per row).
+Bucket E entry form: a DROPDOWN of known project codes (distinct normalized projects from
+  the latest Order Review import ∪ record_pool projects) + side selector + "Add".
+Both persist permanently until the user removes an entry. Re-uploading WIP or Order Review
+  must NOT clear these.
+
+New endpoints (mirror existing CRUD conventions, Zod-validated, Orval-regenerated):
+  GET    /inventory-manual/a            listInventoryManualA      (public)
+  PUT    /inventory-manual/a            upsertInventoryManualA    (auth required)
+  DELETE /inventory-manual/a            deleteInventoryManualA    (auth required)
+  GET    /inventory-manual/e            listInventoryManualE      (public)
+  PUT    /inventory-manual/e            upsertInventoryManualE    (auth required)
+  DELETE /inventory-manual/e            deleteInventoryManualE    (auth required)
+  GET    /inventory/buckets            getInventoryBuckets       (public)
+       → returns computed B/C/D (both sides, rollup+structures, excluded counts) AND the
+         per-structure data columns (Col S, T, U, N as specified), plus E's per-project
+         aggregates. Include enough to render every bucket's columns without a second call.
+
+Follow the same auth pattern the other PUT/DELETE mutations use (auth required for writes,
+public for reads). Add all to openapi.yaml and regenerate hooks with Orval.
+
+=====================================================================
+NAV / ROUTE
+=====================================================================
+- Add page "Inventory" at route /inventory (public), one new file src/pages/inventory.tsx,
+  registered in src/App.tsx / src/layout.tsx nav order alongside the other pages.
+- Compute B/C/D CLIENT-SIDE from the getInventoryBuckets payload + existing store filters
+  where the app's convention is client-side aggregation; keep server work to the raw
+  joined rows. Match how Order Status / Contractor pages are structured.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change parse.ts hashing, Mark No. rules, ageing, dedup, or any existing
+  bucket/sequence logic.
+- Do NOT change the Order Review dedup (UPSERT on project+structure) or its existing columns;
+  only ADD inspectionMt if it is genuinely missing.
+- Do NOT alter contractor_categories or its semantics; only READ it.
+- Do NOT write to record_pool, import_rows, or any computed field.
+- Do NOT apply precedence across B/C/D (overlap is intended).
+- Do NOT invent a second project-code normalizer or a second weight field.
+
+=====================================================================
+ACCEPTANCE CHECK (run and report numbers)
+=====================================================================
+Against the latest Order Review import currently loaded, the page must show
+(counts of project+structure rows, before In-house/Out-vendor split):
+  - Bucket B (Bal Release Col S > 0):   ~261 structures
+  - Bucket C (Bal Release Col S <= 0):  ~1527 structures
+  - Bucket D (Inspection Col O > 0):    ~1214 structures
+  - Rows excluded from B/C for null Balance-Release: ~ (2251 data rows − 1788 numeric) ≈ 463, flagged
+These come from the 06-Jul Order Review (2251 data structure rows, 164 distinct projects).
+Numbers will shift with new uploads — the point is the FILTERS reproduce these on today's data.
+Also verify:
+  - A structure with Bal Release <=0 AND Inspection >0 appears in BOTH C and D (overlap works).
+  - Manual A (free text) and E (dropdown) entries persist across a re-upload of both files.
+  - Every bucket renders an In-house side and an Out-vendor side; no-WIP-mark structures
+    land In-house; mixed-contractor structures appear on BOTH sides badged "(mixed)".
+  - Trailing-dot projects (e.g. 824., 898., 906.) are normalized and not duplicated.
+  - Data columns resolve on today's Order Review: Col N (Progress Galv) non-null on ~1445
+    structures; Col T (Bal Fab) >0 on ~586; Col U (Bal Galv) >0 on ~481. Fab+Galva = T+U.
+  - Release Balance column shows raw value in B (all >0) and CLAMPED 0 in C/D/E; the
+    clamp is display-only and does NOT alter which structures fall in each bucket.
+  - Bucket E, for a chosen known project, shows that project's summed S(clamped)/T+U/N.
+
+Contractor classification parity (against latest WIP + the 54-row contractor list):
+  - 44 distinct WIP contractors all match a setup name exactly (0 unmatched).
+  - Setup split: 25 In-house (5 CNC + 16 Sub-contractor + UNIT-I, UNIT-II, DUMMY
+    CONTRACTOR, NO CONTRACTOR) / 29 Out-vendor (26 tagged + DASHMESH ENTERPRISES GP-2,
+    OUT FAB, S .R . BROTHERS & CO.).
+  - Of 786 WIP structures that have marks: ~346 in-house-only, ~78 out-vendor-only,
+    ~362 mixed (appear on both sides). These will shift with new uploads; the point is
+    the mapping reproduces this split on today's data.
+
+Report the four bucket counts you actually get after building, so we can confirm parity.

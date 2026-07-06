@@ -954,6 +954,159 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /inventory/buckets:
+    get:
+      operationId: getInventoryBuckets
+      tags: [inventory]
+      summary: Get the raw rows behind the Inventory page's auto buckets (B/C/D)
+      description: >
+        Returns one row per (project, structure) from the latest Order Review
+        snapshot, each carrying the two driving numbers (fileBalReleaseMt =
+        Balance->Release Col S, inspectionMt = Progress->Inspection Col O) plus
+        the distinct contractor names touching that structure in the newest WIP
+        import. Server work is kept to this join only — the B/C/D numeric
+        filters, null-exclusion flagging, and in-house/out-vendor side
+        classification (contractor_categories + hardcoded name overrides) are
+        computed client-side so the page's own filters stay in sync with the
+        rest of the app. Purely additive and read-only; available:false when no
+        Order Review file has been ingested yet.
+      responses:
+        "200":
+          description: Raw joined rows for the Inventory page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryBucketsResponse"
+  /inventory-manual/a:
+    get:
+      operationId: listInventoryManualA
+      tags: [inventory]
+      summary: List manual Bucket A ("Project to Start") entries
+      description: >
+        Returns the persisted Bucket A list (free-text project entries the user
+        maintains directly on the Inventory page). Survives re-uploads of both
+        WIP and Order Review files. Public (read-only).
+      responses:
+        "200":
+          description: Bucket A entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InventoryManualEntry"
+    put:
+      operationId: upsertInventoryManualA
+      tags: [inventory]
+      summary: Add or update a manual Bucket A entry
+      description: >
+        Inserts a new Bucket A entry, or updates one in place when `id` is
+        supplied. Requires authentication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryManualEntryInput"
+      responses:
+        "200":
+          description: Saved entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryManualEntry"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Entry not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteInventoryManualA
+      tags: [inventory]
+      summary: Remove a manual Bucket A entry
+      description: >
+        Removes one Bucket A entry by id. Requires authentication.
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+  /inventory-manual/e:
+    get:
+      operationId: listInventoryManualE
+      tags: [inventory]
+      summary: List manual Bucket E ("Material Ready But Not Dispatched") entries
+      description: >
+        Returns the persisted Bucket E list (dropdown-picked project entries the
+        user maintains directly on the Inventory page). Survives re-uploads of
+        both WIP and Order Review files. Public (read-only).
+      responses:
+        "200":
+          description: Bucket E entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InventoryManualEntry"
+    put:
+      operationId: upsertInventoryManualE
+      tags: [inventory]
+      summary: Add or update a manual Bucket E entry
+      description: >
+        Inserts a new Bucket E entry, or updates one in place when `id` is
+        supplied. Requires authentication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryManualEntryInput"
+      responses:
+        "200":
+          description: Saved entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryManualEntry"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Entry not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteInventoryManualE
+      tags: [inventory]
+      summary: Remove a manual Bucket E entry
+      description: >
+        Removes one Bucket E entry by id. Requires authentication.
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
   /imports/{id}/changes:
     get:
       operationId: getImportChanges
@@ -2236,6 +2389,112 @@ components:
         - column
         - project
         - priority
+    InventoryBucketRow:
+      type: object
+      description: >
+        One (project, structure) row from the latest Order Review snapshot,
+        joined to the distinct contractors touching that structure in the
+        newest WIP import. Raw only — the client derives B/C/D membership and
+        in-house/out-vendor sides from these fields.
+      properties:
+        project:
+          type: string
+        structure:
+          type: string
+          nullable: true
+        subType:
+          type: string
+          nullable: true
+        weightMt:
+          type: number
+          nullable: true
+        woOrderQtyMt:
+          type: number
+          nullable: true
+        fileBalReleaseMt:
+          type: number
+          nullable: true
+          description: Balance -> Release (Col S). Drives Bucket B (>0) / Bucket C (<=0).
+        inspectionMt:
+          type: number
+          nullable: true
+          description: Progress -> Inspection (Col O). Drives Bucket D (>0).
+        contractors:
+          type: array
+          items:
+            type: string
+          description: Distinct contractor names touching this structure in the newest WIP import.
+        notInLatest:
+          type: boolean
+          description: True when this row was last touched by an earlier Order Review upload, not the newest one.
+      required:
+        - project
+        - structure
+        - subType
+        - weightMt
+        - woOrderQtyMt
+        - fileBalReleaseMt
+        - inspectionMt
+        - contractors
+        - notInLatest
+    InventoryBucketsResponse:
+      type: object
+      properties:
+        available:
+          type: boolean
+        asOnDate:
+          type: string
+          nullable: true
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/InventoryBucketRow"
+      required:
+        - available
+        - asOnDate
+        - rows
+    InventoryManualEntry:
+      type: object
+      description: >
+        One persisted manual entry for Inventory Bucket A ("Project to Start")
+        or Bucket E ("Material Ready But Not Dispatched"). Never derived; never
+        cleared by a WIP or Order Review re-upload.
+      properties:
+        id:
+          type: integer
+        projectCode:
+          type: string
+        side:
+          type: string
+          enum: [in_house, out_vendor]
+        note:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - projectCode
+        - side
+        - note
+        - createdAt
+    InventoryManualEntryInput:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Omit to insert a new entry; supply to update an existing one.
+        projectCode:
+          type: string
+        side:
+          type: string
+          enum: [in_house, out_vendor]
+        note:
+          type: string
+          nullable: true
+      required:
+        - projectCode
+        - side
     TurnaroundSettings:
       type: object
       description: App-level turnaround-warning configuration. Singleton; global per-activity ideal days, grace cells and pre-warning thresholds keyed by canonical activity code, plus optional sparse per-project overrides and the stalled-mark threshold.

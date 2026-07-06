@@ -595,6 +595,7 @@ const ORDER_REVIEW_VALUE_FIELDS = [
   "releaseMt",
   "fabMt",
   "galvMt",
+  "inspectionMt",
   "fileDespatchMt",
   "fileBalReleaseMt",
   "fileBalDespatchMt",
@@ -636,6 +637,7 @@ function collapseOrderRows(
     prev.releaseMt = addNum(prev.releaseMt, r.releaseMt);
     prev.fabMt = addNum(prev.fabMt, r.fabMt);
     prev.galvMt = addNum(prev.galvMt, r.galvMt);
+    prev.inspectionMt = addNum(prev.inspectionMt, r.inspectionMt);
     prev.fileDespatchMt = addNum(prev.fileDespatchMt, r.fileDespatchMt);
     prev.fileBalReleaseMt = addNum(prev.fileBalReleaseMt, r.fileBalReleaseMt);
     prev.fileBalDespatchMt = addNum(prev.fileBalDespatchMt, r.fileBalDespatchMt);
@@ -718,6 +720,7 @@ export async function ingestOrderReview(
           releaseMt: r.releaseMt,
           fabMt: r.fabMt,
           galvMt: r.galvMt,
+          inspectionMt: r.inspectionMt,
           fileDespatchMt: r.fileDespatchMt,
           fileBalReleaseMt: r.fileBalReleaseMt,
           fileBalDespatchMt: r.fileBalDespatchMt,
@@ -745,6 +748,7 @@ export async function ingestOrderReview(
           releaseMt: r.releaseMt,
           fabMt: r.fabMt,
           galvMt: r.galvMt,
+          inspectionMt: r.inspectionMt,
           fileDespatchMt: r.fileDespatchMt,
           fileBalReleaseMt: r.fileBalReleaseMt,
           fileBalDespatchMt: r.fileBalDespatchMt,

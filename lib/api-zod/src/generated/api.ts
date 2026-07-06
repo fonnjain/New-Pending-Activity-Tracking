@@ -1691,6 +1691,120 @@ export const DeleteOrderImportParams = zod.object({
 
 
 /**
+ * Returns one row per (project, structure) from the latest Order Review snapshot, each carrying the two driving numbers (fileBalReleaseMt = Balance->Release Col S, inspectionMt = Progress->Inspection Col O) plus the distinct contractor names touching that structure in the newest WIP import. Server work is kept to this join only — the B/C/D numeric filters, null-exclusion flagging, and in-house/out-vendor side classification (contractor_categories + hardcoded name overrides) are computed client-side so the page's own filters stay in sync with the rest of the app. Purely additive and read-only; available:false when no Order Review file has been ingested yet.
+
+ * @summary Get the raw rows behind the Inventory page's auto buckets (B/C/D)
+ */
+export const GetInventoryBucketsResponse = zod.object({
+  "available": zod.boolean(),
+  "asOnDate": zod.string().nullable(),
+  "rows": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string().nullable(),
+  "subType": zod.string().nullable(),
+  "weightMt": zod.number().nullable(),
+  "woOrderQtyMt": zod.number().nullable(),
+  "fileBalReleaseMt": zod.number().nullable().describe('Balance -> Release (Col S). Drives Bucket B (>0) \/ Bucket C (<=0).'),
+  "inspectionMt": zod.number().nullable().describe('Progress -> Inspection (Col O). Drives Bucket D (>0).'),
+  "contractors": zod.array(zod.string()).describe('Distinct contractor names touching this structure in the newest WIP import.'),
+  "notInLatest": zod.boolean().describe('True when this row was last touched by an earlier Order Review upload, not the newest one.')
+}).describe('One (project, structure) row from the latest Order Review snapshot, joined to the distinct contractors touching that structure in the newest WIP import. Raw only — the client derives B\/C\/D membership and in-house\/out-vendor sides from these fields.\n'))
+})
+
+
+/**
+ * Returns the persisted Bucket A list (free-text project entries the user maintains directly on the Inventory page). Survives re-uploads of both WIP and Order Review files. Public (read-only).
+
+ * @summary List manual Bucket A ("Project to Start") entries
+ */
+export const ListInventoryManualAResponseItem = zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "side": zod.enum(['in_house', 'out_vendor']),
+  "note": zod.string().nullable(),
+  "createdAt": zod.string()
+}).describe('One persisted manual entry for Inventory Bucket A (\"Project to Start\") or Bucket E (\"Material Ready But Not Dispatched\"). Never derived; never cleared by a WIP or Order Review re-upload.\n')
+export const ListInventoryManualAResponse = zod.array(ListInventoryManualAResponseItem)
+
+
+/**
+ * Inserts a new Bucket A entry, or updates one in place when `id` is supplied. Requires authentication.
+
+ * @summary Add or update a manual Bucket A entry
+ */
+export const UpsertInventoryManualABody = zod.object({
+  "id": zod.number().optional().describe('Omit to insert a new entry; supply to update an existing one.'),
+  "projectCode": zod.string(),
+  "side": zod.enum(['in_house', 'out_vendor']),
+  "note": zod.string().nullish()
+})
+
+export const UpsertInventoryManualAResponse = zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "side": zod.enum(['in_house', 'out_vendor']),
+  "note": zod.string().nullable(),
+  "createdAt": zod.string()
+}).describe('One persisted manual entry for Inventory Bucket A (\"Project to Start\") or Bucket E (\"Material Ready But Not Dispatched\"). Never derived; never cleared by a WIP or Order Review re-upload.\n')
+
+
+/**
+ * Removes one Bucket A entry by id. Requires authentication.
+
+ * @summary Remove a manual Bucket A entry
+ */
+export const DeleteInventoryManualAQueryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
+ * Returns the persisted Bucket E list (dropdown-picked project entries the user maintains directly on the Inventory page). Survives re-uploads of both WIP and Order Review files. Public (read-only).
+
+ * @summary List manual Bucket E ("Material Ready But Not Dispatched") entries
+ */
+export const ListInventoryManualEResponseItem = zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "side": zod.enum(['in_house', 'out_vendor']),
+  "note": zod.string().nullable(),
+  "createdAt": zod.string()
+}).describe('One persisted manual entry for Inventory Bucket A (\"Project to Start\") or Bucket E (\"Material Ready But Not Dispatched\"). Never derived; never cleared by a WIP or Order Review re-upload.\n')
+export const ListInventoryManualEResponse = zod.array(ListInventoryManualEResponseItem)
+
+
+/**
+ * Inserts a new Bucket E entry, or updates one in place when `id` is supplied. Requires authentication.
+
+ * @summary Add or update a manual Bucket E entry
+ */
+export const UpsertInventoryManualEBody = zod.object({
+  "id": zod.number().optional().describe('Omit to insert a new entry; supply to update an existing one.'),
+  "projectCode": zod.string(),
+  "side": zod.enum(['in_house', 'out_vendor']),
+  "note": zod.string().nullish()
+})
+
+export const UpsertInventoryManualEResponse = zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "side": zod.enum(['in_house', 'out_vendor']),
+  "note": zod.string().nullable(),
+  "createdAt": zod.string()
+}).describe('One persisted manual entry for Inventory Bucket A (\"Project to Start\") or Bucket E (\"Material Ready But Not Dispatched\"). Never derived; never cleared by a WIP or Order Review re-upload.\n')
+
+
+/**
+ * Removes one Bucket E entry by id. Requires authentication.
+
+ * @summary Remove a manual Bucket E entry
+ */
+export const DeleteInventoryManualEQueryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
  * Returns the full field-level change set for an import versus the immediately preceding import. For the first import, all marks are reported as new.
 
  * @summary Get the change set for an import

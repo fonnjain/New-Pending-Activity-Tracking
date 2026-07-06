@@ -112,6 +112,10 @@ export const orderReviewRowsTable = pgTable(
     // WIP parsing / activity / dedup / ageing / dispatch math.
     fabMt: doublePrecision("fab_mt"),
     galvMt: doublePrecision("galv_mt"),
+    // Progress Inspection (MT) — col O. Additive display field only (Inventory
+    // page Bucket D signal: inspectionMt > 0). Never feeds WIP parsing/activity/
+    // dedup/ageing/dispatch math, and never touches fabMt/galvMt semantics.
+    inspectionMt: doublePrecision("inspection_mt"),
     // Despatch MT as stated in the file (cross-checked vs computed dispatch).
     fileDespatchMt: doublePrecision("file_despatch_mt"),
     // File-stated balance figures (display + cross-check only, never authoritative):
