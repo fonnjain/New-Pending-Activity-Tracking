@@ -131,3 +131,23 @@ Gate the fallback on a separate presence set built from ALL active WIP records (
 job/structure, never by category). The file's M/N are now persisted on `order_review_rows`
 (fab_mt/galv_mt) and summed in collapse/upsert/diff, so the fallback is durable for all future
 uploads. After any parser/column change, RE-INGEST the stored file (idempotent).
+
+## As-On-Date banner is day-first text — never run it through `formatDate`/`new Date(str)`
+**Why:** the banner text "As On Date :06/07/2026" is DD/MM/YYYY. `detectAsOnDate()` fed it through
+`formatDate()` (US `new Date(str)` parsing), silently storing the wrong date (e.g. 06/07 read as
+June 7 instead of July 6) while the separate `detectReportAsOnDate()` (used for WIP-pairing) already
+used day-first `parseLooseDate()` correctly — the two helpers had drifted.
+**How to apply:** any date parsed from raw Order Review/WIP banner text must go through the shared
+day-first `parseLooseDate()`, never `formatDate`/`new Date(string)`. If a bug report says "As On Date
+is off by month vs day", check for exactly this drift between the two detectors.
+
+## Verifying live bucket data against an external spreadsheet: watch for the spreadsheet's own display duplication
+**Why:** when a verification spreadsheet splits one structure's row across multiple "Side" (contractor
+category) lines for display, it may repeat the SAME full total on each side line instead of splitting
+it — naively summing all visible rows then looks like the app is under-counting by ~2-3x, when
+per-key values actually match exactly. Always dedupe by (project, structure) key — keeping one
+instance of each distinct value-set — before comparing aggregate totals; comparing individual matched
+keys first (not raw sheet sums) surfaces this immediately and avoids chasing a phantom bug.
+**How to apply:** `collapseOrderRows` in `dispatch.ts` already defensively SUMS true duplicate
+(project, structure) rows within a single incoming file — that logic is correct and doesn't need
+"fixing" when totals look off; check spreadsheet display conventions first.

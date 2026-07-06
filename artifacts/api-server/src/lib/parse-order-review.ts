@@ -344,7 +344,11 @@ function detectAsOnDate(grid: unknown[][], headerRow: number): string | null {
       if (!s) continue;
       const m = s.match(/as[\s-]*on\s*:?\s*(.+)$/i) || s.match(/dated?\s*:?\s*(.+)$/i);
       if (m && m[1]) {
-        const d = formatDate(m[1].trim());
+        // Banner text is day-first (VTPL convention, e.g. "06/07/2026" = 6 Jul).
+        // Use parseLooseDate (day-first-aware), NOT formatDate's `new Date(s)`
+        // fallback, which mis-reads it as MM/DD/YYYY (US) and silently stores
+        // the wrong asOnDate, desyncing it from detectReportAsOnDate's pairing date.
+        const d = parseLooseDate(m[1].trim());
         if (d) return d;
       }
     }
