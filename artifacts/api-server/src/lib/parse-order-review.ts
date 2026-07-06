@@ -35,6 +35,9 @@ export interface ParsedOrderReviewRow {
   // File-stated balances: Balance Release (col S), Balance Despatch (col W).
   fileBalReleaseMt: number | null;
   fileBalDespatchMt: number | null;
+  // Balance Fabrication (col T) / Balance Galvanising (col U).
+  balFabMt: number | null;
+  balGalvMt: number | null;
 }
 
 export interface OrderReviewParseResult {
@@ -192,6 +195,8 @@ interface ColumnIndex {
   fileDespatchMt: number;
   fileBalReleaseMt: number;
   fileBalDespatchMt: number;
+  balFabMt: number;
+  balGalvMt: number;
 }
 
 // A logical column spec resolved against COMPOSITE header labels (see
@@ -232,6 +237,11 @@ const HEADER_SPECS: HeaderSpec[] = [
   // "balance" term; every other measure spec excludes it, so there is no overlap.
   { key: "fileBalReleaseMt", include: [["balance", "release"]], fallback: 18 },
   { key: "fileBalDespatchMt", include: [["balance", "despatch"], ["balance", "dispatch"]], fallback: 22 },
+  // Balance Fabrication (col T) / Balance Galvanising (col U). Same "balance"
+  // discipline as the two specs above — the plain fabMt/galvMt specs exclude
+  // "balance", so there is no overlap.
+  { key: "balFabMt", include: [["balance", "fabrication"]], fallback: 19 },
+  { key: "balGalvMt", include: [["balance", "galvanis"]], fallback: 20 },
 ];
 
 // Lowercase + collapse whitespace for a header cell ("BOM\nLabel" -> "bom label").
@@ -467,6 +477,8 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     const fileDespatchMt = toNumber(cells[cols.fileDespatchMt] as Cell);
     const fileBalReleaseMt = toNumber(cells[cols.fileBalReleaseMt] as Cell);
     const fileBalDespatchMt = toNumber(cells[cols.fileBalDespatchMt] as Cell);
+    const balFabMt = toNumber(cells[cols.balFabMt] as Cell);
+    const balGalvMt = toNumber(cells[cols.balGalvMt] as Cell);
     if (weightMt != null) totalWeightMt += weightMt;
     if (releaseMt != null) totalReleaseMt += releaseMt;
     if (fileDespatchMt != null) totalFileDespatchMt += fileDespatchMt;
@@ -487,6 +499,8 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
       fileDespatchMt,
       fileBalReleaseMt,
       fileBalDespatchMt,
+      balFabMt,
+      balGalvMt,
     });
   }
 

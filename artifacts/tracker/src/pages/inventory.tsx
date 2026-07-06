@@ -16,6 +16,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useInventoryData,
   BUCKET_LABELS,
+  releaseBalanceDisplay,
+  fabPlusGalva,
+  sumColumnOrNull,
+  aggregateProjectColumns,
   type InventoryStructureCard,
   type InventorySide,
 } from "@/lib/inventory";
@@ -41,7 +45,6 @@ interface ProjectGroup {
   rows: InventoryStructureCard[];
   count: number;
   weightMt: number;
-  woOrderQtyMt: number;
 }
 
 function groupByProject(rows: InventoryStructureCard[]): ProjectGroup[] {
@@ -49,27 +52,58 @@ function groupByProject(rows: InventoryStructureCard[]): ProjectGroup[] {
   for (const r of rows) {
     let g = map.get(r.project);
     if (!g) {
-      g = { project: r.project, rows: [], count: 0, weightMt: 0, woOrderQtyMt: 0 };
+      g = { project: r.project, rows: [], count: 0, weightMt: 0 };
       map.set(r.project, g);
     }
     g.rows.push(r);
     g.count += 1;
     g.weightMt += r.weightMt ?? 0;
-    g.woOrderQtyMt += r.woOrderQtyMt ?? 0;
   }
   return Array.from(map.values()).sort((a, b) => a.project.localeCompare(b.project));
 }
 
+// Per-bucket data column definitions (spec-mandated). B shows the raw Release
+// Balance (always > 0 there) + a combined Fab+Galva; C/D show the CLAMPED
+// Release Balance (display-only; never affects bucket membership) + Fab and
+// Galva as separate columns. Yard (Progress Galvanising, Col N) is on every
+// auto bucket.
+interface ColumnDef {
+  key: string;
+  label: string;
+  get: (r: InventoryStructureCard) => number | null;
+}
+
+const YARD_COLUMN: ColumnDef = { key: "yard", label: "Yard", get: (r) => r.galvMt };
+
+const BUCKET_B_COLUMNS: ColumnDef[] = [
+  {
+    key: "release",
+    label: "Rel. Bal.",
+    get: (r) => releaseBalanceDisplay(r.fileBalReleaseMt, false),
+  },
+  { key: "fabGalva", label: "Fab+Galva", get: (r) => fabPlusGalva(r.balFabMt, r.balGalvMt) },
+  YARD_COLUMN,
+];
+
+const BUCKET_CD_COLUMNS: ColumnDef[] = [
+  {
+    key: "release",
+    label: "Rel. Bal.",
+    get: (r) => releaseBalanceDisplay(r.fileBalReleaseMt, true),
+  },
+  { key: "fab", label: "Fab", get: (r) => r.balFabMt },
+  { key: "galva", label: "Galva", get: (r) => r.balGalvMt },
+  YARD_COLUMN,
+];
+
 function AutoBucketSide({
   side,
   rows,
-  drivingLabel,
-  drivingField,
+  columns,
 }: {
   side: InventorySide;
   rows: InventoryStructureCard[];
-  drivingLabel: string;
-  drivingField: "fileBalReleaseMt" | "inspectionMt";
+  columns: ColumnDef[];
 }) {
   const groups = useMemo(() => groupByProject(rows), [rows]);
   const totalWeight = groups.reduce((s, g) => s + g.weightMt, 0);
@@ -85,14 +119,14 @@ function AutoBucketSide({
           {totalCount} structure{totalCount === 1 ? "" : "s"} · {mt(totalWeight)} MT
         </span>
       </div>
-      <div className="max-h-80 overflow-auto divide-y">
+      <div className="max-h-96 overflow-auto divide-y">
         {groups.length === 0 ? (
           <div className="py-6 text-center text-xs text-muted-foreground">
             No structures.
           </div>
         ) : (
           groups.map((g) => (
-            <ProjectRow key={g.project} group={g} drivingLabel={drivingLabel} drivingField={drivingField} />
+            <ProjectRow key={g.project} group={g} columns={columns} />
           ))
         )}
       </div>
@@ -102,12 +136,10 @@ function AutoBucketSide({
 
 function ProjectRow({
   group,
-  drivingLabel,
-  drivingField,
+  columns,
 }: {
   group: ProjectGroup;
-  drivingLabel: string;
-  drivingField: "fileBalReleaseMt" | "inspectionMt";
+  columns: ColumnDef[];
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -115,7 +147,7 @@ function ProjectRow({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-muted/30"
+        className="w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-muted/30 gap-2"
       >
         <span className="flex items-center gap-1.5 min-w-0">
           {open ? (
@@ -128,14 +160,21 @@ function ProjectRow({
             {group.count}
           </span>
         </span>
-        <span className="text-xs tabular-nums shrink-0">{mt(group.weightMt)} MT</span>
+        <span className="flex items-center gap-3 shrink-0">
+          {columns.map((col) => (
+            <span key={col.key} className="text-[11px] tabular-nums text-right">
+              <span className="text-muted-foreground mr-1">{col.label}</span>
+              {mt(sumColumnOrNull(group.rows, col.get))}
+            </span>
+          ))}
+        </span>
       </button>
       {open && (
         <div className="pl-6 pb-1">
           {group.rows.map((r) => (
             <div
               key={`${r.project}-${r.structure}`}
-              className="flex items-center justify-between px-2 py-1 text-xs border-t first:border-t-0"
+              className="flex items-center justify-between gap-2 px-2 py-1 text-xs border-t first:border-t-0"
             >
               <span className="flex items-center gap-1.5 min-w-0">
                 <span className="truncate">{r.structure ?? "-"}</span>
@@ -149,8 +188,13 @@ function ProjectRow({
                   <span className="text-rose-600 dark:text-rose-400 shrink-0">not in latest</span>
                 )}
               </span>
-              <span className="tabular-nums shrink-0">
-                {drivingLabel}: {mt(r[drivingField])}
+              <span className="flex items-center gap-3 shrink-0">
+                {columns.map((col) => (
+                  <span key={col.key} className="tabular-nums text-right">
+                    <span className="text-muted-foreground mr-1">{col.label}</span>
+                    {mt(col.get(r))}
+                  </span>
+                ))}
               </span>
             </div>
           ))}
@@ -160,41 +204,65 @@ function ProjectRow({
   );
 }
 
+// Bucket E aggregates the same Release Balance / Fab+Galva / Yard data
+// columns as C/D, but rolled up per-project across ALL of the project's
+// structures in the latest Order Review (rawRows), not per manual entry.
 function ManualEntryList({
   entries,
   onDelete,
   canEdit,
   deletingId,
+  rawRows,
 }: {
   entries: InventoryManualEntry[];
   onDelete: (id: number) => void;
   canEdit: boolean;
   deletingId: number | null;
+  rawRows?: Parameters<typeof aggregateProjectColumns>[0];
 }) {
   if (entries.length === 0) {
     return <div className="py-4 text-center text-xs text-muted-foreground">No entries.</div>;
   }
   return (
     <div className="divide-y">
-      {entries.map((e) => (
-        <div key={e.id} className="flex items-center justify-between px-3 py-1.5 text-sm">
-          <span className="truncate">{e.projectCode}</span>
-          <div className="flex items-center gap-2 shrink-0">
-            {e.note && <span className="text-xs text-muted-foreground">{e.note}</span>}
-            {canEdit && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                disabled={deletingId === e.id}
-                onClick={() => onDelete(e.id)}
-              >
-                <Trash2 className="h-3.5 w-3.5 text-destructive" />
-              </Button>
+      {entries.map((e) => {
+        const agg = rawRows ? aggregateProjectColumns(rawRows, e.projectCode) : null;
+        return (
+          <div key={e.id} className="flex flex-col gap-1 px-3 py-1.5 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="truncate">{e.projectCode}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                {e.note && <span className="text-xs text-muted-foreground">{e.note}</span>}
+                {canEdit && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    disabled={deletingId === e.id}
+                    onClick={() => onDelete(e.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  </Button>
+                )}
+              </div>
+            </div>
+            {agg && (
+              <div className="flex items-center gap-3 text-[11px] text-muted-foreground tabular-nums">
+                <span>
+                  Rel. Bal. <span className="text-foreground">{mt(agg.releaseBalanceMt)}</span>
+                </span>
+                <span>
+                  Fab+Galva <span className="text-foreground">{mt(agg.fabGalvaMt)}</span>
+                </span>
+                <span>
+                  Yard <span className="text-foreground">{mt(agg.yardMt)}</span>
+                </span>
+                <span>({agg.structureCount} structures)</span>
+              </div>
             )}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -205,12 +273,14 @@ function ManualBucketSide({
   onDelete,
   canEdit,
   deletingId,
+  rawRows,
 }: {
   side: InventorySide;
   entries: InventoryManualEntry[];
   onDelete: (id: number) => void;
   canEdit: boolean;
   deletingId: number | null;
+  rawRows?: Parameters<typeof aggregateProjectColumns>[0];
 }) {
   const filtered = entries.filter((e) => e.side === side);
   return (
@@ -223,7 +293,13 @@ function ManualBucketSide({
           {filtered.length} project{filtered.length === 1 ? "" : "s"}
         </span>
       </div>
-      <ManualEntryList entries={filtered} onDelete={onDelete} canEdit={canEdit} deletingId={deletingId} />
+      <ManualEntryList
+        entries={filtered}
+        onDelete={onDelete}
+        canEdit={canEdit}
+        deletingId={deletingId}
+        rawRows={rawRows}
+      />
     </div>
   );
 }
@@ -426,18 +502,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide
-                side="in_house"
-                rows={bInHouse}
-                drivingLabel="Bal. Release"
-                drivingField="fileBalReleaseMt"
-              />
-              <AutoBucketSide
-                side="out_vendor"
-                rows={bOutVendor}
-                drivingLabel="Bal. Release"
-                drivingField="fileBalReleaseMt"
-              />
+              <AutoBucketSide side="in_house" rows={bInHouse} columns={BUCKET_B_COLUMNS} />
+              <AutoBucketSide side="out_vendor" rows={bOutVendor} columns={BUCKET_B_COLUMNS} />
             </div>
           )}
         </CardContent>
@@ -453,18 +519,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide
-                side="in_house"
-                rows={cInHouse}
-                drivingLabel="Bal. Release"
-                drivingField="fileBalReleaseMt"
-              />
-              <AutoBucketSide
-                side="out_vendor"
-                rows={cOutVendor}
-                drivingLabel="Bal. Release"
-                drivingField="fileBalReleaseMt"
-              />
+              <AutoBucketSide side="in_house" rows={cInHouse} columns={BUCKET_CD_COLUMNS} />
+              <AutoBucketSide side="out_vendor" rows={cOutVendor} columns={BUCKET_CD_COLUMNS} />
             </div>
           )}
         </CardContent>
@@ -480,18 +536,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide
-                side="in_house"
-                rows={dInHouse}
-                drivingLabel="Inspection"
-                drivingField="inspectionMt"
-              />
-              <AutoBucketSide
-                side="out_vendor"
-                rows={dOutVendor}
-                drivingLabel="Inspection"
-                drivingField="inspectionMt"
-              />
+              <AutoBucketSide side="in_house" rows={dInHouse} columns={BUCKET_CD_COLUMNS} />
+              <AutoBucketSide side="out_vendor" rows={dOutVendor} columns={BUCKET_CD_COLUMNS} />
             </div>
           )}
         </CardContent>
@@ -507,8 +553,8 @@ export default function InventoryView() {
             <ManualAddForm mode="e" knownProjects={knownProjects} onAdd={addE} isPending={upsertE.isPending} />
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <ManualBucketSide side="in_house" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} />
-            <ManualBucketSide side="out_vendor" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} />
+            <ManualBucketSide side="in_house" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} rawRows={rawRows} />
+            <ManualBucketSide side="out_vendor" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} rawRows={rawRows} />
           </div>
         </CardContent>
       </Card>

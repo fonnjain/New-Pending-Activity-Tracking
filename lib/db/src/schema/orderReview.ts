@@ -124,6 +124,13 @@ export const orderReviewRowsTable = pgTable(
     // Reconciled against the computed balances at a 1% tolerance + small abs floor.
     fileBalReleaseMt: doublePrecision("file_bal_release_mt"),
     fileBalDespatchMt: doublePrecision("file_bal_despatch_mt"),
+    // Balance Fabrication (col T) / Balance Galvanising (col U). Additive
+    // display fields for the Inventory page's per-bucket data columns (Fab /
+    // Galva). Distinct from the PROGRESS fabMt/galvMt above (which are the
+    // "Progress" block cols M/N) — these are the "Balance" block. Never feeds
+    // WIP parsing/activity/dedup/ageing/dispatch math.
+    balFabMt: doublePrecision("bal_fab_mt"),
+    balGalvMt: doublePrecision("bal_galv_mt"),
   },
   (t) => [
     uniqueIndex("order_review_rows_project_structure_uq").on(

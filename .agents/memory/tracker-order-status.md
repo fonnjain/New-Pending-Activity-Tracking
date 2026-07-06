@@ -107,6 +107,15 @@ is idempotent; dispatch seed is capture-once so seeded=0) — old committed rows
 raw alias 647; tower_type 0). "0 everywhere" is usually WIP coverage (one WIP file covered only 56 of
 153 OR projects), NOT a join bug.
 
+## New Order Review columns land NULL until the next upload (don't mistake for a bug)
+**Why:** DB columns added to `order_review_rows` (e.g. Balance Fabrication/Galvanising, cols T/U) only
+get populated by the PARSER going forward; existing rows keep NULL forever because the upsert path only
+writes on new ingests, never backfills historical rows retroactively. Acceptance counts for a brand-new
+column will read 0/all-null until a fresh file is re-uploaded through the staged or direct import flow.
+**How to apply:** after adding a new order-review column, verify parsing logic by header-matching rules
++ a fresh re-upload (or DB query showing `count(*) filter (where col is not null)`), not by expecting the
+existing dataset to already have it. Report this expected gap to the user rather than treating it as broken.
+
 ## Fab/Galv fallback for structures absent from WIP (the standing rule)
 **Rule:** when a structure is present in the Order Review file but ABSENT from the WIP report, its
 Fabrication & Galvanizing tonnage falls back to the file's Progress block (cols M=Fabrication,

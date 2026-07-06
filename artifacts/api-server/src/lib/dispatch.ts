@@ -599,6 +599,8 @@ const ORDER_REVIEW_VALUE_FIELDS = [
   "fileDespatchMt",
   "fileBalReleaseMt",
   "fileBalDespatchMt",
+  "balFabMt",
+  "balGalvMt",
 ] as const;
 type OrderReviewValues = Pick<
   ParsedOrderReviewRow,
@@ -641,6 +643,8 @@ function collapseOrderRows(
     prev.fileDespatchMt = addNum(prev.fileDespatchMt, r.fileDespatchMt);
     prev.fileBalReleaseMt = addNum(prev.fileBalReleaseMt, r.fileBalReleaseMt);
     prev.fileBalDespatchMt = addNum(prev.fileBalDespatchMt, r.fileBalDespatchMt);
+    prev.balFabMt = addNum(prev.balFabMt, r.balFabMt);
+    prev.balGalvMt = addNum(prev.balGalvMt, r.balGalvMt);
   }
   return byKey;
 }
@@ -724,6 +728,8 @@ export async function ingestOrderReview(
           fileDespatchMt: r.fileDespatchMt,
           fileBalReleaseMt: r.fileBalReleaseMt,
           fileBalDespatchMt: r.fileBalDespatchMt,
+          balFabMt: r.balFabMt,
+          balGalvMt: r.balGalvMt,
         });
         changeLog.inserted.push({ project: r.project, structure: r.structure });
         continue;
@@ -752,6 +758,8 @@ export async function ingestOrderReview(
           fileDespatchMt: r.fileDespatchMt,
           fileBalReleaseMt: r.fileBalReleaseMt,
           fileBalDespatchMt: r.fileBalDespatchMt,
+          balFabMt: r.balFabMt,
+          balGalvMt: r.balGalvMt,
         })
         .where(eq(orderReviewRowsTable.id, prior.id));
       changeLog.updated.push({

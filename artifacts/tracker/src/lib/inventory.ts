@@ -71,9 +71,55 @@ export interface InventoryStructureCard {
   woOrderQtyMt: number | null;
   fileBalReleaseMt: number | null;
   inspectionMt: number | null;
+  galvMt: number | null;
+  balFabMt: number | null;
+  balGalvMt: number | null;
   contractors: string[];
   notInLatest: boolean;
   mixed: boolean;
+}
+
+// Release Balance display value (Col S). Bucket B shows the raw value (always
+// > 0 there); C/D/E clamp to max(0, value) so a negative balance never shows.
+// The clamp is DISPLAY-ONLY — it never affects B/C bucket membership, which
+// always uses the true numeric fileBalReleaseMt. Null stays null (renders "-"),
+// it is never coerced to 0.
+export function releaseBalanceDisplay(
+  fileBalReleaseMt: number | null,
+  clamp: boolean,
+): number | null {
+  if (fileBalReleaseMt == null) return null;
+  return clamp ? Math.max(0, fileBalReleaseMt) : fileBalReleaseMt;
+}
+
+// Fab + Galva (Col T + Col U). Both null -> null (renders "-"); one null is
+// treated as 0 for the sum (per spec: "a null cell contributes 0 to a sum").
+export function fabPlusGalva(
+  balFabMt: number | null,
+  balGalvMt: number | null,
+): number | null {
+  if (balFabMt == null && balGalvMt == null) return null;
+  return (balFabMt ?? 0) + (balGalvMt ?? 0);
+}
+
+// Sum a column across structure cards for a project rollup. Null cells
+// contribute 0 to the sum (rollups are never "-" unless every contributing
+// value was null, which callers can detect separately if needed).
+export function sumColumn(
+  rows: InventoryStructureCard[],
+  pick: (r: InventoryStructureCard) => number | null,
+): number {
+  return rows.reduce((s, r) => s + (pick(r) ?? 0), 0);
+}
+
+// Same null semantics as the structure level: a rollup renders "-" only when
+// EVERY contributing row is null for that column; otherwise nulls contribute 0.
+export function sumColumnOrNull(
+  rows: InventoryStructureCard[],
+  pick: (r: InventoryStructureCard) => number | null,
+): number | null {
+  if (rows.length === 0 || rows.every((r) => pick(r) == null)) return null;
+  return sumColumn(rows, pick);
 }
 
 export interface BucketSides {
@@ -103,6 +149,9 @@ function toCard(
       woOrderQtyMt: row.woOrderQtyMt,
       fileBalReleaseMt: row.fileBalReleaseMt,
       inspectionMt: row.inspectionMt,
+      galvMt: row.galvMt,
+      balFabMt: row.balFabMt,
+      balGalvMt: row.balGalvMt,
       contractors: row.contractors,
       notInLatest: row.notInLatest,
       mixed: sides.mixed,
@@ -162,6 +211,46 @@ export function computeAutoBuckets(
     d: splitBySide(d),
     excludedNullReleaseCount,
     excludedNullInspectionCount,
+  };
+}
+
+export interface ProjectAggregate {
+  releaseBalanceMt: number | null;
+  fabGalvaMt: number | null;
+  yardMt: number | null;
+  structureCount: number;
+}
+
+// Bucket E aggregation: sum the clamped Release Balance / Fab+Galva / Yard
+// data columns across ALL of a project's structures in the latest Order
+// Review (not side-filtered — E aggregates the whole project regardless of
+// which contractors touch it). Null-only columns across every structure
+// render as null ("-"); otherwise nulls contribute 0 per-structure.
+export function aggregateProjectColumns(
+  rows: InventoryBucketRow[],
+  project: string,
+): ProjectAggregate {
+  const projectRows = rows.filter((r) => r.project === project);
+  if (projectRows.length === 0) {
+    return { releaseBalanceMt: null, fabGalvaMt: null, yardMt: null, structureCount: 0 };
+  }
+  const allReleaseNull = projectRows.every((r) => r.fileBalReleaseMt == null);
+  const allFabGalvaNull = projectRows.every(
+    (r) => r.balFabMt == null && r.balGalvMt == null,
+  );
+  const allYardNull = projectRows.every((r) => r.galvMt == null);
+  return {
+    releaseBalanceMt: allReleaseNull
+      ? null
+      : projectRows.reduce(
+          (s, r) => s + (releaseBalanceDisplay(r.fileBalReleaseMt, true) ?? 0),
+          0,
+        ),
+    fabGalvaMt: allFabGalvaNull
+      ? null
+      : projectRows.reduce((s, r) => s + (fabPlusGalva(r.balFabMt, r.balGalvMt) ?? 0), 0),
+    yardMt: allYardNull ? null : projectRows.reduce((s, r) => s + (r.galvMt ?? 0), 0),
+    structureCount: projectRows.length,
   };
 }
 

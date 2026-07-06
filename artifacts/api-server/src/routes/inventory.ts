@@ -89,6 +89,14 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
       woOrderQtyMt: r.woOrderQtyMt,
       fileBalReleaseMt: r.fileBalReleaseMt,
       inspectionMt: r.inspectionMt,
+      // Data columns for the Inventory page's per-bucket display: galvMt =
+      // Progress Galvanising (col N, "Yard"); balFabMt/balGalvMt = Balance
+      // Fabrication/Galvanising (cols T/U). Sent raw/unclamped — the display
+      // clamp (max(0, releaseBalance)) and Fab+Galva sum are computed
+      // client-side so null-handling ("-" vs 0) stays in one place.
+      galvMt: r.galvMt,
+      balFabMt: r.balFabMt,
+      balGalvMt: r.balGalvMt,
       contractors: contractors ? Array.from(contractors) : [],
       notInLatest: false,
     };

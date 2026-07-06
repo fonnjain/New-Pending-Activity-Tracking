@@ -1706,6 +1706,9 @@ export const GetInventoryBucketsResponse = zod.object({
   "woOrderQtyMt": zod.number().nullable(),
   "fileBalReleaseMt": zod.number().nullable().describe('Balance -> Release (Col S). Drives Bucket B (>0) \/ Bucket C (<=0).'),
   "inspectionMt": zod.number().nullable().describe('Progress -> Inspection (Col O). Drives Bucket D (>0).'),
+  "galvMt": zod.number().nullable().describe('Progress -> Galvanising (Col N). The \"Yard\" data column shown on every auto bucket (B\/C\/D\/E).'),
+  "balFabMt": zod.number().nullable().describe('Balance -> Fabrication (Col T). The \"Fab\" data column (B combines with balGalvMt into Fab+Galva; C\/D show separately).'),
+  "balGalvMt": zod.number().nullable().describe('Balance -> Galvanising (Col U). The \"Galva\" data column (B combines with balFabMt into Fab+Galva; C\/D show separately).'),
   "contractors": zod.array(zod.string()).describe('Distinct contractor names touching this structure in the newest WIP import.'),
   "notInLatest": zod.boolean().describe('True when this row was last touched by an earlier Order Review upload, not the newest one.')
 }).describe('One (project, structure) row from the latest Order Review snapshot, joined to the distinct contractors touching that structure in the newest WIP import. Raw only — the client derives B\/C\/D membership and in-house\/out-vendor sides from these fields.\n'))

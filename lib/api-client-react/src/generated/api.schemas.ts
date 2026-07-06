@@ -986,6 +986,12 @@ export interface InventoryBucketRow {
   fileBalReleaseMt: number | null;
   /** Progress -> Inspection (Col O). Drives Bucket D (>0). */
   inspectionMt: number | null;
+  /** Progress -> Galvanising (Col N). The "Yard" data column shown on every auto bucket (B/C/D/E). */
+  galvMt: number | null;
+  /** Balance -> Fabrication (Col T). The "Fab" data column (B combines with balGalvMt into Fab+Galva; C/D show separately). */
+  balFabMt: number | null;
+  /** Balance -> Galvanising (Col U). The "Galva" data column (B combines with balFabMt into Fab+Galva; C/D show separately). */
+  balGalvMt: number | null;
   /** Distinct contractor names touching this structure in the newest WIP import. */
   contractors: string[];
   /** True when this row was last touched by an earlier Order Review upload, not the newest one. */
