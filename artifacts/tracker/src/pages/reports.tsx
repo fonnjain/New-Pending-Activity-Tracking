@@ -1309,6 +1309,27 @@ export function ContractorPerformanceReport() {
     [detailRows, contractorFilter, stageFilter],
   );
 
+  // Split the process-ordered stage columns so the two subtotal columns sit
+  // right after the last activity they summarize: Fabrication Subtotal after
+  // TS (the last STAGE_FAB_SET activity), Galvanization Subtotal after GB
+  // (the last STAGE_GALV_SET activity before the terminal Y). Y itself always
+  // renders last since it's the shared terminal stage for every sequence.
+  const { fabStageActs, galvStageActsPreY, hasYStage } = useMemo(() => {
+    const fab: string[] = [];
+    const galvPreY: string[] = [];
+    let hasY = false;
+    for (const a of stageActivities) {
+      if (a === "Y") {
+        hasY = true;
+      } else if (STAGE_GALV_SET.has(a)) {
+        galvPreY.push(a);
+      } else {
+        fab.push(a);
+      }
+    }
+    return { fabStageActs: fab, galvStageActsPreY: galvPreY, hasYStage: hasY };
+  }, [stageActivities]);
+
   const totalMarks = entries.reduce((s, e) => s + e.markCount, 0);
 
   const handleExcel = () => {
@@ -1350,9 +1371,11 @@ export function ContractorPerformanceReport() {
     // activity present, TLT-sequence ordered, plus a Total column.
     const stageColumns: XlsxColumn[] = [
       { label: "Contractor", field: "contractor" },
-      ...stageActivities.map((a) => ({ label: a, field: a, numeric: true, decimals: 2, total: true })),
+      ...fabStageActs.map((a) => ({ label: a, field: a, numeric: true, decimals: 2, total: true })),
       { label: "Fabrication Subtotal (MT)", field: "__fabSubtotal", numeric: true, decimals: 2, total: true },
+      ...galvStageActsPreY.map((a) => ({ label: a, field: a, numeric: true, decimals: 2, total: true })),
       { label: "Galvanization Subtotal (MT)", field: "__galvSubtotal", numeric: true, decimals: 2, total: true },
+      ...(hasYStage ? [{ label: "Y", field: "Y", numeric: true, decimals: 2, total: true }] : []),
       { label: "Total (MT)", field: "__total", numeric: true, decimals: 2, total: true },
     ];
     const stageRowsMt = contractors.map((c) => {
@@ -1549,7 +1572,7 @@ export function ContractorPerformanceReport() {
                       <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground sticky left-0 bg-muted/60">
                         Contractor
                       </TableCell>
-                      {stageActivities.map((a) => (
+                      {fabStageActs.map((a) => (
                         <TableCell
                           key={a}
                           className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap"
@@ -1560,9 +1583,22 @@ export function ContractorPerformanceReport() {
                       <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap">
                         Fabrication Subtotal
                       </TableCell>
+                      {galvStageActsPreY.map((a) => (
+                        <TableCell
+                          key={a}
+                          className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap"
+                        >
+                          {a}
+                        </TableCell>
+                      ))}
                       <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap">
                         Galvanization Subtotal
                       </TableCell>
+                      {hasYStage && (
+                        <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap">
+                          Y
+                        </TableCell>
+                      )}
                       <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap">
                         Total
                       </TableCell>
@@ -1594,7 +1630,7 @@ export function ContractorPerformanceReport() {
                           >
                             {c}
                           </TableCell>
-                          {stageActivities.map((a) => {
+                          {fabStageActs.map((a) => {
                             const wt = stageMatrix.get(`${c}|${a}`) ?? 0;
                             return (
                               <TableCell
@@ -1613,9 +1649,40 @@ export function ContractorPerformanceReport() {
                           <TableCell className="text-right tabular-nums text-xs font-semibold">
                             {formatWeightMT(stageFabByContractor.get(c) ?? 0)}
                           </TableCell>
+                          {galvStageActsPreY.map((a) => {
+                            const wt = stageMatrix.get(`${c}|${a}`) ?? 0;
+                            return (
+                              <TableCell
+                                key={a}
+                                className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
+                                  stageFilter === a && contractorFilter === c
+                                    ? "font-bold text-primary"
+                                    : "text-muted-foreground"
+                                }`}
+                                onClick={() => toggleStage(a, c)}
+                              >
+                                {wt ? formatWeightMT(wt) : "-"}
+                              </TableCell>
+                            );
+                          })}
                           <TableCell className="text-right tabular-nums text-xs font-semibold">
                             {formatWeightMT(stageGalvByContractor.get(c) ?? 0)}
                           </TableCell>
+                          {hasYStage && (() => {
+                            const wt = stageMatrix.get(`${c}|Y`) ?? 0;
+                            return (
+                              <TableCell
+                                className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
+                                  stageFilter === "Y" && contractorFilter === c
+                                    ? "font-bold text-primary"
+                                    : "text-muted-foreground"
+                                }`}
+                                onClick={() => toggleStage("Y", c)}
+                              >
+                                {wt ? formatWeightMT(wt) : "-"}
+                              </TableCell>
+                            );
+                          })()}
                           <TableCell className="text-right tabular-nums text-xs font-bold">
                             {formatWeightMT(stageRowTotals.get(c) ?? 0)}
                           </TableCell>
@@ -1631,7 +1698,7 @@ export function ContractorPerformanceReport() {
                     {contractors.length > 0 && (
                       <TableRow className="border-t-2 font-bold bg-muted/30 hover:bg-muted/30">
                         <TableCell className="text-xs sticky left-0 bg-muted/30">Total</TableCell>
-                        {stageActivities.map((a) => (
+                        {fabStageActs.map((a) => (
                           <TableCell
                             key={a}
                             className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
@@ -1645,9 +1712,30 @@ export function ContractorPerformanceReport() {
                         <TableCell className="text-right tabular-nums text-xs">
                           {formatWeightMT(stageFabTotal)}
                         </TableCell>
+                        {galvStageActsPreY.map((a) => (
+                          <TableCell
+                            key={a}
+                            className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
+                              stageFilter === a && contractorFilter === null ? "text-primary" : ""
+                            }`}
+                            onClick={() => toggleStage(a)}
+                          >
+                            {formatWeightMT(stageColTotals.get(a) ?? 0)}
+                          </TableCell>
+                        ))}
                         <TableCell className="text-right tabular-nums text-xs">
                           {formatWeightMT(stageGalvTotal)}
                         </TableCell>
+                        {hasYStage && (
+                          <TableCell
+                            className={`text-right tabular-nums text-xs cursor-pointer hover:text-primary hover:underline ${
+                              stageFilter === "Y" && contractorFilter === null ? "text-primary" : ""
+                            }`}
+                            onClick={() => toggleStage("Y")}
+                          >
+                            {formatWeightMT(stageColTotals.get("Y") ?? 0)}
+                          </TableCell>
+                        )}
                         <TableCell className="text-right tabular-nums text-xs">
                           {formatWeightMT(stageGrandTotal)}
                         </TableCell>
