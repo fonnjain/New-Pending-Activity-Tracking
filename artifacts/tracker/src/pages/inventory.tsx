@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTracker, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
 import {
   useGetAuthStatus,
@@ -351,6 +351,84 @@ function ManualBucketSide({
   );
 }
 
+function ProjectCheckboxFilter({
+  projects,
+  selected,
+  onChange,
+}: {
+  projects: string[];
+  selected: Set<string> | null;
+  onChange: (next: Set<string> | null) => void;
+}) {
+  if (projects.length === 0) return null;
+
+  const allSelected = selected === null;
+  const selectedCount = allSelected ? projects.length : selected.size;
+
+  const toggle = (project: string) => {
+    const current = allSelected ? new Set(projects) : new Set(selected);
+    if (current.has(project)) current.delete(project);
+    else current.add(project);
+    onChange(current.size === projects.length ? null : current);
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm">
+            Projects{" "}
+            <span className="text-muted-foreground font-normal">
+              ({selectedCount}/{projects.length} selected)
+            </span>
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => onChange(null)}
+              disabled={allSelected}
+            >
+              Select all
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => onChange(new Set())}
+              disabled={selectedCount === 0}
+            >
+              Clear all
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap gap-x-4 gap-y-2 max-h-48 overflow-auto pr-1">
+          {projects.map((p) => {
+            const checked = allSelected || selected.has(p);
+            return (
+              <label
+                key={p}
+                className="flex items-center gap-1.5 text-sm cursor-pointer select-none"
+              >
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-primary shrink-0"
+                  checked={checked}
+                  onChange={() => toggle(p)}
+                />
+                <span className="truncate">{p}</span>
+              </label>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function ManualAddForm({
   mode,
   knownProjects,
@@ -432,9 +510,43 @@ export default function InventoryView() {
   const jobFilter = filters.job;
   const isCurrentJobs = jobFilter === CURRENT_JOBS_FILTER_VALUE;
   const { set: currentJobsSet, meta: currentJobsMeta } = useCurrentJobsSet();
+
+  // Distinct projects present under the current Job filter (before the
+  // project-checkbox refinement below). Drives the checkbox list so it
+  // always reflects the active All/single-project/Current-Jobs scope.
+  const jobScopedProjects = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rawRows) {
+      if (isCurrentJobs) {
+        if (currentJobsSet.has(r.project)) set.add(r.project);
+      } else if (jobFilter) {
+        if (r.project === jobFilter) set.add(r.project);
+      } else {
+        set.add(r.project);
+      }
+    }
+    return Array.from(set).sort();
+  }, [rawRows, jobFilter, isCurrentJobs, currentJobsSet]);
+
+  // Further, user-controlled refinement on top of the Job filter. `null`
+  // means "no refinement" (everything the Job filter allows is shown).
+  const [selectedProjects, setSelectedProjects] = useState<Set<string> | null>(null);
+
+  // Reset the refinement whenever the underlying Job-filter scope changes so
+  // a stale per-project selection from a previous scope can't silently hide
+  // data in the new one.
+  useEffect(() => {
+    setSelectedProjects(null);
+  }, [jobFilter]);
+
+  const matchesProjectSelection = (project: string): boolean =>
+    selectedProjects === null || selectedProjects.has(project);
+
   const applyJobFilter = (rows: InventoryStructureCard[]): InventoryStructureCard[] => {
-    if (isCurrentJobs) return rows.filter((r) => currentJobsSet.has(r.project));
-    return jobFilter ? rows.filter((r) => r.project === jobFilter) : rows;
+    let out = rows;
+    if (isCurrentJobs) out = out.filter((r) => currentJobsSet.has(r.project));
+    else if (jobFilter) out = out.filter((r) => r.project === jobFilter);
+    return out.filter((r) => matchesProjectSelection(r.project));
   };
 
   const bInHouse = applyJobFilter(buckets.b.inHouse);
@@ -520,8 +632,10 @@ export default function InventoryView() {
   // to buckets B/C/D above); manual Buckets A/E are filtered the same way so
   // a filtered export never leaks other projects' manual entries.
   const applyJobFilterManual = (entries: InventoryManualEntry[]): InventoryManualEntry[] => {
-    if (isCurrentJobs) return entries.filter((e) => currentJobsSet.has(e.projectCode));
-    return jobFilter ? entries.filter((e) => e.projectCode === jobFilter) : entries;
+    let out = entries;
+    if (isCurrentJobs) out = out.filter((e) => currentJobsSet.has(e.projectCode));
+    else if (jobFilter) out = out.filter((e) => e.projectCode === jobFilter);
+    return out.filter((e) => matchesProjectSelection(e.projectCode));
   };
 
   const structureRows = (side: InventorySide, rows: InventoryStructureCard[], columns: ColumnDef[]) =>
@@ -629,7 +743,8 @@ export default function InventoryView() {
       },
     ];
     const date = new Date().toISOString().slice(0, 10);
-    const tag = isCurrentJobs ? "current-jobs" : jobFilter ? jobFilter.replace(/[^\w-]+/g, "-") : "all";
+    const baseTag = isCurrentJobs ? "current-jobs" : jobFilter ? jobFilter.replace(/[^\w-]+/g, "-") : "all";
+    const tag = selectedProjects !== null ? `${baseTag}-filtered` : baseTag;
     void exportToXlsxSheets(`inventory_${tag}_${date}.xlsx`, sheets);
   };
 
@@ -655,6 +770,12 @@ export default function InventoryView() {
           </Button>
         </div>
       </div>
+
+      <ProjectCheckboxFilter
+        projects={jobScopedProjects}
+        selected={selectedProjects}
+        onChange={setSelectedProjects}
+      />
 
       {isCurrentJobs && currentJobsSet.size === 0 && (
         <Card className="border-amber-500/40">
