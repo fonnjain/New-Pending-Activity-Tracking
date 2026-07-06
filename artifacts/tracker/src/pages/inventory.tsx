@@ -32,7 +32,8 @@ import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Segmented } from "@/components/ui/segmented";
-import { Boxes, ChevronRight, ChevronDown, Trash2, AlertTriangle } from "lucide-react";
+import { Boxes, ChevronRight, ChevronDown, Trash2, AlertTriangle, FileSpreadsheet } from "lucide-react";
+import { exportToXlsxSheets, type XlsxSheet, type XlsxSummaryRow } from "@/lib/export";
 
 function mt(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "-";
@@ -511,6 +512,121 @@ export default function InventoryView() {
     );
   };
 
+  // Export honours the current Job filter (applyJobFilter is already applied
+  // to buckets B/C/D above); manual Buckets A/E are filtered the same way so
+  // a filtered export never leaks other projects' manual entries.
+  const applyJobFilterManual = (entries: InventoryManualEntry[]): InventoryManualEntry[] =>
+    jobFilter ? entries.filter((e) => e.projectCode === jobFilter) : entries;
+
+  const structureRows = (side: InventorySide, rows: InventoryStructureCard[], columns: ColumnDef[]) =>
+    rows.map((r) => {
+      const row: Record<string, string | number | null> = {
+        side: SIDE_LABELS[side],
+        project: r.project,
+        structure: r.structure ?? "",
+        subType: r.subType ?? "",
+        mixed: r.mixed ? "Yes" : "",
+        notInLatest: r.notInLatest ? "Yes" : "",
+      };
+      for (const col of columns) row[col.key] = col.get(r);
+      return row;
+    });
+
+  const summaryToRows = (label: string, summary: BucketSummary): XlsxSummaryRow[] => [
+    { label: `${label} SUMMARY`, values: {} },
+    { label: "Total Release Balance", values: { release: summary.releaseBalanceMt, fab: summary.releaseBalanceMt } },
+    { label: "Under Production", values: { fabGalva: summary.underProductionMt, fab: summary.underProductionMt } },
+    { label: "Total Yard", values: { yard: summary.yardMt } },
+    { label: "Operation Weight", values: { fab: summary.operationWeightMt, fabGalva: summary.operationWeightMt } },
+    { label: "Grand Total Weight", values: { fab: summary.grandTotalMt, fabGalva: summary.grandTotalMt } },
+  ];
+
+  const autoBucketSheet = (
+    name: string,
+    inHouse: InventoryStructureCard[],
+    outVendor: InventoryStructureCard[],
+    columns: ColumnDef[],
+    clampRelease: boolean,
+  ): XlsxSheet => {
+    const baseColumns = [
+      { label: "Side", field: "side" },
+      { label: "Project", field: "project" },
+      { label: "Structure", field: "structure" },
+      { label: "Sub Type", field: "subType" },
+      { label: "Mixed", field: "mixed" },
+      { label: "Not In Latest", field: "notInLatest" },
+    ];
+    const dataColumns = columns.map((c) => ({
+      label: c.label,
+      field: c.key,
+      numeric: true,
+      decimals: 3,
+      total: true,
+    }));
+    return {
+      name,
+      columns: [...baseColumns, ...dataColumns],
+      rows: [
+        ...structureRows("in_house", inHouse, columns),
+        ...structureRows("out_vendor", outVendor, columns),
+      ],
+      summaryRows: [
+        ...summaryToRows("In-House", computeBucketSummary(inHouse, clampRelease)),
+        ...summaryToRows("Out-Vendor", computeBucketSummary(outVendor, clampRelease)),
+      ],
+    };
+  };
+
+  const manualBucketRows = (entries: InventoryManualEntry[], includeAgg: boolean) =>
+    entries.map((e) => {
+      const agg = includeAgg ? aggregateProjectColumns(rawRows, e.projectCode) : null;
+      return {
+        side: SIDE_LABELS[e.side as InventorySide],
+        project: e.projectCode,
+        woOrderQtyMt: e.woOrderQtyMt,
+        note: e.note ?? "",
+        releaseBalanceMt: agg?.releaseBalanceMt ?? null,
+        fabGalvaMt: agg?.fabGalvaMt ?? null,
+        yardMt: agg?.yardMt ?? null,
+        structureCount: agg?.structureCount ?? null,
+      };
+    });
+
+  const handleExport = () => {
+    const filteredManualA = applyJobFilterManual(manualA);
+    const filteredManualE = applyJobFilterManual(manualE);
+    const sheets: XlsxSheet[] = [
+      {
+        name: "A - " + BUCKET_LABELS.a.slice(0, 28),
+        columns: [
+          { label: "Side", field: "side" },
+          { label: "Project", field: "project" },
+          { label: "WO Qty (MT)", field: "woOrderQtyMt", numeric: true, decimals: 3, total: true },
+          { label: "Note", field: "note" },
+        ],
+        rows: manualBucketRows(filteredManualA, false),
+      },
+      autoBucketSheet("B - Raw Material Incomplete", bInHouse, bOutVendor, BUCKET_B_COLUMNS, false),
+      autoBucketSheet("C - RM Complete", cInHouse, cOutVendor, BUCKET_CD_COLUMNS, true),
+      autoBucketSheet("D - Dispatch Clearance", dInHouse, dOutVendor, BUCKET_CD_COLUMNS, true),
+      {
+        name: "E - Ready Not Dispatched",
+        columns: [
+          { label: "Side", field: "side" },
+          { label: "Project", field: "project" },
+          { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
+          { label: "Fab+Galva (MT)", field: "fabGalvaMt", numeric: true, decimals: 3, total: true },
+          { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
+          { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
+        ],
+        rows: manualBucketRows(filteredManualE, true),
+      },
+    ];
+    const date = new Date().toISOString().slice(0, 10);
+    const tag = jobFilter ? jobFilter.replace(/[^\w-]+/g, "-") : "all";
+    void exportToXlsxSheets(`inventory_${tag}_${date}.xlsx`, sheets);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -518,9 +634,20 @@ export default function InventoryView() {
           <Boxes className="h-5 w-5 text-primary" />
           Inventory
         </h1>
-        {asOnDate && (
-          <span className="text-xs text-muted-foreground">Order Review as on {asOnDate}</span>
-        )}
+        <div className="flex items-center gap-3">
+          {asOnDate && (
+            <span className="text-xs text-muted-foreground">Order Review as on {asOnDate}</span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-2"
+            onClick={handleExport}
+            disabled={isLoading}
+          >
+            <FileSpreadsheet className="h-4 w-4" /> Export Excel
+          </Button>
+        </div>
       </div>
 
       {!available && (
