@@ -567,7 +567,13 @@ export function readStructural(buffer: Buffer): StructuralRead {
 
   const found = new Set(columnsFound);
   const expected = Object.values(COL);
-  const missingColumns = expected.filter((c) => !found.has(c));
+  // "WO Batch No." was renamed to "Batch No." in newer file exports — treat
+  // either header as satisfying the woBatchNo expectation.
+  const missingColumns = expected.filter((c) => {
+    if (found.has(c)) return false;
+    if (c === COL.woBatchNo && found.has("Batch No.")) return false;
+    return true;
+  });
 
   const rawRows = XLSX.utils.sheet_to_json<RawRow>(ws, {
     range: headerRow,
@@ -674,7 +680,8 @@ export function parseWorkbook(
     // WO Batch No. (col U) = MFC batch. Raw (trimmed) value drives the hash;
     // the stored/displayed value is normalized (uppercased, blank -> "Z" so
     // blanks sort after real batches A, B, C ...).
-    const rawBatch = emptyToNull(row[COL.woBatchNo]);
+    // "WO Batch No." was renamed to "Batch No." in newer file exports.
+    const rawBatch = emptyToNull(row[COL.woBatchNo] ?? row["Batch No."]);
     const mfcBatch = rawBatch ? rawBatch.toUpperCase() : "Z";
     // Classify the mark (TLT vs NTLT + subtype). Additive — these fields are NOT
     // hashed (hashRow lists only source columns), so identity is unchanged.
