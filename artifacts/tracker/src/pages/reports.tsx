@@ -2257,7 +2257,7 @@ function FabCompletionReport() {
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-border bg-muted font-bold">
-                <td className="px-3 py-2" colSpan={2}>
+                <td className="px-3 py-2" colSpan={3}>
                   Grand Total
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
