@@ -451,8 +451,16 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
       if (!s) continue;
       const m = s.match(PROJECT_BANNER);
       if (m && m[1]) {
-        currentProject = normalizeProject(m[1]);
-        currentStructure = ""; // new project resets the BOM carry
+        const nextProject = normalizeProject(m[1]);
+        if (nextProject !== currentProject) {
+          // Project change — reset the structure carry so continuation rows
+          // from the previous project don't bleed into the new project.
+          currentStructure = "";
+        }
+        // Same-project banners (e.g. one per BOM section: Proto / Mass / Pre)
+        // must NOT wipe currentStructure; the next continuation row (blank Col C)
+        // should still inherit the last structure from the preceding section.
+        currentProject = nextProject;
         bannerHit = true;
       }
     }

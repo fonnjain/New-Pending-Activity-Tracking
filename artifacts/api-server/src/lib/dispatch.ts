@@ -699,99 +699,86 @@ export async function ingestOrderReview(
   };
 
   await db.transaction(async (tx) => {
+    // Read all existing rows.  When legacy data has multiple BOM rows per
+    // (project, structure) — Proto, Mass, Pre stored individually instead of
+    // as a single BOM-summed aggregate — only the FIRST row encountered per
+    // key is kept for change-detection; the extra rows are swept away by the
+    // delete-then-insert strategy below.
     const existing = await tx.select().from(orderReviewRowsTable);
-    const existingByKey = new Map(
-      existing.map((row) => [matchKey(row.project, row.structure), row]),
-    );
+    const existingByKey = new Map<string, typeof existing[number]>();
+    for (const row of existing) {
+      const key = matchKey(row.project, row.structure);
+      if (!existingByKey.has(key)) existingByKey.set(key, row);
+    }
 
-    const toInsert: (typeof orderReviewRowsTable.$inferInsert)[] = [];
-    // Keys present + identical -> only bump last-seen importId (a presence write,
-    // not a value change, so it is NOT counted as "updated").
-    const unchangedRowIds: number[] = [];
-
+    // Compute change log: compare the first-seen existing row per key against
+    // the incoming BOM-summed row (values will differ whenever the DB held
+    // individual BOM rows rather than a summed aggregate).
     for (const [key, r] of incoming) {
       const prior = existingByKey.get(key);
       if (!prior) {
-        toInsert.push({
-          importId: imp.id,
-          project: r.project,
-          structure: r.structure,
-          subType: r.subType,
-          sets: r.sets,
-          weightMt: r.weightMt,
-          woOrderQtyMt: r.woOrderQtyMt,
-          bomType: r.bomType,
-          releaseMt: r.releaseMt,
-          fabMt: r.fabMt,
-          galvMt: r.galvMt,
-          inspectionMt: r.inspectionMt,
-          fileDespatchMt: r.fileDespatchMt,
-          fileBalReleaseMt: r.fileBalReleaseMt,
-          fileBalDespatchMt: r.fileBalDespatchMt,
-          balFabMt: r.balFabMt,
-          balGalvMt: r.balGalvMt,
-        });
         changeLog.inserted.push({ project: r.project, structure: r.structure });
-        continue;
+      } else {
+        const changes = diffOrderValues(prior, r);
+        if (changes.length === 0) changeLog.unchanged++;
+        else
+          changeLog.updated.push({
+            project: prior.project,
+            structure: prior.structure,
+            changes,
+          });
       }
-      const changes = diffOrderValues(prior, r);
-      if (changes.length === 0) {
-        changeLog.unchanged++;
-        if (prior.importId !== imp.id) unchangedRowIds.push(prior.id);
-        continue;
-      }
-      // Update values IN PLACE (one current row per key); structure case is left
-      // as first stored to keep the WIP join key stable.
-      await tx
-        .update(orderReviewRowsTable)
-        .set({
-          importId: imp.id,
-          subType: r.subType,
-          sets: r.sets,
-          weightMt: r.weightMt,
-          woOrderQtyMt: r.woOrderQtyMt,
-          bomType: r.bomType,
-          releaseMt: r.releaseMt,
-          fabMt: r.fabMt,
-          galvMt: r.galvMt,
-          inspectionMt: r.inspectionMt,
-          fileDespatchMt: r.fileDespatchMt,
-          fileBalReleaseMt: r.fileBalReleaseMt,
-          fileBalDespatchMt: r.fileBalDespatchMt,
-          balFabMt: r.balFabMt,
-          balGalvMt: r.balGalvMt,
-        })
-        .where(eq(orderReviewRowsTable.id, prior.id));
-      changeLog.updated.push({
-        project: prior.project,
-        structure: prior.structure,
-        changes,
-      });
     }
-
-    // Insert genuinely new keys.
-    const chunk = 500;
-    for (let i = 0; i < toInsert.length; i += chunk) {
-      await tx
-        .insert(orderReviewRowsTable)
-        .values(toInsert.slice(i, i + chunk));
-    }
-
-    // Bump last-seen importId for present-but-unchanged rows so they are not
-    // wrongly flagged as absent from the latest file.
-    for (let i = 0; i < unchangedRowIds.length; i += chunk) {
-      await tx
-        .update(orderReviewRowsTable)
-        .set({ importId: imp.id })
-        .where(inArray(orderReviewRowsTable.id, unchangedRowIds.slice(i, i + chunk)));
-    }
-
-    // Flag (keep, never delete) keys present before but absent from this file.
     for (const [key, row] of existingByKey) {
       if (!incoming.has(key)) {
         changeLog.flagged.push({ project: row.project, structure: row.structure });
       }
     }
+
+    // Delete ALL existing rows whose key appears in the incoming set.  This
+    // includes any legacy BOM-row duplicates (e.g. a separate Mass row and a
+    // separate Proto row for the same structure) that accumulated when the DB
+    // was loaded before per-structure BOM collapsing was enforced.  The fresh
+    // insert below replaces them with exactly ONE BOM-summed row per key.
+    // Rows absent from this file (flagged) are not touched.
+    const chunk = 500;
+    const idsToDelete = existing
+      .filter((row) => incoming.has(matchKey(row.project, row.structure)))
+      .map((row) => row.id);
+    for (let i = 0; i < idsToDelete.length; i += chunk) {
+      await tx
+        .delete(orderReviewRowsTable)
+        .where(inArray(orderReviewRowsTable.id, idsToDelete.slice(i, i + chunk)));
+    }
+
+    // Insert ONE BOM-summed row per (project, structure) for every key present
+    // in this file.  All rows carry the current importId so notInLatest is
+    // correctly false for structures appearing in this upload.
+    const toInsert = Array.from(incoming.values()).map((r) => ({
+      importId: imp.id,
+      project: r.project,
+      structure: r.structure,
+      subType: r.subType,
+      sets: r.sets,
+      weightMt: r.weightMt,
+      woOrderQtyMt: r.woOrderQtyMt,
+      bomType: r.bomType,
+      releaseMt: r.releaseMt,
+      fabMt: r.fabMt,
+      galvMt: r.galvMt,
+      inspectionMt: r.inspectionMt,
+      fileDespatchMt: r.fileDespatchMt,
+      fileBalReleaseMt: r.fileBalReleaseMt,
+      fileBalDespatchMt: r.fileBalDespatchMt,
+      balFabMt: r.balFabMt,
+      balGalvMt: r.balGalvMt,
+    }));
+    for (let i = 0; i < toInsert.length; i += chunk) {
+      await tx
+        .insert(orderReviewRowsTable)
+        .values(toInsert.slice(i, i + chunk));
+    }
+    // Rows absent from this file are left in place (flagged by importId mismatch).
   });
 
   await db
