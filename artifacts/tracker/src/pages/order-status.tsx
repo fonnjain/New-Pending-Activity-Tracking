@@ -36,6 +36,11 @@ function mt(n: number | null | undefined): string {
   return n.toFixed(3);
 }
 
+function dispMt(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "";
+  return n.toFixed(3);
+}
+
 interface ComputedBuckets {
   fabMt: number;
   galvMt: number;
@@ -457,8 +462,8 @@ export default function OrderStatusView() {
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.releaseBalanceMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.fabMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.galvMt)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.fileDespatchMt)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.dispatchBalanceMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{dispMt(totals.fileDespatchMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{dispMt(totals.dispatchBalanceMt)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -533,8 +538,8 @@ function ProjectGroup({
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.releaseBalanceMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.fabMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.galvMt)}</td>
-        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.fileDespatchMt)}</td>
-        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.dispatchBalanceMt)}</td>
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{dispMt(subtotal.fileDespatchMt)}</td>
+        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{dispMt(subtotal.dispatchBalanceMt)}</td>
       </tr>
       {open &&
         list.map((r) => (
@@ -566,8 +571,8 @@ function ProjectGroup({
             <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.releaseBalanceMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.fabMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.galvMt)}</td>
-            <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.fileDespatchMt)}</td>
-            <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.dispatchBalanceMt)}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{dispMt(r.fileDespatchMt)}</td>
+            <td className="px-2 py-1.5 text-right tabular-nums">{dispMt(r.dispatchBalanceMt)}</td>
           </tr>
         ))}
       {open && (
@@ -582,8 +587,8 @@ function ProjectGroup({
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.releaseBalanceMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.fabMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.galvMt)}</td>
-          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.fileDespatchMt)}</td>
-          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.dispatchBalanceMt)}</td>
+          <td className="px-2 py-1 text-right tabular-nums font-medium">{dispMt(subtotal.fileDespatchMt)}</td>
+          <td className="px-2 py-1 text-right tabular-nums font-medium">{dispMt(subtotal.dispatchBalanceMt)}</td>
         </tr>
       )}
     </>
