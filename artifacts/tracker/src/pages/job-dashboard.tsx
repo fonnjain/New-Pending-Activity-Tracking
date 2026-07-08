@@ -138,21 +138,16 @@ function JobDashboardContent() {
 
   const [project, setProject] = useState<string | null>(null);
   const [mfcBatch, setMfcBatch] = useState<string | null>(null);
-  const [structure, setStructure] = useState<string | null>(null);
-  const [mark, setMark] = useState<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [projectSort, setProjectSort] = useState<ProjectSortKey>("assignDate");
 
   const primaryLabel = isAll ? "Group" : isNtlt ? "Section" : "Project";
-  const secondaryLabel = isAll ? "Sub-group" : isNtlt ? "Sub-category" : "Structure";
 
   // Switching mode clears any stale cross-mode local selection.
   const switchMode = (v: string | null) => {
     if (!v || v === filters.category) return;
     setProject(null);
     setMfcBatch(null);
-    setStructure(null);
-    setMark(null);
     setSelectedJob(null);
     setFilter("category", v);
   };
@@ -179,55 +174,12 @@ function JobDashboardContent() {
     [records, project, isNtlt],
   );
 
-  const structureOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          records
-            .filter(
-              (r) =>
-                (!project || primaryOf(r) === project) &&
-                (!mfcBatch || mfcOf(r) === mfcBatch),
-            )
-            .map((r) => secondaryOf(r))
-            .filter((s): s is string => Boolean(s)),
-        ),
-      ).sort(),
-    [records, project, mfcBatch, isNtlt, isAll],
-  );
-
-  const markOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          records
-            .filter(
-              (r) =>
-                (!project || primaryOf(r) === project) &&
-                (!mfcBatch || mfcOf(r) === mfcBatch) &&
-                (!structure || secondaryOf(r) === structure),
-            )
-            .map((r) => r.markId)
-            .filter(Boolean),
-        ),
-      ).sort(),
-    [records, project, mfcBatch, structure, isNtlt, isAll],
-  );
-
   const setProjectCascade = (v: string | null) => {
     setProject(v);
     setMfcBatch(null);
-    setStructure(null);
-    setMark(null);
   };
   const setMfcCascade = (v: string | null) => {
     setMfcBatch(v);
-    setStructure(null);
-    setMark(null);
-  };
-  const setStructureCascade = (v: string | null) => {
-    setStructure(v);
-    setMark(null);
   };
 
   const filtered = useMemo(
@@ -235,11 +187,9 @@ function JobDashboardContent() {
       records.filter((r) => {
         if (project && primaryOf(r) !== project) return false;
         if (mfcBatch && mfcOf(r) !== mfcBatch) return false;
-        if (structure && secondaryOf(r) !== structure) return false;
-        if (mark && r.markId !== mark) return false;
         return true;
       }),
-    [records, project, mfcBatch, structure, mark, isNtlt, isAll],
+    [records, project, mfcBatch, isNtlt, isAll],
   );
 
   const { totalProjects, totalMarks, totalQty, totalWt, avgAgeing, byProject, byActivity } =
@@ -458,7 +408,7 @@ function JobDashboardContent() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className={`grid grid-cols-1 sm:grid-cols-2 ${isNtlt ? "lg:grid-cols-4" : "lg:grid-cols-5"} gap-3`}>
+          <div className={`grid grid-cols-1 sm:grid-cols-2 ${isNtlt ? "lg:grid-cols-2" : "lg:grid-cols-3"} gap-3`}>
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">
                 Order Type
@@ -500,32 +450,6 @@ function JobDashboardContent() {
                 />
               </div>
             )}
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">
-                {secondaryLabel}
-              </label>
-              <SearchableSelect
-                value={structure}
-                onChange={setStructureCascade}
-                options={structureOptions}
-                allLabel={`All ${secondaryLabel === "Sub-category" ? "Sub-categories" : "Structures"}`}
-                searchPlaceholder={`Search ${secondaryLabel.toLowerCase()}...`}
-                disabled={structureOptions.length === 0}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">
-                Mark
-              </label>
-              <SearchableSelect
-                value={mark}
-                onChange={setMark}
-                options={markOptions}
-                allLabel="All Marks"
-                searchPlaceholder="Search marks..."
-                disabled={markOptions.length === 0}
-              />
-            </div>
           </div>
         </CardContent>
       </Card>
