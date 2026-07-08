@@ -524,8 +524,8 @@ export async function exportToXlsxSheets(
   const wb = new ExcelJS.Workbook();
   wb.created = new Date();
   const used = new Set<string>();
-  for (const sheet of sheets) writeSheet(wb, sheet, used);
   if (combined) writeCombinedBlockSheet(wb, combined.inHouse, combined.outVendor, used);
+  for (const sheet of sheets) writeSheet(wb, sheet, used);
   await downloadWorkbook(wb, filename);
 }
 
