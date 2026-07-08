@@ -652,6 +652,31 @@ export default function InventoryView() {
       return row;
     });
 
+  // Project-level aggregation for Excel export — one row per project, numeric
+  // columns summed across all structures in that project.
+  const projectRows = (side: InventorySide, rows: InventoryStructureCard[], columns: ColumnDef[]) => {
+    const projectMap = new Map<string, Record<string, string | number | null>>();
+    for (const r of rows) {
+      const existing = projectMap.get(r.project);
+      if (!existing) {
+        const row: Record<string, string | number | null> = {
+          side: SIDE_LABELS[side],
+          project: r.project,
+        };
+        for (const col of columns) row[col.key] = col.get(r) ?? 0;
+        projectMap.set(r.project, row);
+      } else {
+        for (const col of columns) {
+          const val = col.get(r);
+          if (val !== null) {
+            existing[col.key] = ((existing[col.key] as number) ?? 0) + val;
+          }
+        }
+      }
+    }
+    return [...projectMap.values()];
+  };
+
   const summaryToRows = (label: string, summary: BucketSummary): XlsxSummaryRow[] => [
     { label: `${label} SUMMARY`, values: {} },
     { label: "Total Release Balance", values: { release: summary.releaseBalanceMt, fab: summary.releaseBalanceMt } },
@@ -671,10 +696,6 @@ export default function InventoryView() {
     const baseColumns = [
       { label: "Side", field: "side" },
       { label: "Project", field: "project" },
-      { label: "Structure", field: "structure" },
-      { label: "Sub Type", field: "subType" },
-      { label: "Mixed", field: "mixed" },
-      { label: "Not In Latest", field: "notInLatest" },
     ];
     const dataColumns = columns.map((c) => ({
       label: c.label,
@@ -687,8 +708,8 @@ export default function InventoryView() {
       name,
       columns: [...baseColumns, ...dataColumns],
       rows: [
-        ...structureRows("in_house", inHouse, columns),
-        ...structureRows("out_vendor", outVendor, columns),
+        ...projectRows("in_house", inHouse, columns),
+        ...projectRows("out_vendor", outVendor, columns),
       ],
       summaryRows: [
         ...summaryToRows("In-House", computeBucketSummary(inHouse, clampRelease)),
