@@ -7,6 +7,7 @@
  */
 import type { FabricationProjectCompletionRow } from './fabricationProjectCompletionRow';
 import type { FabricationProjectCompletionTotals } from './fabricationProjectCompletionTotals';
+import type { UnknownProjectCauses } from './unknownProjectCauses';
 
 export interface FabricationProjectCompletionResponse {
   /** False when no WIP import exists. */
@@ -14,4 +15,7 @@ export interface FabricationProjectCompletionResponse {
   /** One row per (project, BOM Label), sorted by project then BOM label. */
   rows: FabricationProjectCompletionRow[];
   totals: FabricationProjectCompletionTotals;
+  /** Cause classification for each project that has Unknown structures, including those that may be suppressed by the < 1 MT threshold.
+   */
+  unknownCauses: UnknownProjectCauses[];
 }

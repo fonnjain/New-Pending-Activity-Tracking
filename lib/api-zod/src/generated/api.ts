@@ -1570,7 +1570,16 @@ export const GetFabricationProjectCompletionTltResponse = zod.object({
   "assignmentBalanceCalcMt": zod.number(),
   "cuttingBalanceMt": zod.number(),
   "qualityCheckBalanceMt": zod.number()
-})
+}),
+  "unknownCauses": zod.array(zod.object({
+  "project": zod.string(),
+  "structures": zod.array(zod.object({
+  "wip": zod.string().describe('The unmatched WIP structure code.'),
+  "cause": zod.enum(['mismatch', 'absent']).describe('\"mismatch\" = an OR structure exists under a slightly different code; \"absent\" = no plausible OR counterpart found.\n'),
+  "candidates": zod.array(zod.string()).describe('OR structure codes that could be the matching counterpart (only for \"mismatch\").'),
+  "ambiguous": zod.boolean().describe('True when multiple OR candidates were found (only for \"mismatch\").')
+}).describe('Cause classification for a single WIP structure that has no Order Review match.'))
+}).describe('Cause info for all Unknown structures in one project.')).describe('Cause classification for each project that has Unknown structures, including those that may be suppressed by the < 1 MT threshold.\n')
 })
 
 

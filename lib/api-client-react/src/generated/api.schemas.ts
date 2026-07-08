@@ -1930,12 +1930,50 @@ export interface FabricationProjectCompletionTotals {
   qualityCheckBalanceMt: number;
 }
 
+/**
+ * "mismatch" = an OR structure exists under a slightly different code; "absent" = no plausible OR counterpart found.
+
+ */
+export type UnknownStructureCauseEntryCause = typeof UnknownStructureCauseEntryCause[keyof typeof UnknownStructureCauseEntryCause];
+
+
+export const UnknownStructureCauseEntryCause = {
+  mismatch: 'mismatch',
+  absent: 'absent',
+} as const;
+
+/**
+ * Cause classification for a single WIP structure that has no Order Review match.
+ */
+export interface UnknownStructureCauseEntry {
+  /** The unmatched WIP structure code. */
+  wip: string;
+  /** "mismatch" = an OR structure exists under a slightly different code; "absent" = no plausible OR counterpart found.
+   */
+  cause: UnknownStructureCauseEntryCause;
+  /** OR structure codes that could be the matching counterpart (only for "mismatch"). */
+  candidates: string[];
+  /** True when multiple OR candidates were found (only for "mismatch"). */
+  ambiguous: boolean;
+}
+
+/**
+ * Cause info for all Unknown structures in one project.
+ */
+export interface UnknownProjectCauses {
+  project: string;
+  structures: UnknownStructureCauseEntry[];
+}
+
 export interface FabricationProjectCompletionResponse {
   /** False when no WIP import exists. */
   available: boolean;
   /** One row per (project, BOM Label), sorted by project then BOM label. */
   rows: FabricationProjectCompletionRow[];
   totals: FabricationProjectCompletionTotals;
+  /** Cause classification for each project that has Unknown structures, including those that may be suppressed by the < 1 MT threshold.
+   */
+  unknownCauses: UnknownProjectCauses[];
 }
 
 export interface ReportResult {

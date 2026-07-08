@@ -2033,10 +2033,67 @@ function FabCompletionReport() {
     [jobFilteredRows, selectedProjects],
   );
 
-  // 3-level grouping: BOM Label → Sub-Type Group → Project.
-  const bomGroups = useMemo(() => buildBomGroups(rows), [rows]);
+  // Per-project Unknown combined total (sum of all 4 measures).
+  // Threshold: < 1.0 MT → hide that project's Unknown rows entirely;
+  // >= 1.0 MT → show. If ALL projects are < 1 MT the Unknown group disappears.
+  const UNKNOWN_THRESHOLD_MT = 1.0;
 
-  const grandTotal = useMemo(() => sumRows(rows), [rows]);
+  const { visibleRows, visibleUnknownProjects } = useMemo(() => {
+    const unknownCombined = new Map<string, number>();
+    for (const r of rows) {
+      if (r.bomLabel !== "Unknown") continue;
+      const combined =
+        r.releaseBalanceCalcMt +
+        r.assignmentBalanceCalcMt +
+        r.cuttingBalanceMt +
+        r.qualityCheckBalanceMt;
+      unknownCombined.set(r.project, (unknownCombined.get(r.project) ?? 0) + combined);
+    }
+    const visibleUnknownProjects = new Set(
+      [...unknownCombined.entries()]
+        .filter(([, v]) => v >= UNKNOWN_THRESHOLD_MT)
+        .map(([p]) => p),
+    );
+    const visibleRows = rows.filter(
+      (r) => r.bomLabel !== "Unknown" || visibleUnknownProjects.has(r.project),
+    );
+    return { visibleRows, visibleUnknownProjects };
+  }, [rows]);
+
+  // 3-level grouping: BOM Label → Sub-Type Group → Project.
+  const bomGroups = useMemo(() => buildBomGroups(visibleRows), [visibleRows]);
+
+  const grandTotal = useMemo(() => sumRows(visibleRows), [visibleRows]);
+
+  // Cause footer: shown below the Unknown group only when at least one
+  // Unknown project passes the threshold. Groups by mismatch vs. absent.
+  const unknownCauseFooter = useMemo(() => {
+    if (!data?.unknownCauses || visibleUnknownProjects.size === 0) return null;
+    const visibleCauses = data.unknownCauses.filter((c) =>
+      visibleUnknownProjects.has(c.project),
+    );
+    if (visibleCauses.length === 0) return null;
+
+    const mismatches: string[] = [];
+    const absents: string[] = [];
+
+    for (const pc of visibleCauses) {
+      const mParts = pc.structures
+        .filter((s) => s.cause === "mismatch")
+        .map((s) => {
+          const arrow = s.candidates.join("/");
+          return `${s.wip}\u2192${arrow}${s.ambiguous ? " (ambiguous)" : ""}`;
+        });
+      const aParts = pc.structures
+        .filter((s) => s.cause === "absent")
+        .map((s) => s.wip);
+
+      if (mParts.length > 0) mismatches.push(`${pc.project} [${mParts.join(", ")}]`);
+      if (aParts.length > 0) absents.push(`${pc.project} [${aParts.join(", ")}]`);
+    }
+
+    return { mismatches, absents };
+  }, [data?.unknownCauses, visibleUnknownProjects]);
 
   function handleExportExcel() {
     const date = new Date().toISOString().slice(0, 10);
@@ -2252,6 +2309,35 @@ function FabCompletionReport() {
                       {fmt(bom.subtotal.qualityCheckBalanceMt)}
                     </td>
                   </tr>
+                  {/* Cause footer — only for the Unknown group when visible */}
+                  {bom.label === "Unknown" && unknownCauseFooter && (
+                    <tr key="unknown-cause-footer">
+                      <td
+                        colSpan={7}
+                        className="px-3 py-2 text-xs text-muted-foreground border-b border-border bg-muted/10"
+                      >
+                        <span className="font-medium text-foreground">
+                          Unknown structures (cause):
+                        </span>
+                        {unknownCauseFooter.mismatches.length > 0 && (
+                          <div className="mt-0.5">
+                            <span className="font-medium">
+                              Code mismatch (in OR under a different code):{" "}
+                            </span>
+                            {unknownCauseFooter.mismatches.join("; ")}
+                          </div>
+                        )}
+                        {unknownCauseFooter.absents.length > 0 && (
+                          <div className="mt-0.5">
+                            <span className="font-medium">
+                              Absent from Order Review:{" "}
+                            </span>
+                            {unknownCauseFooter.absents.join("; ")}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
                 </>
               ))}
             </tbody>

@@ -47,6 +47,59 @@ function structureKey(project: string, structure: string): string {
   return `${project}\u0001${structure}`;
 }
 
+// ---------------------------------------------------------------------------
+// Unknown-cause classification
+// ---------------------------------------------------------------------------
+// Classifies a WIP structure code that has no OR match into:
+//   "mismatch"  — an OR structure exists under a slightly different code
+//                 (differs by a leading numeric prefix, trailing -X suffix, or leading dash)
+//   "absent"    — no plausible OR counterpart found
+//
+// Rules (applied to OR structures, both directions):
+//   R1: OR has leading digit(s), WIP doesn't → strip OR's leading digits and compare
+//   R2: WIP has leading digit(s), OR doesn't → strip WIP's leading digits and compare
+//   R3: OR has trailing "-word" suffix, WIP doesn't → strip OR's suffix and compare
+//   R4: OR has a leading dash, WIP doesn't → strip OR's leading dash and compare
+//
+// If 0 candidates → "absent".  1 candidate → "mismatch" (not ambiguous).  2+ → "mismatch" (ambiguous).
+// This is for the footnote ONLY; it does NOT auto-fix any matching.
+function classifyCause(
+  wip: string,
+  orStructures: string[],
+): { cause: "mismatch" | "absent"; candidates: string[]; ambiguous: boolean } {
+  const candidates: string[] = [];
+
+  for (const orStr of orStructures) {
+    let matched = false;
+
+    // R1: OR has leading digits, WIP doesn't (e.g. OR "1DS3", WIP "DS3")
+    if (!matched) {
+      const stripped = orStr.replace(/^\d+/, "");
+      if (stripped !== orStr && stripped === wip) matched = true;
+    }
+
+    // R2: WIP has leading digits, OR doesn't (e.g. WIP "2OC3", OR "OC3")
+    if (!matched) {
+      const stripped = wip.replace(/^\d+/, "");
+      if (stripped !== wip && stripped === orStr) matched = true;
+    }
+
+    // R3: OR has trailing "-word" suffix, WIP doesn't (e.g. OR "1BUS-I", WIP "1BUS")
+    if (!matched) {
+      const stripped = orStr.replace(/-[\w]+$/, "");
+      if (stripped !== orStr && stripped === wip) matched = true;
+    }
+
+    // R4: OR has a leading dash, WIP doesn't (e.g. OR "-ABC", WIP "ABC")
+    if (!matched && orStr.startsWith("-") && orStr.slice(1) === wip) matched = true;
+
+    if (matched) candidates.push(orStr);
+  }
+
+  if (candidates.length === 0) return { cause: "absent", candidates: [], ambiguous: false };
+  return { cause: "mismatch", candidates, ambiguous: candidates.length > 1 };
+}
+
 const router: IRouter = Router();
 
 // GET /reports/fabrication-project-completion-tlt
@@ -72,7 +125,7 @@ router.get(
       .limit(1);
 
     if (!latestImport) {
-      res.json({ available: false, rows: [], totals: ZERO_TOTALS });
+      res.json({ available: false, rows: [], totals: ZERO_TOTALS, unknownCauses: [] });
       return;
     }
 
@@ -196,11 +249,17 @@ router.get(
     // For each (project, structure), collect the set of distinct non-null bomType
     // values. Exactly one → that label; 0 → "Unknown"; 2+ → "Mixed".
     const bomDistinct = new Map<string, Set<string>>();
+    // Also build per-project OR structure list for cause classification.
+    const orByProject = new Map<string, string[]>();
     if (orderReview) {
       for (const r of orderReview.rows) {
         const k = structureKey(r.project, r.structure);
         if (!bomDistinct.has(k)) bomDistinct.set(k, new Set());
         if (r.bomType) bomDistinct.get(k)!.add(r.bomType);
+
+        const list = orByProject.get(r.project) ?? [];
+        list.push(r.structure);
+        orByProject.set(r.project, list);
       }
     }
 
@@ -212,6 +271,7 @@ router.get(
     }
 
     // 5. Group by (bomLabel, subTypeGroup, project), summing all 4 measures.
+    // Also track Unknown structures per project for cause classification.
     const grouped = new Map<
       string,
       {
@@ -224,6 +284,8 @@ router.get(
         qualityCheckBalanceMt: number;
       }
     >();
+    // unknownByProject: project → deduplicated list of WIP structure codes with no OR match
+    const unknownByProject = new Map<string, Set<string>>();
 
     for (const { project, structure, towerSubType } of tltStructures) {
       const bomLabel = getBomLabel(project, structure);
@@ -252,6 +314,12 @@ router.get(
         existing.cuttingBalanceMt += cutMt;
         existing.qualityCheckBalanceMt += qcMt;
       }
+
+      if (bomLabel === "Unknown") {
+        const set = unknownByProject.get(project) ?? new Set<string>();
+        set.add(structure);
+        unknownByProject.set(project, set);
+      }
     }
 
     // 6. Sort: BOM label canonical → sub-type canonical → project ascending.
@@ -276,7 +344,20 @@ router.get(
       ZERO_TOTALS,
     );
 
-    res.json({ available: true, rows, totals });
+    // 8. Build unknownCauses: for each project with Unknown structures, classify
+    //    each structure as "mismatch" or "absent" using affix rules.
+    const unknownCauses = [...unknownByProject.entries()].map(
+      ([project, structureSet]) => ({
+        project,
+        structures: [...structureSet].sort().map((wip) => {
+          const orStructures = orByProject.get(project) ?? [];
+          const { cause, candidates, ambiguous } = classifyCause(wip, orStructures);
+          return { wip, cause, candidates, ambiguous };
+        }),
+      }),
+    );
+
+    res.json({ available: true, rows, totals, unknownCauses });
   },
 );
 

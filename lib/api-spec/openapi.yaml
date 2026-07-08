@@ -3893,6 +3893,45 @@ components:
         - assignmentBalanceCalcMt
         - cuttingBalanceMt
         - qualityCheckBalanceMt
+    UnknownStructureCauseEntry:
+      type: object
+      description: Cause classification for a single WIP structure that has no Order Review match.
+      properties:
+        wip:
+          type: string
+          description: The unmatched WIP structure code.
+        cause:
+          type: string
+          enum: [mismatch, absent]
+          description: >
+            "mismatch" = an OR structure exists under a slightly different code;
+            "absent" = no plausible OR counterpart found.
+        candidates:
+          type: array
+          items:
+            type: string
+          description: OR structure codes that could be the matching counterpart (only for "mismatch").
+        ambiguous:
+          type: boolean
+          description: True when multiple OR candidates were found (only for "mismatch").
+      required:
+        - wip
+        - cause
+        - candidates
+        - ambiguous
+    UnknownProjectCauses:
+      type: object
+      description: Cause info for all Unknown structures in one project.
+      properties:
+        project:
+          type: string
+        structures:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnknownStructureCauseEntry"
+      required:
+        - project
+        - structures
     FabricationProjectCompletionResponse:
       type: object
       properties:
@@ -3906,10 +3945,18 @@ components:
           description: One row per (project, BOM Label), sorted by project then BOM label.
         totals:
           $ref: "#/components/schemas/FabricationProjectCompletionTotals"
+        unknownCauses:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnknownProjectCauses"
+          description: >
+            Cause classification for each project that has Unknown structures,
+            including those that may be suppressed by the < 1 MT threshold.
       required:
         - available
         - rows
         - totals
+        - unknownCauses
     ReportResult:
       type: object
       properties:

@@ -1,0 +1,104 @@
+TASK: Add conditional display + a cause footer for the "Unknown" BOM Label group in the
+Fabrication Report – Project Completion - TLT.
+
+=====================================================================
+CONTEXT
+=====================================================================
+The report groups WIP marks by BOM Label (Proto / Mass / Pre / Unknown) × Sub-Type
+(STUB/SST/Other) × Project, with four measures: Release Balance Calc, Assignment Balance
+Calc, Cutting Balance, Quality Check Balance (all MT). "Unknown" = marks whose structure did
+not match any Order Review structure, so no BOM Label could be assigned. This change only
+affects how the "Unknown" group is displayed; do NOT change the measures or the matching.
+
+=====================================================================
+RULE 1 — HIDE Unknown PER PROJECT when negligible (< 1 MT combined)
+=====================================================================
+The threshold is applied PER PROJECT, not to the grand total across all projects.
+
+For EACH project that has Unknown rows, compute that project's Unknown COMBINED TOTAL = sum
+of ALL FOUR measures added together, over that project's Unknown rows only:
+    projectUnknownCombined(P) = Σ(Release Balance Calc) + Σ(Assignment Balance Calc)
+                                + Σ(Cutting Balance) + Σ(Quality Check Balance)
+                                [over Unknown rows of project P only]
+
+Then, per project:
+- IF projectUnknownCombined(P) < 1.0 MT  → HIDE that project's Unknown rows: remove them from
+  the Unknown group, the Summary, and the Unknown subtotal, and do NOT mention project P in
+  the cause footer. Fully invisible for that project. (Do not redistribute its weight into
+  other BOM labels.)
+- IF projectUnknownCombined(P) >= 1.0 MT → SHOW that project's Unknown rows as today AND
+  include project P in the cause footer (RULE 2).
+
+So Unknown is filtered project-by-project: some projects may show while others are hidden,
+each decided by its OWN combined total. The threshold is on the COMBINED four-measure sum,
+not any single measure. Use >= 1.0 for "show".
+
+IF ALL Unknown projects are < 1 MT (all hidden) → REMOVE the Unknown group ENTIRELY: no
+Unknown sheet/section, no subtotal, no footer. Do not leave an empty Unknown sheet.
+
+On CURRENT data, every Unknown project is < 1 MT (largest is 885 ≈ 0.400 MT; others: 909
+0.293, 890 0.243, 922 0.125, 920 0.051, 821 0.006, 869 0.003, 899 0.000). So on today's
+files the ENTIRE Unknown group is REMOVED. The rule must still work when a future project's
+Unknown ≥ 1 MT (then that project shows, with the footer).
+
+=====================================================================
+RULE 2 — Cause footer note (only when Unknown is shown)
+=====================================================================
+The footer covers ONLY the projects that are SHOWN (projectUnknownCombined >= 1 MT). Hidden
+(<1 MT) projects are not mentioned. When at least one project's Unknown is shown, add a
+FOOTER NOTE beneath the Unknown group that explains WHY those structures are Unknown, grouped
+by ROOT CAUSE into two categories:
+
+  A) "Code mismatch — structure exists in Order Review under a different code":
+     the WIP structure name differs from an OR structure by a prefix/suffix/format (e.g.
+     WIP "DS3" vs OR "1DS3"; WIP "1BUS" vs OR "1BUS-I"; WIP "TA" vs OR "4TA"). The physical
+     structure IS in OR, just under a different string.
+  B) "Absent from Order Review — no corresponding structure":
+     the WIP structure has no plausible OR counterpart at all (e.g. project 899 "1D" family,
+     922 "2BA/2CA/2CC/3DD2"). The OR file needs the rows added.
+
+For each category, list the affected PROJECTS and their unmatched STRUCTURES. Keep it
+compact, e.g.:
+    "Unknown structures (cause):
+      • Code mismatch (in OR under a different code): 869 [DS3→1DS3], 885 [2OC3→OC3],
+        909 [1BUS→1BUS-I], 920 [TA/TB/TE/TF→4TA/4TB/4TE/4TF], 821 [DB3M→1DB3M] …
+      • Absent from Order Review: 899 [1DP3,1DP6M,1DR3,1DR3M,1DS3], 922 [2BA,2CA,2CC,3DD2],
+        890 [2DW3,4DC3,4DD3] …"
+
+How to CLASSIFY each unmatched WIP structure into A vs B (deterministic, no guessing beyond
+this):
+  - Take the unmatched WIP structure code for its project. Search that project's OR
+    structures for a candidate that equals the WIP code after allowing ANY of: a leading
+    numeric prefix (e.g. "1","2","4"), a trailing "-<letter/number>" suffix (e.g. "-I"), or
+    a leading dash — i.e. OR code endsWith/startsWith or differs only by such an affix.
+  - If exactly one such OR candidate exists → category A, show "WIP→OR".
+  - If none exists → category B.
+  - If MULTIPLE OR candidates exist (ambiguous, e.g. "DD3" matches both "1DD3" and "2DD3")
+    → still category A but mark it "(ambiguous)" and list the candidates; do NOT auto-pick.
+  This classification is for the FOOTNOTE ONLY. Do NOT use it to actually re-match or move
+  weight — Unknown stays Unknown; we are only explaining the cause. (Auto-matching prefixes
+  is unsafe and is intentionally NOT done.)
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change the four measures, the TLT filter, the BOM-Label matching, or the
+  Proto/Mass/Pre groups.
+- Do NOT auto-fix/auto-match the Unknown structures; the footnote is explanatory only.
+- Do NOT redistribute suppressed Unknown weight into other labels.
+- Do NOT change WIP/Order Review parsing, hashing/dedup, ageing, Activity, qty.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- Compute projectUnknownCombined for EACH Unknown project. On current data ALL are < 1 MT
+  (885 ≈ 0.400 is the largest), so the ENTIRE Unknown group is REMOVED — no Unknown sheet,
+  no summary rows, no subtotal, no footer.
+- Verify Proto/Mass/Pre totals are UNCHANGED after removing Unknown (weight not redistributed).
+- Simulate/confirm the SHOW path works: if a project's Unknown were ≥ 1 MT, that project's
+  Unknown rows appear AND the footer lists it under the correct cause group (code mismatch /
+  absent from OR), with ambiguous cases (e.g. 821 DD3 → 1DD3/2DD3) marked "(ambiguous)".
+- Only projects with Unknown ≥ 1 MT appear in the footer; <1 MT projects are fully invisible.
+- No Unknown weight is moved or fabricated; grand totals of the four measures unchanged.
+- Report: per-project Unknown combined values, which projects show vs hide, whether the whole
+  group was removed, and any footer content generated.
