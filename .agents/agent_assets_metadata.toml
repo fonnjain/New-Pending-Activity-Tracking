@@ -30,3 +30,9 @@ id = "sgFyhUraCAT9K1o10StGu"
 uri = "file://docs/Tracker_Formulas_Definitions.docx"
 type = "word_document"
 title = "Formulas, Logic, Definitions & Variables (Word)"
+
+[[outputs]]
+id = "zoFvnepakIa3qnDoQBCbI"
+uri = "file://diagnosis_unknown_bom_label.docx"
+type = "word_document"
+title = "Diagnosis: Unknown BOM Label – Project Completion Report"
