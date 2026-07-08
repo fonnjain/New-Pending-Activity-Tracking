@@ -36,3 +36,9 @@ id = "zoFvnepakIa3qnDoQBCbI"
 uri = "file://diagnosis_unknown_bom_label.docx"
 type = "word_document"
 title = "Diagnosis: Unknown BOM Label – Project Completion Report"
+
+[[outputs]]
+id = "hO23Ap6g68bzL2UePNJ72"
+uri = "file://unknown_bom_analysis.docx"
+type = "word_document"
+title = "Unknown BOM Label Analysis — Fab Completion Report"
