@@ -1,0 +1,77 @@
+TASK: DIAGNOSE (do not fix yet) why the Fabrication Report – Project Completion - TLT is
+classifying some marks as "Unknown" BOM Label when they should resolve to a real BOM Label.
+Use project 920 as the test case, then report the root cause.
+
+=====================================================================
+BACKGROUND
+=====================================================================
+In this report, BOM Label (Proto / Mass / Pre) comes from the Order Review sheet and is
+attached to each WIP mark by joining the mark's (project, structure) to Order Review.
+"Unknown" is the fallback when a mark's structure cannot be resolved to a BOM Label.
+
+A LEGITIMATE Unknown example is project 946: it appears in WIP with active fabrication but
+is NOT present in the current Order Review file at all, so no BOM Label can be assigned —
+that is correct behaviour.
+
+THE PROBLEM: project 920 is showing up under "Unknown" (e.g. a small Cutting Balance in the
+Unknown group), but 920 SHOULD have ZERO Unknown. Verified against the raw files:
+  - 920 has 67 distinct WIP structures (Alias values).
+  - All 67 exist in the current Order Review for project 920 (which has 77 structures).
+  - Every one of those Order Review structures HAS a BOM Label (Proto/Mass/Pre).
+  - Therefore every 920 WIP mark should resolve to a BOM Label; Unknown for 920 should be 0.
+For reference, 920's total WIP weight by activity (MT): C≈108.326, RFI≈45.945, Q≈18.940,
+W≈16.452, Y≈9.514, G≈7.304, NH≈5.044, GB≈1.096. The Unknown bucket is catching a small
+slice of this that should have been labelled.
+
+=====================================================================
+WHAT TO INVESTIGATE (report findings; no fix in this task)
+=====================================================================
+For project 920 specifically:
+1. List EVERY 920 WIP mark the report classified as "Unknown": its Alias (structure),
+   Mark No., Type, Activity, and Balance Wt. How many, and which structures do they belong
+   to?
+2. For each such structure, show the exact join the code performs to look up BOM Label, and
+   show WHY it returns nothing. Print both sides of the join key as the code actually
+   compares them (the WIP side and the Order Review side), including any hidden differences:
+     - Whitespace / case / trailing dots on project code (is the SAME normalizer applied to
+       BOTH sides before joining? e.g. WIP "920" vs Order Review "920" vs "920.").
+     - Structure key: is it joining on Alias == Tower Type (Col C) exactly? Any trimming/
+       case differences? Leading zeros? Trailing spaces?
+     - Is the join ALSO keyed on something extra (Mark No., Tower Sub Type, Order Nature,
+       Job Card) that fails even when project+structure match? If so, that extra key is the
+       bug.
+3. Check the BOM-row structure: Order Review structures span multiple BOM rows (Proto/Mass/
+   Pre) where only the FIRST row carries the structure code (Col C) and continuation rows
+   have Col C blank. Determine how the code picks the BOM Label for a structure:
+     - If it reads BOM Label from only ONE row, or from a row where BOM Label is blank, the
+       lookup can fail → Unknown. Is that happening?
+     - If a structure has multiple BOM Labels, how does the code choose — and does that path
+       ever yield null → Unknown?
+4. Determine whether "Unknown" is caused by:
+     (a) project-code normalization mismatch between WIP and Order Review sides, OR
+     (b) structure/Alias key mismatch (trim/case/format), OR
+     (c) an over-specified join (extra key beyond project+structure), OR
+     (d) BOM Label read from a blank/continuation row, OR
+     (e) a genuine data gap (structure truly absent from Order Review — like 946).
+   State which one explains the 920 Unknown marks, with the evidence from steps 1-3.
+
+=====================================================================
+CROSS-CHECK
+=====================================================================
+- Confirm 946-style Unknown (structure truly absent from Order Review) is a DIFFERENT cause
+  than the 920 Unknown. The report should separate "no Order Review match at all" from
+  "matched but BOM Label not resolved" — if both currently fall into one "Unknown" bucket,
+  note that.
+- Report the total Unknown weight for each of the four measures, and how much of it is
+  946-style (legitimate) vs 920-style (join/label bug).
+
+=====================================================================
+OUTPUT
+=====================================================================
+- The list of 920 Unknown marks with both-side join keys shown.
+- The identified root cause (a-e) with evidence.
+- A count/weight split of Unknown into "legitimate (no OR match)" vs "bug (match exists but
+  label not resolved)".
+- A proposed minimal fix (described, not yet applied) — e.g. apply the shared normalizer to
+  both join sides, or read BOM Label as the structure's set of BOM rows rather than one row.
+Do NOT change any code in this task; this is diagnosis only. Await confirmation before fixing.

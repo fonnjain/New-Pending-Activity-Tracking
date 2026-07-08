@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   activityRank,
   assignDayKey,
@@ -1901,6 +1901,88 @@ function buildBomGroups(rows: FabricationProjectCompletionRow[]): BomGroup[] {
     });
 }
 
+// ---------------------------------------------------------------------------
+// Checkbox multi-project selector — same pattern as the Bucket List page.
+// `selected = null` means "all"; a Set means those specific projects.
+// ---------------------------------------------------------------------------
+function FabProjectCheckboxFilter({
+  projects,
+  selected,
+  onChange,
+}: {
+  projects: string[];
+  selected: Set<string> | null;
+  onChange: (next: Set<string> | null) => void;
+}) {
+  if (projects.length === 0) return null;
+
+  const allSelected = selected === null;
+  const selectedCount = allSelected ? projects.length : selected.size;
+
+  const toggle = (project: string) => {
+    const current = allSelected ? new Set(projects) : new Set(selected);
+    if (current.has(project)) current.delete(project);
+    else current.add(project);
+    onChange(current.size === projects.length ? null : current);
+  };
+
+  return (
+    <Card className="border-border mb-3">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm">
+            Projects{" "}
+            <span className="text-muted-foreground font-normal">
+              ({selectedCount}/{projects.length} selected)
+            </span>
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => onChange(null)}
+              disabled={allSelected}
+            >
+              Select all
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => onChange(new Set())}
+              disabled={selectedCount === 0}
+            >
+              Clear all
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="flex flex-wrap gap-x-4 gap-y-2 max-h-40 overflow-auto pr-1">
+          {projects.map((p) => {
+            const checked = allSelected || selected.has(p);
+            return (
+              <label
+                key={p}
+                className="flex items-center gap-1.5 text-sm cursor-pointer select-none"
+              >
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-primary shrink-0"
+                  checked={checked}
+                  onChange={() => toggle(p)}
+                />
+                <span>{p}</span>
+              </label>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // Excel columns include Sub-Type Group between BOM Label and Project.
 const FAB_COMP_COLUMNS: XlsxColumn[] = [
   { label: "BOM Label", field: "bomLabel" },
@@ -1917,17 +1999,39 @@ function FabCompletionReport() {
   const { filters } = useTracker();
   const { set: currentJobsSet } = useCurrentJobsSet();
 
-  const rows: FabricationProjectCompletionRow[] = useMemo(() => {
+  // Rows after the global job filter (All / single project / Current Jobs).
+  const jobFilteredRows: FabricationProjectCompletionRow[] = useMemo(() => {
     if (!data?.rows) return [];
     if (filters.job === CURRENT_JOBS_FILTER_VALUE) {
-      // Current Jobs sentinel: filter to the uploaded project-code set.
-      // If the set hasn't loaded yet, show all (safe fallback).
       if (!currentJobsSet) return data.rows;
       return data.rows.filter((r) => currentJobsSet.has(r.project));
     }
     if (filters.job) return data.rows.filter((r) => r.project === filters.job);
     return data.rows;
   }, [data, filters.job, currentJobsSet]);
+
+  // Distinct projects within the current job scope — drives the checkbox list.
+  const availableProjects = useMemo(
+    () => [...new Set(jobFilteredRows.map((r) => r.project))].sort(),
+    [jobFilteredRows],
+  );
+
+  // Checkbox refinement on top of the global filter. null = all selected.
+  const [selectedProjects, setSelectedProjects] = useState<Set<string> | null>(null);
+
+  // Reset checkbox selection whenever the global job scope changes.
+  useEffect(() => {
+    setSelectedProjects(null);
+  }, [filters.job]);
+
+  // Final rows: global filter + checkbox refinement.
+  const rows = useMemo(
+    () =>
+      selectedProjects === null
+        ? jobFilteredRows
+        : jobFilteredRows.filter((r) => selectedProjects.has(r.project)),
+    [jobFilteredRows, selectedProjects],
+  );
 
   // 3-level grouping: BOM Label → Sub-Type Group → Project.
   const bomGroups = useMemo(() => buildBomGroups(rows), [rows]);
@@ -1998,13 +2102,11 @@ function FabCompletionReport() {
     );
   }
 
-  if (!data?.available || rows.length === 0) {
+  if (!data?.available) {
     return (
       <Card className="border-border">
         <CardContent className="py-6 text-sm text-muted-foreground">
-          {!data?.available
-            ? "No WIP import available. Upload a WIP file to generate this report."
-            : "No TLT data for the selected filters."}
+          No WIP import available. Upload a WIP file to generate this report.
         </CardContent>
       </Card>
     );
@@ -2013,7 +2115,20 @@ function FabCompletionReport() {
   const fmt = (n: number) => n.toFixed(3);
 
   return (
-    <Card className="border-border">
+    <div className="space-y-0">
+      <FabProjectCheckboxFilter
+        projects={availableProjects}
+        selected={selectedProjects}
+        onChange={setSelectedProjects}
+      />
+      {rows.length === 0 ? (
+        <Card className="border-border">
+          <CardContent className="py-6 text-sm text-muted-foreground">
+            No TLT data for the selected filters.
+          </CardContent>
+        </Card>
+      ) : (
+      <Card className="border-border">
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex flex-wrap items-center justify-between gap-3">
           Fabrication Report – Project Completion - TLT
@@ -2163,6 +2278,8 @@ function FabCompletionReport() {
         </div>
       </CardContent>
     </Card>
+      )}
+    </div>
   );
 }
 
