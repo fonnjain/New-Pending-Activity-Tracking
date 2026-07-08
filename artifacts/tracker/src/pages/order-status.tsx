@@ -5,8 +5,6 @@ import {
   getGetOrderStatusQueryKey,
   useGetImportRecords,
   getGetImportRecordsQueryKey,
-  useGetAccumulatedWip,
-  getGetAccumulatedWipQueryKey,
   type OrderStatusRow,
   type Record as WipRecord,
 } from "@workspace/api-client-react";
@@ -61,17 +59,6 @@ interface DisplayRow {
   // null and rendered "n/a" — NTLT marks never contribute Fab/Galv math.
   fabMt: number | null;
   galvMt: number | null;
-  // Finished Good Overview Computed = Order Review file Galvanising (col N,
-  // Progress > Galvanising) minus file Dispatch (col Q, Progress > Despatch).
-  // Purely file-sourced (no WIP dependency); null only when the file has no
-  // Galvanising figure for this structure.
-  computedFgMt: number | null;
-  // Finished Good WIP Computed = Galvanizing WIP Accumulated (lifetime,
-  // per-project) minus total file Dispatch (col Q) for that project, summed
-  // across all its structures. Accumulated WIP has no structure breakdown,
-  // so this is a project-level figure repeated on every structure row of
-  // that project. Null only when the project has no Accumulated WIP entry.
-  computedFgWipMt: number | null;
   inFile: boolean;
   inWip: boolean;
   // The structure has NTLT marks whose bundle math is intentionally suppressed.
@@ -91,10 +78,6 @@ export default function OrderStatusView() {
 
   const { data: order, isLoading: orderLoading } = useGetOrderStatus({
     query: { queryKey: getGetOrderStatusQueryKey() },
-  });
-
-  const { data: accWip, isLoading: accWipLoading } = useGetAccumulatedWip({
-    query: { queryKey: getGetAccumulatedWipQueryKey() },
   });
 
   const { data: records = [], isLoading: recordsLoading } = useGetImportRecords(
@@ -176,17 +159,6 @@ export default function OrderStatusView() {
     return m;
   }, [order]);
 
-  // Galvanizing WIP Accumulated, structure-wise (the underlying engine is
-  // mark-wise, rolled up structure-wise then project-wise). Keyed the same
-  // way as dispatchByKey/computedByKey so this is a true per-structure
-  // figure, not a project total repeated on every row.
-  const galvAccByKey = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const s of accWip?.byStructure ?? []) {
-      m.set(keyOf(s.project, s.structure), s.galvanizingMt);
-    }
-    return m;
-  }, [accWip]);
 
   // Union of file rows and WIP-derived keys, filtered by the active project /
   // structure selections so the table tracks the global filter bar.
@@ -244,15 +216,6 @@ export default function OrderStatusView() {
               ? 0
               : null,
         galvMt,
-        computedFgMt:
-          file?.fileGalvMt == null
-            ? null
-            : file.fileGalvMt - (file?.fileDespatchMt ?? 0),
-        computedFgWipMt: (() => {
-          const galvAccMt = galvAccByKey.get(k);
-          if (galvAccMt === undefined) return null;
-          return galvAccMt - (file?.fileDespatchMt ?? 0);
-        })(),
         inFile: !!file,
         inWip: !!comp,
         outOfScope,
@@ -271,7 +234,6 @@ export default function OrderStatusView() {
     computedByKey,
     ntltKeys,
     wipKeys,
-    galvAccByKey,
     filters.job,
     filters.structure,
   ]);
@@ -294,10 +256,8 @@ export default function OrderStatusView() {
           acc.releaseBalanceMt += r.releaseBalanceMt ?? 0;
           acc.fabMt += r.fabMt ?? 0;
           acc.galvMt += r.galvMt ?? 0;
-          acc.computedFgMt += r.computedFgMt ?? 0;
           acc.fileDespatchMt += r.fileDespatchMt ?? 0;
           acc.dispatchBalanceMt += r.dispatchBalanceMt ?? 0;
-          acc.computedFgWipMt += r.computedFgWipMt ?? 0;
           return acc;
         },
         {
@@ -308,10 +268,8 @@ export default function OrderStatusView() {
           releaseBalanceMt: 0,
           fabMt: 0,
           galvMt: 0,
-          computedFgMt: 0,
           fileDespatchMt: 0,
           dispatchBalanceMt: 0,
-          computedFgWipMt: 0,
         },
       );
       return { project, list, subtotal };
@@ -328,10 +286,8 @@ export default function OrderStatusView() {
         acc.releaseBalanceMt += r.releaseBalanceMt ?? 0;
         acc.fabMt += r.fabMt ?? 0;
         acc.galvMt += r.galvMt ?? 0;
-        acc.computedFgMt += r.computedFgMt ?? 0;
         acc.fileDespatchMt += r.fileDespatchMt ?? 0;
         acc.dispatchBalanceMt += r.dispatchBalanceMt ?? 0;
-        acc.computedFgWipMt += r.computedFgWipMt ?? 0;
         return acc;
       },
       {
@@ -342,10 +298,8 @@ export default function OrderStatusView() {
         releaseBalanceMt: 0,
         fabMt: 0,
         galvMt: 0,
-        computedFgMt: 0,
         fileDespatchMt: 0,
         dispatchBalanceMt: 0,
-        computedFgWipMt: 0,
       },
     );
     return base;
@@ -365,8 +319,6 @@ export default function OrderStatusView() {
       { label: "Scope", field: "scope" },
       { label: "Fabrication (MT)", field: "fabMt", numeric: true, decimals: 3, total: true },
       { label: "Galvanizing (MT)", field: "galvMt", numeric: true, decimals: 3, total: true },
-      { label: "Finished Good Overview Computed (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
-      { label: "Finished Good WIP Computed (MT)", field: "computedFgWipMt", numeric: true, decimals: 3 },
       { label: "Dispatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
       { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
     ];
@@ -383,8 +335,6 @@ export default function OrderStatusView() {
       scope: r.outOfScope ? "NTLT (out of scope)" : "TLT",
       fabMt: r.fabMt ?? "",
       galvMt: r.galvMt ?? "",
-      computedFgMt: r.computedFgMt ?? "",
-      computedFgWipMt: r.computedFgWipMt ?? "",
       fileDespatchMt: r.fileDespatchMt ?? "",
       dispatchBalanceMt: r.dispatchBalanceMt ?? "",
     }));
@@ -397,7 +347,7 @@ export default function OrderStatusView() {
   }
 
   const available = order?.available ?? false;
-  const loading = orderLoading || recordsLoading || accWipLoading;
+  const loading = orderLoading || recordsLoading;
 
   return (
     <div className="space-y-6">
@@ -407,10 +357,7 @@ export default function OrderStatusView() {
           <p className="text-sm text-muted-foreground mt-1">
             Per project and structure: order quantities from the latest Order Review
             file, joined to live Fabrication / Galvanizing tonnage computed from the
-            selected WIP report, Dispatch (MT) from the file, Finished Good
-            Overview Computed (file Galvanising minus file Dispatch), and
-            Finished Good WIP Computed (live WIP Galvanizing minus file
-            Dispatch).
+            selected WIP report, and Dispatch (MT) from the file.
           </p>
         </div>
         <Button
@@ -457,8 +404,6 @@ export default function OrderStatusView() {
           <KpiTile label="Order Wt (MT)" value={mt(totals.weightMt)} />
           <KpiTile label="In Fabrication (MT)" value={mt(totals.fabMt)} />
           <KpiTile label="In Galvanizing (MT)" value={mt(totals.galvMt)} />
-          <KpiTile label="Finished Good Overview Computed (MT)" value={mt(totals.computedFgMt)} />
-          <KpiTile label="Finished Good WIP Computed (MT)" value={mt(totals.computedFgWipMt)} />
         </div>
       )}
 
@@ -492,8 +437,6 @@ export default function OrderStatusView() {
                     <th className="px-2 py-1.5 font-semibold text-right">Release Bal.</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Fabrication</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Galvanizing</th>
-                    <th className="px-2 py-1.5 font-semibold text-right">Finished Good Overview Computed</th>
-                    <th className="px-2 py-1.5 font-semibold text-right">Finished Good WIP Computed</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Dispatch</th>
                     <th className="px-2 py-1.5 font-semibold text-right">Dispatch Bal.</th>
                   </tr>
@@ -514,8 +457,6 @@ export default function OrderStatusView() {
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.releaseBalanceMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.fabMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.galvMt)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.computedFgMt)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.computedFgWipMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.fileDespatchMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{mt(totals.dispatchBalanceMt)}</td>
                   </tr>
@@ -556,8 +497,6 @@ function ProjectGroup({
       releaseBalanceMt: number;
       fabMt: number;
       galvMt: number;
-      computedFgMt: number;
-      computedFgWipMt: number | null;
       fileDespatchMt: number;
       dispatchBalanceMt: number;
     };
@@ -594,8 +533,6 @@ function ProjectGroup({
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.releaseBalanceMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.fabMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.galvMt)}</td>
-        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.computedFgMt)}</td>
-        <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.computedFgWipMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.fileDespatchMt)}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{mt(subtotal.dispatchBalanceMt)}</td>
       </tr>
@@ -629,8 +566,6 @@ function ProjectGroup({
             <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.releaseBalanceMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.fabMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{r.outOfScope ? "n/a" : mt(r.galvMt)}</td>
-            <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.computedFgMt)}</td>
-            <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.computedFgWipMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.fileDespatchMt)}</td>
             <td className="px-2 py-1.5 text-right tabular-nums">{mt(r.dispatchBalanceMt)}</td>
           </tr>
@@ -647,8 +582,6 @@ function ProjectGroup({
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.releaseBalanceMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.fabMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.galvMt)}</td>
-          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.computedFgMt)}</td>
-          <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.computedFgWipMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.fileDespatchMt)}</td>
           <td className="px-2 py-1 text-right tabular-nums font-medium">{mt(subtotal.dispatchBalanceMt)}</td>
         </tr>

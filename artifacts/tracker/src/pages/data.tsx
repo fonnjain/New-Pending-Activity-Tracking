@@ -653,8 +653,37 @@ function CurrentJobsCard() {
 
 function AccumulatedWipContent() {
   const { data, isLoading } = useGetAccumulatedWip();
+  const { data: order } = useGetOrderStatus({ query: { queryKey: getGetOrderStatusQueryKey() } });
   const byProject = useMemo(() => data?.byProject ?? [], [data]);
   const byStructure = useMemo(() => data?.byStructure ?? [], [data]);
+
+  // Per-project sums of fileGalvMt and fileDespatchMt from the Order Review file,
+  // used to compute the two FG figures that moved here from Order Status.
+  const orderByProject = useMemo(() => {
+    const m = new Map<string, { fileGalvMt: number; fileDespatchMt: number }>();
+    for (const r of order?.rows ?? []) {
+      const cur = m.get(r.project) ?? { fileGalvMt: 0, fileDespatchMt: 0 };
+      cur.fileGalvMt += r.fileGalvMt ?? 0;
+      cur.fileDespatchMt += r.fileDespatchMt ?? 0;
+      m.set(r.project, cur);
+    }
+    return m;
+  }, [order]);
+
+  // Finished Good Overview Computed = Galvanising (file col N) minus Dispatch (file col Q),
+  // summed per project across all structures.
+  // Finished Good WIP Computed = Galvanizing WIP Accumulated minus file Dispatch, per project.
+  const fgOverviewTotal = useMemo(() => {
+    let t = 0;
+    for (const v of orderByProject.values()) t += v.fileGalvMt - v.fileDespatchMt;
+    return t;
+  }, [orderByProject]);
+
+  const fgWipTotal = useMemo(() => {
+    const galvAcc = byProject.reduce((s, p) => s + p.galvanizingMt, 0);
+    const disp = Array.from(orderByProject.values()).reduce((s, v) => s + v.fileDespatchMt, 0);
+    return galvAcc - disp;
+  }, [byProject, orderByProject]);
 
   const handleExport = () => {
     exportToXlsx(
@@ -714,7 +743,7 @@ function AccumulatedWipContent() {
         </Card>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Fabrication WIP Accumulated</CardTitle>
@@ -735,6 +764,36 @@ function AccumulatedWipContent() {
                 </div>
               </CardContent>
             </Card>
+            {order?.available && (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Finished Good Overview Computed</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-3xl font-bold tabular-nums">
+                      {fgOverviewTotal.toFixed(3)} MT
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Galvanising (file) minus Dispatch (file)
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Finished Good WIP Computed</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-3xl font-bold tabular-nums">
+                      {fgWipTotal.toFixed(3)} MT
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Galvanizing Accumulated minus Dispatch (file)
+                    </p>
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </div>
 
           {byProject.length === 0 ? (
@@ -760,22 +819,51 @@ function AccumulatedWipContent() {
                         <th className="px-3 py-2 font-semibold text-right">
                           Galvanizing WIP Accumulated (MT)
                         </th>
+                        {order?.available && (
+                          <>
+                            <th className="px-3 py-2 font-semibold text-right">
+                              Finished Good Overview Computed (MT)
+                            </th>
+                            <th className="px-3 py-2 font-semibold text-right">
+                              Finished Good WIP Computed (MT)
+                            </th>
+                          </>
+                        )}
                       </tr>
                     </thead>
                     <tbody>
-                      {byProject.map((r) => (
-                        <tr key={r.project} className="border-b last:border-0 hover:bg-muted/30">
-                          <td className="px-3 py-2">{r.project}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fabricationMt)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.galvanizingMt)}</td>
-                        </tr>
-                      ))}
+                      {byProject.map((r) => {
+                        const op = orderByProject.get(r.project);
+                        return (
+                          <tr key={r.project} className="border-b last:border-0 hover:bg-muted/30">
+                            <td className="px-3 py-2">{r.project}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fabricationMt)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{mt3(r.galvanizingMt)}</td>
+                            {order?.available && (
+                              <>
+                                <td className="px-3 py-2 text-right tabular-nums">
+                                  {op != null ? (op.fileGalvMt - op.fileDespatchMt).toFixed(3) : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums">
+                                  {op != null ? (r.galvanizingMt - op.fileDespatchMt).toFixed(3) : "-"}
+                                </td>
+                              </>
+                            )}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                     <tfoot className="border-t-2 bg-muted font-semibold sticky bottom-0 z-10">
                       <tr>
                         <td className="px-3 py-2">Grand total ({byProject.length})</td>
                         <td className="px-3 py-2 text-right tabular-nums">{mt3(data?.overall.fabricationMt)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{mt3(data?.overall.galvanizingMt)}</td>
+                        {order?.available && (
+                          <>
+                            <td className="px-3 py-2 text-right tabular-nums">{fgOverviewTotal.toFixed(3)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{fgWipTotal.toFixed(3)}</td>
+                          </>
+                        )}
                       </tr>
                     </tfoot>
                   </table>

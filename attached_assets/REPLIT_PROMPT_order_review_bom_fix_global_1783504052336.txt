@@ -1,0 +1,97 @@
+TASK: Fix how the app reads the Order Review sheet EVERYWHERE. Order Review values are
+currently at risk of being read from only the first row of each structure, dropping the
+"Mass"/"Pre" continuation rows. Make ONE correct aggregation and route every consumer
+(Order Status page and any other feature) through it.
+
+=====================================================================
+THE PROBLEM (verified)
+=====================================================================
+In the Order Review sheet, a single STRUCTURE spans MULTIPLE ROWS — one per BOM Label
+(BOM Type / Col K): "Proto", "Mass", and/or "Pre". The STRUCTURE CODE (Col C = Tower Type)
+appears only on the FIRST row of the structure; the continuation rows (Mass/Pre) have
+Col C BLANK and belong to the structure directly above them.
+
+Numeric values are distributed ACROSS these rows. To get a structure's true value for ANY
+column you must SUM that column over ALL of the structure's BOM rows (first row + the
+following blank-Col-C continuation rows), grouped under the structure code carried down
+from the first row.
+
+If the parser keeps only the first/Proto row (e.g. by keying on "Col C is non-blank"), it
+DROPS the Mass/Pre rows. Effects:
+  - Under-counted weights/qty/balances.
+  - WRONG bucket/status classification (a structure with 0 on its Proto row but a positive
+    Mass row is mis-filed).
+The aggregate error looks small (≈1–3% of each column sits on continuation rows) which is
+exactly why this is dangerous: GLOBAL TOTALS barely move, but INDIVIDUAL projects/structures
+can be off by 100x. VERIFIED: project 920 Balance-Release reads 0.267 MT first-row-only vs
+76.511 MT BOM-summed (file's own 920 subtotal = 76.509 MT).
+
+Measured share of each column that sits on continuation rows (this file): Order Qty Wt
+0.7%, WO Order Qty Wt 1.8%, Progress Release 1.9%, Progress Fab 2.0%, Progress Galv 2.0%,
+Progress Inspection 2.2%, Progress Despatch 2.8%, Balance Release 1.3%, Balance Fab 1.3%,
+Balance Galv 0.1%, Balance Despatch 0.3%. i.e. EVERY numeric column is affected.
+
+=====================================================================
+THE FIX (single source of truth)
+=====================================================================
+1. In the Order Review PARSER, aggregate to ONE record per (normalized project, structure)
+   by SUMMING every numeric column across the structure's BOM rows:
+     - Structure boundary starts at a row with Col C (Tower Type) non-blank.
+     - Following rows with Col C blank (and a BOM Label present, or otherwise clearly a
+       continuation) belong to that same structure — add their values in.
+     - A new Project Code header, a Sub Total/Total row, or the next non-blank Col C ends
+       the current structure.
+   Store BOM-summed values in order_review_rows (one row per project+structure). Keep the
+   raw per-BOM-row detail too if the app needs BOM Type breakdowns, but the value every
+   consumer reads by default must be the BOM-SUMMED structure total.
+
+   Columns to sum (Order Review layout): Order Qty (Sets F / Weight G), WO Order Qty
+   (Sets H / Weight J), Progress: Release L, Fabrication M, Galvanising N, Inspection O,
+   Despatch Q; Balance: Work Order R, Release S, Fabrication T, Galvanising U, Inspection V,
+   Despatch W. (Weight/Set E is a per-set constant, NOT a sum — carry the first row's value,
+   do not add it across BOM rows.)
+
+2. EVERY consumer of Order Review data reads from this BOM-summed aggregate — no feature
+   re-parses the sheet or reads first-row-only. Audit and route through the single
+   aggregation: the Order Status page, the Inventory buckets (B/C/D), the Release Balance
+   tab, Reports, and anywhere else that references Order Review columns. There must be ONE
+   function/query that produces per-structure Order Review values; delete/redirect any
+   ad-hoc first-row reads.
+
+3. This is a CORRECTNESS fix only. Do NOT change the DEFINITION, units, or names of any
+   field; do NOT change WIP parsing, hashing/dedup identity, ageing, Activity, or qty. The
+   Order Review dedup key stays (project + structure). Just ensure the stored value is the
+   BOM-summed structure total.
+
+=====================================================================
+NORMALIZATION / JOINS (unchanged, restated)
+=====================================================================
+- Normalize project codes with the EXISTING normalizer (strip trailing "."/".0").
+- Structure = Order Review Col C (Tower Type) == WIP Alias; joins to WIP use (normalized
+  project, structure).
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change any field's meaning, unit, or name — correctness (BOM summing) only.
+- Do NOT change WIP parsing, hash/dedup, ageing, Activity, qty, or sequence logic.
+- Do NOT add a second normalizer.
+- Do NOT leave any feature reading Order Review first-row-only; all go through the single
+  BOM-summed aggregate.
+
+=====================================================================
+ACCEPTANCE CHECK (report actual numbers)
+=====================================================================
+- Project 920 Balance-Release now reads ≈ 76.5 MT (76.511), NOT 0.267 MT. (Spot-check its
+  per-project subtotal against the sheet: 76.509 MT.)
+- Order Review Balance-Release GRAND total ≈ 5625.353 MT (BOM-summed). The OLD first-row
+  method gives ≈ 5551.005 MT — if you still see ~5551, the fix is not applied everywhere.
+- Pick 3 projects that have Mass rows and confirm each project's Order Status row (Weight,
+  WO Order Qty, Release, Release Bal, Fabrication, Galvanising) equals the sheet's own
+  per-project subtotal for that column (not the Proto-row-only value).
+- Confirm Inventory buckets B/C/D and the Release Balance tab now use the same BOM-summed
+  values (their 920 numbers move accordingly; e.g. some structures shift from bucket C to B).
+- Grep/audit result: list every code path that reads Order Review columns and confirm each
+  now uses the single BOM-summed aggregate.
+- Report: 920 value, grand total (~5625 not ~5551), the 3 project subtotal checks, and the
+  list of consumers routed through the aggregate.
