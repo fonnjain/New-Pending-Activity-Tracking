@@ -28,16 +28,21 @@ router.get("/release-balance", async (_req, res): Promise<void> => {
     });
   }
 
-  // Build OR lookup. The DB stores one row per (project, structure) after the
-  // BOM-summing fix in parse-order-review.ts. We still aggregate defensively here
-  // in case older data was stored before the fix: summing null+null → null,
-  // null+number → number, number+number → sum.
+  // Build OR lookup — scoped to the LATEST Order Review import only.
+  // order_review_rows is an UPSERT table: every (project, structure) has one row
+  // whose import_id is set to the most-recent OR import that included it. Rows
+  // from older imports that were NOT present in the latest upload keep their old
+  // import_id. We only want the current file's structures, so we filter to
+  // import_id = latest_import_id.
   const orMap = new Map<
     string,
     { project: string; structure: string; releaseMt: number | null }
   >();
   if (orderReview) {
-    for (const r of orderReview.rows) {
+    const latestOrImportId = orderReview.import.id;
+    for (const r of orderReview.rows.filter(
+      (row) => row.importId === latestOrImportId,
+    )) {
       const key = `${r.project}\u0001${r.structure}`;
       const prev = orMap.get(key);
       if (!prev) {
@@ -69,9 +74,19 @@ router.get("/release-balance", async (_req, res): Promise<void> => {
     return;
   }
 
-  // Full outer join across all (project, structure) keys present in either side.
-  const allKeys = new Set([...wipMap.keys(), ...orMap.keys()]);
-  const rows = [...allKeys]
+  // Scope to the current snapshot:
+  //   (a) every key present in the latest Order Review, PLUS
+  //   (b) every WIP key where Release Balance Computed > 0.
+  // This excludes historical record_pool structures that are absent from the
+  // current loaded files. A separate filter below drops any row where both
+  // sides end up null/zero (e.g. OR structure with null release + no WIP).
+  const candidateKeys = new Set<string>();
+  for (const key of orMap.keys()) candidateKeys.add(key);
+  for (const [key, w] of wipMap.entries()) {
+    if (w.computedMt > 0) candidateKeys.add(key);
+  }
+
+  const rows = [...candidateKeys]
     .map((key) => {
       const wip = wipMap.get(key);
       const or = orMap.get(key);
@@ -89,6 +104,13 @@ router.get("/release-balance", async (_req, res): Promise<void> => {
         diffMt,
       };
     })
+    // Drop rows where both columns are null/zero — these are OR structures that
+    // have no release value on either side (e.g. null OR value + no WIP entry).
+    .filter(
+      (r) =>
+        (r.releaseBalanceComputedMt != null && r.releaseBalanceComputedMt > 0) ||
+        (r.releaseBalanceOrderReviewMt != null && r.releaseBalanceOrderReviewMt > 0),
+    )
     .sort((a, b) =>
       a.project !== b.project
         ? a.project.localeCompare(b.project)
