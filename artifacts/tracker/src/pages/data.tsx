@@ -873,7 +873,9 @@ function ReleaseBalanceContent() {
             sum of Balance Wt. (Col Q) divided by 1000 for rows where Type
             (Col A) is "Job Card Not Started" and Job Card Status (Col G) is
             "Initial". Cross-checked against the Order Review file's stated
-            Release Balance. Re-computed on every WIP upload.
+            Release Balance. Automatically re-computed on every WIP upload —
+            the Recompute button on the Data tab does not affect this view
+            (it cannot, since the raw file bytes are not permanently stored).
           </p>
         </div>
         {rows.length > 0 && (
