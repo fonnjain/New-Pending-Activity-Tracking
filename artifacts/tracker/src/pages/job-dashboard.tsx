@@ -140,6 +140,10 @@ function JobDashboardContent() {
   const [mfcBatch, setMfcBatch] = useState<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [projectSort, setProjectSort] = useState<ProjectSortKey>("assignDate");
+  const [activityFilter, setActivityFilter] = useState<string | null>(null);
+  const [contractorFilter, setContractorFilter] = useState<string | null>(null);
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
 
   const primaryLabel = isAll ? "Group" : isNtlt ? "Section" : "Project";
 
@@ -149,6 +153,10 @@ function JobDashboardContent() {
     setProject(null);
     setMfcBatch(null);
     setSelectedJob(null);
+    setActivityFilter(null);
+    setContractorFilter(null);
+    setDateFrom("");
+    setDateTo("");
     setFilter("category", v);
   };
 
@@ -182,7 +190,8 @@ function JobDashboardContent() {
     setMfcBatch(v);
   };
 
-  const filtered = useMemo(
+  // Pre-filter: project + MFC scope (drives option lists for activity/contractor).
+  const preFiltered = useMemo(
     () =>
       records.filter((r) => {
         if (project && primaryOf(r) !== project) return false;
@@ -190,6 +199,33 @@ function JobDashboardContent() {
         return true;
       }),
     [records, project, mfcBatch, isNtlt, isAll],
+  );
+
+  // Options for activity + contractor dropdowns scoped to the project/MFC selection.
+  const activityOptions = useMemo(
+    () => sortActivities(Array.from(new Set(preFiltered.map((r) => r.activity).filter((a): a is string => !!a)))),
+    [preFiltered],
+  );
+  const categoryMap = useContractorCategoryMap();
+  const contractorGroups = useMemo(
+    () =>
+      buildContractorGroups(
+        Array.from(new Set(preFiltered.map((r) => r.contractor).filter((c): c is string => !!c))).sort(),
+      ),
+    [preFiltered],
+  );
+
+  // Final filter: apply activity, contractor, and assign-date range on top of preFiltered.
+  const filtered = useMemo(
+    () =>
+      preFiltered.filter((r) => {
+        if (activityFilter && r.activity !== activityFilter) return false;
+        if (!matchesContractorSelection(r.contractor, contractorFilter, categoryMap)) return false;
+        if (dateFrom && (r.assignDate == null || String(r.assignDate) < dateFrom)) return false;
+        if (dateTo && (r.assignDate == null || String(r.assignDate) > dateTo)) return false;
+        return true;
+      }),
+    [preFiltered, activityFilter, contractorFilter, dateFrom, dateTo, categoryMap],
   );
 
   const { totalProjects, totalMarks, totalQty, totalWt, avgAgeing, byProject, byActivity } =
@@ -407,7 +443,8 @@ function JobDashboardContent() {
             {isAll ? "Group Filters" : isNtlt ? "Section Filters" : "Project Filters"}
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
+          {/* Row 1: Order Type / Project / MFC */}
           <div className={`grid grid-cols-1 sm:grid-cols-2 ${isNtlt ? "lg:grid-cols-2" : "lg:grid-cols-3"} gap-3`}>
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground uppercase">
@@ -450,6 +487,56 @@ function JobDashboardContent() {
                 />
               </div>
             )}
+          </div>
+          {/* Row 2: Activity / Contractor / Date range */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-muted-foreground uppercase">
+                Activity
+              </label>
+              <SearchableSelect
+                value={activityFilter}
+                onChange={setActivityFilter}
+                options={activityOptions}
+                allLabel="All Activities"
+                searchPlaceholder="Search activities..."
+                disabled={activityOptions.length === 0}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-muted-foreground uppercase">
+                Contractor
+              </label>
+              <SearchableSelect
+                value={contractorFilter}
+                onChange={setContractorFilter}
+                groups={contractorGroups}
+                allLabel="All Contractors"
+                searchPlaceholder="Search contractors..."
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-muted-foreground uppercase">
+                Date From
+              </label>
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-muted-foreground uppercase">
+                Date To
+              </label>
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="h-9"
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
