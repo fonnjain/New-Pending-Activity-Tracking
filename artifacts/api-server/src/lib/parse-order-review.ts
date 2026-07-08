@@ -444,6 +444,23 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     const cells = grid[i];
     if (!Array.isArray(cells)) continue;
 
+    // Peek at the structure column and check for numeric payload BEFORE the
+    // banner scan. Some Order Review exports write the full "Project Code : NNN"
+    // text in the project column on every Mass/Pre data row (not only on a
+    // dedicated section-banner row). Those rows must be parsed as data, not
+    // silently skipped as banners. We distinguish them from pure section-banner
+    // rows (which have banner text in at most one cell, everything else blank)
+    // by two signals:
+    //   1. rawStructure non-empty  → definitely a data row (structure is present)
+    //   2. hasNumericData true     → data row carrying MT / set figures
+    // Only when BOTH are false is the row treated as a pure banner and skipped.
+    const rawStructure = normalizeStructure(cellStr(cells[cols.structure] as Cell));
+    const hasNumericData = cells.some((c) => {
+      const s = cellStr(c as Cell);
+      if (!s || PROJECT_BANNER.test(s)) return false;
+      return toNumber(c as Cell) !== null;
+    });
+
     // Forward-fill the project from any "Project Code : NNN" banner cell.
     let bannerHit = false;
     for (const cell of cells) {
@@ -452,16 +469,25 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
       const m = s.match(PROJECT_BANNER);
       if (m && m[1]) {
         const nextProject = normalizeProject(m[1]);
+        // A pure banner row has no structure in Col C and no numeric data.
+        // Data rows that embed the project code inline have MT values in other
+        // columns — they must be processed as data, not skipped.
+        const isPureBanner = !rawStructure && !hasNumericData;
         if (nextProject !== currentProject) {
-          // Project change — reset the structure carry so continuation rows
-          // from the previous project don't bleed into the new project.
-          currentStructure = "";
+          if (isPureBanner) {
+            // Project change on a pure banner row — reset the structure carry
+            // so continuation rows from the previous project don't bleed into
+            // the new project. On data rows the structure column handles this.
+            currentStructure = "";
+          }
         }
         // Same-project banners (e.g. one per BOM section: Proto / Mass / Pre)
         // must NOT wipe currentStructure; the next continuation row (blank Col C)
         // should still inherit the last structure from the preceding section.
         currentProject = nextProject;
-        bannerHit = true;
+        if (isPureBanner) {
+          bannerHit = true;
+        }
       }
     }
 
@@ -476,7 +502,6 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     // The first (Proto) row has the Tower Type Code in Col C; Mass/Pre continuation
     // rows have blank Col C and belong to the same structure. We carry the last
     // non-blank structure seen in this project group — exactly like currentProject.
-    const rawStructure = normalizeStructure(cellStr(cells[cols.structure] as Cell));
     if (rawStructure) {
       currentStructure = rawStructure;
     }
