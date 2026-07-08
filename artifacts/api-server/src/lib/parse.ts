@@ -632,6 +632,8 @@ export function parseWorkbook(
   let classificationConflicts = 0;
   const projects = new Set<string>();
   const rows: ParsedRow[] = [];
+  // Finished Goods WIP per project: additive, does NOT change row identity.
+  const fgWipByJob: Record<string, number> = {};
 
   for (const row of rawRows) {
     rowsRead++;
@@ -646,6 +648,19 @@ export function parseWorkbook(
     // they are bucketed under "(Unassigned)" instead.
     const rawProject = normalizeProject(row[COL.projectCode]);
     if (rawProject) lastProject = rawProject;
+
+    // FG Pending For Dispatch: collect Balance Wt. (Col Q) per project for the
+    // "Finished Goods WIP" column. Uses forward-filled lastProject because FG
+    // rows always carry a blank Project Code. Falls through to normal mark
+    // processing so identity/hashing is completely unchanged.
+    const rowType = cellToString(row["Type"]);
+    if (rowType && rowType.trim().toUpperCase() === "FG PENDING FOR DISPATCH") {
+      const fgProject = rawProject || lastProject;
+      if (fgProject) {
+        fgWipByJob[fgProject] =
+          (fgWipByJob[fgProject] ?? 0) + (toNumber(row[COL.balanceWt]) ?? 0);
+      }
+    }
 
     // The real project for this row: its own code, or — only for Structure
     // members with a blank code — the inherited group project. Project-less item
@@ -794,6 +809,7 @@ export function parseWorkbook(
       noProductionDate,
       futureProductionDate,
       classificationConflicts,
+      ...(Object.keys(fgWipByJob).length > 0 && { fgWipByJob }),
     },
   };
 }

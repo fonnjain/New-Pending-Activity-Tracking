@@ -136,11 +136,10 @@ export const PROCESS_PHASES: ProcessPhase[] = [
   },
   {
     key: "dispatch",
-    label: "Ready for Dispatch",
-    // Reports Finished Good WIP Computed (live WIP Galvanizing minus file
-    // Dispatch, from Order Status), not an activity code: Y now rolls into
-    // Galvanising, so no activity routes here. The Project-Wise page fills
-    // this column per-project from `useFgRows()`, not from any WIP record field.
+    label: "Finished Goods WIP",
+    // Reports FG Pending For Dispatch weight from the WIP file's "Type" column
+    // (new ≥Jul-2026 format, Col A). Summed per project in parseSummary.fgWipByJob
+    // and shown directly — not activity-based (no WIP record activity routes here).
     activities: [],
     subLabel: "FG",
   },

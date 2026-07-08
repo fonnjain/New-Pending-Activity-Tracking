@@ -17,6 +17,7 @@ import {
   getGetImportRecordsQueryKey,
   useGetOrderStatus,
   getGetOrderStatusQueryKey,
+  useListImports,
 } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
@@ -108,6 +109,19 @@ function JobDashboardContent() {
     }
     return m;
   }, [order, isAll]);
+
+  // Finished Goods WIP per project from the WIP file's parseSummary. Keyed by
+  // raw project code (no category prefix). React Query cache — no extra request.
+  const { data: importList } = useListImports();
+  const fgWipByJob = useMemo((): Record<string, number> => {
+    const imp = importList?.find((i) => i.id === selectedImportId);
+    return imp?.summary?.fgWipByJob ?? {};
+  }, [importList, selectedImportId]);
+
+  // Strip any category prefix ("TLT: " / "NTLT: ") from p.job to get the raw
+  // project code used as the key in fgWipByJob.
+  const fgWipForJob = (job: string): number =>
+    fgWipByJob[job.replace(/^(?:TLT|NTLT): /, "")] ?? 0;
 
   // Scope to the current Order Type mode. The toggle drives both the primary
   // dimension (Project for TLT, Section for NTLT) and the grouping below.
@@ -641,11 +655,14 @@ function JobDashboardContent() {
                     </TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       if (ph.key === "dispatch") {
-                        // Ready for Dispatch (FG): intentionally left blank for
-                        // now — no data field has been assigned to this column.
+                        const wt = fgWipForJob(p.job);
                         return (
                           <TableCell key={ph.key} className="text-right tabular-nums">
-                            <span className="text-muted-foreground">-</span>
+                            {wt > 0 ? (
+                              <span className="font-bold">{formatWeight(wt)}</span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                         );
                       }
@@ -697,9 +714,14 @@ function JobDashboardContent() {
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.rel) * 1000)}</TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       if (ph.key === "dispatch") {
+                        const totalFgWt = byProject.reduce((s, p) => s + fgWipForJob(p.job), 0);
                         return (
                           <TableCell key={ph.key} className="text-right tabular-nums">
-                            <span className="text-muted-foreground">-</span>
+                            {totalFgWt > 0 ? (
+                              <span className="font-bold">{formatWeight(totalFgWt)}</span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                         );
                       }

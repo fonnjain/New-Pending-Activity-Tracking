@@ -28,6 +28,12 @@ export interface ImportUpload {
   reportDate?: string;
 }
 
+/**
+ * Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = "FG Pending For Dispatch". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.
+
+ */
+export type ParseSummaryFgWipByJob = {[key: string]: number};
+
 export interface ParseSummary {
   rowsRead: number;
   rowsKept: number;
@@ -42,6 +48,9 @@ export interface ParseSummary {
   noProductionDate: number;
   /** Last Production Entry Date later than today (clamped to today for ageing). */
   futureProductionDate: number;
+  /** Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = "FG Pending For Dispatch". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.
+   */
+  fgWipByJob?: ParseSummaryFgWipByJob;
 }
 
 export interface ChangeSummary {

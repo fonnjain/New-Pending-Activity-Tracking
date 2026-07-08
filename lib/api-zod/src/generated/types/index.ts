@@ -94,6 +94,7 @@ export * from './orderReviewSummary';
 export * from './orderStatusResponse';
 export * from './orderStatusRow';
 export * from './parseSummary';
+export * from './parseSummaryFgWipByJob';
 export * from './partialActivityConfig';
 export * from './partialPreWarnConfig';
 export * from './preWarnConfig';

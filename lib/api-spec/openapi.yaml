@@ -1398,6 +1398,15 @@ components:
         futureProductionDate:
           type: integer
           description: Last Production Entry Date later than today (clamped to today for ageing).
+        fgWipByJob:
+          type: object
+          description: >
+            Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows
+            where Type (Col A, new >=Jul-2026 WIP format) = "FG Pending For
+            Dispatch". Same unit as balanceWt (kg raw). Absent when the file has
+            no Type column (old format) or no FG rows.
+          additionalProperties:
+            type: number
       required:
         - rowsRead
         - rowsKept
