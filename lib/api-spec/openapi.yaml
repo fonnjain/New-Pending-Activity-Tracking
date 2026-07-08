@@ -3352,6 +3352,12 @@ components:
         computedDispatchMt:
           type: number
           description: WIP-derived dispatch only (equals accruedMt). The Order Review file/seed never contributes.
+        balFabMt:
+          type: ["number", "null"]
+          description: Balance Fabrication MT from the Order Review file (col T).
+        balGalvMt:
+          type: ["number", "null"]
+          description: Balance Galvanising MT from the Order Review file (col U).
         notInLatest:
           type: boolean
           description: Current order row absent from the latest Order Review file (kept, not deleted).
@@ -3374,6 +3380,8 @@ components:
         - seedMt
         - accruedMt
         - computedDispatchMt
+        - balFabMt
+        - balGalvMt
         - notInLatest
     DispatchReconciliationRow:
       type: object

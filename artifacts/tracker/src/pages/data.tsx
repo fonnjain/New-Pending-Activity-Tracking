@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, Fragment } from "react";
 import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetAccumulatedWip, getGetAccumulatedWipQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
@@ -6,7 +6,7 @@ import { useFgRows, type FgComputedRow } from "@/lib/fg";
 import { contractorCategoryLabel } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, ListChecks } from "lucide-react";
+import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, ListChecks, ChevronDown, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx, exportToJson, type XlsxColumn } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
@@ -654,46 +654,120 @@ function CurrentJobsCard() {
 function AccumulatedWipContent() {
   const { data, isLoading } = useGetAccumulatedWip();
   const { data: order } = useGetOrderStatus({ query: { queryKey: getGetOrderStatusQueryKey() } });
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
   const byProject = useMemo(() => data?.byProject ?? [], [data]);
   const byStructure = useMemo(() => data?.byStructure ?? [], [data]);
+  const hasOrder = !!order?.available;
 
-  // Per-project sums of fileGalvMt and fileDespatchMt from the Order Review file,
-  // used to compute the two FG figures that moved here from Order Status.
-  const orderByProject = useMemo(() => {
-    const m = new Map<string, { fileGalvMt: number; fileDespatchMt: number }>();
+  // Combined (project, structure) rows — accumulated WIP merged with Order Review fields
+  type StructRow = {
+    project: string; structure: string;
+    fabricationMt: number; galvanizingMt: number;
+    releaseMt: number | null; fileGalvMt: number | null;
+    fileDespatchMt: number | null; balFabMt: number | null; balGalvMt: number | null;
+  };
+  const allStructures = useMemo<StructRow[]>(() => {
+    const key = (p: string, s: string) => `${p}\0${s}`;
+    const m = new Map<string, StructRow>();
+    for (const r of byStructure) {
+      const k = key(r.project, r.structure);
+      const e = m.get(k) ?? { project: r.project, structure: r.structure, fabricationMt: 0, galvanizingMt: 0, releaseMt: null, fileGalvMt: null, fileDespatchMt: null, balFabMt: null, balGalvMt: null };
+      e.fabricationMt = r.fabricationMt;
+      e.galvanizingMt = r.galvanizingMt;
+      m.set(k, e);
+    }
     for (const r of order?.rows ?? []) {
-      const cur = m.get(r.project) ?? { fileGalvMt: 0, fileDespatchMt: 0 };
-      cur.fileGalvMt += r.fileGalvMt ?? 0;
-      cur.fileDespatchMt += r.fileDespatchMt ?? 0;
-      m.set(r.project, cur);
+      const k = key(r.project, r.structure);
+      const e = m.get(k) ?? { project: r.project, structure: r.structure, fabricationMt: 0, galvanizingMt: 0, releaseMt: null, fileGalvMt: null, fileDespatchMt: null, balFabMt: null, balGalvMt: null };
+      e.releaseMt = r.releaseMt;
+      e.fileGalvMt = r.fileGalvMt;
+      e.fileDespatchMt = r.fileDespatchMt;
+      e.balFabMt = r.balFabMt;
+      e.balGalvMt = r.balGalvMt;
+      m.set(k, e);
+    }
+    return Array.from(m.values()).sort((a, b) => a.project.localeCompare(b.project) || a.structure.localeCompare(b.structure));
+  }, [byStructure, order]);
+
+  // Group structures by project for expand/collapse
+  const structuresByProject = useMemo(() => {
+    const m = new Map<string, StructRow[]>();
+    for (const r of allStructures) {
+      const list = m.get(r.project) ?? [];
+      list.push(r);
+      m.set(r.project, list);
     }
     return m;
-  }, [order]);
+  }, [allStructures]);
 
-  // Finished Good Overview Computed = Galvanising (file col N) minus Dispatch (file col Q),
-  // summed per project across all structures.
-  // Finished Good WIP Computed = Galvanizing WIP Accumulated minus file Dispatch, per project.
-  const fgOverviewTotal = useMemo(() => {
-    let t = 0;
-    for (const v of orderByProject.values()) t += v.fileGalvMt - v.fileDespatchMt;
-    return t;
-  }, [orderByProject]);
+  // Combined accumulated WIP + Order Review per project (union of both sources)
+  type ProjRow = {
+    project: string; fabricationMt: number; galvanizingMt: number;
+    releaseMt: number; fileGalvMt: number; fileDespatchMt: number;
+    balFabMt: number; balGalvMt: number;
+  };
+  const projectRows = useMemo<ProjRow[]>(() => {
+    const m = new Map<string, ProjRow>();
+    for (const r of byProject) {
+      m.set(r.project, { project: r.project, fabricationMt: r.fabricationMt, galvanizingMt: r.galvanizingMt, releaseMt: 0, fileGalvMt: 0, fileDespatchMt: 0, balFabMt: 0, balGalvMt: 0 });
+    }
+    for (const r of order?.rows ?? []) {
+      const cur = m.get(r.project) ?? { project: r.project, fabricationMt: 0, galvanizingMt: 0, releaseMt: 0, fileGalvMt: 0, fileDespatchMt: 0, balFabMt: 0, balGalvMt: 0 };
+      cur.releaseMt += r.releaseMt ?? 0;
+      cur.fileGalvMt += r.fileGalvMt ?? 0;
+      cur.fileDespatchMt += r.fileDespatchMt ?? 0;
+      cur.balFabMt += r.balFabMt ?? 0;
+      cur.balGalvMt += r.balGalvMt ?? 0;
+      m.set(r.project, cur);
+    }
+    return Array.from(m.values()).sort((a, b) => a.project.localeCompare(b.project));
+  }, [byProject, order]);
 
-  const fgWipTotal = useMemo(() => {
-    const galvAcc = byProject.reduce((s, p) => s + p.galvanizingMt, 0);
-    const disp = Array.from(orderByProject.values()).reduce((s, v) => s + v.fileDespatchMt, 0);
-    return galvAcc - disp;
-  }, [byProject, orderByProject]);
+  // Grand totals across all project rows
+  const totals = useMemo(() => projectRows.reduce(
+    (t, r) => ({
+      fabricationMt: t.fabricationMt + r.fabricationMt,
+      galvanizingMt: t.galvanizingMt + r.galvanizingMt,
+      releaseMt: t.releaseMt + r.releaseMt,
+      fileGalvMt: t.fileGalvMt + r.fileGalvMt,
+      fileDespatchMt: t.fileDespatchMt + r.fileDespatchMt,
+      balFabMt: t.balFabMt + r.balFabMt,
+      balGalvMt: t.balGalvMt + r.balGalvMt,
+    }),
+    { fabricationMt: 0, galvanizingMt: 0, releaseMt: 0, fileGalvMt: 0, fileDespatchMt: 0, balFabMt: 0, balGalvMt: 0 },
+  ), [projectRows]);
+
+  const fgOverviewTotal = totals.fileGalvMt - totals.fileDespatchMt;
+  const fgWipTotal = totals.galvanizingMt - totals.fileDespatchMt;
+
+  const toggle = (project: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(project) ? next.delete(project) : next.add(project);
+      return next;
+    });
+
+  const orderCols: XlsxColumn[] = hasOrder
+    ? [
+        { label: "Release (MT)", field: "releaseMt", numeric: true, decimals: 3, total: true },
+        { label: "Galv Progress (MT)", field: "fileGalvMt", numeric: true, decimals: 3, total: true },
+        { label: "Dispatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
+        { label: "Fab Balance (MT)", field: "balFabMt", numeric: true, decimals: 3, total: true },
+        { label: "Galv Balance (MT)", field: "balGalvMt", numeric: true, decimals: 3, total: true },
+      ]
+    : [];
 
   const handleExport = () => {
     exportToXlsx(
       "accumulated-wip.xlsx",
       [
         { label: "Project", field: "project" },
-        { label: "Fabrication WIP Accumulated (MT)", field: "fabricationMt", numeric: true, decimals: 3, total: true },
-        { label: "Galvanizing WIP Accumulated (MT)", field: "galvanizingMt", numeric: true, decimals: 3, total: true },
+        { label: "Fab WIP Accumulated (MT)", field: "fabricationMt", numeric: true, decimals: 3, total: true },
+        { label: "Galv WIP Accumulated (MT)", field: "galvanizingMt", numeric: true, decimals: 3, total: true },
+        ...orderCols,
       ],
-      byProject,
+      projectRows,
       { sheetName: "Accumulated WIP" },
     );
   };
@@ -704,10 +778,11 @@ function AccumulatedWipContent() {
       [
         { label: "Project", field: "project" },
         { label: "Structure", field: "structure" },
-        { label: "Fabrication WIP Accumulated (MT)", field: "fabricationMt", numeric: true, decimals: 3, total: true },
-        { label: "Galvanizing WIP Accumulated (MT)", field: "galvanizingMt", numeric: true, decimals: 3, total: true },
+        { label: "Fab WIP Accumulated (MT)", field: "fabricationMt", numeric: true, decimals: 3, total: true },
+        { label: "Galv WIP Accumulated (MT)", field: "galvanizingMt", numeric: true, decimals: 3, total: true },
+        ...orderCols,
       ],
-      byStructure,
+      allStructures,
       { sheetName: "Accumulated WIP by Structure" },
     );
   };
@@ -727,11 +802,17 @@ function AccumulatedWipContent() {
             again.
           </p>
         </div>
-        {byProject.length > 0 && (
-          <Button variant="outline" size="sm" onClick={handleExport} className="shrink-0">
-            <FileDown className="h-4 w-4 mr-1.5" />
-            Export
-          </Button>
+        {projectRows.length > 0 && (
+          <div className="flex gap-2 shrink-0">
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              <FileDown className="h-4 w-4 mr-1.5" />
+              Export
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleExportByStructure}>
+              <FileDown className="h-4 w-4 mr-1.5" />
+              Export by Structure
+            </Button>
+          </div>
         )}
       </div>
 
@@ -764,7 +845,7 @@ function AccumulatedWipContent() {
                 </div>
               </CardContent>
             </Card>
-            {order?.available && (
+            {hasOrder && (
               <>
                 <Card>
                   <CardHeader>
@@ -796,7 +877,7 @@ function AccumulatedWipContent() {
             )}
           </div>
 
-          {byProject.length === 0 ? (
+          {projectRows.length === 0 ? (
             <Card>
               <CardContent className="py-10 text-center text-muted-foreground text-sm">
                 No accumulated WIP yet.
@@ -812,110 +893,102 @@ function AccumulatedWipContent() {
                   <table className="w-full text-sm">
                     <thead className="border-b bg-muted sticky top-0 z-10">
                       <tr className="text-left">
-                        <th className="px-3 py-2 font-semibold">Project</th>
-                        <th className="px-3 py-2 font-semibold text-right">
-                          Fabrication WIP Accumulated (MT)
-                        </th>
-                        <th className="px-3 py-2 font-semibold text-right">
-                          Galvanizing WIP Accumulated (MT)
-                        </th>
-                        {order?.available && (
+                        <th className="px-3 py-2 font-semibold">Project / Structure</th>
+                        <th className="px-3 py-2 font-semibold text-right">Fab WIP Acc (MT)</th>
+                        <th className="px-3 py-2 font-semibold text-right">Galv WIP Acc (MT)</th>
+                        {hasOrder && (
                           <>
-                            <th className="px-3 py-2 font-semibold text-right">
-                              Finished Good Overview Computed (MT)
-                            </th>
-                            <th className="px-3 py-2 font-semibold text-right">
-                              Finished Good WIP Computed (MT)
-                            </th>
+                            <th className="px-3 py-2 font-semibold text-right">Release (MT)</th>
+                            <th className="px-3 py-2 font-semibold text-right">Galv Progress (MT)</th>
+                            <th className="px-3 py-2 font-semibold text-right">Dispatch (MT)</th>
+                            <th className="px-3 py-2 font-semibold text-right">Fab Balance (MT)</th>
+                            <th className="px-3 py-2 font-semibold text-right">Galv Balance (MT)</th>
+                            <th className="px-3 py-2 font-semibold text-right">FG Overview (MT)</th>
+                            <th className="px-3 py-2 font-semibold text-right">FG WIP (MT)</th>
                           </>
                         )}
                       </tr>
                     </thead>
                     <tbody>
-                      {byProject.map((r) => {
-                        const op = orderByProject.get(r.project);
+                      {projectRows.map((r) => {
+                        const isOpen = expanded.has(r.project);
+                        const structs = structuresByProject.get(r.project) ?? [];
+                        const fgOv = r.fileGalvMt - r.fileDespatchMt;
+                        const fgWip = r.galvanizingMt - r.fileDespatchMt;
                         return (
-                          <tr key={r.project} className="border-b last:border-0 hover:bg-muted/30">
-                            <td className="px-3 py-2">{r.project}</td>
-                            <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fabricationMt)}</td>
-                            <td className="px-3 py-2 text-right tabular-nums">{mt3(r.galvanizingMt)}</td>
-                            {order?.available && (
-                              <>
-                                <td className="px-3 py-2 text-right tabular-nums">
-                                  {op != null ? (op.fileGalvMt - op.fileDespatchMt).toFixed(3) : "-"}
-                                </td>
-                                <td className="px-3 py-2 text-right tabular-nums">
-                                  {op != null ? (r.galvanizingMt - op.fileDespatchMt).toFixed(3) : "-"}
-                                </td>
-                              </>
-                            )}
-                          </tr>
+                          <Fragment key={r.project}>
+                            <tr
+                              className="border-b bg-primary/10 hover:bg-primary/15 cursor-pointer"
+                              onClick={() => toggle(r.project)}
+                            >
+                              <td className="px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  {isOpen ? (
+                                    <ChevronDown className="h-4 w-4 text-primary shrink-0" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4 text-primary shrink-0" />
+                                  )}
+                                  <span className="font-bold">{r.project}</span>
+                                  <span className="text-[10px] uppercase text-muted-foreground ml-1">
+                                    {structs.length} structure{structs.length === 1 ? "" : "s"}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums font-bold">{mt3(r.fabricationMt)}</td>
+                              <td className="px-3 py-2 text-right tabular-nums font-bold">{mt3(r.galvanizingMt)}</td>
+                              {hasOrder && (
+                                <>
+                                  <td className="px-3 py-2 text-right tabular-nums font-bold">{r.releaseMt.toFixed(3)}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums font-bold">{r.fileGalvMt.toFixed(3)}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums font-bold">{r.fileDespatchMt.toFixed(3)}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums font-bold">{r.balFabMt.toFixed(3)}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums font-bold">{r.balGalvMt.toFixed(3)}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums font-bold">{fgOv.toFixed(3)}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums font-bold">{fgWip.toFixed(3)}</td>
+                                </>
+                              )}
+                            </tr>
+                            {isOpen && structs.map((s) => (
+                              <tr
+                                key={`${s.project}\0${s.structure}`}
+                                className="border-b last:border-0 hover:bg-muted/30"
+                              >
+                                <td className="px-3 py-2 pl-9 text-muted-foreground">{s.structure}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{mt3(s.fabricationMt)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{mt3(s.galvanizingMt)}</td>
+                                {hasOrder && (
+                                  <>
+                                    <td className="px-3 py-2 text-right tabular-nums">{s.releaseMt != null ? s.releaseMt.toFixed(3) : ""}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums">{s.fileGalvMt != null ? s.fileGalvMt.toFixed(3) : ""}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums">{s.fileDespatchMt != null ? s.fileDespatchMt.toFixed(3) : ""}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums">{s.balFabMt != null ? s.balFabMt.toFixed(3) : ""}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums">{s.balGalvMt != null ? s.balGalvMt.toFixed(3) : ""}</td>
+                                    <td className="px-3 py-2" />
+                                    <td className="px-3 py-2" />
+                                  </>
+                                )}
+                              </tr>
+                            ))}
+                          </Fragment>
                         );
                       })}
                     </tbody>
                     <tfoot className="border-t-2 bg-muted font-semibold sticky bottom-0 z-10">
                       <tr>
-                        <td className="px-3 py-2">Grand total ({byProject.length})</td>
+                        <td className="px-3 py-2">Grand total ({projectRows.length} projects)</td>
                         <td className="px-3 py-2 text-right tabular-nums">{mt3(data?.overall.fabricationMt)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{mt3(data?.overall.galvanizingMt)}</td>
-                        {order?.available && (
+                        {hasOrder && (
                           <>
+                            <td className="px-3 py-2 text-right tabular-nums">{totals.releaseMt.toFixed(3)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{totals.fileGalvMt.toFixed(3)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{totals.fileDespatchMt.toFixed(3)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{totals.balFabMt.toFixed(3)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{totals.balGalvMt.toFixed(3)}</td>
                             <td className="px-3 py-2 text-right tabular-nums">{fgOverviewTotal.toFixed(3)}</td>
                             <td className="px-3 py-2 text-right tabular-nums">{fgWipTotal.toFixed(3)}</td>
                           </>
                         )}
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {byStructure.length > 0 && (
-            <Card>
-              <CardHeader className="flex items-start justify-between gap-3 flex-row">
-                <CardTitle className="text-base">By structure</CardTitle>
-                <Button variant="outline" size="sm" onClick={handleExportByStructure} className="shrink-0">
-                  <FileDown className="h-4 w-4 mr-1.5" />
-                  Export
-                </Button>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="overflow-auto max-h-[70vh]">
-                  <table className="w-full text-sm">
-                    <thead className="border-b bg-muted sticky top-0 z-10">
-                      <tr className="text-left">
-                        <th className="px-3 py-2 font-semibold">Project</th>
-                        <th className="px-3 py-2 font-semibold">Structure</th>
-                        <th className="px-3 py-2 font-semibold text-right">
-                          Fabrication WIP Accumulated (MT)
-                        </th>
-                        <th className="px-3 py-2 font-semibold text-right">
-                          Galvanizing WIP Accumulated (MT)
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {byStructure.map((r) => (
-                        <tr
-                          key={`${r.project}\u0001${r.structure}`}
-                          className="border-b last:border-0 hover:bg-muted/30"
-                        >
-                          <td className="px-3 py-2">{r.project}</td>
-                          <td className="px-3 py-2">{r.structure}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fabricationMt)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{mt3(r.galvanizingMt)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="border-t-2 bg-muted font-semibold sticky bottom-0 z-10">
-                      <tr>
-                        <td className="px-3 py-2" colSpan={2}>
-                          Grand total ({byStructure.length})
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">{mt3(data?.overall.fabricationMt)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{mt3(data?.overall.galvanizingMt)}</td>
                       </tr>
                     </tfoot>
                   </table>

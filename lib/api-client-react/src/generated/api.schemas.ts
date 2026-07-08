@@ -1524,6 +1524,16 @@ export interface OrderStatusRow {
   accruedMt: number;
   /** WIP-derived dispatch only (equals accruedMt). The Order Review file/seed never contributes. */
   computedDispatchMt: number;
+  /**
+     * Balance Fabrication MT from the Order Review file (col T).
+     * @nullable
+     */
+  balFabMt: number | null;
+  /**
+     * Balance Galvanising MT from the Order Review file (col U).
+     * @nullable
+     */
+  balGalvMt: number | null;
   /** Current order row absent from the latest Order Review file (kept, not deleted). */
   notInLatest: boolean;
 }
