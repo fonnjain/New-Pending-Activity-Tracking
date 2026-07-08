@@ -1,0 +1,87 @@
+TASK: Apply the fixes for the "Unknown" BOM Label issue in the Fabrication Report, based on
+the confirmed diagnosis. Two fixes are APPROVED (with one guard added); one is HELD.
+
+=====================================================================
+DIAGNOSIS CONFIRMED (verified against the source files)
+=====================================================================
+Root cause = structure-name mismatch between the WIP parser and the Order Review parser.
+Verified independently:
+  - Project 946: all 19 OR structures carry a LEADING DASH ("-069-2NBA1" ...) while WIP has
+    them without ("069-2NBA1"). ~97% of Unknown weight. FIXABLE.
+  - Project 920: OR stores "4TA/4TB/4TC/4TD/4TE/4TF" and "CBOM"; WIP parses "TA/TB/TE/TF"
+    and "CBOM-920\2CE". Tiny (0.051 MT). This is a genuine SOURCE-FILE naming inconsistency.
+  - 168 header-row leak rows (structure = "Project Code : NNN") pollute order_review_rows.
+
+=====================================================================
+FIX 2 — APPROVED (do first): skip Order Review header-row leakage
+=====================================================================
+In the Order Review parser, SKIP any row whose structure/Tower-Type cell (Col C) begins
+with "Project Code" — these are project-banner rows, not structures. They must never be
+stored in order_review_rows. This removes the 168 phantom rows (and the "Project Code : 946"
+row that falsely made 946 look present). Purely additive; only the OR parser changes.
+
+=====================================================================
+FIX 1 — APPROVED WITH A GUARD: strip a leading dash from OR structure codes
+=====================================================================
+After extracting the structure code from Col C, strip a SINGLE leading "-" before storing,
+so OR "-069-2NBA1" matches WIP "069-2NBA1". BUT add this guard (the blind replace is unsafe):
+
+  *** DO NOT strip if the code is ALL dashes or would collide. ***
+  Reason: project VR082 contains junk placeholder structures literally named "-", "--",
+  "---", "----". Stripping one dash turns "----" into "---", which already exists → key
+  collision and data corruption.
+
+Implement safely:
+  - Only strip the leading dash if, after stripping, the result is NON-EMPTY AND contains at
+    least one non-dash character (i.e. skip codes that are entirely dashes).
+  - After stripping, if the resulting structure code already exists for the same project
+    (collision), do NOT merge — keep them distinct (e.g. leave the dashed one as-is) and log
+    it. Never silently collapse two different structures into one.
+  - Apply ONLY in the OR parser, mirroring what the WIP parser already does to its Alias.
+    Idempotent: codes without a leading dash are unchanged.
+
+Expected effect: project 946's 19 structures now match WIP and resolve to their real BOM
+Label ("Proto"), collapsing the ~98.8 MT Cutting / ~2.08 MT QC out of "Unknown" into the
+correct label. VR082 junk rows remain unchanged (no collision).
+
+=====================================================================
+FIX 3 — HELD (do NOT apply): project 920 TA/TB/TE/TF and CBOM
+=====================================================================
+These 5 marks (0.051 MT) reflect genuine naming differences between the WIP and OR source
+files (OR "4TA" vs WIP "TA"; OR "CBOM" vs WIP "CBOM-920\2CE"). Do NOT hack the parser to
+force-match these — a code fix would risk mismatching legitimately-distinct structures. Leave
+them as Unknown for now; the correct resolution is upstream source-file correction. Just make
+sure they are surfaced (see reporting change below), not silently dropped.
+
+=====================================================================
+REPORTING CHANGE: distinguish the two kinds of Unknown
+=====================================================================
+Currently "no OR structure match" lumps together (a) genuine mismatches now fixed and (b)
+true source discrepancies. After Fixes 1-2, keep an "Unknown" bucket but label the reason so
+future cases are diagnosable:
+  - Show, for any remaining Unknown marks, the project + structure so the user can see
+    exactly which structures failed to match (like the 5 in 920). A small "unmatched
+    structures" note is enough; do not fabricate a BOM Label for them.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT touch WIP parsing, hashing/dedup identity, ageing, Activity, qty, or the BOM-summing
+  logic. Only the Order Review parser changes (Fixes 1 & 2).
+- Do NOT strip more than one leading dash; do NOT strip all-dash codes; do NOT merge on
+  collision.
+- Do NOT apply Fix 3.
+
+=====================================================================
+ACCEPTANCE CHECK (report numbers)
+=====================================================================
+- order_review_rows no longer contains any "Project Code : ..." structure rows (168 removed).
+- Project 946: its 19 structures now match WIP and carry BOM Label "Proto"; 946 no longer
+  appears under "Unknown". Unknown Cutting drops from ~101.5 MT to ~2.7 MT.
+- Project VR082: its "-","--","---","----" structures are UNCHANGED and not collided/merged.
+- Project 920: still shows its 5 TA/TB/TE/TF/CBOM marks as Unknown (Fix 3 held), now with
+  the structure names visible in the unmatched note. Total 920 Unknown ≈ 0.051 MT.
+- Fabrication report grand totals for the four measures are otherwise unchanged (weight only
+  MOVED from Unknown into Proto for 946; nothing created or lost).
+- Report: Unknown Cutting/QC before vs after, the 946 structures' new BOM Label, and
+  confirmation VR082 is untouched.

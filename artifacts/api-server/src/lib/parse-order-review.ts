@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { OrderReviewSummary } from "@workspace/db";
+import { logger } from "./logger";
 
 // ---------------------------------------------------------------------------
 // "Order Review" file (the SECOND input file)
@@ -114,6 +115,19 @@ function normalizeProject(value: string): string {
 // phantom duplicate keys from spacing variants across daily files.
 export function normalizeStructure(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+// Fix 1: Strip a single leading "-" from an OR structure code, mirroring what the
+// WIP parser already does to its Alias column.
+// Guard: result must be non-empty AND contain at least one non-dash character.
+// This preserves all-dash VR082 placeholders ("-", "--", "---", "----") which would
+// reduce to all-dash or empty strings — both of which the guard blocks.
+function stripLeadingDash(structure: string): string {
+  if (!structure.startsWith("-")) return structure;
+  const stripped = structure.slice(1);
+  // Empty result or all-dash result → do NOT strip.
+  if (!stripped || !/[^-]/.test(stripped)) return structure;
+  return stripped;
 }
 
 function getGrid(buffer: Buffer): unknown[][] {
@@ -433,6 +447,9 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
   const projects = new Set<string>();
   let currentProject = "";
   let currentStructure = ""; // forward-filled across BOM rows (Proto→Mass→Pre)
+  // Tracks (project\x01structure) keys already emitted — used by the
+  // leading-dash strip collision guard below.
+  const seenStructures = new Set<string>();
   let rowsRead = 0;
   let skippedTotals = 0;
   let missingStructure = 0;
@@ -454,7 +471,12 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     //   1. rawStructure non-empty  → definitely a data row (structure is present)
     //   2. hasNumericData true     → data row carrying MT / set figures
     // Only when BOTH are false is the row treated as a pure banner and skipped.
-    const rawStructure = normalizeStructure(cellStr(cells[cols.structure] as Cell));
+    const rawStructureCell = normalizeStructure(cellStr(cells[cols.structure] as Cell));
+    // Fix 2: if the structure cell itself contains a project-banner string (e.g.
+    // "Project Code : 920"), this is a header/banner row that leaked into the data
+    // range — treat it as structure-less so isPureBanner fires and the row is
+    // skipped without polluting currentStructure.
+    const rawStructure = PROJECT_BANNER.test(rawStructureCell) ? "" : rawStructureCell;
     const hasNumericData = cells.some((c) => {
       const s = cellStr(c as Cell);
       if (!s || PROJECT_BANNER.test(s)) return false;
@@ -503,7 +525,27 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     // rows have blank Col C and belong to the same structure. We carry the last
     // non-blank structure seen in this project group — exactly like currentProject.
     if (rawStructure) {
-      currentStructure = rawStructure;
+      // Fix 1: strip a single leading "-" so OR "-069-2NBA1" matches WIP "069-2NBA1".
+      // The all-dash guard in stripLeadingDash protects VR082 placeholders
+      // ("-", "--", "---", "----") whose stripped form would be all-dash or empty.
+      const candidate = stripLeadingDash(rawStructure);
+      if (candidate !== rawStructure) {
+        // Collision guard: if the stripped structure was already emitted for this
+        // project (e.g. the file happens to contain both "-ABC" and "ABC"), keep
+        // the original to avoid silently merging two distinct structures.
+        const collisionKey = `${currentProject}\u0001${candidate}`;
+        if (seenStructures.has(collisionKey)) {
+          logger.warn(
+            { project: currentProject, original: rawStructure, stripped: candidate },
+            "OR leading-dash strip skipped: collision with existing structure",
+          );
+          currentStructure = rawStructure;
+        } else {
+          currentStructure = candidate;
+        }
+      } else {
+        currentStructure = rawStructure;
+      }
     }
     if (!currentStructure) {
       // No structure yet in this project group — genuinely orphaned row.
@@ -529,6 +571,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     if (releaseMt != null) totalReleaseMt += releaseMt;
     if (fileDespatchMt != null) totalFileDespatchMt += fileDespatchMt;
     if (currentProject) projects.add(currentProject);
+    seenStructures.add(`${currentProject}\u0001${structure}`);
 
     rows.push({
       project: currentProject,
