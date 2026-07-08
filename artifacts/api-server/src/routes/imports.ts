@@ -58,6 +58,7 @@ import {
 } from "../lib/dispatch";
 import { recomputeAccumulatedWip } from "../lib/accumulatedWip";
 import { recomputeContractorMovement } from "../lib/contractorMovement";
+import { recomputeReleaseBalance } from "../lib/parseWipReleaseBalance";
 import { cutoffSql, loadValidFrom, importDayKey } from "../lib/cutoff";
 import {
   detectFileType,
@@ -580,6 +581,12 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
     await recomputeContractorMovement();
   } catch (err) {
     req.log.warn({ err }, "Contractor movement recompute failed after import");
+  }
+  // Refresh Release Balance Computed snapshot (Not Started + Initial rows; best-effort).
+  try {
+    await recomputeReleaseBalance(file.buffer);
+  } catch (err) {
+    req.log.warn({ err }, "Release balance recompute failed after import");
   }
   res.status(201).json(result);
 });
@@ -1238,6 +1245,12 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     await recomputeContractorMovement();
   } catch (err) {
     req.log.warn({ err }, "Contractor movement recompute failed after commit");
+  }
+  // Refresh Release Balance Computed snapshot (Not Started + Initial rows; best-effort).
+  try {
+    await recomputeReleaseBalance(staged.fileData);
+  } catch (err) {
+    req.log.warn({ err }, "Release balance recompute failed after commit");
   }
   res.status(201).json({ kind: "wip", ...result });
 });

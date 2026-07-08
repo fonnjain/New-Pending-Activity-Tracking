@@ -59,6 +59,7 @@ import type {
   MovementResponse,
   OrderStatusResponse,
   Record,
+  ReleaseBalanceResponse,
   ReportRequest,
   ReportResult,
   ReviewRequest,
@@ -2773,6 +2774,85 @@ export function useGetContractorMovement<TData = Awaited<ReturnType<typeof getCo
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetContractorMovementQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetReleaseBalanceUrl = () => {
+
+
+
+
+  return `/api/release-balance`
+}
+
+/**
+ * Returns the Release Balance Computed (MT) — the sum of Balance Wt. (Col Q) ÷ 1000 for rows where Type (Col A) = "Job Card Not Started" AND Job Card Status (Col G) = "Initial" — grouped by (project, structure) from the most recently committed WIP file, joined to the Order Review file's own stated Release Balance (fileBalReleaseMt) for cross-checking. Purely additive — never changes parsing, activity values, dedup, ageing, warning, milestone, or dispatch state.
+
+ * @summary Get per-structure Release Balance Computed from the latest WIP file
+ */
+export const getReleaseBalance = async ( options?: RequestInit): Promise<ReleaseBalanceResponse> => {
+
+  return customFetch<ReleaseBalanceResponse>(getGetReleaseBalanceUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetReleaseBalanceQueryKey = () => {
+    return [
+    `/api/release-balance`
+    ] as const;
+    }
+
+
+export const getGetReleaseBalanceQueryOptions = <TData = Awaited<ReturnType<typeof getReleaseBalance>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getReleaseBalance>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetReleaseBalanceQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getReleaseBalance>>> = ({ signal }) => getReleaseBalance({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getReleaseBalance>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetReleaseBalanceQueryResult = NonNullable<Awaited<ReturnType<typeof getReleaseBalance>>>
+export type GetReleaseBalanceQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get per-structure Release Balance Computed from the latest WIP file
+ */
+
+export function useGetReleaseBalance<TData = Awaited<ReturnType<typeof getReleaseBalance>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getReleaseBalance>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetReleaseBalanceQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

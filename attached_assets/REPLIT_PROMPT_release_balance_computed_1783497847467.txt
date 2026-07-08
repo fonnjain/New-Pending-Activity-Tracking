@@ -1,0 +1,116 @@
+TASK: Add a WIP-derived "Release Balance Computed" metric and a new "Release Balance" tab
+on the Data page that shows it alongside the existing Order-Review Release Balance.
+
+=====================================================================
+CONTEXT / ERP SEMANTICS (verified against the WIP file)
+=====================================================================
+The WIP export's Column A ("Type") has exactly three values:
+   1. "Job Card Not Started"
+   2. "Job Card WIP"
+   3. "FG Pending For Dispatch"
+
+Within "Job Card Not Started", Column G ("Job Card Status") is either "Initial" or
+"Authorized", giving three real-world states:
+   - Not Started + Initial              → factory has NO steel; steel release is PENDING.
+                                          Contractor (Col D) is ALWAYS BLANK here.
+                                          (Verified: 0 of these rows have a contractor.)
+   - Not Started + Authorized + Col D has a contractor name
+                                          → job card assigned to a contractor, but
+                                            Cutting (C) not yet started.
+   - Not Started + Authorized + Col D BLANK
+                                          → job card not assigned to anyone = "Assignment
+                                            Balance".
+"Job Card WIP" rows carry operations/activities from RFI..Y (varies per card) and NEVER
+include Cutting (C). (Verified: 0 WIP rows have Activity = C.)
+
+WIP column map (header on row 4; 24 columns). Relevant columns:
+   A=Type, B=Project Code, C=Order Nature, D=Contractor, G=Job Card Status,
+   J=Alias(=structure), Q=Balance Wt., S=Activity.
+Project Code is forward-filled: it appears on "Structure" rows (Col C = "Structure").
+
+IMPORTANT UNIT FACT: WIP Col Q "Balance Wt." is in KILOGRAMS. The existing Order Review
+Release Balance (Col S of Order Review) is in TONNES (MT). All comparisons below convert
+the WIP value to MT by dividing by 1000.
+
+=====================================================================
+NEW METRIC: "Release Balance Computed"  (WIP-derived; SEPARATE from existing)
+=====================================================================
+Definition:
+   Release Balance Computed (MT) = SUM( WIP Col Q ) / 1000
+   over rows where  Col A == "Job Card Not Started"  AND  Col G == "Initial".
+   Group by (normalized project, structure=Alias).
+
+This is a NEW, independent field. It is NOT the existing Release Balance. The existing
+Release Balance (from the Order Review file, Col S) MUST remain completely untouched
+everywhere in the app — do not repurpose, rename, or recompute it. Two different numbers,
+both retained.
+
+Add it additively to the WIP-derived data (e.g. a computed column/aggregate keyed by
+project+structure). Do NOT alter parsing, hashing, dedup, ageing, Activity, or qty. Use the
+EXISTING project-code normalizer (strip trailing "."/".0"); do not add a new one.
+
+Verified magnitudes on the current files (for the ACCEPTANCE CHECK — will move with new
+uploads):
+   - Release Balance Computed grand total ≈ 2387.061 MT over 240 (project,structure) keys,
+     summed over 10,045 "Not Started + Initial" rows (raw Col Q ≈ 2,459,405.877 kg).
+   - Type counts: Job Card WIP ≈ 28,477; Job Card Not Started ≈ 26,131 (Initial ≈ 10,045,
+     Authorized ≈ 16,086); FG Pending For Dispatch ≈ 5,167.
+   - Of Authorized-not-started: ≈ 11,518 have a contractor; ≈ 4,568 are blank (Assignment
+     Balance). These are informational — the metric itself is Initial-only.
+
+=====================================================================
+NEW "Release Balance" TAB (Data page)
+=====================================================================
+Add a new tab/section on the Data page titled "Release Balance". It shows BOTH numbers
+side by side, joined on (project, structure):
+
+   Columns: Project | Structure | Release Balance (Order Review, MT) | Release Balance
+            Computed (WIP, MT)
+
+   - "Release Balance (Order Review)" = existing Order Review Col S value (MT), READ from
+     the already-parsed order_review_rows. Do not recompute; just read it.
+   - "Release Balance Computed (WIP)" = the new WIP metric above (MT).
+   - JOIN on normalized project + structure (structure = Order Review Col C == WIP Alias).
+   - Show a row if EITHER side has a value. Where one side is absent, show blank/– (not a
+     fabricated 0). (Verified: all 240 WIP-computed keys match an Order Review structure;
+     ~1497 Order-Review structures have no WIP-computed value — that's expected, show them
+     with the computed column blank.)
+   - GROUP by project (rollup + expandable to structures), with per-project subtotals for
+     both columns and a GRAND TOTAL row for both columns.
+   - MT to 3 dp throughout.
+
+This tab is READ/DISPLAY ONLY. It introduces no new writes beyond the WIP-derived
+aggregate; it must not modify either source value.
+
+=====================================================================
+ENDPOINT
+=====================================================================
+   GET /release-balance   getReleaseBalance   (public)
+     → returns joined rows {project, structure, releaseBalanceOrderReviewMt,
+       releaseBalanceComputedWipMt} plus per-project subtotals + grand totals, from the
+       latest WIP import and latest Order Review import. Add to openapi.yaml; regenerate.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT touch the existing Release Balance (Order Review Col S) anywhere — not its value,
+  name, or computation.
+- Do NOT change WIP parsing/hash/dedup/ageing/Activity/qty.
+- Do NOT introduce a second normalizer.
+- Do NOT convert or store Col Q anywhere else; the /1000 MT conversion is for THIS metric
+  and tab only. Do not change how Col Q is used by any existing feature.
+- Do NOT invent 0s to fill an absent side of the join.
+
+=====================================================================
+ACCEPTANCE CHECK (report actual numbers)
+=====================================================================
+- Release Balance Computed (WIP) grand total ≈ 2387.061 MT on current data; 240
+  (project,structure) keys; source rows = Not Started + Initial only.
+- Order Review Release Balance grand total on the tab matches the existing app's Order
+  Review Release Balance (≈ 5551.005 MT for the loaded file) — same number, not changed.
+- Spot check: a "Not Started + Initial" row has blank contractor; a "Job Card WIP" row
+  never has Activity = C.
+- The join shows all 240 WIP keys matched; ~1497 Order-Review-only structures render with
+  the Computed column blank (not 0).
+- Confirm NO existing Release Balance figure anywhere else in the app changed.
+- Report: RBC grand total, OR Release Balance grand total, and joined/blank counts.

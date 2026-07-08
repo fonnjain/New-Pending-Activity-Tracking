@@ -1523,6 +1523,30 @@ export const GetContractorMovementResponse = zod.object({
 
 
 /**
+ * Returns the Release Balance Computed (MT) — the sum of Balance Wt. (Col Q) ÷ 1000 for rows where Type (Col A) = "Job Card Not Started" AND Job Card Status (Col G) = "Initial" — grouped by (project, structure) from the most recently committed WIP file, joined to the Order Review file's own stated Release Balance (fileBalReleaseMt) for cross-checking. Purely additive — never changes parsing, activity values, dedup, ageing, warning, milestone, or dispatch state.
+
+ * @summary Get per-structure Release Balance Computed from the latest WIP file
+ */
+export const GetReleaseBalanceResponse = zod.object({
+  "available": zod.boolean().describe('False when no WIP file with Not Started + Initial rows has been uploaded.'),
+  "orderReviewAsOnDate": zod.string().nullable().describe('\"As on\" date of the latest Order Review import; null if none.'),
+  "rows": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string(),
+  "releaseBalanceComputedMt": zod.number().describe('Sum of Balance Wt. (Col Q) ÷ 1000 MT for Not Started + Initial rows in the latest WIP file.'),
+  "releaseBalanceOrderReviewMt": zod.number().nullable().describe('File-stated Release Balance (MT) from the latest Order Review (fileBalReleaseMt); null when Order Review unavailable for this row.'),
+  "diffMt": zod.number().nullable().describe('releaseBalanceComputedMt minus releaseBalanceOrderReviewMt; null when Order Review MT is unavailable.')
+}).describe('Per-(project, structure) Release Balance figures from the latest WIP file and Order Review.')),
+  "totals": zod.object({
+  "releaseBalanceComputedMt": zod.number(),
+  "releaseBalanceOrderReviewMt": zod.number(),
+  "diffMt": zod.number(),
+  "rowCount": zod.number()
+}).describe('Grand totals across all Release Balance rows.')
+}).describe('Release Balance Computed from the latest WIP file, joined to Order Review.')
+
+
+/**
  * Re-runs, on demand, every deterministic recompute and backfill pass the app otherwise runs automatically (best-effort after upload/delete/ settings changes, or once at boot): classification backfill, hole- operation backfill, milestones, accumulated WIP, contractor movement, and dispatch. Every pass is a pure re-derivation from permanent append-only history or raw stored columns — nothing here is authoritative or destructive, so running it repeatedly is always safe and idempotent. Exists purely as a manual fallback (e.g. a prior automatic pass failed silently, or the server restarted mid-backfill); normal operation never requires it. Requires auth.
 
  * @summary Manually trigger every deterministic recompute/backfill pass

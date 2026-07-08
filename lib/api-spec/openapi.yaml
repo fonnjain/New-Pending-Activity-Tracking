@@ -875,6 +875,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ContractorMovementResponse"
+  /release-balance:
+    get:
+      operationId: getReleaseBalance
+      tags: [imports]
+      summary: Get per-structure Release Balance Computed from the latest WIP file
+      description: >
+        Returns the Release Balance Computed (MT) — the sum of Balance Wt.
+        (Col Q) ÷ 1000 for rows where Type (Col A) = "Job Card Not Started"
+        AND Job Card Status (Col G) = "Initial" — grouped by (project,
+        structure) from the most recently committed WIP file, joined to the
+        Order Review file's own stated Release Balance (fileBalReleaseMt) for
+        cross-checking. Purely additive — never changes parsing, activity
+        values, dedup, ageing, warning, milestone, or dispatch state.
+      responses:
+        "200":
+          description: Release Balance Computed rows and totals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseBalanceResponse"
   /admin/recompute:
     post:
       operationId: adminRecompute
@@ -3717,6 +3737,67 @@ components:
         - throughput
         - dataQuality
         - assumptions
+    ReleaseBalanceRow:
+      type: object
+      description: Per-(project, structure) Release Balance figures from the latest WIP file and Order Review.
+      properties:
+        project:
+          type: string
+        structure:
+          type: string
+        releaseBalanceComputedMt:
+          type: number
+          description: Sum of Balance Wt. (Col Q) ÷ 1000 MT for Not Started + Initial rows in the latest WIP file.
+        releaseBalanceOrderReviewMt:
+          type: ["number", "null"]
+          description: File-stated Release Balance (MT) from the latest Order Review (fileBalReleaseMt); null when Order Review unavailable for this row.
+        diffMt:
+          type: ["number", "null"]
+          description: releaseBalanceComputedMt minus releaseBalanceOrderReviewMt; null when Order Review MT is unavailable.
+      required:
+        - project
+        - structure
+        - releaseBalanceComputedMt
+        - releaseBalanceOrderReviewMt
+        - diffMt
+    ReleaseBalanceTotals:
+      type: object
+      description: Grand totals across all Release Balance rows.
+      properties:
+        releaseBalanceComputedMt:
+          type: number
+        releaseBalanceOrderReviewMt:
+          type: number
+        diffMt:
+          type: number
+        rowCount:
+          type: integer
+      required:
+        - releaseBalanceComputedMt
+        - releaseBalanceOrderReviewMt
+        - diffMt
+        - rowCount
+    ReleaseBalanceResponse:
+      type: object
+      description: Release Balance Computed from the latest WIP file, joined to Order Review.
+      properties:
+        available:
+          type: boolean
+          description: False when no WIP file with Not Started + Initial rows has been uploaded.
+        orderReviewAsOnDate:
+          type: ["string", "null"]
+          description: '"As on" date of the latest Order Review import; null if none.'
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseBalanceRow"
+        totals:
+          $ref: "#/components/schemas/ReleaseBalanceTotals"
+      required:
+        - available
+        - orderReviewAsOnDate
+        - rows
+        - totals
     ReportResult:
       type: object
       properties:

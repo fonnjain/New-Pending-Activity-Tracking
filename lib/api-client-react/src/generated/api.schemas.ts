@@ -1839,6 +1839,51 @@ export interface ReportDetailed {
   assumptions: string[];
 }
 
+/**
+ * Per-(project, structure) Release Balance figures from the latest WIP file and Order Review.
+ */
+export interface ReleaseBalanceRow {
+  project: string;
+  structure: string;
+  /** Sum of Balance Wt. (Col Q) ÷ 1000 MT for Not Started + Initial rows in the latest WIP file. */
+  releaseBalanceComputedMt: number;
+  /**
+     * File-stated Release Balance (MT) from the latest Order Review (fileBalReleaseMt); null when Order Review unavailable for this row.
+     * @nullable
+     */
+  releaseBalanceOrderReviewMt: number | null;
+  /**
+     * releaseBalanceComputedMt minus releaseBalanceOrderReviewMt; null when Order Review MT is unavailable.
+     * @nullable
+     */
+  diffMt: number | null;
+}
+
+/**
+ * Grand totals across all Release Balance rows.
+ */
+export interface ReleaseBalanceTotals {
+  releaseBalanceComputedMt: number;
+  releaseBalanceOrderReviewMt: number;
+  diffMt: number;
+  rowCount: number;
+}
+
+/**
+ * Release Balance Computed from the latest WIP file, joined to Order Review.
+ */
+export interface ReleaseBalanceResponse {
+  /** False when no WIP file with Not Started + Initial rows has been uploaded. */
+  available: boolean;
+  /**
+     * "As on" date of the latest Order Review import; null if none.
+     * @nullable
+     */
+  orderReviewAsOnDate: string | null;
+  rows: ReleaseBalanceRow[];
+  totals: ReleaseBalanceTotals;
+}
+
 export interface ReportResult {
   /** False when ANTHROPIC_API_KEY is unset. */
   available: boolean;

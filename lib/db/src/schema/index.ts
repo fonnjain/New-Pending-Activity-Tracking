@@ -11,6 +11,7 @@ export * from "./manualThickness";
 export * from "./contractorCategories";
 export * from "./fabricationPriorities";
 export * from "./orderReview";
+export * from "./releaseBalanceWip";
 export * from "./accumulatedWip";
 export * from "./contractorMovement";
 export * from "./inventoryManual";
