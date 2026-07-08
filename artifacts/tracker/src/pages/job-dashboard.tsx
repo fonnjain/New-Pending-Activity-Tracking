@@ -456,32 +456,21 @@ function JobDashboardContent() {
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
-            {isAll ? "Group Filters" : isNtlt ? "Section Filters" : "Project Filters"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {/* Row 1: Order Type / Project / MFC */}
-          <div className={`grid grid-cols-1 sm:grid-cols-2 ${isNtlt ? "lg:grid-cols-2" : "lg:grid-cols-3"} gap-3`}>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">
-                Order Type
-              </label>
-              <Segmented
-                value={filters.category}
-                onChange={switchMode}
-                options={[
-                  { value: "ALL", label: "All" },
-                  { value: "TLT", label: "TLT" },
-                  { value: "NTLT", label: "NTLT" },
-                ]}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">
-                {primaryLabel}
-              </label>
+        <CardContent className="p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">
+              Order Type
+            </span>
+            <Segmented
+              value={filters.category}
+              onChange={switchMode}
+              options={[
+                { value: "ALL", label: "All" },
+                { value: "TLT", label: "TLT" },
+                { value: "NTLT", label: "NTLT" },
+              ]}
+            />
+            <div className="w-[200px]">
               <SearchableSelect
                 value={project}
                 onChange={setProjectCascade}
@@ -491,10 +480,7 @@ function JobDashboardContent() {
               />
             </div>
             {!isNtlt && (
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-muted-foreground uppercase">
-                  MFC
-                </label>
+              <div className="w-[140px]">
                 <SearchableSelect
                   value={mfcBatch}
                   onChange={setMfcCascade}
@@ -505,13 +491,7 @@ function JobDashboardContent() {
                 />
               </div>
             )}
-          </div>
-          {/* Row 2: Activity / Contractor / Date range */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">
-                Activity
-              </label>
+            <div className="w-[160px]">
               <SearchableSelect
                 value={activityFilter}
                 onChange={setActivityFilter}
@@ -521,10 +501,7 @@ function JobDashboardContent() {
                 disabled={activityOptions.length === 0}
               />
             </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">
-                Contractor
-              </label>
+            <div className="w-[180px]">
               <SearchableSelect
                 value={contractorFilter}
                 onChange={setContractorFilter}
@@ -533,26 +510,19 @@ function JobDashboardContent() {
                 searchPlaceholder="Search contractors..."
               />
             </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">
-                Date From
-              </label>
+            <div className="flex items-center gap-1 shrink-0">
               <Input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="h-9"
+                className="h-9 w-[132px]"
               />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase">
-                Date To
-              </label>
+              <span className="text-muted-foreground text-xs select-none">–</span>
               <Input
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="h-9"
+                className="h-9 w-[132px]"
               />
             </div>
           </div>
