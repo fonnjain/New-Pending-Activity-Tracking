@@ -837,7 +837,7 @@ function JobDetail({
   onBack: () => void;
   headerPhases?: typeof PROCESS_PHASES;
   orderEntry?: { wo: number; rel: number; disp: number };
-  orderRows?: Array<{ structure: string; woOrderQtyMt: number | null; releaseMt: number | null; fileDespatchMt: number | null }>;
+  orderRows?: Array<{ structure: string; weightMt: number | null; woOrderQtyMt: number | null; releaseMt: number | null; fileDespatchMt: number | null }>;
 }) {
   const jobIsNtlt = records.some((r) => (r.category || "TLT") === "NTLT");
   const isNtlt = jobIsNtlt;
@@ -857,7 +857,7 @@ function JobDetail({
     for (const r of orderRows) {
       const mfc = structToMfc.get(r.structure) ?? "Z";
       const agg = m.get(mfc) ?? { wo: 0, rel: 0, disp: 0 };
-      agg.wo += r.woOrderQtyMt ?? 0;
+      agg.wo += r.weightMt ?? 0;
       agg.rel += r.releaseMt ?? 0;
       agg.disp += r.fileDespatchMt ?? 0;
       m.set(mfc, agg);
@@ -988,7 +988,9 @@ function JobDetail({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {byMfc.map((m) => (
+                  {byMfc.map((m) => {
+                    const moe = orderByMfc.get(m.batch);
+                    return (
                     <TableRow
                       key={m.batch}
                       className="cursor-pointer hover:bg-muted/40"
@@ -996,17 +998,14 @@ function JobDetail({
                     >
                       <TableCell className="font-mono font-medium">{m.batch}</TableCell>
                       <TableCell className="text-right">{m.structures}</TableCell>
-                      {orderEntry && (() => {
-                        const moe = orderByMfc.get(m.batch);
-                        return (
-                          <>
-                            <TableCell className="text-right tabular-nums">{formatWeight((moe?.wo ?? 0) * 1000)}</TableCell>
-                            <TableCell className="text-right tabular-nums">{formatWeight((moe?.disp ?? 0) * 1000)}</TableCell>
-                            <TableCell className="text-right tabular-nums">{formatWeight(((moe?.wo ?? 0) - (moe?.disp ?? 0)) * 1000)}</TableCell>
-                            <TableCell className="text-right tabular-nums">{formatWeight(((moe?.wo ?? 0) - (moe?.rel ?? 0)) * 1000)}</TableCell>
-                          </>
-                        );
-                      })()}
+                      {orderEntry && (
+                        <>
+                          <TableCell className="text-right tabular-nums">{formatWeight((moe?.wo ?? 0) * 1000)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatWeight((moe?.disp ?? 0) * 1000)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatWeight(((moe?.wo ?? 0) - (moe?.disp ?? 0)) * 1000)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatWeight(((moe?.wo ?? 0) - (moe?.rel ?? 0)) * 1000)}</TableCell>
+                        </>
+                      )}
                       {PROCESS_PHASES.map((ph) => {
                         if (ph.key === "dispatch") {
                           return (
@@ -1044,7 +1043,7 @@ function JobDetail({
                         <ChevronRight className="w-4 h-4" />
                       </TableCell>
                     </TableRow>
-                  ))}
+                  ); })}
                   {byMfc.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={totalCols} className="text-center py-4 text-muted-foreground">
