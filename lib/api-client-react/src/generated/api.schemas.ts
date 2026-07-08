@@ -1845,15 +1845,18 @@ export interface ReportDetailed {
 export interface ReleaseBalanceRow {
   project: string;
   structure: string;
-  /** Sum of Balance Wt. (Col Q) ÷ 1000 MT for Not Started + Initial rows in the latest WIP file. */
-  releaseBalanceComputedMt: number;
+  /**
+     * Sum of Balance Wt. (Col Q) ÷ 1000 MT for Not Started + Initial rows in the latest WIP file; null for OR-only structures absent from WIP.
+     * @nullable
+     */
+  releaseBalanceComputedMt: number | null;
   /**
      * File-stated Release Balance (MT) from the latest Order Review (fileBalReleaseMt); null when Order Review unavailable for this row.
      * @nullable
      */
   releaseBalanceOrderReviewMt: number | null;
   /**
-     * releaseBalanceComputedMt minus releaseBalanceOrderReviewMt; null when Order Review MT is unavailable.
+     * releaseBalanceComputedMt minus releaseBalanceOrderReviewMt; null when either side is unavailable.
      * @nullable
      */
   diffMt: number | null;

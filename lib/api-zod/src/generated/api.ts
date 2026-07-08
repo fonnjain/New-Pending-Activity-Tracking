@@ -1533,9 +1533,9 @@ export const GetReleaseBalanceResponse = zod.object({
   "rows": zod.array(zod.object({
   "project": zod.string(),
   "structure": zod.string(),
-  "releaseBalanceComputedMt": zod.number().describe('Sum of Balance Wt. (Col Q) ÷ 1000 MT for Not Started + Initial rows in the latest WIP file.'),
+  "releaseBalanceComputedMt": zod.number().nullable().describe('Sum of Balance Wt. (Col Q) ÷ 1000 MT for Not Started + Initial rows in the latest WIP file; null for OR-only structures absent from WIP.'),
   "releaseBalanceOrderReviewMt": zod.number().nullable().describe('File-stated Release Balance (MT) from the latest Order Review (fileBalReleaseMt); null when Order Review unavailable for this row.'),
-  "diffMt": zod.number().nullable().describe('releaseBalanceComputedMt minus releaseBalanceOrderReviewMt; null when Order Review MT is unavailable.')
+  "diffMt": zod.number().nullable().describe('releaseBalanceComputedMt minus releaseBalanceOrderReviewMt; null when either side is unavailable.')
 }).describe('Per-(project, structure) Release Balance figures from the latest WIP file and Order Review.')),
   "totals": zod.object({
   "releaseBalanceComputedMt": zod.number(),

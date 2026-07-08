@@ -1,0 +1,148 @@
+TASK: Build the auto-computed Inventory buckets B, C, D (the data-driven part of the
+Inventory page), reading from the latest Order Review + WIP imports. Buckets A and E
+(manual) are covered by a separate spec; this prompt is B/C/D only.
+
+=====================================================================
+CONTEXT
+=====================================================================
+VTPL Balance & Activity Tracker. STRICTLY ADDITIVE, READ-ONLY over existing data (reads
+order_review_rows + record_pool + contractor_categories). Must NOT change parsing identity,
+hashing/dedup, ageing, Activity, or qty. The deterministic engine stays authoritative.
+
+The Inventory page shows 5 buckets (A–E), each split IN-HOUSE vs OUT-VENDOR. This prompt
+builds the three AUTO buckets:
+  B — "Raw Material Incomplete"                         Release Balance (Col S) > 0
+  C — "RM Complete, Material Under Production"           Release Balance (Col S) <= 0
+  D — "Dispatch Clearance Recd, Production Not Complete" Inspection Progress (Col O) > 0
+Overlap is ALLOWED — a structure may appear in B, C, and D simultaneously. No precedence.
+
+=====================================================================
+*** CRITICAL ORDER-REVIEW PARSING RULE (Proto / Mass / Pre BOM rows) ***
+=====================================================================
+In the Order Review file a single structure spans MULTIPLE ROWS — one per BOM Label
+(Col K): "Proto", "Mass", and/or "Pre". The STRUCTURE CODE (Col C = Tower Type) appears
+only on the FIRST row; continuation rows (Mass/Pre) have Col C BLANK and belong to the
+structure above. The values (Release S, Fabrication T, Galvanising U, Progress-Galv N,
+Inspection O) are spread ACROSS these rows and the Mass row often holds most of the weight.
+
+You MUST aggregate each structure by SUMMING every column across ALL its BOM rows (first
+row + following blank-Col-C continuation rows). A parser that keeps only the first/Proto
+row DROPS the Mass/Pre weight and (a) under-counts totals and (b) puts structures in the
+WRONG bucket (a structure with 0 on its Proto row but positive on its Mass row would be
+mis-filed in C instead of B).
+
+VERIFIED BUG: first-row-only gives project 920 Release Balance = 0.267 MT; correct
+BOM-summed = 76.511 MT (the file's own 920 Col S subtotal = 76.509 MT).
+
+VERIFY the app's existing Order Review parser: if order_review_rows already stores one
+BOM-summed value per structure, use it as-is. If it stores per-BOM-row or first-row-only,
+FIX the aggregation (additively) so each (project, structure) has summed S/T/U/N/O. Confirm
+920 reads ~76.5 MT before trusting any bucket number.
+
+Column reference (Order Review): C=structure(TowerType=WIP Alias), K=BOM Label,
+N=Progress Galvanising (="Yard"), O=Progress Inspection, S=Balance Release,
+T=Balance Fabrication, U=Balance Galvanising. (Col O and N are PROGRESS block; S/T/U are
+BALANCE block — do not confuse Progress-Galv N with Balance-Galv U.)
+
+=====================================================================
+MEMBERSHIP (per BOM-summed structure)
+=====================================================================
+  B: S > 0
+  C: S <= 0
+  D: O > 0
+Null/blank driving column → excluded from that bucket and counted in a per-bucket
+"excluded (no data)" footer (never silently dropped). Normalize project codes with the
+EXISTING normalizer (strip trailing "."/".0"). Overlap across B/C/D is intended.
+
+=====================================================================
+IN-HOUSE vs OUT-VENDOR (each bucket has both sides)
+=====================================================================
+Order Review has no contractor. Classify each (project, structure) by joining to its WIP
+marks (record_pool, latest import; normalized project + structure==Alias) and mapping each
+mark's contractor to a side via contractor_categories PLUS these explicit overrides:
+  IN-HOUSE  = CNC, Sub-contractor, and unclassified UNIT-I, UNIT-II, DUMMY CONTRACTOR,
+              NO CONTRACTOR.
+  OUT-VENDOR = Out-vendor (FAB/GALVA), and unclassified DASHMESH ENTERPRISES GP-2, OUT FAB,
+              S .R . BROTHERS & CO.
+  Unknown/new contractor → default IN-HOUSE (flag for later classification).
+Match contractor names EXACTLY (trimmed); never fuzzy-merge suffixes ((JW)/GP-2/UNIT-II).
+
+Placement:
+  - No WIP marks              → IN-HOUSE (default).
+  - All marks in-house        → IN-HOUSE.
+  - All marks out-vendor      → OUT-VENDOR.
+  - MIXED marks               → SHOW IN BOTH SIDES (badge "(mixed)"); per-side subtotals
+                                may exceed a naive combined total — keep them per-side and
+                                labelled. Do NOT split the weight; show full structure
+                                weight on each side it appears.
+Isolate this in ONE helper classifyStructureSides(structureMarks) → set {in?, out?}.
+
+=====================================================================
+DISPLAY COLUMNS (per structure; rollup = sum over project)
+=====================================================================
+Group by PROJECT, ROLLUP + EXPANDABLE, within each side. All weights MT, 3 dp.
+  Bucket B:  Release Balance (Col S, raw, >0) | Fab+Galva (T+U) | Yard (N)
+  Bucket C:  Release Balance (Col S, CLAMPED to 0) | Fab (T) | Galva (U) | Yard (N)
+  Bucket D:  Release Balance (Col S, CLAMPED to 0) | Fab (T) | Galva (U) | Yard (N)
+CLAMP = max(0, S): show 0 whenever S<=0; B shows raw S. Clamp is DISPLAY-ONLY — membership
+still uses the true numeric S. Null cell → "-" at structure level, contributes 0 to sums.
+
+=====================================================================
+PER-BUCKET SUMMARY (footer; sum across all projects, both sides)
+=====================================================================
+  Total Release Balance = Σ displayed Release Balance (raw in B; clamped→0 in C/D).
+  Under Production       = Σ (Fab + Galva) = Σ(T + U).
+  Total Yard            = Σ Yard (N).
+  Operation Weight      = Under Production + Total Yard.
+  Grand Total Weight    = Total Release Balance + Operation Weight.
+(For C/D, Total Release Balance = 0 by clamp, so their Grand Total = Operation Weight — this
+is expected, not a bug.) Also show per-side (In-house / Out-vendor) subtotals.
+
+=====================================================================
+ENDPOINT
+=====================================================================
+  GET /inventory/buckets   getInventoryBuckets   (public)
+    → B/C/D, both sides, project rollups + structures, display columns, per-bucket
+      summaries, and excluded (no-data) counts. Add to openapi.yaml; regenerate hooks.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change parse identity, hashing, dedup, ageing, Activity, qty, or sequence logic.
+- The ONLY allowed Order Review change is the BOM-summing correctness fix above.
+- Do NOT apply precedence across B/C/D (overlap intended).
+- Do NOT alter contractor_categories semantics; only READ it.
+- Do NOT invent a second normalizer or second weight field; reuse the Order Status weight.
+- Do NOT let the display CLAMP affect membership.
+
+=====================================================================
+ACCEPTANCE CHECK (report actual numbers; BOM-summed Order Review)
+=====================================================================
+FIRST verify BOM fix: project 920 Release Balance ≈ 76.5 MT (not 0.267). Order Review
+Release-Balance grand total ≈ 5625.353 MT (the OLD first-row-only method gave ≈ 5551 — if
+you see 5551, the fix is not applied).
+
+On the current loaded files, bucket membership (UNIQUE project+structure, before the
+In-house/Out-vendor split that duplicates mixed structures):
+  B (S>0):   ~277 structures
+  C (S<=0):  ~1462 structures
+  D (O>0):   ~1182 structures
+  Excluded from B/C for null Release (Col S): ~449 structures (flagged, not dropped).
+
+After the side-split (mixed structures counted on both sides), row counts ≈ B 415 / C 1698
+/ D 1321.
+
+Per-bucket summaries should be approximately:
+  B:  Release 7376.877 | UnderProd 14654.222 | Yard 37738.696 | Op 52392.918 | Grand 59769.795
+  C:  Release 0.000    | UnderProd 3735.658  | Yard 32789.403 | Op 36525.061 | Grand 36525.061
+  D:  Release 3577.426 | UnderProd 10266.959 | Yard 62876.815 | Op 73143.774 | Grand 76721.200
+
+Also verify:
+  - A structure with S<=0 AND O>0 appears in BOTH C and D (overlap works).
+  - No-WIP-mark structures land In-house; mixed structures appear on both sides badged
+    "(mixed)".
+  - Trailing-dot projects (824., 898., 906.) normalized, not duplicated.
+  - Operation == UnderProd + Yard and Grand == Release + Operation reconcile exactly per
+    bucket; C's Release == 0.
+Report: 920 release value, OR grand total (~5625 not ~5551), the three bucket unique
+counts, and the three summary blocks.

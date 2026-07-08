@@ -1,0 +1,159 @@
+TASK: Add a WIP-derived "Release Balance Computed" metric and a new "Release Balance" tab
+on the Data page that shows it alongside the existing Order-Review Release Balance.
+
+=====================================================================
+CONTEXT / ERP SEMANTICS (verified against the WIP file)
+=====================================================================
+The WIP export's Column A ("Type") has exactly three values:
+   1. "Job Card Not Started"
+   2. "Job Card WIP"
+   3. "FG Pending For Dispatch"
+
+Within "Job Card Not Started", Column G ("Job Card Status") is either "Initial" or
+"Authorized", giving three real-world states:
+   - Not Started + Initial              → factory has NO steel; steel release is PENDING.
+                                          Contractor (Col D) is ALWAYS BLANK here.
+                                          (Verified: 0 of these rows have a contractor.)
+   - Not Started + Authorized + Col D has a contractor name
+                                          → job card assigned to a contractor, but
+                                            Cutting (C) not yet started.
+   - Not Started + Authorized + Col D BLANK
+                                          → job card not assigned to anyone = "Assignment
+                                            Balance".
+"Job Card WIP" rows carry operations/activities from RFI..Y (varies per card) and NEVER
+include Cutting (C). (Verified: 0 WIP rows have Activity = C.)
+
+WIP column map (header on row 4; 24 columns). Relevant columns:
+   A=Type, B=Project Code, C=Order Nature, D=Contractor, G=Job Card Status,
+   J=Alias(=structure), Q=Balance Wt., S=Activity.
+Project Code is forward-filled: it appears on "Structure" rows (Col C = "Structure").
+
+IMPORTANT UNIT FACT: WIP Col Q "Balance Wt." is in KILOGRAMS. The existing Order Review
+Release Balance (Col S of Order Review) is in TONNES (MT). All comparisons below convert
+the WIP value to MT by dividing by 1000.
+
+=====================================================================
+CRITICAL ORDER-REVIEW PARSING RULE (Proto / Mass / Pre BOM rows)
+=====================================================================
+In the Order Review file, a single structure spans MULTIPLE ROWS — one per BOM Label
+(Col K): "Proto", "Mass", and/or "Pre". The STRUCTURE CODE (Col C = Tower Type) appears
+only on the FIRST row of the structure; the continuation rows (Mass / Pre) have Col C
+BLANK and belong to the structure above them. The balance/progress values (Release Col S,
+Fabrication Col T, Galvanising Col U, Progress-Galv Col N, Inspection Col O, etc.) are
+distributed ACROSS these rows — often the Mass row carries the bulk of the weight.
+
+Therefore, to get a structure's Release Balance (or any S/T/U/N/O value) you MUST SUM the
+column across ALL of that structure's BOM rows (the Proto/first row PLUS the following
+Mass/Pre continuation rows with blank Col C), grouped under the structure code that carries
+down from the first row.
+
+DO NOT take only the first row per structure. A parser that keys on "Col C non-blank" and
+ignores continuation rows will DROP the Mass/Pre values and massively under-count. This is
+a real, verified bug: for project 920 it produced 0.267 MT instead of the correct
+76.511 MT (the file's own Col S subtotal for 920 is 76.509 MT). The error is wildly uneven
+per project — some projects sit almost entirely on Mass rows.
+
+VERIFY the app's existing Order Review parser against this rule. If order_review_rows is
+already storing one summed value per structure across all BOM rows, good — leave it. If it
+is only capturing the first/Proto row, that is a BUG: fix the Order Review aggregation to
+sum across BOM rows per structure (additively; do not change identity/hash). Confirm by
+checking project 920 reads 76.5 MT, not 0.267 MT.
+
+=====================================================================
+NEW METRIC: "Release Balance Computed"  (WIP-derived; SEPARATE from existing)
+=====================================================================
+Definition:
+   Release Balance Computed (MT) = SUM( WIP Col Q ) / 1000
+   over rows where  Col A == "Job Card Not Started"  AND  Col G == "Initial".
+   Group by (normalized project, structure=Alias).
+
+This is a NEW, independent field. It is NOT the existing Release Balance. The existing
+Release Balance (from the Order Review file, Col S) keeps its DEFINITION and units — do
+not repurpose or rename it. The only allowed change to it is the BOM-summing CORRECTNESS
+fix described in the CRITICAL PARSING RULE above (sum across Proto/Mass/Pre rows if the
+current parser wrongly uses only the first row). These remain TWO different numbers, both
+retained: Order Review Release Balance (Col S) vs WIP Release Balance Computed.
+
+Add it additively to the WIP-derived data (e.g. a computed column/aggregate keyed by
+project+structure). Do NOT alter parsing, hashing, dedup, ageing, Activity, or qty. Use the
+EXISTING project-code normalizer (strip trailing "."/".0"); do not add a new one.
+
+Verified magnitudes on the current files (for the ACCEPTANCE CHECK — will move with new
+uploads):
+   - Release Balance Computed grand total ≈ 2387.061 MT over 240 (project,structure) keys,
+     summed over 10,045 "Not Started + Initial" rows (raw Col Q ≈ 2,459,405.877 kg).
+   - Type counts: Job Card WIP ≈ 28,477; Job Card Not Started ≈ 26,131 (Initial ≈ 10,045,
+     Authorized ≈ 16,086); FG Pending For Dispatch ≈ 5,167.
+   - Of Authorized-not-started: ≈ 11,518 have a contractor; ≈ 4,568 are blank (Assignment
+     Balance). These are informational — the metric itself is Initial-only.
+
+=====================================================================
+NEW "Release Balance" TAB (Data page)
+=====================================================================
+Add a new tab/section on the Data page titled "Release Balance". It shows BOTH numbers
+side by side, joined on (project, structure):
+
+   Columns: Project | Structure | Release Balance (Order Review, MT) | Release Balance
+            Computed (WIP, MT)
+
+   - "Release Balance (Order Review)" = Order Review Col S value (MT) per structure, SUMMED
+     across all its BOM rows (Proto/Mass/Pre) per the CRITICAL PARSING RULE above. Read from
+     order_review_rows ONLY IF that table already stores the BOM-summed value; otherwise fix
+     the aggregation first. Must reconcile to the file's own per-project Col S subtotals
+     (e.g. 920 = 76.5 MT).
+   - "Release Balance Computed (WIP)" = the new WIP metric above (MT).
+   - JOIN on normalized project + structure (structure = Order Review Col C == WIP Alias).
+   - Show a row if EITHER side has a value. Where one side is absent, show blank/– (not a
+     fabricated 0). (Verified: all 240 WIP-computed keys match an Order Review structure;
+     the remaining Order-Review structures have no WIP-computed value — that's expected,
+     show them with the computed column blank.)
+   - GROUP by project (rollup + expandable to structures), with per-project subtotals for
+     both columns and a GRAND TOTAL row for both columns.
+   - MT to 3 dp throughout.
+
+This tab is READ/DISPLAY ONLY. It introduces no new writes beyond the WIP-derived
+aggregate; it must not modify either source value.
+
+=====================================================================
+ENDPOINT
+=====================================================================
+   GET /release-balance   getReleaseBalance   (public)
+     → returns joined rows {project, structure, releaseBalanceOrderReviewMt,
+       releaseBalanceComputedWipMt} plus per-project subtotals + grand totals, from the
+       latest WIP import and latest Order Review import. Add to openapi.yaml; regenerate.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change the MEANING/definition of the Order Review Release Balance (still Col S,
+  in MT). The ONLY permitted change to it is CORRECTNESS: ensuring it is summed across a
+  structure's BOM rows (Proto/Mass/Pre) if the current parser wrongly uses only the first
+  row. Do not rename it, do not change its units, do not repurpose it. If it is already
+  BOM-summed correctly, leave it entirely alone.
+- Do NOT change WIP parsing/hash/dedup/ageing/Activity/qty.
+- Do NOT introduce a second normalizer.
+- Do NOT convert or store Col Q anywhere else; the /1000 MT conversion is for THIS metric
+  and tab only. Do not change how Col Q is used by any existing feature.
+- Do NOT invent 0s to fill an absent side of the join.
+
+=====================================================================
+ACCEPTANCE CHECK (report actual numbers)
+=====================================================================
+- BOM-ROW CHECK (do this FIRST): Order Review Release Balance for project 920 must read
+  ≈ 76.5 MT (76.511 summed), NOT 0.267 MT. If it reads ~0.267, the parser is dropping
+  Mass/Pre rows — fix per the CRITICAL PARSING RULE before proceeding.
+- Order Review Release Balance grand total (all projects, BOM-summed) ≈ 5625.353 MT on the
+  loaded file. (Note: the OLD first-row-only method gave ≈ 5551.005 MT — if you still see
+  5551, the fix is not applied.)
+- Release Balance Computed (WIP) grand total ≈ 2387.061 MT on current data; 240
+  (project,structure) keys; source rows = Not Started + Initial only.
+- Project 920 specifically: Order Review ≈ 76.511 MT and WIP Computed ≈ 76.500 MT should
+  now closely reconcile (variance ≈ 0).
+- Spot check: a "Not Started + Initial" row has blank contractor; a "Job Card WIP" row
+  never has Activity = C.
+- The join shows all 240 WIP keys matched; Order-Review-only structures render with the
+  Computed column blank (not 0).
+- Confirm the Order Review Release Balance change (if any) was purely the BOM-summing
+  correctness fix — no other release-balance figure's DEFINITION changed.
+- Report: 920 OR value, OR grand total (confirm ~5625 not ~5551), RBC grand total, and
+  joined/blank counts.

@@ -432,6 +432,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
   const rows: ParsedOrderReviewRow[] = [];
   const projects = new Set<string>();
   let currentProject = "";
+  let currentStructure = ""; // forward-filled across BOM rows (Proto→Mass→Pre)
   let rowsRead = 0;
   let skippedTotals = 0;
   let missingStructure = 0;
@@ -451,6 +452,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
       const m = s.match(PROJECT_BANNER);
       if (m && m[1]) {
         currentProject = normalizeProject(m[1]);
+        currentStructure = ""; // new project resets the BOM carry
         bannerHit = true;
       }
     }
@@ -462,14 +464,21 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     }
     if (bannerHit) continue;
 
-    const structure = normalizeStructure(cellStr(cells[cols.structure] as Cell));
-    if (!structure) {
-      // A row with measures but no structure is a data-quality miss; a fully
-      // blank row is silently skipped.
+    // Forward-fill structure across BOM rows within a project.
+    // The first (Proto) row has the Tower Type Code in Col C; Mass/Pre continuation
+    // rows have blank Col C and belong to the same structure. We carry the last
+    // non-blank structure seen in this project group — exactly like currentProject.
+    const rawStructure = normalizeStructure(cellStr(cells[cols.structure] as Cell));
+    if (rawStructure) {
+      currentStructure = rawStructure;
+    }
+    if (!currentStructure) {
+      // No structure yet in this project group — genuinely orphaned row.
       const anyValue = cells.some((c) => cellStr(c as Cell) !== "");
       if (anyValue) missingStructure++;
       continue;
     }
+    const structure = currentStructure;
 
     rowsRead++;
     const weightMt = toNumber(cells[cols.weightMt] as Cell);

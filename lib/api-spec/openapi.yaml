@@ -3746,14 +3746,14 @@ components:
         structure:
           type: string
         releaseBalanceComputedMt:
-          type: number
-          description: Sum of Balance Wt. (Col Q) ÷ 1000 MT for Not Started + Initial rows in the latest WIP file.
+          type: ["number", "null"]
+          description: Sum of Balance Wt. (Col Q) ÷ 1000 MT for Not Started + Initial rows in the latest WIP file; null for OR-only structures absent from WIP.
         releaseBalanceOrderReviewMt:
           type: ["number", "null"]
           description: File-stated Release Balance (MT) from the latest Order Review (fileBalReleaseMt); null when Order Review unavailable for this row.
         diffMt:
           type: ["number", "null"]
-          description: releaseBalanceComputedMt minus releaseBalanceOrderReviewMt; null when Order Review MT is unavailable.
+          description: releaseBalanceComputedMt minus releaseBalanceOrderReviewMt; null when either side is unavailable.
       required:
         - project
         - structure
