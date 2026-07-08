@@ -1,0 +1,79 @@
+TASK: Extend the existing "Fabrication Report – Project Completion - TLT" to add a
+Tower-Sub-Type bifurcation (STUB / SST / Other) WITHIN each BOM Label grouping.
+
+=====================================================================
+CONTEXT (current report)
+=====================================================================
+The report already exists on the Reports page. It is TLT-only, and groups by BOM Label
+(Proto / Mass / Pre / Unknown) × Project, with four measures per row (all from WIP Col Q,
+kg → MT /1000):
+   - Release Balance Calculated    (Type="Job Card Not Started" AND Status="Initial")
+   - Assignment Balance Calculated (Type="Job Card Not Started" AND Contractor blank)
+   - Cutting Balance (C)            (Activity = "C")
+   - Quality Check Balance          (Activity ∈ {RFI, NH, B, HAB, W, Q, TS})
+BOM Label comes from Order Review (Col K) via join on (normalized project + structure);
+"Unknown" = WIP marks whose structure has no Order Review match (no BOM Label available).
+This change is STRICTLY ADDITIVE — do NOT change the measures, the BOM logic, the TLT
+filter, or anything else. Only add a sub-grouping level.
+
+=====================================================================
+NEW BIFURCATION: Tower Sub Type → STUB / SST / Other
+=====================================================================
+Add a sub-grouping level BELOW BOM Label and ABOVE Project, based on WIP Tower Sub Type
+(WIP Col I). Exactly THREE sub-type groups:
+   - "STUB"  = Tower Sub Type equals STUB (case-insensitive, trimmed).
+   - "SST"   = Tower Sub Type is the S.S.T family. Match by NORMALIZING the sub type
+               (uppercase, remove all dots, spaces, and hyphens) and testing == "SST".
+               This catches "S.S.T", "SST", "S S T", "S.S.T.", etc.
+   - "Other" = every other Tower Sub Type, COMBINED into one group (Normal Tower, Column,
+               Beam, Peak, Mast, Equipment, all extensions, etc.). Do NOT break these out.
+
+Resulting grouping is: BOM Label → {STUB, SST, Other} → Project. So each BOM Label sheet
+shows three sub-sections (STUB, SST, Other), and under each sub-section ALL projects that
+have any weight in that (BOM Label, Sub-Type group), each with the four measures.
+
+The four measures are computed EXACTLY as today, just partitioned by the (BOM Label,
+Sub-Type group, Project) the mark belongs to. A mark's Sub-Type group is decided by its
+own WIP Col I value. Nothing about the measure formulas changes.
+
+=====================================================================
+LAYOUT
+=====================================================================
+- Keep the existing per-BOM-Label structure (Proto / Mass / Pre / Unknown sheets or
+  sections; keep Summary). Within each, render three ordered sub-groups: STUB, SST, Other.
+- Under each sub-group, list all its projects (sorted), each row = the four measures.
+- Add a SUBTOTAL row per sub-group (STUB subtotal, SST subtotal, Other subtotal) and keep
+  the existing per-BOM-Label total (which now equals STUB+SST+Other) and grand total.
+- On the Summary sheet, add the Sub-Type group as a column so a row is
+  (BOM Label, Sub-Type group, Project, 4 measures); keep it sortable/filterable.
+- Weights MT, 3 dp, unchanged.
+
+=====================================================================
+ENDPOINT
+=====================================================================
+Extend getFabricationProjectCompletionTlt to include subType group in each row:
+  row = {bomLabel, subTypeGroup ('STUB'|'SST'|'Other'), project, releaseBalanceCalcMt,
+         assignmentBalanceCalcMt, cuttingBalanceMt, qualityCheckBalanceMt}
+plus sub-group subtotals + BOM-label totals + grand total. Update openapi.yaml; regenerate.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change the four measure definitions, the TLT filter, or the BOM-Label logic.
+- Do NOT break "Other" into individual sub types — it is ONE combined group.
+- Do NOT change WIP/Order Review parsing, hashing/dedup, ageing, Activity, qty.
+- The sum of STUB + SST + Other within a (BOM Label, Project) must equal the current
+  (BOM Label, Project) value — this is a partition, not a filter. Verify no weight is lost.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- Every BOM Label section now has STUB, SST, Other sub-groups; SST matches S.S.T/SST/S S T
+  variants; STUB matches STUB; all else is in Other.
+- For any (BOM Label, Project): STUB + SST + Other equals the pre-change value for each of
+  the four measures (no weight lost or double-counted).
+- Grand totals for all four measures are unchanged from the current report (partition only).
+- In the current WIP, STUB ≈ 152 marks and S.S.T ≈ 140 marks exist, so STUB and SST
+  sub-groups should be non-empty in at least some BOM labels; confirm they appear.
+- Report: the four grand totals (must match current), and a spot check of one project
+  showing STUB + SST + Other = its total for one measure.

@@ -1832,6 +1832,13 @@ function bomLabelIndex(label: string) {
   return i === -1 ? BOM_LABEL_ORDER.length : i;
 }
 
+// Canonical sub-type group order within each BOM label section.
+const SUBTYPE_ORDER = ["STUB", "SST", "Other"];
+function subTypeIndex(g: string) {
+  const i = SUBTYPE_ORDER.indexOf(g);
+  return i === -1 ? SUBTYPE_ORDER.length : i;
+}
+
 type FabSums = {
   releaseBalanceCalcMt: number;
   assignmentBalanceCalcMt: number;
@@ -1851,6 +1858,58 @@ function sumRows(rs: FabricationProjectCompletionRow[]): FabSums {
   };
 }
 
+// Build the 3-level structure: BOM Label → Sub-Type Group → Project rows.
+type SubTypeGroup = {
+  subType: string;
+  rows: FabricationProjectCompletionRow[];
+  subtotal: FabSums;
+};
+type BomGroup = {
+  label: string;
+  subGroups: SubTypeGroup[];
+  subtotal: FabSums;
+};
+
+function buildBomGroups(rows: FabricationProjectCompletionRow[]): BomGroup[] {
+  // Level 1: BOM Label
+  const bomMap = new Map<string, FabricationProjectCompletionRow[]>();
+  for (const row of rows) {
+    const list = bomMap.get(row.bomLabel) ?? [];
+    list.push(row);
+    bomMap.set(row.bomLabel, list);
+  }
+  return [...bomMap.entries()]
+    .sort(([a], [b]) => bomLabelIndex(a) - bomLabelIndex(b))
+    .map(([label, bomRows]) => {
+      // Level 2: Sub-Type Group
+      const stMap = new Map<string, FabricationProjectCompletionRow[]>();
+      for (const row of bomRows) {
+        const list = stMap.get(row.subTypeGroup) ?? [];
+        list.push(row);
+        stMap.set(row.subTypeGroup, list);
+      }
+      const subGroups: SubTypeGroup[] = [...stMap.entries()]
+        .sort(([a], [b]) => subTypeIndex(a) - subTypeIndex(b))
+        .map(([subType, stRows]) => ({
+          subType,
+          rows: [...stRows].sort((a, b) => a.project.localeCompare(b.project)),
+          subtotal: sumRows(stRows),
+        }));
+      return { label, subGroups, subtotal: sumRows(bomRows) };
+    });
+}
+
+// Excel columns include Sub-Type Group between BOM Label and Project.
+const FAB_COMP_COLUMNS: XlsxColumn[] = [
+  { label: "BOM Label", field: "bomLabel" },
+  { label: "Sub-Type Group", field: "subTypeGroup" },
+  { label: "Project", field: "project" },
+  { label: "Release Balance Calc (MT)", field: "releaseBalanceCalcMt", numeric: true, decimals: 3, total: true },
+  { label: "Assignment Balance Calc (MT)", field: "assignmentBalanceCalcMt", numeric: true, decimals: 3, total: true },
+  { label: "Cutting Balance (MT)", field: "cuttingBalanceMt", numeric: true, decimals: 3, total: true },
+  { label: "Quality Check Balance (MT)", field: "qualityCheckBalanceMt", numeric: true, decimals: 3, total: true },
+];
+
 function FabCompletionReport() {
   const { data, isLoading } = useGetFabricationProjectCompletionTlt();
   const { filters } = useTracker();
@@ -1861,58 +1920,61 @@ function FabCompletionReport() {
     return data.rows;
   }, [data, filters.job]);
 
-  // Group by BOM label (outer), then project (inner). Sorted by BOM label
-  // canonical order; projects sorted alphabetically within each group.
-  const bomGroups = useMemo(() => {
-    const map = new Map<string, FabricationProjectCompletionRow[]>();
-    for (const row of rows) {
-      const list = map.get(row.bomLabel) ?? [];
-      list.push(row);
-      map.set(row.bomLabel, list);
-    }
-    return [...map.entries()]
-      .sort(([a], [b]) => bomLabelIndex(a) - bomLabelIndex(b))
-      .map(([label, groupRows]) => ({
-        label,
-        rows: [...groupRows].sort((a, b) =>
-          a.project.localeCompare(b.project),
-        ),
-        subtotal: sumRows(groupRows),
-      }));
-  }, [rows]);
+  // 3-level grouping: BOM Label → Sub-Type Group → Project.
+  const bomGroups = useMemo(() => buildBomGroups(rows), [rows]);
 
   const grandTotal = useMemo(() => sumRows(rows), [rows]);
 
-  const FAB_COMP_COLUMNS: XlsxColumn[] = [
-    { label: "BOM Label", field: "bomLabel" },
-    { label: "Project", field: "project" },
-    { label: "Release Balance Calc (MT)", field: "releaseBalanceCalcMt", numeric: true, decimals: 3, total: true },
-    { label: "Assignment Balance Calc (MT)", field: "assignmentBalanceCalcMt", numeric: true, decimals: 3, total: true },
-    { label: "Cutting Balance (MT)", field: "cuttingBalanceMt", numeric: true, decimals: 3, total: true },
-    { label: "Quality Check Balance (MT)", field: "qualityCheckBalanceMt", numeric: true, decimals: 3, total: true },
-  ];
-
   function handleExportExcel() {
     const date = new Date().toISOString().slice(0, 10);
-    // Summary sheet: flat rows ordered by BOM label then project, with per-BOM subtotals.
-    const summaryRows = bomGroups.flatMap((g) => g.rows);
-    const xlsSummaryRows: XlsxSummaryRow[] = bomGroups.map((g) => ({
-      label: `${g.label} Subtotal`,
-      values: {
-        releaseBalanceCalcMt: g.subtotal.releaseBalanceCalcMt,
-        assignmentBalanceCalcMt: g.subtotal.assignmentBalanceCalcMt,
-        cuttingBalanceMt: g.subtotal.cuttingBalanceMt,
-        qualityCheckBalanceMt: g.subtotal.qualityCheckBalanceMt,
-      },
-    }));
-    // Per-BOM-label sheets.
-    const bomSheets = bomGroups.map((g) => ({
-      name: g.label,
-      columns: FAB_COMP_COLUMNS,
-      rows: g.rows,
-    }));
+    // Summary sheet: flat rows already sorted server-side (BOM→SubType→Project),
+    // with per-sub-type-group subtotal rows inserted after each sub-group, then
+    // per-BOM-label total rows.
+    const summaryXlsRows: FabricationProjectCompletionRow[] = [];
+    const summaryXlsSummaryRows: XlsxSummaryRow[] = [];
+    for (const bom of bomGroups) {
+      for (const sg of bom.subGroups) {
+        summaryXlsRows.push(...sg.rows);
+        summaryXlsSummaryRows.push({
+          label: `${bom.label} / ${sg.subType} Subtotal`,
+          values: {
+            releaseBalanceCalcMt: sg.subtotal.releaseBalanceCalcMt,
+            assignmentBalanceCalcMt: sg.subtotal.assignmentBalanceCalcMt,
+            cuttingBalanceMt: sg.subtotal.cuttingBalanceMt,
+            qualityCheckBalanceMt: sg.subtotal.qualityCheckBalanceMt,
+          },
+        });
+      }
+      summaryXlsSummaryRows.push({
+        label: `${bom.label} Total`,
+        values: {
+          releaseBalanceCalcMt: bom.subtotal.releaseBalanceCalcMt,
+          assignmentBalanceCalcMt: bom.subtotal.assignmentBalanceCalcMt,
+          cuttingBalanceMt: bom.subtotal.cuttingBalanceMt,
+          qualityCheckBalanceMt: bom.subtotal.qualityCheckBalanceMt,
+        },
+      });
+    }
+    // Per-BOM-label sheets (rows for that label, sub-type subtotals).
+    const bomSheets = bomGroups.map((bom) => {
+      const sheetRows: FabricationProjectCompletionRow[] = [];
+      const sheetSummaryRows: XlsxSummaryRow[] = [];
+      for (const sg of bom.subGroups) {
+        sheetRows.push(...sg.rows);
+        sheetSummaryRows.push({
+          label: `${sg.subType} Subtotal`,
+          values: {
+            releaseBalanceCalcMt: sg.subtotal.releaseBalanceCalcMt,
+            assignmentBalanceCalcMt: sg.subtotal.assignmentBalanceCalcMt,
+            cuttingBalanceMt: sg.subtotal.cuttingBalanceMt,
+            qualityCheckBalanceMt: sg.subtotal.qualityCheckBalanceMt,
+          },
+        });
+      }
+      return { name: bom.label, columns: FAB_COMP_COLUMNS, rows: sheetRows, summaryRows: sheetSummaryRows };
+    });
     exportToXlsxSheets(`fab_completion_tlt_${date}.xlsx`, [
-      { name: "Summary", columns: FAB_COMP_COLUMNS, rows: summaryRows, summaryRows: xlsSummaryRows },
+      { name: "Summary", columns: FAB_COMP_COLUMNS, rows: summaryXlsRows, summaryRows: summaryXlsSummaryRows },
       ...bomSheets,
     ]);
   }
@@ -1966,6 +2028,9 @@ function FabCompletionReport() {
                   BOM Label
                 </th>
                 <th className="text-left px-3 py-2 font-semibold whitespace-nowrap">
+                  Sub-Type
+                </th>
+                <th className="text-left px-3 py-2 font-semibold whitespace-nowrap">
                   Project
                 </th>
                 <th className="text-right px-3 py-2 font-semibold whitespace-nowrap">
@@ -1983,50 +2048,84 @@ function FabCompletionReport() {
               </tr>
             </thead>
             <tbody>
-              {bomGroups.map(({ label, rows: groupRows, subtotal }) => (
+              {bomGroups.map((bom, bomIdx) => (
                 <>
-                  {groupRows.map((row, idx) => (
-                    <tr
-                      key={`${row.bomLabel}-${row.project}`}
-                      className="border-b border-border/50 hover:bg-muted/30"
-                    >
-                      <td className="px-3 py-1.5 text-muted-foreground">
-                        {idx === 0 ? row.bomLabel : ""}
-                      </td>
-                      <td className="px-3 py-1.5">{row.project}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">
-                        {fmt(row.releaseBalanceCalcMt)}
-                      </td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">
-                        {fmt(row.assignmentBalanceCalcMt)}
-                      </td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">
-                        {fmt(row.cuttingBalanceMt)}
-                      </td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">
-                        {fmt(row.qualityCheckBalanceMt)}
-                      </td>
-                    </tr>
+                  {bom.subGroups.map((sg, sgIdx) => (
+                    <>
+                      {sg.rows.map((row, rowIdx) => (
+                        <tr
+                          key={`${row.bomLabel}-${row.subTypeGroup}-${row.project}`}
+                          className="border-b border-border/50 hover:bg-muted/30"
+                        >
+                          {/* BOM Label only in first cell of the whole BOM group */}
+                          <td className="px-3 py-1.5 text-muted-foreground">
+                            {sgIdx === 0 && rowIdx === 0 ? row.bomLabel : ""}
+                          </td>
+                          {/* Sub-Type only in first row of each sub-group */}
+                          <td className="px-3 py-1.5 text-muted-foreground">
+                            {rowIdx === 0 ? row.subTypeGroup : ""}
+                          </td>
+                          <td className="px-3 py-1.5">{row.project}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {fmt(row.releaseBalanceCalcMt)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {fmt(row.assignmentBalanceCalcMt)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {fmt(row.cuttingBalanceMt)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {fmt(row.qualityCheckBalanceMt)}
+                          </td>
+                        </tr>
+                      ))}
+                      {/* Sub-type subtotal row */}
+                      <tr
+                        key={`${bom.label}-${sg.subType}-subtotal`}
+                        className="border-b border-border bg-muted/25 font-medium"
+                      >
+                        <td className="px-3 py-1.5" />
+                        <td className="px-3 py-1.5 text-muted-foreground italic">
+                          {sg.subType} Subtotal
+                        </td>
+                        <td className="px-3 py-1.5" />
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {fmt(sg.subtotal.releaseBalanceCalcMt)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {fmt(sg.subtotal.assignmentBalanceCalcMt)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {fmt(sg.subtotal.cuttingBalanceMt)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {fmt(sg.subtotal.qualityCheckBalanceMt)}
+                        </td>
+                      </tr>
+                    </>
                   ))}
+                  {/* BOM label total row */}
                   <tr
-                    key={`${label}-subtotal`}
+                    key={`${bom.label}-total`}
                     className="border-b-2 border-border bg-muted/40 font-semibold"
                   >
-                    <td className="px-3 py-1.5">{label}</td>
+                    <td className="px-3 py-1.5">{bom.label}</td>
                     <td className="px-3 py-1.5 text-muted-foreground">
-                      Subtotal
+                      Total
+                    </td>
+                    <td className="px-3 py-1.5" />
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {fmt(bom.subtotal.releaseBalanceCalcMt)}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">
-                      {fmt(subtotal.releaseBalanceCalcMt)}
+                      {fmt(bom.subtotal.assignmentBalanceCalcMt)}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">
-                      {fmt(subtotal.assignmentBalanceCalcMt)}
+                      {fmt(bom.subtotal.cuttingBalanceMt)}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">
-                      {fmt(subtotal.cuttingBalanceMt)}
-                    </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">
-                      {fmt(subtotal.qualityCheckBalanceMt)}
+                      {fmt(bom.subtotal.qualityCheckBalanceMt)}
                     </td>
                   </tr>
                 </>

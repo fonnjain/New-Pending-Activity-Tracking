@@ -1911,6 +1911,8 @@ export interface FabricationProjectCompletionRow {
   project: string;
   /** BOM Label: Proto | Mass | Pre | Mixed | Unknown. */
   bomLabel: string;
+  /** Tower Sub Type group: STUB | SST | Other. */
+  subTypeGroup: string;
   /** Release Balance Calculated (JCNS + Initial rows), in MT. */
   releaseBalanceCalcMt: number;
   /** Assignment Balance Calculated (JCNS + blank contractor), in MT. */

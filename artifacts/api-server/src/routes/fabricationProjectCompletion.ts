@@ -25,6 +25,24 @@ function bomSortIndex(label: string): number {
   return i === -1 ? BOM_ORDER.length : i;
 }
 
+// Sub-type group order for sorting within a BOM label.
+const SUBTYPE_ORDER = ["STUB", "SST", "Other"];
+
+function subTypeSortIndex(g: string): number {
+  const i = SUBTYPE_ORDER.indexOf(g);
+  return i === -1 ? SUBTYPE_ORDER.length : i;
+}
+
+// Classify a raw WIP Tower Sub Type (Col I) into STUB | SST | Other.
+// Normalise: uppercase, strip dots/spaces/hyphens, then compare.
+function classifySubType(raw: string | null): "STUB" | "SST" | "Other" {
+  if (!raw) return "Other";
+  const norm = raw.trim().toUpperCase().replace(/[.\s-]/g, "");
+  if (norm === "STUB") return "STUB";
+  if (norm === "SST") return "SST";
+  return "Other";
+}
+
 function structureKey(project: string, structure: string): string {
   return `${project}\u0001${structure}`;
 }
@@ -71,11 +89,15 @@ router.get(
       assignmentRows,
       orderReview,
     ] = await Promise.all([
-      // All distinct TLT (project, structure) pairs for the latest import.
+      // TLT (project, structure) pairs + dominant tower sub type for the latest import.
+      // max() picks one value per structure; in practice all marks in a structure share
+      // the same tower sub type so any pick is correct.
       db
-        .selectDistinct({
+        .select({
           project: recordPoolTable.job,
           structure: recordPoolTable.structure,
+          towerSubType:
+            sql<string | null>`max(${recordPoolTable.towerSubType})`,
         })
         .from(importRowsTable)
         .innerJoin(
@@ -87,7 +109,8 @@ router.get(
             eq(importRowsTable.importId, latestImport.id),
             eq(recordPoolTable.category, "TLT"),
           ),
-        ),
+        )
+        .groupBy(recordPoolTable.job, recordPoolTable.structure),
 
       // Cutting balance (activity = C) per (project, structure).
       db
@@ -188,12 +211,13 @@ router.get(
       return "Mixed";
     }
 
-    // 5. Group by (project, bomLabel), summing all 4 measures.
+    // 5. Group by (bomLabel, subTypeGroup, project), summing all 4 measures.
     const grouped = new Map<
       string,
       {
         project: string;
         bomLabel: string;
+        subTypeGroup: string;
         releaseBalanceCalcMt: number;
         assignmentBalanceCalcMt: number;
         cuttingBalanceMt: number;
@@ -201,24 +225,22 @@ router.get(
       }
     >();
 
-    for (const { project, structure } of tltStructures) {
+    for (const { project, structure, towerSubType } of tltStructures) {
       const bomLabel = getBomLabel(project, structure);
-      const gKey = structureKey(project, bomLabel);
+      const subTypeGroup = classifySubType(towerSubType);
+      const gKey = `${project}\u0001${bomLabel}\u0001${subTypeGroup}`;
 
-      const relMt =
-        releaseMap.get(structureKey(project, structure)) ?? 0;
-      const assignMt =
-        assignmentMap.get(structureKey(project, structure)) ?? 0;
-      const cutMt =
-        cuttingMap.get(structureKey(project, structure)) ?? 0;
-      const qcMt =
-        qualityMap.get(structureKey(project, structure)) ?? 0;
+      const relMt = releaseMap.get(structureKey(project, structure)) ?? 0;
+      const assignMt = assignmentMap.get(structureKey(project, structure)) ?? 0;
+      const cutMt = cuttingMap.get(structureKey(project, structure)) ?? 0;
+      const qcMt = qualityMap.get(structureKey(project, structure)) ?? 0;
 
       const existing = grouped.get(gKey);
       if (!existing) {
         grouped.set(gKey, {
           project,
           bomLabel,
+          subTypeGroup,
           releaseBalanceCalcMt: relMt,
           assignmentBalanceCalcMt: assignMt,
           cuttingBalanceMt: cutMt,
@@ -232,11 +254,13 @@ router.get(
       }
     }
 
-    // 6. Sort: project ascending, then BOM label in canonical order.
+    // 6. Sort: BOM label canonical → sub-type canonical → project ascending.
     const rows = [...grouped.values()].sort((a, b) => {
-      const pc = a.project.localeCompare(b.project);
-      if (pc !== 0) return pc;
-      return bomSortIndex(a.bomLabel) - bomSortIndex(b.bomLabel);
+      const bc = bomSortIndex(a.bomLabel) - bomSortIndex(b.bomLabel);
+      if (bc !== 0) return bc;
+      const sc = subTypeSortIndex(a.subTypeGroup) - subTypeSortIndex(b.subTypeGroup);
+      if (sc !== 0) return sc;
+      return a.project.localeCompare(b.project);
     });
 
     // 7. Compute grand totals.

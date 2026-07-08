@@ -1559,6 +1559,7 @@ export const GetFabricationProjectCompletionTltResponse = zod.object({
   "rows": zod.array(zod.object({
   "project": zod.string().describe('Normalized project \/ job code.'),
   "bomLabel": zod.string().describe('BOM Label: Proto | Mass | Pre | Mixed | Unknown.'),
+  "subTypeGroup": zod.string().describe('Tower Sub Type group: STUB | SST | Other.'),
   "releaseBalanceCalcMt": zod.number().describe('Release Balance Calculated (JCNS + Initial rows), in MT.'),
   "assignmentBalanceCalcMt": zod.number().describe('Assignment Balance Calculated (JCNS + blank contractor), in MT.'),
   "cuttingBalanceMt": zod.number().describe('Cutting Balance (activity C), in MT.'),

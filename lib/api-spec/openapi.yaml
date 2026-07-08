@@ -3846,6 +3846,9 @@ components:
         bomLabel:
           type: string
           description: "BOM Label: Proto | Mass | Pre | Mixed | Unknown."
+        subTypeGroup:
+          type: string
+          description: "Tower Sub Type group: STUB | SST | Other."
         releaseBalanceCalcMt:
           type: number
           format: double
@@ -3865,6 +3868,7 @@ components:
       required:
         - project
         - bomLabel
+        - subTypeGroup
         - releaseBalanceCalcMt
         - assignmentBalanceCalcMt
         - cuttingBalanceMt
