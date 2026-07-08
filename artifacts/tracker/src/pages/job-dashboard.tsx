@@ -439,6 +439,7 @@ function JobDashboardContent() {
   };
 
   if (selectedJob) {
+    const rawJob = selectedJob.replace(/^(?:TLT|NTLT): /, "");
     return (
       <JobDetail
         job={selectedJob}
@@ -447,6 +448,7 @@ function JobDashboardContent() {
         onBack={() => setSelectedJob(null)}
         headerPhases={headerPhases}
         orderEntry={orderByJob.get(selectedJob)}
+        orderRows={order?.rows?.filter((r) => r.project === rawJob) ?? []}
       />
     );
   }
@@ -827,6 +829,7 @@ function JobDetail({
   onBack,
   headerPhases = PROCESS_PHASES,
   orderEntry,
+  orderRows = [],
 }: {
   job: string;
   label: string;
@@ -834,10 +837,33 @@ function JobDetail({
   onBack: () => void;
   headerPhases?: typeof PROCESS_PHASES;
   orderEntry?: { wo: number; rel: number; disp: number };
+  orderRows?: Array<{ structure: string; woOrderQtyMt: number | null; releaseMt: number | null; fileDespatchMt: number | null }>;
 }) {
   const jobIsNtlt = records.some((r) => (r.category || "TLT") === "NTLT");
   const isNtlt = jobIsNtlt;
   const mfcVal = (r: { mfcBatch?: string | null }) => r.mfcBatch || "Z";
+
+  // Per-MFC order figures: map structure → mfcBatch using WIP records, then
+  // sum woOrderQtyMt / releaseMt / fileDespatchMt per mfc batch.
+  const orderByMfc = useMemo(() => {
+    if (!orderRows.length) return new Map<string, { wo: number; rel: number; disp: number }>();
+    const structToMfc = new Map<string, string>();
+    for (const r of records) {
+      if (r.structure && !structToMfc.has(r.structure)) {
+        structToMfc.set(r.structure, mfcVal(r));
+      }
+    }
+    const m = new Map<string, { wo: number; rel: number; disp: number }>();
+    for (const r of orderRows) {
+      const mfc = structToMfc.get(r.structure) ?? "Z";
+      const agg = m.get(mfc) ?? { wo: 0, rel: 0, disp: 0 };
+      agg.wo += r.woOrderQtyMt ?? 0;
+      agg.rel += r.releaseMt ?? 0;
+      agg.disp += r.fileDespatchMt ?? 0;
+      m.set(mfc, agg);
+    }
+    return m;
+  }, [orderRows, records]);
 
   // Drill-down state. TLT: Project -> MFC (only) -> Structure (collapsible
   // marks). NTLT has no MFC concept, so it goes straight to Structure level.
@@ -970,14 +996,17 @@ function JobDetail({
                     >
                       <TableCell className="font-mono font-medium">{m.batch}</TableCell>
                       <TableCell className="text-right">{m.structures}</TableCell>
-                      {orderEntry && (
-                        <>
-                          <TableCell className="text-right tabular-nums">{formatWeight(orderEntry.wo * 1000)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatWeight(orderEntry.disp * 1000)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatWeight((orderEntry.wo - orderEntry.disp) * 1000)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatWeight((orderEntry.wo - orderEntry.rel) * 1000)}</TableCell>
-                        </>
-                      )}
+                      {orderEntry && (() => {
+                        const moe = orderByMfc.get(m.batch);
+                        return (
+                          <>
+                            <TableCell className="text-right tabular-nums">{formatWeight((moe?.wo ?? 0) * 1000)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{formatWeight((moe?.disp ?? 0) * 1000)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{formatWeight(((moe?.wo ?? 0) - (moe?.disp ?? 0)) * 1000)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{formatWeight(((moe?.wo ?? 0) - (moe?.rel ?? 0)) * 1000)}</TableCell>
+                          </>
+                        );
+                      })()}
                       {PROCESS_PHASES.map((ph) => {
                         if (ph.key === "dispatch") {
                           return (
