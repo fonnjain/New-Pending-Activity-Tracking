@@ -1883,6 +1883,40 @@ function FabCompletionReport() {
 
   const grandTotal = useMemo(() => sumRows(rows), [rows]);
 
+  const FAB_COMP_COLUMNS: XlsxColumn[] = [
+    { label: "BOM Label", field: "bomLabel" },
+    { label: "Project", field: "project" },
+    { label: "Release Balance Calc (MT)", field: "releaseBalanceCalcMt", numeric: true, decimals: 3, total: true },
+    { label: "Assignment Balance Calc (MT)", field: "assignmentBalanceCalcMt", numeric: true, decimals: 3, total: true },
+    { label: "Cutting Balance (MT)", field: "cuttingBalanceMt", numeric: true, decimals: 3, total: true },
+    { label: "Quality Check Balance (MT)", field: "qualityCheckBalanceMt", numeric: true, decimals: 3, total: true },
+  ];
+
+  function handleExportExcel() {
+    const date = new Date().toISOString().slice(0, 10);
+    // Summary sheet: flat rows ordered by BOM label then project, with per-BOM subtotals.
+    const summaryRows = bomGroups.flatMap((g) => g.rows);
+    const xlsSummaryRows: XlsxSummaryRow[] = bomGroups.map((g) => ({
+      label: `${g.label} Subtotal`,
+      values: {
+        releaseBalanceCalcMt: g.subtotal.releaseBalanceCalcMt,
+        assignmentBalanceCalcMt: g.subtotal.assignmentBalanceCalcMt,
+        cuttingBalanceMt: g.subtotal.cuttingBalanceMt,
+        qualityCheckBalanceMt: g.subtotal.qualityCheckBalanceMt,
+      },
+    }));
+    // Per-BOM-label sheets.
+    const bomSheets = bomGroups.map((g) => ({
+      name: g.label,
+      columns: FAB_COMP_COLUMNS,
+      rows: g.rows,
+    }));
+    exportToXlsxSheets(`fab_completion_tlt_${date}.xlsx`, [
+      { name: "Summary", columns: FAB_COMP_COLUMNS, rows: summaryRows, summaryRows: xlsSummaryRows },
+      ...bomSheets,
+    ]);
+  }
+
   if (isLoading) {
     return (
       <Card className="border-border">
@@ -1910,8 +1944,17 @@ function FabCompletionReport() {
   return (
     <Card className="border-border">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">
+        <CardTitle className="text-base flex flex-wrap items-center justify-between gap-3">
           Fabrication Report – Project Completion - TLT
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5"
+            disabled={!rows.length}
+            onClick={handleExportExcel}
+          >
+            <FileSpreadsheet className="w-4 h-4" /> Export Excel
+          </Button>
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
