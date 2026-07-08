@@ -1,0 +1,107 @@
+TASK: Add a new report "Fabrication Report – Project Completion - TLT" on the Reports page.
+TLT only. Grouped by Project × BOM Label. No structure/mark detail (everything rolls up).
+
+=====================================================================
+CONTEXT
+=====================================================================
+VTPL Balance & Activity Tracker. STRICTLY ADDITIVE, read-only over existing data. Must NOT
+change parsing identity, hashing/dedup, ageing, Activity, qty, or the TLT/NTLT and sequence
+logic. Reuse existing engine values; this is a new reporting VIEW.
+
+The report is for TLT ONLY. TLT vs NTLT classification ALREADY EXISTS in the app (from the
+sequences setup). REUSE that existing classification to include only TLT marks/structures —
+do NOT re-derive or re-define TLT/NTLT.
+
+All weights: WIP Col Q "Balance Wt." is in KILOGRAMS → divide by 1000 for MT. Show MT, 3 dp.
+
+=====================================================================
+GROUPING
+=====================================================================
+Rows are per (Project/Job code × BOM Label). No structure-wise or mark-wise breakdown —
+all measures sum Mark → Structure → Project(×BOM Label).
+
+BOM Label comes from Order Review (Col K: "Proto" / "Mass" / "Pre"). WIP has NO BOM Label
+column, so BOM Label is obtained by joining a WIP mark's structure to Order Review on
+(normalized project + structure), where structure = WIP Alias (Col J) == Order Review Tower
+Type (Col C). Also available for disambiguation: Tower Sub Type = WIP Col I == Order Review
+Col D.
+
+MULTI-BOM STRUCTURES: ~95 structures span MORE THAN ONE BOM Label (mostly Proto+Mass). A
+WIP balance for such a structure cannot be cleanly attributed to a single BOM Label.
+Therefore: any structure whose Order Review rows carry more than one distinct BOM Label is
+assigned to a SEPARATE BOM Label bucket called "Mixed". So each project can have up to four
+BOM rows: Proto, Mass, Pre, Mixed. A structure with exactly one BOM Label goes to that
+label; a structure with 2+ labels goes to "Mixed". (Structures with no Order Review match →
+BOM Label "Unknown"; show as its own row, do not drop.)
+
+=====================================================================
+COLUMNS (all MT, summed to Project × BOM Label, TLT marks only)
+=====================================================================
+1. Project / Job code            (normalized; strip trailing "."/".0" with existing normalizer)
+2. BOM Label                     (Proto / Mass / Pre / Mixed / Unknown)
+3. Release Balance Calculated    = WIP-derived, SAME logic already defined earlier:
+       SUM(WIP Col Q)/1000 where Type (Col A) = "Job Card Not Started" AND Job Card Status
+       (Col G) = "Initial". (Contractor is always blank on these rows.)
+4. Assignment Balance Calculated = SUM(WIP Col Q)/1000 where Type (Col A) = "Job Card Not
+       Started" AND Contractor (Col D) is BLANK (no one assigned).
+       NOTE ON OVERLAP (intended, do NOT "fix"): a "Not Started + Initial" row also has a
+       blank contractor, so it is counted in BOTH Release Balance Calculated AND Assignment
+       Balance Calculated. These are two different lenses; overlap is expected.
+5. Cutting Balance (C)           = SUM(WIP Col Q)/1000 where Activity (Col S) = "C".
+6. Quality Check Balance (RFI to TS) = SUM(WIP Col Q)/1000 where Activity (Col S) ∈
+       {RFI, NH, B, HAB, W, Q, TS}  (fabrication ops before galvanizing; same set the
+       Project-wise report uses for its Quality Check measure — reuse that definition/const
+       if it exists, don't redefine).
+
+WIP relevant columns: A=Type, D=Contractor, G=Job Card Status, I=Tower Sub Type, J=Alias
+(=structure), Q=Balance Wt.(kg), S=Activity. Project Code (Col B) is forward-filled from
+"Structure" rows (Order Nature Col C = "Structure").
+
+=====================================================================
+LAYOUT / BEHAVIOUR
+=====================================================================
+- New report entry on the Reports page titled "Fabrication Report – Project Completion -
+  TLT".
+- One row per (project, BOM Label). Sort by project, then BOM Label (Proto, Mass, Pre,
+  Mixed, Unknown).
+- Per-project subtotal row (sum of its BOM rows) and a grand total row for columns 3–6.
+- Respect the app's global filters the way other reports do (Job filter, dates), but the
+  report is inherently TLT (uses TLT classification); do not show NTLT.
+- Weight MT, 3 dp.
+
+=====================================================================
+ENDPOINT
+=====================================================================
+  GET /reports/fabrication-project-completion-tlt   getFabricationProjectCompletionTlt (public)
+    → rows {project, bomLabel, releaseBalanceCalcMt, assignmentBalanceCalcMt,
+      cuttingBalanceMt, qualityCheckBalanceMt} + per-project subtotals + grand totals.
+    Add to openapi.yaml; regenerate hooks.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT re-define TLT/NTLT, the activity sequence, or the Quality-Check activity set —
+  reuse existing.
+- Do NOT change WIP/Order Review parsing, hashing/dedup, ageing, Activity, qty.
+- Do NOT de-duplicate the Release vs Assignment overlap — it is intended.
+- Do NOT add structure/mark detail — Project × BOM Label only.
+- Reuse the existing project normalizer; do not add a new one.
+
+=====================================================================
+ACCEPTANCE CHECK (report actual numbers; TLT-only will be lower than these all-marks sums)
+=====================================================================
+Sanity magnitudes computed over ALL marks (TLT filter will reduce these):
+  - Release Balance Calculated (Not Started + Initial): ≈ 2459.406 MT (all marks)
+  - Assignment Balance Calculated (Not Started + blank contractor): ≈ 6325.666 MT (all marks)
+  - Cutting Balance (Activity C): ≈ 5494.038 MT (all marks)
+  - Quality Check Balance (RFI,NH,B,HAB,W,Q,TS): ≈ 2293.528 MT (all marks)
+After applying the TLT-only filter, report the TLT totals for each column.
+Also verify:
+  - Each project splits into Proto/Mass/Pre/Mixed rows; the 95 multi-BOM structures land in
+    "Mixed", not Proto or Mass.
+  - A "Not Started + Initial" mark contributes to BOTH Release and Assignment columns.
+  - Grand total column 3 (TLT) ≤ 2459.406 (all-marks value), confirming the TLT filter and
+    the Initial condition are both applied.
+  - Trailing-dot projects normalized, not duplicated.
+Report: the four TLT column grand totals, and a spot-check of one project's Proto/Mass/
+Mixed split.

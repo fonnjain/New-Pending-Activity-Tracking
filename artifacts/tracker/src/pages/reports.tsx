@@ -38,6 +38,8 @@ import {
   useDeleteFabricationPriority,
   getListFabricationPrioritiesQueryKey,
   useGetContractorMovement,
+  useGetFabricationProjectCompletionTlt,
+  type FabricationProjectCompletionRow,
   type Record as ApiRecord,
   type ContractorMovementEntry,
 } from "@workspace/api-client-react";
@@ -82,7 +84,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 type SortKey = "activity" | "ageing" | "contractor";
 
-type ReportType = "jobwise" | "fabload" | "plantop" | "contractorperf" | "ai";
+type ReportType = "jobwise" | "fabload" | "plantop" | "contractorperf" | "fabcompletion" | "ai";
 
 const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
   {
@@ -108,6 +110,12 @@ const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
     name: "Contractor Performance",
     description:
       "Daily marks/weight moved from one activity to the next, credited to the contractor who released each stage.",
+  },
+  {
+    id: "fabcompletion",
+    name: "Fabrication Report – Project Completion - TLT",
+    description:
+      "TLT-only completion breakdown by Project and BOM Label: Release Balance, Assignment Balance, Cutting, and Quality Check weights in MT.",
   },
   {
     id: "ai",
@@ -1811,6 +1819,201 @@ export function ContractorPerformanceReport() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Fabrication Report – Project Completion - TLT
+// ---------------------------------------------------------------------------
+// Per-(project × BOM Label) table with four completion-balance measures.
+// All weights server-computed and returned in MT (3 dp). TLT only.
+// Respects the global Job filter; groups by project with per-project subtotals.
+function FabCompletionReport() {
+  const { data, isLoading } = useGetFabricationProjectCompletionTlt();
+  const { filters } = useTracker();
+
+  const rows: FabricationProjectCompletionRow[] = useMemo(() => {
+    if (!data?.rows) return [];
+    if (filters.job) return data.rows.filter((r) => r.project === filters.job);
+    return data.rows;
+  }, [data, filters.job]);
+
+  const projects = useMemo(
+    () => [...new Set(rows.map((r) => r.project))],
+    [rows],
+  );
+
+  function projectSubtotal(project: string) {
+    const pr = rows.filter((r) => r.project === project);
+    return {
+      releaseBalanceCalcMt: pr.reduce((s, r) => s + r.releaseBalanceCalcMt, 0),
+      assignmentBalanceCalcMt: pr.reduce(
+        (s, r) => s + r.assignmentBalanceCalcMt,
+        0,
+      ),
+      cuttingBalanceMt: pr.reduce((s, r) => s + r.cuttingBalanceMt, 0),
+      qualityCheckBalanceMt: pr.reduce(
+        (s, r) => s + r.qualityCheckBalanceMt,
+        0,
+      ),
+    };
+  }
+
+  const grandTotal = useMemo(
+    () => ({
+      releaseBalanceCalcMt: rows.reduce(
+        (s, r) => s + r.releaseBalanceCalcMt,
+        0,
+      ),
+      assignmentBalanceCalcMt: rows.reduce(
+        (s, r) => s + r.assignmentBalanceCalcMt,
+        0,
+      ),
+      cuttingBalanceMt: rows.reduce((s, r) => s + r.cuttingBalanceMt, 0),
+      qualityCheckBalanceMt: rows.reduce(
+        (s, r) => s + r.qualityCheckBalanceMt,
+        0,
+      ),
+    }),
+    [rows],
+  );
+
+  if (isLoading) {
+    return (
+      <Card className="border-border">
+        <CardContent className="py-6 text-sm text-muted-foreground">
+          Loading...
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!data?.available || rows.length === 0) {
+    return (
+      <Card className="border-border">
+        <CardContent className="py-6 text-sm text-muted-foreground">
+          {!data?.available
+            ? "No WIP import available. Upload a WIP file to generate this report."
+            : "No TLT data for the selected filters."}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const fmt = (n: number) => n.toFixed(3);
+
+  return (
+    <Card className="border-border">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">
+          Fabrication Report – Project Completion - TLT
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-auto">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                <th className="text-left px-3 py-2 font-semibold whitespace-nowrap">
+                  Project
+                </th>
+                <th className="text-left px-3 py-2 font-semibold whitespace-nowrap">
+                  BOM Label
+                </th>
+                <th className="text-right px-3 py-2 font-semibold whitespace-nowrap">
+                  Release Balance Calc (MT)
+                </th>
+                <th className="text-right px-3 py-2 font-semibold whitespace-nowrap">
+                  Assignment Balance Calc (MT)
+                </th>
+                <th className="text-right px-3 py-2 font-semibold whitespace-nowrap">
+                  Cutting Balance (MT)
+                </th>
+                <th className="text-right px-3 py-2 font-semibold whitespace-nowrap">
+                  Quality Check Balance (MT)
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {projects.map((project) => {
+                const projectRows = rows.filter((r) => r.project === project);
+                const sub = projectSubtotal(project);
+                return projectRows.map((row, idx) => {
+                  const isLast = idx === projectRows.length - 1;
+                  return (
+                    <>
+                      <tr
+                        key={`${row.project}-${row.bomLabel}`}
+                        className="border-b border-border/50 hover:bg-muted/30"
+                      >
+                        <td className="px-3 py-1.5 text-muted-foreground">
+                          {idx === 0 ? row.project : ""}
+                        </td>
+                        <td className="px-3 py-1.5">{row.bomLabel}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {fmt(row.releaseBalanceCalcMt)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {fmt(row.assignmentBalanceCalcMt)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {fmt(row.cuttingBalanceMt)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {fmt(row.qualityCheckBalanceMt)}
+                        </td>
+                      </tr>
+                      {isLast && (
+                        <tr
+                          key={`${project}-subtotal`}
+                          className="border-b-2 border-border bg-muted/40 font-semibold"
+                        >
+                          <td className="px-3 py-1.5">{project}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground">
+                            Subtotal
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {fmt(sub.releaseBalanceCalcMt)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {fmt(sub.assignmentBalanceCalcMt)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {fmt(sub.cuttingBalanceMt)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {fmt(sub.qualityCheckBalanceMt)}
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                });
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-border bg-muted font-bold">
+                <td className="px-3 py-2" colSpan={2}>
+                  Grand Total
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {fmt(grandTotal.releaseBalanceCalcMt)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {fmt(grandTotal.assignmentBalanceCalcMt)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {fmt(grandTotal.cuttingBalanceMt)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {fmt(grandTotal.qualityCheckBalanceMt)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function ReportsView() {
   const [reportType, setReportType] = useState<ReportType>("jobwise");
   return (
@@ -1857,6 +2060,8 @@ export default function ReportsView() {
         <PlantOperationView />
       ) : reportType === "contractorperf" ? (
         <ContractorPerformanceReport />
+      ) : reportType === "fabcompletion" ? (
+        <FabCompletionReport />
       ) : (
         <AiTurnaroundReport />
       )}

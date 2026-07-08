@@ -1,0 +1,69 @@
+TASK: Fix the "Release Balance" report/tab scope. The Order Review VALUES are now correct
+(BOM-summing works — verified), but the report is showing far too many rows: it is pulling
+the ENTIRE historical record_pool instead of only the current (latest) Order Review + WIP.
+
+=====================================================================
+DIAGNOSIS (verified against the app's own exported file)
+=====================================================================
+The app's exported release-balance file has 17,524 structures across 1,101 projects. The
+CURRENT Order Review file has only ~2,188 structures across 160 projects. So ~941 extra
+projects / ~15,300 extra structures are being included — these come from historical
+record_pool entries (everything ever uploaded), not the currently-loaded files.
+
+Confirmed:
+  - For every structure that IS in the current Order Review, the app's Order-Review Release
+    Balance MATCHES ground truth exactly (1,738 non-zero values, 0 mismatches). Values are
+    correct — do not change the value logic.
+  - Project 920 is correct (WIP Computed 76.500, Order Review 76.511).
+  - All 160 current Order Review projects are present.
+  - The problem is SCOPE: thousands of rows have BLANK/0 in BOTH columns — these are old
+    structures with no current Order Review release balance and no current WIP Initial
+    balance. They should not appear at all.
+
+=====================================================================
+THE FIX (scope to latest imports; drop empty rows)
+=====================================================================
+1. Restrict the report to structures present in the LATEST Order Review import UNION the
+   structures that have a non-zero WIP Release Balance Computed in the LATEST WIP import.
+   Concretely, a (project, structure) row qualifies ONLY IF at least one of these is true:
+     (a) it exists in the latest order_review_rows (the current Order Review file), OR
+     (b) it has Release Balance Computed (WIP, latest import) > 0.
+   Do NOT enumerate the full historical record_pool. The report is a snapshot of the
+   CURRENT loaded files, consistent with every other page.
+
+2. DROP fully-empty rows: if BOTH "Release Balance Order Review" AND "Release Balance
+   Computed WIP" are null/zero for a (project, structure), do not emit that row. (These are
+   the ~15k noise rows.) Keep a row if EITHER side is non-zero.
+
+3. Expected result on the current files: ~2,188 structures across 160 projects (matching
+   the Order Review), NOT 17,524 / 1,101. Grand totals:
+     - Order Review Release Balance ≈ 5625.353 MT
+     - WIP Release Balance Computed ≈ 2387.061 MT
+   (The app currently sums 5934.104 and 4774.122 respectively — both inflated by the extra
+   historical rows; after scoping they should drop to ≈5625 and ≈2387.)
+
+=====================================================================
+KEEP (already correct — do not regress)
+=====================================================================
+- Order Review value = Col S BOM-summed (Proto/Mass/Pre) per structure. Verified correct;
+  leave the aggregation as-is.
+- WIP Release Balance Computed = SUM(Col Q kg)/1000 where Type="Job Card Not Started" AND
+  Status="Initial". Verified (920 = 76.5). Leave as-is.
+- Column headers, join on (normalized project + structure), MT 3 dp.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change the VALUE logic of either column (both verified correct).
+- Do NOT change WIP/Order Review parsing, hashing/dedup, ageing, Activity, qty.
+- Do NOT show historical record_pool structures absent from the current files.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- Row count ≈ 2,188 structures / 160 projects (NOT ~17,524 / ~1,101).
+- No row has both columns null/zero.
+- Grand totals: Order Review ≈ 5625.353 MT; WIP Computed ≈ 2387.061 MT.
+- 920 unchanged and correct (76.5 both sides).
+- Every project shown exists in the current Order Review (or has WIP Computed > 0).
+- Report: new row count, project count, both grand totals.

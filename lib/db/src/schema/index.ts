@@ -16,3 +16,4 @@ export * from "./accumulatedWip";
 export * from "./contractorMovement";
 export * from "./inventoryManual";
 export * from "./currentJobs";
+export * from "./assignmentBalanceWip";

@@ -1906,6 +1906,36 @@ export interface ReleaseBalanceResponse {
   totals: ReleaseBalanceTotals;
 }
 
+export interface FabricationProjectCompletionRow {
+  /** Normalized project / job code. */
+  project: string;
+  /** BOM Label: Proto | Mass | Pre | Mixed | Unknown. */
+  bomLabel: string;
+  /** Release Balance Calculated (JCNS + Initial rows), in MT. */
+  releaseBalanceCalcMt: number;
+  /** Assignment Balance Calculated (JCNS + blank contractor), in MT. */
+  assignmentBalanceCalcMt: number;
+  /** Cutting Balance (activity C), in MT. */
+  cuttingBalanceMt: number;
+  /** Quality Check Balance (RFI,NH,B,HAB,W,Q,TS), in MT. */
+  qualityCheckBalanceMt: number;
+}
+
+export interface FabricationProjectCompletionTotals {
+  releaseBalanceCalcMt: number;
+  assignmentBalanceCalcMt: number;
+  cuttingBalanceMt: number;
+  qualityCheckBalanceMt: number;
+}
+
+export interface FabricationProjectCompletionResponse {
+  /** False when no WIP import exists. */
+  available: boolean;
+  /** One row per (project, BOM Label), sorted by project then BOM label. */
+  rows: FabricationProjectCompletionRow[];
+  totals: FabricationProjectCompletionTotals;
+}
+
 export interface ReportResult {
   /** False when ANTHROPIC_API_KEY is unset. */
   available: boolean;

@@ -1550,6 +1550,30 @@ export const GetReleaseBalanceResponse = zod.object({
 
 
 /**
+ * Returns a per-(project, BOM Label) breakdown of four completion measures for TLT marks only: Release Balance Calculated (Job Card Not Started + Initial rows), Assignment Balance Calculated (Job Card Not Started + blank contractor), Cutting Balance (activity C), and Quality Check Balance (activities RFI, NH, B, HAB, W, Q, TS). All weights in MT. BOM Label is derived from the Order Review file (Proto / Mass / Pre); structures with multiple BOM labels → "Mixed"; no match → "Unknown". Grand totals included. Purely additive read — never changes parsing, hashing, dedup, ageing, activity, qty, or any other state.
+
+ * @summary Fabrication Report – Project Completion (TLT only)
+ */
+export const GetFabricationProjectCompletionTltResponse = zod.object({
+  "available": zod.boolean().describe('False when no WIP import exists.'),
+  "rows": zod.array(zod.object({
+  "project": zod.string().describe('Normalized project \/ job code.'),
+  "bomLabel": zod.string().describe('BOM Label: Proto | Mass | Pre | Mixed | Unknown.'),
+  "releaseBalanceCalcMt": zod.number().describe('Release Balance Calculated (JCNS + Initial rows), in MT.'),
+  "assignmentBalanceCalcMt": zod.number().describe('Assignment Balance Calculated (JCNS + blank contractor), in MT.'),
+  "cuttingBalanceMt": zod.number().describe('Cutting Balance (activity C), in MT.'),
+  "qualityCheckBalanceMt": zod.number().describe('Quality Check Balance (RFI,NH,B,HAB,W,Q,TS), in MT.')
+})).describe('One row per (project, BOM Label), sorted by project then BOM label.'),
+  "totals": zod.object({
+  "releaseBalanceCalcMt": zod.number(),
+  "assignmentBalanceCalcMt": zod.number(),
+  "cuttingBalanceMt": zod.number(),
+  "qualityCheckBalanceMt": zod.number()
+})
+})
+
+
+/**
  * Re-runs, on demand, every deterministic recompute and backfill pass the app otherwise runs automatically (best-effort after upload/delete/ settings changes, or once at boot): classification backfill, hole- operation backfill, milestones, accumulated WIP, contractor movement, and dispatch. Every pass is a pure re-derivation from permanent append-only history or raw stored columns — nothing here is authoritative or destructive, so running it repeatedly is always safe and idempotent. Exists purely as a manual fallback (e.g. a prior automatic pass failed silently, or the server restarted mid-backfill); normal operation never requires it. Requires auth.
 
  * @summary Manually trigger every deterministic recompute/backfill pass

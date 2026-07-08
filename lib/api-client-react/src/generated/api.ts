@@ -45,6 +45,7 @@ import type {
   ErrorResponse,
   FabricationPriority,
   FabricationPriorityInput,
+  FabricationProjectCompletionResponse,
   HealthStatus,
   Import,
   ImportSummary,
@@ -2853,6 +2854,85 @@ export function useGetReleaseBalance<TData = Awaited<ReturnType<typeof getReleas
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetReleaseBalanceQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetFabricationProjectCompletionTltUrl = () => {
+
+
+
+
+  return `/api/reports/fabrication-project-completion-tlt`
+}
+
+/**
+ * Returns a per-(project, BOM Label) breakdown of four completion measures for TLT marks only: Release Balance Calculated (Job Card Not Started + Initial rows), Assignment Balance Calculated (Job Card Not Started + blank contractor), Cutting Balance (activity C), and Quality Check Balance (activities RFI, NH, B, HAB, W, Q, TS). All weights in MT. BOM Label is derived from the Order Review file (Proto / Mass / Pre); structures with multiple BOM labels → "Mixed"; no match → "Unknown". Grand totals included. Purely additive read — never changes parsing, hashing, dedup, ageing, activity, qty, or any other state.
+
+ * @summary Fabrication Report – Project Completion (TLT only)
+ */
+export const getFabricationProjectCompletionTlt = async ( options?: RequestInit): Promise<FabricationProjectCompletionResponse> => {
+
+  return customFetch<FabricationProjectCompletionResponse>(getGetFabricationProjectCompletionTltUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFabricationProjectCompletionTltQueryKey = () => {
+    return [
+    `/api/reports/fabrication-project-completion-tlt`
+    ] as const;
+    }
+
+
+export const getGetFabricationProjectCompletionTltQueryOptions = <TData = Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFabricationProjectCompletionTltQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>> = ({ signal }) => getFabricationProjectCompletionTlt({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFabricationProjectCompletionTltQueryResult = NonNullable<Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>>
+export type GetFabricationProjectCompletionTltQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Fabrication Report – Project Completion (TLT only)
+ */
+
+export function useGetFabricationProjectCompletionTlt<TData = Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFabricationProjectCompletionTltQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

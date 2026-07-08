@@ -895,6 +895,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReleaseBalanceResponse"
+  /reports/fabrication-project-completion-tlt:
+    get:
+      operationId: getFabricationProjectCompletionTlt
+      tags: [imports]
+      summary: Fabrication Report – Project Completion (TLT only)
+      description: >
+        Returns a per-(project, BOM Label) breakdown of four completion measures
+        for TLT marks only: Release Balance Calculated (Job Card Not Started +
+        Initial rows), Assignment Balance Calculated (Job Card Not Started + blank
+        contractor), Cutting Balance (activity C), and Quality Check Balance
+        (activities RFI, NH, B, HAB, W, Q, TS). All weights in MT. BOM Label is
+        derived from the Order Review file (Proto / Mass / Pre); structures with
+        multiple BOM labels → "Mixed"; no match → "Unknown". Grand totals
+        included. Purely additive read — never changes parsing, hashing, dedup,
+        ageing, activity, qty, or any other state.
+      responses:
+        "200":
+          description: Fabrication project completion rows and totals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FabricationProjectCompletionResponse"
   /admin/recompute:
     post:
       operationId: adminRecompute
@@ -3813,6 +3835,75 @@ components:
       required:
         - available
         - orderReviewAsOnDate
+        - rows
+        - totals
+    FabricationProjectCompletionRow:
+      type: object
+      properties:
+        project:
+          type: string
+          description: Normalized project / job code.
+        bomLabel:
+          type: string
+          description: "BOM Label: Proto | Mass | Pre | Mixed | Unknown."
+        releaseBalanceCalcMt:
+          type: number
+          format: double
+          description: Release Balance Calculated (JCNS + Initial rows), in MT.
+        assignmentBalanceCalcMt:
+          type: number
+          format: double
+          description: Assignment Balance Calculated (JCNS + blank contractor), in MT.
+        cuttingBalanceMt:
+          type: number
+          format: double
+          description: Cutting Balance (activity C), in MT.
+        qualityCheckBalanceMt:
+          type: number
+          format: double
+          description: Quality Check Balance (RFI,NH,B,HAB,W,Q,TS), in MT.
+      required:
+        - project
+        - bomLabel
+        - releaseBalanceCalcMt
+        - assignmentBalanceCalcMt
+        - cuttingBalanceMt
+        - qualityCheckBalanceMt
+    FabricationProjectCompletionTotals:
+      type: object
+      properties:
+        releaseBalanceCalcMt:
+          type: number
+          format: double
+        assignmentBalanceCalcMt:
+          type: number
+          format: double
+        cuttingBalanceMt:
+          type: number
+          format: double
+        qualityCheckBalanceMt:
+          type: number
+          format: double
+      required:
+        - releaseBalanceCalcMt
+        - assignmentBalanceCalcMt
+        - cuttingBalanceMt
+        - qualityCheckBalanceMt
+    FabricationProjectCompletionResponse:
+      type: object
+      properties:
+        available:
+          type: boolean
+          description: False when no WIP import exists.
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/FabricationProjectCompletionRow"
+          description: One row per (project, BOM Label), sorted by project then BOM label.
+        totals:
+          $ref: "#/components/schemas/FabricationProjectCompletionTotals"
+      required:
+        - available
         - rows
         - totals
     ReportResult:
