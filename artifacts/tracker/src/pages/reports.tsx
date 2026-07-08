@@ -1825,6 +1825,32 @@ export function ContractorPerformanceReport() {
 // Per-(project × BOM Label) table with four completion-balance measures.
 // All weights server-computed and returned in MT (3 dp). TLT only.
 // Respects the global Job filter; groups by project with per-project subtotals.
+// Canonical BOM label sort order.
+const BOM_LABEL_ORDER = ["Proto", "Mass", "Pre", "Mixed", "Unknown"];
+function bomLabelIndex(label: string) {
+  const i = BOM_LABEL_ORDER.indexOf(label);
+  return i === -1 ? BOM_LABEL_ORDER.length : i;
+}
+
+type FabSums = {
+  releaseBalanceCalcMt: number;
+  assignmentBalanceCalcMt: number;
+  cuttingBalanceMt: number;
+  qualityCheckBalanceMt: number;
+};
+
+function sumRows(rs: FabricationProjectCompletionRow[]): FabSums {
+  return {
+    releaseBalanceCalcMt: rs.reduce((s, r) => s + r.releaseBalanceCalcMt, 0),
+    assignmentBalanceCalcMt: rs.reduce(
+      (s, r) => s + r.assignmentBalanceCalcMt,
+      0,
+    ),
+    cuttingBalanceMt: rs.reduce((s, r) => s + r.cuttingBalanceMt, 0),
+    qualityCheckBalanceMt: rs.reduce((s, r) => s + r.qualityCheckBalanceMt, 0),
+  };
+}
+
 function FabCompletionReport() {
   const { data, isLoading } = useGetFabricationProjectCompletionTlt();
   const { filters } = useTracker();
@@ -1835,45 +1861,27 @@ function FabCompletionReport() {
     return data.rows;
   }, [data, filters.job]);
 
-  const projects = useMemo(
-    () => [...new Set(rows.map((r) => r.project))],
-    [rows],
-  );
+  // Group by BOM label (outer), then project (inner). Sorted by BOM label
+  // canonical order; projects sorted alphabetically within each group.
+  const bomGroups = useMemo(() => {
+    const map = new Map<string, FabricationProjectCompletionRow[]>();
+    for (const row of rows) {
+      const list = map.get(row.bomLabel) ?? [];
+      list.push(row);
+      map.set(row.bomLabel, list);
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => bomLabelIndex(a) - bomLabelIndex(b))
+      .map(([label, groupRows]) => ({
+        label,
+        rows: [...groupRows].sort((a, b) =>
+          a.project.localeCompare(b.project),
+        ),
+        subtotal: sumRows(groupRows),
+      }));
+  }, [rows]);
 
-  function projectSubtotal(project: string) {
-    const pr = rows.filter((r) => r.project === project);
-    return {
-      releaseBalanceCalcMt: pr.reduce((s, r) => s + r.releaseBalanceCalcMt, 0),
-      assignmentBalanceCalcMt: pr.reduce(
-        (s, r) => s + r.assignmentBalanceCalcMt,
-        0,
-      ),
-      cuttingBalanceMt: pr.reduce((s, r) => s + r.cuttingBalanceMt, 0),
-      qualityCheckBalanceMt: pr.reduce(
-        (s, r) => s + r.qualityCheckBalanceMt,
-        0,
-      ),
-    };
-  }
-
-  const grandTotal = useMemo(
-    () => ({
-      releaseBalanceCalcMt: rows.reduce(
-        (s, r) => s + r.releaseBalanceCalcMt,
-        0,
-      ),
-      assignmentBalanceCalcMt: rows.reduce(
-        (s, r) => s + r.assignmentBalanceCalcMt,
-        0,
-      ),
-      cuttingBalanceMt: rows.reduce((s, r) => s + r.cuttingBalanceMt, 0),
-      qualityCheckBalanceMt: rows.reduce(
-        (s, r) => s + r.qualityCheckBalanceMt,
-        0,
-      ),
-    }),
-    [rows],
-  );
+  const grandTotal = useMemo(() => sumRows(rows), [rows]);
 
   if (isLoading) {
     return (
@@ -1912,10 +1920,10 @@ function FabCompletionReport() {
             <thead>
               <tr className="border-b border-border bg-muted/50">
                 <th className="text-left px-3 py-2 font-semibold whitespace-nowrap">
-                  Project
+                  BOM Label
                 </th>
                 <th className="text-left px-3 py-2 font-semibold whitespace-nowrap">
-                  BOM Label
+                  Project
                 </th>
                 <th className="text-right px-3 py-2 font-semibold whitespace-nowrap">
                   Release Balance Calc (MT)
@@ -1932,61 +1940,54 @@ function FabCompletionReport() {
               </tr>
             </thead>
             <tbody>
-              {projects.map((project) => {
-                const projectRows = rows.filter((r) => r.project === project);
-                const sub = projectSubtotal(project);
-                return projectRows.map((row, idx) => {
-                  const isLast = idx === projectRows.length - 1;
-                  return (
-                    <>
-                      <tr
-                        key={`${row.project}-${row.bomLabel}`}
-                        className="border-b border-border/50 hover:bg-muted/30"
-                      >
-                        <td className="px-3 py-1.5 text-muted-foreground">
-                          {idx === 0 ? row.project : ""}
-                        </td>
-                        <td className="px-3 py-1.5">{row.bomLabel}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">
-                          {fmt(row.releaseBalanceCalcMt)}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">
-                          {fmt(row.assignmentBalanceCalcMt)}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">
-                          {fmt(row.cuttingBalanceMt)}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">
-                          {fmt(row.qualityCheckBalanceMt)}
-                        </td>
-                      </tr>
-                      {isLast && (
-                        <tr
-                          key={`${project}-subtotal`}
-                          className="border-b-2 border-border bg-muted/40 font-semibold"
-                        >
-                          <td className="px-3 py-1.5">{project}</td>
-                          <td className="px-3 py-1.5 text-muted-foreground">
-                            Subtotal
-                          </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">
-                            {fmt(sub.releaseBalanceCalcMt)}
-                          </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">
-                            {fmt(sub.assignmentBalanceCalcMt)}
-                          </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">
-                            {fmt(sub.cuttingBalanceMt)}
-                          </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">
-                            {fmt(sub.qualityCheckBalanceMt)}
-                          </td>
-                        </tr>
-                      )}
-                    </>
-                  );
-                });
-              })}
+              {bomGroups.map(({ label, rows: groupRows, subtotal }) => (
+                <>
+                  {groupRows.map((row, idx) => (
+                    <tr
+                      key={`${row.bomLabel}-${row.project}`}
+                      className="border-b border-border/50 hover:bg-muted/30"
+                    >
+                      <td className="px-3 py-1.5 text-muted-foreground">
+                        {idx === 0 ? row.bomLabel : ""}
+                      </td>
+                      <td className="px-3 py-1.5">{row.project}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">
+                        {fmt(row.releaseBalanceCalcMt)}
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">
+                        {fmt(row.assignmentBalanceCalcMt)}
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">
+                        {fmt(row.cuttingBalanceMt)}
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">
+                        {fmt(row.qualityCheckBalanceMt)}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr
+                    key={`${label}-subtotal`}
+                    className="border-b-2 border-border bg-muted/40 font-semibold"
+                  >
+                    <td className="px-3 py-1.5">{label}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">
+                      Subtotal
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {fmt(subtotal.releaseBalanceCalcMt)}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {fmt(subtotal.assignmentBalanceCalcMt)}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {fmt(subtotal.cuttingBalanceMt)}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {fmt(subtotal.qualityCheckBalanceMt)}
+                    </td>
+                  </tr>
+                </>
+              ))}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-border bg-muted font-bold">
