@@ -50,6 +50,8 @@ import {
   useContractorCategoryMap,
   contractorCategoryFor,
   dateRangeWindow,
+  CURRENT_JOBS_FILTER_VALUE,
+  useCurrentJobsSet,
 } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1913,12 +1915,19 @@ const FAB_COMP_COLUMNS: XlsxColumn[] = [
 function FabCompletionReport() {
   const { data, isLoading } = useGetFabricationProjectCompletionTlt();
   const { filters } = useTracker();
+  const { set: currentJobsSet } = useCurrentJobsSet();
 
   const rows: FabricationProjectCompletionRow[] = useMemo(() => {
     if (!data?.rows) return [];
+    if (filters.job === CURRENT_JOBS_FILTER_VALUE) {
+      // Current Jobs sentinel: filter to the uploaded project-code set.
+      // If the set hasn't loaded yet, show all (safe fallback).
+      if (!currentJobsSet) return data.rows;
+      return data.rows.filter((r) => currentJobsSet.has(r.project));
+    }
     if (filters.job) return data.rows.filter((r) => r.project === filters.job);
     return data.rows;
-  }, [data, filters.job]);
+  }, [data, filters.job, currentJobsSet]);
 
   // 3-level grouping: BOM Label → Sub-Type Group → Project.
   const bomGroups = useMemo(() => buildBomGroups(rows), [rows]);
