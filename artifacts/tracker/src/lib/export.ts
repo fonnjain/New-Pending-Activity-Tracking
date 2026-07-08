@@ -79,12 +79,25 @@ function numFmt(decimals: number): string {
   return decimals > 0 ? `#,##0.${"0".repeat(decimals)}` : "#,##0";
 }
 
+// A data section within a sheet. When a sheet uses `sections`, rows and
+// summaryRows from each section are written in order (section rows, then
+// section summaryRows) before moving to the next section. The grand-total row
+// still sums across all sections' rows.
+export type XlsxSection = {
+  rows: any[];
+  summaryRows?: XlsxSummaryRow[];
+};
+
 // A single worksheet definition for a multi-sheet export.
+// Use `sections` when you need per-group summary rows interleaved with data
+// (e.g. In-House summary before Out-Vendor rows). If `sections` is set,
+// top-level `rows` and `summaryRows` are ignored.
 export type XlsxSheet = {
   name: string;
   columns: XlsxColumn[];
-  rows: any[];
+  rows?: any[];
   summaryRows?: XlsxSummaryRow[];
+  sections?: XlsxSection[];
 };
 
 // Parse a value for a numeric column: a finite number when possible, else
@@ -110,35 +123,43 @@ function uniqueSheetName(name: string, used: Set<string>): string {
   return candidate;
 }
 
-// Write one fully-styled worksheet (header band, auto-sized columns, optional
-// summary rows, totals row, and grid borders around every cell).
+// A labelled group of rows for the combined block-grid sheet.
+// Each group maps to one bucket×side block placed side by side with others.
+export type XlsxBlockGroup = {
+  label: string;        // block title (e.g. "B - Raw Material Incomplete")
+  columns: XlsxColumn[]; // NO "side" column — the side is the band label
+  rows: any[];
+  summaryRows?: XlsxSummaryRow[];
+};
+
+// Write one fully-styled worksheet (header band, auto-sized columns, per-section
+// summary rows interleaved with data, totals row, and grid borders).
 function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
-  const { columns, rows, summaryRows = [] } = sheet;
+  const { columns } = sheet;
+
+  // Normalise: sections take precedence over legacy flat rows/summaryRows.
+  const sections: XlsxSection[] = sheet.sections ?? [
+    { rows: sheet.rows ?? [], summaryRows: sheet.summaryRows ?? [] },
+  ];
+  const allRows = sections.flatMap((s) => s.rows);
+
   const ws = wb.addWorksheet(uniqueSheetName(sheet.name, usedNames), {
     views: [{ state: "frozen", ySplit: 1 }],
   });
 
-  // Columns: header label, number format + right alignment for numeric columns,
-  // and an auto-computed width from the widest value (clamped 10..48).
+  // Columns: auto-sized width from all data rows.
   ws.columns = columns.map((c) => {
     const decimals = c.decimals ?? (c.numeric ? 2 : 0);
     let maxLen = c.label.length;
-    for (const r of rows) {
+    for (const r of allRows) {
       const v = r[c.field];
       if (v == null) continue;
-      let text: string;
-      if (c.numeric) {
-        const n = toNum(v);
-        text =
-          n == null
-            ? ""
-            : n.toLocaleString(undefined, {
-                minimumFractionDigits: decimals,
-                maximumFractionDigits: decimals,
-              });
-      } else {
-        text = String(v);
-      }
+      const text = c.numeric
+        ? (toNum(v) ?? "").toLocaleString(undefined, {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals,
+          })
+        : String(v);
       if (text.length > maxLen) maxLen = text.length;
     }
     return {
@@ -151,74 +172,57 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
     };
   });
 
-  // Data rows. Numeric cells are written as real (finite) numbers or left blank
-  // so Excel treats them as numbers; text cells fall back to "".
-  for (const r of rows) {
-    const rowObj: Record<string, any> = {};
-    for (const c of columns) {
-      const v = r[c.field];
-      rowObj[c.field] = c.numeric ? toNum(v) : v == null ? "" : v;
+  // Write each section: data rows then that section's summary rows.
+  for (const section of sections) {
+    for (const r of section.rows) {
+      const rowObj: Record<string, any> = {};
+      for (const c of columns) {
+        const v = r[c.field];
+        rowObj[c.field] = c.numeric ? toNum(v) : v == null ? "" : v;
+      }
+      ws.addRow(rowObj);
     }
-    ws.addRow(rowObj);
-  }
-
-  // Optional summary rows (e.g. per-activity subtotals) inserted between the data
-  // and the grand-total row. Bold with a light fill to set them apart; a row
-  // with no values renders as a section heading.
-  for (const s of summaryRows) {
-    const obj: Record<string, any> = {};
-    columns.forEach((c, i) => {
-      if (i === 0) obj[c.field] = s.label;
-      else if (c.field in s.values) obj[c.field] = s.values[c.field];
-    });
-    const row = ws.addRow(obj);
-    for (let c = 1; c <= columns.length; c++) {
-      const cell = row.getCell(c);
-      cell.font = { bold: true };
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FFF3F4F6" },
-      };
+    for (const s of section.summaryRows ?? []) {
+      const obj: Record<string, any> = {};
+      columns.forEach((c, i) => {
+        if (i === 0) obj[c.field] = s.label;
+        else if (c.field in s.values) obj[c.field] = s.values[c.field];
+      });
+      const row = ws.addRow(obj);
+      for (let c = 1; c <= columns.length; c++) {
+        const cell = row.getCell(c);
+        cell.font = { bold: true };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
+      }
     }
   }
 
-  // Header band: bold white text on a dark fill, centered, with a thin border.
+  // Header band.
   const headerRow = ws.getRow(1);
   headerRow.height = 20;
   headerRow.eachCell((cell: any) => {
     cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    cell.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FF1F2937" },
-    };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
     cell.alignment = { horizontal: "center", vertical: "middle" };
   });
 
-  // Totals row: label in the first column, SUM for each flagged numeric column.
+  // Totals row: sums across ALL sections.
   const hasTotals = columns.some((c) => c.total);
-  if (hasTotals && rows.length) {
+  if (hasTotals && allRows.length) {
     const totalObj: Record<string, any> = {};
     columns.forEach((c, i) => {
-      if (i === 0) {
-        totalObj[c.field] = "TOTAL";
-      } else if (c.total) {
-        totalObj[c.field] = rows.reduce((s, r) => s + (toNum(r[c.field]) ?? 0), 0);
-      }
+      if (i === 0) totalObj[c.field] = "TOTAL";
+      else if (c.total) totalObj[c.field] = allRows.reduce((s, r) => s + (toNum(r[c.field]) ?? 0), 0);
     });
     const totalRow = ws.addRow(totalObj);
-    totalRow.eachCell((cell: any) => {
-      cell.font = { bold: true };
-    });
+    totalRow.eachCell((cell: any) => { cell.font = { bold: true }; });
   }
 
-  // Grid borders: a thin line around every cell so the report reads as a table,
-  // with a darker bottom under the header and a darker top above the totals row.
+  // Grid borders.
   const thin = { style: "thin" as const, color: { argb: "FFD1D5DB" } };
   const headerBottom = { style: "thin" as const, color: { argb: "FF111827" } };
   const totalsTop = { style: "thin" as const, color: { argb: "FF9CA3AF" } };
-  const totalsRowNum = hasTotals && rows.length ? ws.rowCount : -1;
+  const totalsRowNum = hasTotals && allRows.length ? ws.rowCount : -1;
   for (let r = 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
     for (let c = 1; c <= columns.length; c++) {
@@ -231,13 +235,230 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
     }
   }
 
-  // Auto-filter over the header row (Excel extends the dropdowns down the data).
-  ws.autoFilter = {
-    from: { row: 1, column: 1 },
-    to: { row: 1, column: columns.length },
-  };
-
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: columns.length } };
   return ws;
+}
+
+// ─── Combined block-grid sheet ─────────────────────────────────────────────
+// Layout: all In-House blocks side-by-side, then a gap, then all Out-Vendor
+// blocks side-by-side. Each block = one bucket's data for that side.
+function writeCombinedBlockSheet(
+  wb: any,
+  inHouseGroups: XlsxBlockGroup[],
+  outVendorGroups: XlsxBlockGroup[],
+  usedNames: Set<string>,
+) {
+  const ws = wb.addWorksheet(uniqueSheetName("Combined", usedNames));
+
+  // Layout: each block occupies its column count, with 1 spacer column between.
+  const SPACER = 1;
+  const blockLayout = (() => {
+    let col = 1;
+    return inHouseGroups.map((g) => {
+      const start = col;
+      const width = g.columns.length;
+      col += width + SPACER;
+      return { start, width };
+    });
+  })();
+  const totalCols = inHouseGroups.reduce((s, g) => s + g.columns.length, 0) +
+    (inHouseGroups.length - 1) * SPACER;
+
+  // Set worksheet column widths from max content across both bands.
+  const allGroups = [...inHouseGroups, ...outVendorGroups];
+  inHouseGroups.forEach((g, gi) => {
+    const { start } = blockLayout[gi];
+    const ihRows = inHouseGroups[gi]?.rows ?? [];
+    const ovRows = outVendorGroups[gi]?.rows ?? [];
+    g.columns.forEach((c, ci) => {
+      const decimals = c.decimals ?? (c.numeric ? 2 : 0);
+      let maxLen = c.label.length;
+      for (const r of [...ihRows, ...ovRows]) {
+        const v = r[c.field];
+        if (v == null) continue;
+        const text = c.numeric
+          ? (toNum(v) ?? "").toLocaleString(undefined, {
+              minimumFractionDigits: decimals,
+              maximumFractionDigits: decimals,
+            })
+          : String(v);
+        if (text.length > maxLen) maxLen = text.length;
+      }
+      ws.getColumn(start + ci).width = Math.min(24, Math.max(10, maxLen + 2));
+    });
+    if (gi < inHouseGroups.length - 1) {
+      ws.getColumn(start + g.columns.length).width = 2;
+    }
+  });
+  void allGroups; // suppress unused warning
+
+  const thin = { style: "thin" as const, color: { argb: "FFD1D5DB" } };
+  const medium = { style: "medium" as const, color: { argb: "FF374151" } };
+  const totalsTop = { style: "thin" as const, color: { argb: "FF9CA3AF" } };
+
+  function applyOuterBorder(
+    r: number, c: number,
+    blockStart: number, blockWidth: number,
+    bandStart: number, bandEnd: number,
+  ) {
+    const cell = ws.getCell(r, c);
+    const existing = (cell.border as any) ?? {};
+    cell.border = {
+      top: r === bandStart ? medium : (existing.top ?? thin),
+      bottom: r === bandEnd ? medium : (existing.bottom ?? thin),
+      left: c === blockStart ? medium : (existing.left ?? thin),
+      right: c === blockStart + blockWidth - 1 ? medium : (existing.right ?? thin),
+    };
+  }
+
+  // Writes one horizontal band (InHouse or OutVendor) starting at `startRow`.
+  // Returns the row number after the last written row.
+  function writeBand(groups: XlsxBlockGroup[], bandLabel: string, startRow: number): number {
+    let rowNum = startRow;
+
+    const maxDataRows = Math.max(0, ...groups.map((g) => g.rows.length));
+    const maxSummaryRows = Math.max(0, ...groups.map((g) => g.summaryRows?.length ?? 0));
+    const hasTotals = groups.some((g) => g.columns.some((c) => c.total));
+    const bandEnd =
+      startRow +
+      2 + // band title + block titles + col headers = 3 rows, indices 0..2
+      maxDataRows +
+      maxSummaryRows +
+      (hasTotals ? 1 : 0) - 1;
+
+    // Band title row (full-width).
+    {
+      const row = ws.getRow(rowNum++);
+      row.height = 22;
+      if (totalCols > 1) ws.mergeCells(rowNum - 1, 1, rowNum - 1, totalCols);
+      const cell = row.getCell(1);
+      cell.value = bandLabel;
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 13 };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF111827" } };
+      cell.alignment = { horizontal: "left", vertical: "middle" };
+    }
+
+    // Per-block title row.
+    {
+      const row = ws.getRow(rowNum++);
+      row.height = 20;
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi];
+        const { start, width } = blockLayout[gi];
+        if (width > 1) ws.mergeCells(rowNum - 1, start, rowNum - 1, start + width - 1);
+        const cell = row.getCell(start);
+        cell.value = g.label;
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+      }
+    }
+
+    // Column header row.
+    {
+      const row = ws.getRow(rowNum++);
+      row.height = 18;
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi];
+        const { start } = blockLayout[gi];
+        for (let ci = 0; ci < g.columns.length; ci++) {
+          const cell = row.getCell(start + ci);
+          cell.value = g.columns[ci].label;
+          cell.font = { bold: true };
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
+          cell.alignment = { horizontal: "center" };
+          cell.border = { top: thin, bottom: medium, left: thin, right: thin };
+        }
+      }
+    }
+
+    // Data rows (fixed height = maxDataRows for alignment across blocks).
+    for (let i = 0; i < maxDataRows; i++) {
+      const row = ws.getRow(rowNum++);
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi];
+        const { start } = blockLayout[gi];
+        const r = g.rows[i];
+        if (!r) continue;
+        for (let ci = 0; ci < g.columns.length; ci++) {
+          const c = g.columns[ci];
+          const cell = row.getCell(start + ci);
+          const v = r[c.field];
+          if (c.numeric) {
+            cell.value = toNum(v);
+            cell.numFmt = numFmt(c.decimals ?? 2);
+            cell.alignment = { horizontal: "right" };
+          } else {
+            cell.value = v == null ? "" : v;
+          }
+          cell.border = { top: thin, bottom: thin, left: thin, right: thin };
+        }
+      }
+    }
+
+    // Summary rows (aligned: same slot index across blocks).
+    for (let i = 0; i < maxSummaryRows; i++) {
+      const row = ws.getRow(rowNum++);
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi];
+        const { start } = blockLayout[gi];
+        const s = (g.summaryRows ?? [])[i];
+        if (!s) continue;
+        for (let ci = 0; ci < g.columns.length; ci++) {
+          const c = g.columns[ci];
+          const cell = row.getCell(start + ci);
+          if (ci === 0) {
+            cell.value = s.label;
+          } else if (c.field in s.values) {
+            cell.value = s.values[c.field];
+            cell.numFmt = numFmt(c.decimals ?? 2);
+            cell.alignment = { horizontal: "right" };
+          }
+          cell.font = { bold: true };
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
+          cell.border = { top: thin, bottom: thin, left: thin, right: thin };
+        }
+      }
+    }
+
+    // Total row.
+    if (hasTotals) {
+      const row = ws.getRow(rowNum++);
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi];
+        const { start } = blockLayout[gi];
+        for (let ci = 0; ci < g.columns.length; ci++) {
+          const c = g.columns[ci];
+          const cell = row.getCell(start + ci);
+          if (ci === 0) {
+            cell.value = "TOTAL";
+          } else if (c.total) {
+            cell.value = g.rows.reduce((s, r) => s + (toNum(r[c.field]) ?? 0), 0);
+            cell.numFmt = numFmt(c.decimals ?? 2);
+            cell.alignment = { horizontal: "right" };
+          }
+          cell.font = { bold: true };
+          cell.border = { top: totalsTop, bottom: thin, left: thin, right: thin };
+        }
+      }
+    }
+
+    // Apply medium outer border around each block.
+    for (let gi = 0; gi < groups.length; gi++) {
+      const g = groups[gi];
+      const { start, width } = blockLayout[gi];
+      for (let r = startRow; r <= bandEnd; r++) {
+        for (let c = start; c < start + width; c++) {
+          applyOuterBorder(r, c, start, width, startRow, bandEnd);
+        }
+      }
+    }
+
+    return rowNum;
+  }
+
+  const afterInHouse = writeBand(inHouseGroups, "IN-HOUSE", 1);
+  writeBand(outVendorGroups, "OUT-VENDOR", afterInHouse + 3);
 }
 
 // Stream a finished workbook to the browser as a .xlsx download.
@@ -276,12 +497,19 @@ export async function exportToXlsx(
 
 // Export a workbook with one styled worksheet per supplied sheet definition
 // (e.g. one sheet per activity). Every sheet gets the same formatting + borders.
-export async function exportToXlsxSheets(filename: string, sheets: XlsxSheet[]) {
+// Pass `combined` to append a block-grid "Combined" sheet with InHouse blocks
+// side-by-side on top and OutVendor blocks side-by-side below.
+export async function exportToXlsxSheets(
+  filename: string,
+  sheets: XlsxSheet[],
+  combined?: { inHouse: XlsxBlockGroup[]; outVendor: XlsxBlockGroup[] },
+) {
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
   wb.created = new Date();
   const used = new Set<string>();
   for (const sheet of sheets) writeSheet(wb, sheet, used);
+  if (combined) writeCombinedBlockSheet(wb, combined.inHouse, combined.outVendor, used);
   await downloadWorkbook(wb, filename);
 }
 

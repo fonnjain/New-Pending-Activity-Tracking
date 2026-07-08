@@ -33,7 +33,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Segmented } from "@/components/ui/segmented";
 import { Boxes, ChevronRight, ChevronDown, Trash2, AlertTriangle, FileSpreadsheet } from "lucide-react";
-import { exportToXlsxSheets, type XlsxSheet, type XlsxSummaryRow } from "@/lib/export";
+import { exportToXlsxSheets, type XlsxSheet, type XlsxSummaryRow, type XlsxBlockGroup } from "@/lib/export";
 
 function mt(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "-";
@@ -707,13 +707,15 @@ export default function InventoryView() {
     return {
       name,
       columns: [...baseColumns, ...dataColumns],
-      rows: [
-        ...projectRows("in_house", inHouse, columns),
-        ...projectRows("out_vendor", outVendor, columns),
-      ],
-      summaryRows: [
-        ...summaryToRows("In-House", computeBucketSummary(inHouse, clampRelease)),
-        ...summaryToRows("Out-Vendor", computeBucketSummary(outVendor, clampRelease)),
+      sections: [
+        {
+          rows: projectRows("in_house", inHouse, columns),
+          summaryRows: summaryToRows("In-House", computeBucketSummary(inHouse, clampRelease)),
+        },
+        {
+          rows: projectRows("out_vendor", outVendor, columns),
+          summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(outVendor, clampRelease)),
+        },
       ],
     };
   };
@@ -736,6 +738,7 @@ export default function InventoryView() {
   const handleExport = () => {
     const filteredManualA = applyJobFilterManual(manualA);
     const filteredManualE = applyJobFilterManual(manualE);
+
     const sheets: XlsxSheet[] = [
       {
         name: "A - " + BUCKET_LABELS.a.slice(0, 28),
@@ -763,10 +766,91 @@ export default function InventoryView() {
         rows: manualBucketRows(filteredManualE, true),
       },
     ];
+
+    // Helper: block columns without the "Side" column (side is the band label).
+    const blockCols = (cols: ColumnDef[]) => [
+      { label: "Project", field: "project" },
+      ...cols.map((c) => ({ label: c.label, field: c.key, numeric: true, decimals: 3, total: true })),
+    ];
+
+    // Combined sheet: InHouse blocks side-by-side on top, OutVendor below.
+    // A/E manual rows filtered by side field; B/C/D use projectRows directly.
+    const aRowsIH = manualBucketRows(filteredManualA, false).filter(
+      (r) => r.side === SIDE_LABELS.in_house,
+    );
+    const aRowsOV = manualBucketRows(filteredManualA, false).filter(
+      (r) => r.side === SIDE_LABELS.out_vendor,
+    );
+    const eRowsIH = manualBucketRows(filteredManualE, true).filter(
+      (r) => r.side === SIDE_LABELS.in_house,
+    );
+    const eRowsOV = manualBucketRows(filteredManualE, true).filter(
+      (r) => r.side === SIDE_LABELS.out_vendor,
+    );
+
+    const aCols: XlsxBlockGroup["columns"] = [
+      { label: "Project", field: "project" },
+      { label: "WO Qty (MT)", field: "woOrderQtyMt", numeric: true, decimals: 3, total: true },
+    ];
+    const eCols: XlsxBlockGroup["columns"] = [
+      { label: "Project", field: "project" },
+      { label: "Release Bal. (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
+      { label: "Fab+Galva (MT)", field: "fabGalvaMt", numeric: true, decimals: 3, total: true },
+      { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
+      { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
+    ];
+
+    const combined = {
+      inHouse: [
+        { label: "A - " + BUCKET_LABELS.a.slice(0, 26), columns: aCols, rows: aRowsIH },
+        {
+          label: "B - Raw Material Incomplete",
+          columns: blockCols(BUCKET_B_COLUMNS),
+          rows: projectRows("in_house", bInHouse, BUCKET_B_COLUMNS),
+          summaryRows: summaryToRows("In-House", computeBucketSummary(bInHouse, false)),
+        },
+        {
+          label: "C - RM Complete",
+          columns: blockCols(BUCKET_CD_COLUMNS),
+          rows: projectRows("in_house", cInHouse, BUCKET_CD_COLUMNS),
+          summaryRows: summaryToRows("In-House", computeBucketSummary(cInHouse, true)),
+        },
+        {
+          label: "D - Dispatch Clearance",
+          columns: blockCols(BUCKET_CD_COLUMNS),
+          rows: projectRows("in_house", dInHouse, BUCKET_CD_COLUMNS),
+          summaryRows: summaryToRows("In-House", computeBucketSummary(dInHouse, true)),
+        },
+        { label: "E - Ready Not Dispatched", columns: eCols, rows: eRowsIH },
+      ] satisfies XlsxBlockGroup[],
+      outVendor: [
+        { label: "A - " + BUCKET_LABELS.a.slice(0, 26), columns: aCols, rows: aRowsOV },
+        {
+          label: "B - Raw Material Incomplete",
+          columns: blockCols(BUCKET_B_COLUMNS),
+          rows: projectRows("out_vendor", bOutVendor, BUCKET_B_COLUMNS),
+          summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(bOutVendor, false)),
+        },
+        {
+          label: "C - RM Complete",
+          columns: blockCols(BUCKET_CD_COLUMNS),
+          rows: projectRows("out_vendor", cOutVendor, BUCKET_CD_COLUMNS),
+          summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(cOutVendor, true)),
+        },
+        {
+          label: "D - Dispatch Clearance",
+          columns: blockCols(BUCKET_CD_COLUMNS),
+          rows: projectRows("out_vendor", dOutVendor, BUCKET_CD_COLUMNS),
+          summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(dOutVendor, true)),
+        },
+        { label: "E - Ready Not Dispatched", columns: eCols, rows: eRowsOV },
+      ] satisfies XlsxBlockGroup[],
+    };
+
     const date = new Date().toISOString().slice(0, 10);
     const baseTag = isCurrentJobs ? "current-jobs" : jobFilter ? jobFilter.replace(/[^\w-]+/g, "-") : "all";
     const tag = selectedProjects !== null ? `${baseTag}-filtered` : baseTag;
-    void exportToXlsxSheets(`inventory_${tag}_${date}.xlsx`, sheets);
+    void exportToXlsxSheets(`inventory_${tag}_${date}.xlsx`, sheets, combined);
   };
 
   return (
