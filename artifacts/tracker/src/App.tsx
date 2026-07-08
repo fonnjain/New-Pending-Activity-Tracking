@@ -50,6 +50,7 @@ function ProductionTracker() {
         <Route path="/computed-fg" component={DataView} />
         <Route path="/order-reconciliation" component={DataView} />
         <Route path="/accumulated-wip" component={DataView} />
+        <Route path="/release-balance" component={DataView} />
         <Route path="/reports" component={ReportsView} />
         <Route path="/thickness" component={DataView} />
         <Route path="/warning-parameters" component={DataView} />
@@ -76,6 +77,7 @@ const LEGACY_TRACKER_PATHS = [
   "/reports",
   "/thickness",
   "/warning-parameters",
+  "/release-balance",
 ];
 
 function Router() {
