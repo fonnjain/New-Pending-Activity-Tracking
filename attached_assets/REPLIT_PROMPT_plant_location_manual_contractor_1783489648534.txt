@@ -1,0 +1,92 @@
+TASK: Extend the Contractor setup (Data page) with a "Plant Location" attribute per
+contractor, and allow users to ADD contractors manually.
+
+=====================================================================
+CONTEXT
+=====================================================================
+VTPL Balance & Activity Tracker. STRICTLY ADDITIVE change. Must NOT alter parsing,
+hashing/dedup, ageing, Activity, qty, or the existing In-house/Out-vendor CLASSIFICATION
+logic. The Contractor setup today (Data page) lists contractors with:
+   Contractor | Type (dropdown) | Out-vendor Tags (Fabrication / Galvanizing) | delete
+Type values include CNC, Sub-contractor, Out-vendor, Unclassified. Out-vendor Tags
+(Fabrication, Galvanizing) apply only when Type = Out-vendor. Keep ALL of this.
+
+Contractors currently appear here because they were seen in uploaded WIP data. We are
+ADDING: (1) a Plant Location attribute on every contractor, and (2) manual add of
+contractors that are not (yet) in any file.
+
+=====================================================================
+1) PLANT LOCATION (new per-contractor attribute)
+=====================================================================
+- Add a "Plant Location" column to the Contractor setup table, rendered as a dropdown
+  on each row, EXACTLY THREE options:
+      "VTPL Unit-1"
+      "VTPL Unit-2"
+      "Unassigned"   (default / none)
+- Default for every existing and newly-seen contractor = "Unassigned".
+- This is METADATA ONLY. It does NOT change the In-house/Out-vendor classification
+  (In-house = CNC OR Sub-contractor OR the hand-assigned unclassified set; else Out-vendor).
+  Do NOT let Plant Location affect any bucket, summary, or classification anywhere.
+- Changing the dropdown persists immediately (same pattern as changing Type today).
+- Plant Location survives re-uploads of WIP/Order Review (it lives on the contractor
+  record, which is already persistent; just add the column).
+
+Schema: add a nullable column to the EXISTING contractor table (the one backing
+contractor_categories / the Contractor setup — do not create a parallel table):
+      plantLocation  text   -- 'unit_1' | 'unit_2' | null(=Unassigned)
+Store the enum value; map to display labels in the UI. Null = Unassigned.
+
+=====================================================================
+2) MANUAL ADD of contractors
+=====================================================================
+- Add an "Add Contractor" control above/at the top of the Contractor setup list.
+- The user provides:
+      Contractor name (free text, required)
+      Type            (dropdown: CNC / Sub-contractor / Out-vendor / Unclassified)
+      Plant Location  (dropdown: VTPL Unit-1 / VTPL Unit-2 / Unassigned)
+  Out-vendor Tags (Fabrication/Galvanizing) become editable only if Type = Out-vendor,
+  matching existing row behaviour; default both unchecked.
+- On add: create a contractor record exactly like an auto-discovered one, so it shows in
+  the list and participates in classification identically.
+- DUPLICATE HANDLING: if the typed name (trimmed, exact match — do NOT fuzzy-merge
+  suffixes like (JW)/GP-2/UNIT-II) already exists, do NOT create a second row; show a
+  gentle inline notice and offer to edit the existing one instead.
+- Manually-added contractors are first-class: editable Type / Plant Location / tags,
+  deletable via the existing delete control, and they PERSIST across uploads.
+- If a manually-added contractor later appears in an uploaded WIP file under the same
+  exact name, it must MATCH the existing record (not duplicate) — the manual entry and
+  the file-seen entry are the same contractor.
+
+=====================================================================
+ENDPOINTS (extend existing contractor endpoints; Zod-validated; Orval-regenerated)
+=====================================================================
+- Extend the existing contractor update endpoint to accept plantLocation.
+- Add a create endpoint for manual entry, e.g.:
+      POST   /contractor-categories        createContractor      (auth required)
+      PATCH  /contractor-categories/{id}    updateContractor      (auth required)  -- now also plantLocation
+  Mirror the naming/auth of the current contractor endpoints; if a single upsert endpoint
+  already exists, extend it rather than adding new ones. Update openapi.yaml + regenerate.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change how In-house/Out-vendor is derived; Plant Location is independent metadata.
+- Do NOT change Type options, Out-vendor Tags behaviour, or delete behaviour.
+- Do NOT fuzzy-merge contractor names; exact-trim match only (suffixes are distinct names).
+- Do NOT create a parallel contractor table; add the column to the existing one.
+- Do NOT make Plant Location required; Unassigned is a valid resting state.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- Every contractor row shows a Plant Location dropdown with Unit-1 / Unit-2 / Unassigned;
+  existing rows default to Unassigned.
+- Setting a row to Unit-1/Unit-2 persists and survives a WIP re-upload.
+- "Add Contractor" lets a user type a name and pick Type + Plant Location (+ tags if
+  Out-vendor); the new contractor appears in the list and classifies like any other.
+- Adding a name that already exists does NOT duplicate; user is pointed to the existing row.
+- A manually-added contractor whose name later appears in WIP matches (no duplicate row).
+- Plant Location has NO effect on buckets/summaries/classification (verify a bucket count
+  is unchanged before/after assigning locations).
+- Report: confirm the plantLocation column exists, its three states, and that the manual
+  add + duplicate guard work.

@@ -124,7 +124,7 @@ export function ContractorSetupContent() {
         data: {
           displayName,
           category,
-          outVendorType: category === "OUT_VENDOR" ? outVendorType : [],
+          outVendorType,
         },
       },
       { onSuccess: invalidate },
@@ -150,13 +150,13 @@ export function ContractorSetupContent() {
     const columns: XlsxColumn[] = [
       { label: "Contractor", field: "contractor" },
       { label: "Type", field: "type" },
-      { label: "Out-vendor Tags", field: "outVendorTags" },
+      { label: "Tags", field: "outVendorTags" },
     ];
     const exportRows = filtered.map((r) => ({
       contractor: r.displayName,
       type: categoryLabel(r.category),
       outVendorTags:
-        r.category === "OUT_VENDOR" && r.outVendorType.length
+        r.outVendorType.length
           ? r.outVendorType.map(outVendorLabel).join(", ")
           : "-",
     }));
@@ -188,7 +188,7 @@ export function ContractorSetupContent() {
 
       <p className="text-sm text-muted-foreground">
         Classify each contractor as CNC, Sub-contractor, or Out-vendor.
-        Out-vendors can be tagged Fabrication and/or Galvanizing. Mappings are
+        Any contractor can be tagged Fabrication and/or Galvanizing. Mappings are
         descriptive only — they never change parsing, ageing, quantities, or the
         contractor names themselves, and are matched on the full contractor name.
       </p>
@@ -238,7 +238,7 @@ export function ContractorSetupContent() {
                   <TableRow>
                     <TableHead>Contractor</TableHead>
                     <TableHead className="w-[200px]">Type</TableHead>
-                    <TableHead className="w-[220px]">Out-vendor Tags</TableHead>
+                    <TableHead className="w-[220px]">Tags</TableHead>
                     <TableHead className="w-[60px]" />
                   </TableRow>
                 </TableHeader>
@@ -268,32 +268,28 @@ export function ContractorSetupContent() {
                         </Select>
                       </TableCell>
                       <TableCell>
-                        {r.category === "OUT_VENDOR" ? (
-                          <div className="flex items-center gap-4">
-                            {OUT_VENDOR_TYPES.map((t) => {
-                              const checked = r.outVendorType.includes(t.value);
-                              return (
-                                <label
-                                  key={t.value}
-                                  className="flex items-center gap-1.5 text-sm cursor-pointer"
-                                >
-                                  <Checkbox
-                                    checked={checked}
-                                    onCheckedChange={(c) => {
-                                      const next = c
-                                        ? Array.from(new Set([...r.outVendorType, t.value]))
-                                        : r.outVendorType.filter((x) => x !== t.value);
-                                      save(r.displayName, r.category, next);
-                                    }}
-                                  />
-                                  {t.label}
-                                </label>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
+                        <div className="flex items-center gap-4">
+                          {OUT_VENDOR_TYPES.map((t) => {
+                            const checked = r.outVendorType.includes(t.value);
+                            return (
+                              <label
+                                key={t.value}
+                                className="flex items-center gap-1.5 text-sm cursor-pointer"
+                              >
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={(c) => {
+                                    const next = c
+                                      ? Array.from(new Set([...r.outVendorType, t.value]))
+                                      : r.outVendorType.filter((x) => x !== t.value);
+                                    save(r.displayName, r.category, next);
+                                  }}
+                                />
+                                {t.label}
+                              </label>
+                            );
+                          })}
+                        </div>
                       </TableCell>
                       <TableCell>
                         {r.mapped && (
