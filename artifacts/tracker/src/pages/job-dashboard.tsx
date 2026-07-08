@@ -431,6 +431,8 @@ function JobDashboardContent() {
         label={primaryLabel}
         records={records.filter((r) => primaryOf(r) === selectedJob)}
         onBack={() => setSelectedJob(null)}
+        headerPhases={headerPhases}
+        orderEntry={orderByJob.get(selectedJob)}
       />
     );
   }
@@ -801,11 +803,15 @@ function JobDetail({
   label,
   records,
   onBack,
+  headerPhases = PROCESS_PHASES,
+  orderEntry,
 }: {
   job: string;
   label: string;
   records: any[];
   onBack: () => void;
+  headerPhases?: typeof PROCESS_PHASES;
+  orderEntry?: { wo: number; rel: number; disp: number };
 }) {
   const jobIsNtlt = records.some((r) => (r.category || "TLT") === "NTLT");
   const isNtlt = jobIsNtlt;
@@ -815,6 +821,11 @@ function JobDetail({
   // marks). NTLT has no MFC concept, so it goes straight to Structure level.
   const [selectedMfc, setSelectedMfc] = useState<string | null>(null);
   const atMfcListLevel = !isNtlt && selectedMfc === null;
+
+  const emptyPhases = () =>
+    Object.fromEntries(
+      PROCESS_PHASES.map((p) => [p.key, { marks: 0, weight: 0 }]),
+    ) as Record<ProcessPhaseKey, { marks: number; weight: number }>;
 
   // Step 1 (TLT only): MFC batch rollups for the whole project. No filters,
   // no marks table -- deliberately just the MFC list per the requested UX.
@@ -829,12 +840,21 @@ function JobDetail({
     return Array.from(groups.entries())
       .map(([batch, recs]) => {
         const aged = recs.filter((r) => r.ageingDays !== null);
+        const phases = emptyPhases();
+        for (const r of recs) {
+          const key = processPhase(r.activity);
+          if (key) {
+            phases[key].marks += 1;
+            phases[key].weight += r.balanceWt;
+          }
+        }
         return {
           batch,
           structures: new Set(recs.map((r) => r.structure).filter(Boolean)).size,
           marks: recs.length,
           qty: recs.reduce((s, r) => s + r.balanceQty, 0),
           weight: recs.reduce((s, r) => s + r.balanceWt, 0),
+          phases,
           avgAge: aged.length
             ? Math.round(aged.reduce((s, r) => s + (r.ageingDays || 0), 0) / aged.length)
             : null,
@@ -843,7 +863,23 @@ function JobDetail({
       .sort((a, b) => a.batch.localeCompare(b.batch));
   }, [records, isNtlt]);
 
+  // Footer totals across all MFC rows.
+  const mfcTotals = useMemo(() => {
+    const phases = emptyPhases();
+    let marks = 0, weight = 0;
+    for (const m of byMfc) {
+      marks += m.marks;
+      weight += m.weight;
+      for (const ph of PROCESS_PHASES) {
+        phases[ph.key].marks += m.phases[ph.key].marks;
+        phases[ph.key].weight += m.phases[ph.key].weight;
+      }
+    }
+    return { marks, weight, phases };
+  }, [byMfc]);
+
   if (atMfcListLevel) {
+    const totalCols = 3 + (orderEntry ? 4 : 0) + headerPhases.length + 3;
     return (
       <div className="space-y-4">
         <div className="flex items-start gap-3">
@@ -870,9 +906,35 @@ function JobDetail({
                   <TableRow>
                     <TableHead>MFC</TableHead>
                     <TableHead className="text-right">Structures</TableHead>
-                    <TableHead className="text-right">Marks</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Wt</TableHead>
+                    {orderEntry && (
+                      <>
+                        <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Work Order Qty</TableHead>
+                        <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Qty</TableHead>
+                        <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Balance</TableHead>
+                        <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Balance</TableHead>
+                      </>
+                    )}
+                    {headerPhases.map((ph) => (
+                      <TableHead key={ph.key} className="text-right align-bottom">
+                        <span className="block whitespace-normal leading-tight">{ph.label}</span>
+                        <span className="block text-[10px] font-normal text-muted-foreground normal-case leading-tight max-w-[180px] ml-auto">
+                          {ph.subLabel
+                            ? `(${ph.subLabel})`
+                            : ph.activities.length
+                              ? `(${ph.activities.join(", ")})`
+                              : "-"}
+                        </span>
+                        <span className="block text-[10px] font-normal text-muted-foreground normal-case">
+                          wt / marks
+                        </span>
+                      </TableHead>
+                    ))}
+                    <TableHead className="text-right align-bottom">
+                      <span className="block whitespace-nowrap">Total</span>
+                      <span className="block text-[10px] font-normal text-muted-foreground normal-case">
+                        wt / marks
+                      </span>
+                    </TableHead>
                     <TableHead className="text-right">Avg Ageing</TableHead>
                     <TableHead className="w-6" />
                   </TableRow>
@@ -886,10 +948,47 @@ function JobDetail({
                     >
                       <TableCell className="font-mono font-medium">{m.batch}</TableCell>
                       <TableCell className="text-right">{m.structures}</TableCell>
-                      <TableCell className="text-right">{m.marks}</TableCell>
-                      <TableCell className="text-right">{m.qty.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{formatWeight(m.weight)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{m.avgAge ?? "-"}</TableCell>
+                      {orderEntry && (
+                        <>
+                          <TableCell className="text-right tabular-nums">{formatWeight(orderEntry.wo * 1000)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatWeight(orderEntry.disp * 1000)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatWeight((orderEntry.wo - orderEntry.disp) * 1000)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatWeight((orderEntry.wo - orderEntry.rel) * 1000)}</TableCell>
+                        </>
+                      )}
+                      {PROCESS_PHASES.map((ph) => {
+                        if (ph.key === "dispatch") {
+                          return (
+                            <TableCell key={ph.key} className="text-right tabular-nums">
+                              <span className="text-muted-foreground">-</span>
+                            </TableCell>
+                          );
+                        }
+                        const cell = m.phases[ph.key];
+                        return (
+                          <TableCell key={ph.key} className="text-right tabular-nums">
+                            {cell.marks > 0 ? (
+                              <>
+                                <span className="font-bold">{formatWeight(cell.weight)}</span>
+                                <span className="block text-xs text-muted-foreground">
+                                  {cell.marks} marks
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                        );
+                      })}
+                      <TableCell className="text-right tabular-nums bg-muted/30">
+                        <span className="font-bold">{formatWeight(m.weight)}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {m.marks} marks
+                        </span>
+                      </TableCell>
+                      <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(m.avgAge)}`}>
+                        {m.avgAge !== null ? `${m.avgAge}d` : "-"}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">
                         <ChevronRight className="w-4 h-4" />
                       </TableCell>
@@ -897,12 +996,61 @@ function JobDetail({
                   ))}
                   {byMfc.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-4 text-muted-foreground">
+                      <TableCell colSpan={totalCols} className="text-center py-4 text-muted-foreground">
                         No MFC batches found for this {label.toLowerCase()}.
                       </TableCell>
                     </TableRow>
                   )}
                 </TableBody>
+                {byMfc.length > 0 && (
+                  <TableFooter>
+                    <TableRow className="border-t-2">
+                      <TableCell className="font-bold uppercase tracking-wider text-xs">Total</TableCell>
+                      <TableCell />
+                      {orderEntry && (
+                        <>
+                          <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderEntry.wo * 1000)}</TableCell>
+                          <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderEntry.disp * 1000)}</TableCell>
+                          <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderEntry.wo - orderEntry.disp) * 1000)}</TableCell>
+                          <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderEntry.wo - orderEntry.rel) * 1000)}</TableCell>
+                        </>
+                      )}
+                      {PROCESS_PHASES.map((ph) => {
+                        if (ph.key === "dispatch") {
+                          return (
+                            <TableCell key={ph.key} className="text-right tabular-nums">
+                              <span className="text-muted-foreground">-</span>
+                            </TableCell>
+                          );
+                        }
+                        const marks = mfcTotals.phases[ph.key].marks;
+                        const weight = mfcTotals.phases[ph.key].weight;
+                        return (
+                          <TableCell key={ph.key} className="text-right tabular-nums">
+                            {marks > 0 ? (
+                              <>
+                                <span className="font-bold">{formatWeight(weight)}</span>
+                                <span className="block text-xs text-muted-foreground">
+                                  {marks} marks
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                        );
+                      })}
+                      <TableCell className="text-right tabular-nums bg-muted/50">
+                        <span className="font-bold">{formatWeight(mfcTotals.weight)}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {mfcTotals.marks} marks
+                        </span>
+                      </TableCell>
+                      <TableCell />
+                      <TableCell />
+                    </TableRow>
+                  </TableFooter>
+                )}
               </Table>
             </div>
           </CardContent>
