@@ -18,6 +18,7 @@ export const contractorCategoriesTable = pgTable("contractor_categories", {
     .$type<string[]>()
     .notNull()
     .default([]),
+  plantLocation: text("plant_location"),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

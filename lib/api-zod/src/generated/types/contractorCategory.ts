@@ -7,6 +7,7 @@
  */
 import type { ContractorCategoryCategory } from './contractorCategoryCategory';
 import type { ContractorCategoryOutVendorTypeItem } from './contractorCategoryOutVendorTypeItem';
+import type { ContractorCategoryPlantLocation } from './contractorCategoryPlantLocation';
 
 export interface ContractorCategory {
   /** Normalized contractor name (join key). */
@@ -17,5 +18,10 @@ export interface ContractorCategory {
   category: ContractorCategoryCategory;
   /** FAB/GALVA tags (only meaningful when category=OUT_VENDOR). */
   outVendorType: ContractorCategoryOutVendorTypeItem[];
+  /**
+     * Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, null=Unassigned). Display metadata only.
+     * @nullable
+     */
+  plantLocation?: ContractorCategoryPlantLocation;
   updatedAt?: string;
 }

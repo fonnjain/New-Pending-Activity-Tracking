@@ -12,9 +12,12 @@ import { useTracker } from "@/lib/store";
 import {
   CONTRACTOR_CATEGORIES,
   OUT_VENDOR_TYPES,
+  PLANT_LOCATION_OPTIONS,
   normalizeContractorName,
+  plantLocationLabel,
   type ContractorCategory,
   type OutVendorType,
+  type PlantLocation,
 } from "@workspace/domain";
 import { LoginGate, LogoutButton } from "@/components/login-gate";
 import { exportToXlsx, type XlsxColumn } from "@/lib/export";
@@ -37,13 +40,14 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Users, Trash2, Search, FileSpreadsheet } from "lucide-react";
+import { Users, Trash2, Search, FileSpreadsheet, Plus } from "lucide-react";
 
 interface RowState {
   displayName: string;
   category: ContractorCategory;
   outVendorType: OutVendorType[];
-  mapped: boolean; // has a saved overlay row
+  plantLocation: PlantLocation | null;
+  mapped: boolean;
 }
 
 export default function ContractorSetupView() {
@@ -58,6 +62,13 @@ export function ContractorSetupContent() {
   const { selectedImportId } = useTracker();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+
+  // "Add Contractor" form state
+  const [addName, setAddName] = useState("");
+  const [addCategory, setAddCategory] = useState<ContractorCategory>("UNCLASSIFIED");
+  const [addPlantLocation, setAddPlantLocation] = useState<PlantLocation | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
 
   const { data: mappings } = useListContractorCategories({
     query: { queryKey: getListContractorCategoriesQueryKey() },
@@ -91,6 +102,7 @@ export function ContractorSetupContent() {
           displayName: name,
           category: "UNCLASSIFIED",
           outVendorType: [],
+          plantLocation: null,
           mapped: false,
         });
       }
@@ -100,6 +112,7 @@ export function ContractorSetupContent() {
         displayName: m.displayName,
         category: m.category as ContractorCategory,
         outVendorType: (m.outVendorType ?? []) as OutVendorType[],
+        plantLocation: (m.plantLocation as PlantLocation | null) ?? null,
         mapped: true,
       });
     }
@@ -118,6 +131,7 @@ export function ContractorSetupContent() {
     displayName: string,
     category: ContractorCategory,
     outVendorType: OutVendorType[],
+    plantLocation: PlantLocation | null,
   ) => {
     upsert.mutate(
       {
@@ -125,6 +139,7 @@ export function ContractorSetupContent() {
           displayName,
           category,
           outVendorType,
+          plantLocation: plantLocation ?? null,
         },
       },
       { onSuccess: invalidate },
@@ -151,6 +166,7 @@ export function ContractorSetupContent() {
       { label: "Contractor", field: "contractor" },
       { label: "Type", field: "type" },
       { label: "Tags", field: "outVendorTags" },
+      { label: "Plant Location", field: "plantLocation" },
     ];
     const exportRows = filtered.map((r) => ({
       contractor: r.displayName,
@@ -159,10 +175,33 @@ export function ContractorSetupContent() {
         r.outVendorType.length
           ? r.outVendorType.map(outVendorLabel).join(", ")
           : "-",
+      plantLocation: plantLocationLabel(r.plantLocation),
     }));
     exportToXlsx("contractor-setup.xlsx", columns, exportRows, {
       sheetName: "Contractor Setup",
     });
+  };
+
+  const handleAdd = () => {
+    const name = addName.trim();
+    if (!name) {
+      setAddError("Contractor name is required.");
+      return;
+    }
+    const key = normalizeContractorName(name);
+    const existing = rows.find((r) => r.key === key);
+    if (existing) {
+      setAddError(
+        `"${existing.displayName}" already exists. Edit it in the table below.`,
+      );
+      return;
+    }
+    save(name, addCategory, [], addPlantLocation);
+    setAddName("");
+    setAddCategory("UNCLASSIFIED");
+    setAddPlantLocation(null);
+    setAddError(null);
+    setAddOpen(false);
   };
 
   return (
@@ -188,8 +227,8 @@ export function ContractorSetupContent() {
 
       <p className="text-sm text-muted-foreground">
         Classify each contractor as CNC, Sub-contractor, or Out-vendor.
-        Any contractor can be tagged Fabrication and/or Galvanizing. Mappings are
-        descriptive only — they never change parsing, ageing, quantities, or the
+        Any contractor can be tagged Fabrication and/or Galvanizing and assigned a Plant Location.
+        Mappings are descriptive only — they never change parsing, ageing, quantities, or the
         contractor names themselves, and are matched on the full contractor name.
       </p>
 
@@ -207,6 +246,100 @@ export function ContractorSetupContent() {
           </Card>
         ))}
       </div>
+
+      {/* Add Contractor */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+              Add Contractor
+            </CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setAddOpen((o) => !o);
+                setAddError(null);
+              }}
+            >
+              <Plus className="w-4 h-4 mr-1.5" />
+              {addOpen ? "Cancel" : "Add"}
+            </Button>
+          </div>
+        </CardHeader>
+        {addOpen && (
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-1">
+                <label className="text-xs font-semibold text-muted-foreground uppercase mb-1 block">
+                  Contractor Name
+                </label>
+                <Input
+                  value={addName}
+                  onChange={(e) => {
+                    setAddName(e.target.value);
+                    setAddError(null);
+                  }}
+                  placeholder="Enter contractor name..."
+                  onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase mb-1 block">
+                  Type
+                </label>
+                <Select
+                  value={addCategory}
+                  onValueChange={(v) => setAddCategory(v as ContractorCategory)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CONTRACTOR_CATEGORIES.map((c) => (
+                      <SelectItem key={c.value} value={c.value}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase mb-1 block">
+                  Plant Location
+                </label>
+                <Select
+                  value={addPlantLocation ?? "__unassigned__"}
+                  onValueChange={(v) =>
+                    setAddPlantLocation(v === "__unassigned__" ? null : (v as PlantLocation))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PLANT_LOCATION_OPTIONS.map((o) => (
+                      <SelectItem
+                        key={o.value ?? "__unassigned__"}
+                        value={o.value ?? "__unassigned__"}
+                      >
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {addError && (
+              <p className="text-sm text-destructive">{addError}</p>
+            )}
+            <Button size="sm" onClick={handleAdd} disabled={upsert.isPending}>
+              <Plus className="w-4 h-4 mr-1.5" />
+              Add Contractor
+            </Button>
+          </CardContent>
+        )}
+      </Card>
 
       <Card>
         <CardHeader>
@@ -228,7 +361,7 @@ export function ContractorSetupContent() {
           {filtered.length === 0 ? (
             <div className="text-center p-8 text-muted-foreground text-sm">
               {rows.length === 0
-                ? "No contractors found. Upload an import to populate the list, or out-vendor mappings will appear once seeded."
+                ? "No contractors found. Upload an import to populate the list, or use Add Contractor above."
                 : "No contractors match your search."}
             </div>
           ) : (
@@ -237,8 +370,9 @@ export function ContractorSetupContent() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Contractor</TableHead>
-                    <TableHead className="w-[200px]">Type</TableHead>
+                    <TableHead className="w-[180px]">Type</TableHead>
                     <TableHead className="w-[220px]">Tags</TableHead>
+                    <TableHead className="w-[180px]">Plant Location</TableHead>
                     <TableHead className="w-[60px]" />
                   </TableRow>
                 </TableHeader>
@@ -252,7 +386,7 @@ export function ContractorSetupContent() {
                         <Select
                           value={r.category}
                           onValueChange={(v) =>
-                            save(r.displayName, v as ContractorCategory, r.outVendorType)
+                            save(r.displayName, v as ContractorCategory, r.outVendorType, r.plantLocation)
                           }
                         >
                           <SelectTrigger className="h-8">
@@ -282,7 +416,7 @@ export function ContractorSetupContent() {
                                     const next = c
                                       ? Array.from(new Set([...r.outVendorType, t.value]))
                                       : r.outVendorType.filter((x) => x !== t.value);
-                                    save(r.displayName, r.category, next);
+                                    save(r.displayName, r.category, next, r.plantLocation);
                                   }}
                                 />
                                 {t.label}
@@ -290,6 +424,33 @@ export function ContractorSetupContent() {
                             );
                           })}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={r.plantLocation ?? "__unassigned__"}
+                          onValueChange={(v) =>
+                            save(
+                              r.displayName,
+                              r.category,
+                              r.outVendorType,
+                              v === "__unassigned__" ? null : (v as PlantLocation),
+                            )
+                          }
+                        >
+                          <SelectTrigger className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PLANT_LOCATION_OPTIONS.map((o) => (
+                              <SelectItem
+                                key={o.value ?? "__unassigned__"}
+                                value={o.value ?? "__unassigned__"}
+                              >
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell>
                         {r.mapped && (

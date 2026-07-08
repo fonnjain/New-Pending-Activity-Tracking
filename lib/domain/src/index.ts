@@ -406,6 +406,24 @@ export function isOutVendorType(v: unknown): v is OutVendorType {
   return v === "FAB" || v === "GALVA";
 }
 
+// --- Plant Location (per-contractor metadata, display-only) -------------------
+// Purely descriptive; NEVER affects classification, buckets, or ageing.
+export type PlantLocation = "unit_1" | "unit_2";
+
+export const PLANT_LOCATION_OPTIONS: { value: PlantLocation | null; label: string }[] = [
+  { value: null, label: "Unassigned" },
+  { value: "unit_1", label: "VTPL Unit-1" },
+  { value: "unit_2", label: "VTPL Unit-2" },
+];
+
+export function isPlantLocation(v: unknown): v is PlantLocation {
+  return v === "unit_1" || v === "unit_2";
+}
+
+export function plantLocationLabel(v: string | null | undefined): string {
+  return PLANT_LOCATION_OPTIONS.find((o) => o.value === v)?.label ?? "Unassigned";
+}
+
 // --- "Fabrication Load for TLT" report (display/planning overlay only) ---------
 // Two sections (work AT an operation = operational; work BEFORE it = inhand),
 // five load columns each, and a per-row Priority (P1..P10). These constants are

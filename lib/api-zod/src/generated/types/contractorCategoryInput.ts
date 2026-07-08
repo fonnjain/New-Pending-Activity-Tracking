@@ -7,9 +7,15 @@
  */
 import type { ContractorCategoryInputCategory } from './contractorCategoryInputCategory';
 import type { ContractorCategoryInputOutVendorTypeItem } from './contractorCategoryInputOutVendorTypeItem';
+import type { ContractorCategoryInputPlantLocation } from './contractorCategoryInputPlantLocation';
 
 export interface ContractorCategoryInput {
   displayName: string;
   category: ContractorCategoryInputCategory;
   outVendorType?: ContractorCategoryInputOutVendorTypeItem[];
+  /**
+     * Plant location metadata (null = Unassigned).
+     * @nullable
+     */
+  plantLocation?: ContractorCategoryInputPlantLocation;
 }

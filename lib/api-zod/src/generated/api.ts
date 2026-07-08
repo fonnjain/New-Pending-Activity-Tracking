@@ -758,6 +758,7 @@ export const ListContractorCategoriesResponseItem = zod.object({
   "displayName": zod.string().describe('Contractor name as last seen\/entered (for display).'),
   "category": zod.enum(['CNC', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']).describe('Contractor sub-category.'),
   "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).describe('FAB\/GALVA tags (only meaningful when category=OUT_VENDOR).'),
+  "plantLocation": zod.union([zod.literal('unit_1'),zod.literal('unit_2'),zod.literal(null)]).nullish().describe('Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, null=Unassigned). Display metadata only.'),
   "updatedAt": zod.string().optional()
 })
 export const ListContractorCategoriesResponse = zod.array(ListContractorCategoriesResponseItem)
@@ -771,7 +772,8 @@ export const ListContractorCategoriesResponse = zod.array(ListContractorCategori
 export const UpsertContractorCategoryBody = zod.object({
   "displayName": zod.string(),
   "category": zod.enum(['CNC', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']),
-  "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).optional()
+  "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).optional(),
+  "plantLocation": zod.union([zod.literal('unit_1'),zod.literal('unit_2'),zod.literal(null)]).nullish().describe('Plant location metadata (null = Unassigned).')
 })
 
 export const UpsertContractorCategoryResponse = zod.object({
@@ -779,6 +781,7 @@ export const UpsertContractorCategoryResponse = zod.object({
   "displayName": zod.string().describe('Contractor name as last seen\/entered (for display).'),
   "category": zod.enum(['CNC', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']).describe('Contractor sub-category.'),
   "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).describe('FAB\/GALVA tags (only meaningful when category=OUT_VENDOR).'),
+  "plantLocation": zod.union([zod.literal('unit_1'),zod.literal('unit_2'),zod.literal(null)]).nullish().describe('Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, null=Unassigned). Display metadata only.'),
   "updatedAt": zod.string().optional()
 })
 

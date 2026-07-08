@@ -852,6 +852,18 @@ export const ContractorCategoryOutVendorTypeItem = {
   GALVA: 'GALVA',
 } as const;
 
+/**
+ * Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, null=Unassigned). Display metadata only.
+ * @nullable
+ */
+export type ContractorCategoryPlantLocation = typeof ContractorCategoryPlantLocation[keyof typeof ContractorCategoryPlantLocation] | null;
+
+
+export const ContractorCategoryPlantLocation = {
+  unit_1: 'unit_1',
+  unit_2: 'unit_2',
+} as const;
+
 export interface ContractorCategory {
   /** Normalized contractor name (join key). */
   nameKey: string;
@@ -861,6 +873,11 @@ export interface ContractorCategory {
   category: ContractorCategoryCategory;
   /** FAB/GALVA tags (only meaningful when category=OUT_VENDOR). */
   outVendorType: ContractorCategoryOutVendorTypeItem[];
+  /**
+     * Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, null=Unassigned). Display metadata only.
+     * @nullable
+     */
+  plantLocation?: ContractorCategoryPlantLocation;
   updatedAt?: string;
 }
 
@@ -882,10 +899,27 @@ export const ContractorCategoryInputOutVendorTypeItem = {
   GALVA: 'GALVA',
 } as const;
 
+/**
+ * Plant location metadata (null = Unassigned).
+ * @nullable
+ */
+export type ContractorCategoryInputPlantLocation = typeof ContractorCategoryInputPlantLocation[keyof typeof ContractorCategoryInputPlantLocation] | null;
+
+
+export const ContractorCategoryInputPlantLocation = {
+  unit_1: 'unit_1',
+  unit_2: 'unit_2',
+} as const;
+
 export interface ContractorCategoryInput {
   displayName: string;
   category: ContractorCategoryInputCategory;
   outVendorType?: ContractorCategoryInputOutVendorTypeItem[];
+  /**
+     * Plant location metadata (null = Unassigned).
+     * @nullable
+     */
+  plantLocation?: ContractorCategoryInputPlantLocation;
 }
 
 export type FabricationPrioritySection = typeof FabricationPrioritySection[keyof typeof FabricationPrioritySection];

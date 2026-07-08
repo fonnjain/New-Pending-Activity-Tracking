@@ -2387,6 +2387,10 @@ components:
             type: string
             enum: [FAB, GALVA]
           description: FAB/GALVA tags (only meaningful when category=OUT_VENDOR).
+        plantLocation:
+          type: ["string", "null"]
+          enum: [unit_1, unit_2, null]
+          description: Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, null=Unassigned). Display metadata only.
         updatedAt:
           type: string
       required:
@@ -2407,6 +2411,10 @@ components:
           items:
             type: string
             enum: [FAB, GALVA]
+        plantLocation:
+          type: ["string", "null"]
+          enum: [unit_1, unit_2, null]
+          description: Plant location metadata (null = Unassigned).
       required:
         - displayName
         - category

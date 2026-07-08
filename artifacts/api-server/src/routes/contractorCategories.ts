@@ -5,6 +5,7 @@ import {
   normalizeContractorName,
   isContractorCategory,
   isOutVendorType,
+  isPlantLocation,
 } from "@workspace/domain";
 import { UpsertContractorCategoryBody } from "@workspace/api-zod";
 import { requireAuth } from "./auth";
@@ -41,11 +42,8 @@ router.put(
       res.status(400).json({ error: "invalid category" });
       return;
     }
-    // Out-vendor tags only meaningful for OUT_VENDOR; drop them otherwise.
-    const outVendorType =
-      parsed.data.category === "OUT_VENDOR"
-        ? (parsed.data.outVendorType ?? []).filter(isOutVendorType)
-        : [];
+    const outVendorType = (parsed.data.outVendorType ?? []).filter(isOutVendorType);
+    const plantLocation = isPlantLocation(parsed.data.plantLocation) ? parsed.data.plantLocation : null;
     const [row] = await db
       .insert(contractorCategoriesTable)
       .values({
@@ -53,6 +51,7 @@ router.put(
         displayName,
         category: parsed.data.category,
         outVendorType,
+        plantLocation,
       })
       .onConflictDoUpdate({
         target: contractorCategoriesTable.nameKey,
@@ -60,6 +59,7 @@ router.put(
           displayName,
           category: parsed.data.category,
           outVendorType,
+          plantLocation,
           updatedAt: new Date(),
         },
       })
