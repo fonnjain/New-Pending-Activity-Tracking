@@ -72,6 +72,7 @@ import {
   exportToXlsxSheets,
   exportToXlsxBlockGrid,
   type XlsxColumn,
+  type XlsxSection,
   type XlsxSummaryRow,
   type XlsxGridSheet,
   type XlsxGridBlock,
@@ -2097,54 +2098,56 @@ function FabCompletionReport() {
 
   function handleExportExcel() {
     const date = new Date().toISOString().slice(0, 10);
-    // Summary sheet: flat rows already sorted server-side (BOM→SubType→Project),
-    // with per-sub-type-group subtotal rows inserted after each sub-group, then
-    // per-BOM-label total rows.
-    const summaryXlsRows: FabricationProjectCompletionRow[] = [];
-    const summaryXlsSummaryRows: XlsxSummaryRow[] = [];
+
+    const subtotalValues = (s: { releaseBalanceCalcMt: number; assignmentBalanceCalcMt: number; cuttingBalanceMt: number; qualityCheckBalanceMt: number }) => ({
+      releaseBalanceCalcMt: s.releaseBalanceCalcMt,
+      assignmentBalanceCalcMt: s.assignmentBalanceCalcMt,
+      cuttingBalanceMt: s.cuttingBalanceMt,
+      qualityCheckBalanceMt: s.qualityCheckBalanceMt,
+    });
+
+    // Summary sheet: one section per sub-group. Each section's summaryRows
+    // contains the sub-type subtotal immediately after its rows, and the last
+    // sub-group of each BOM label also carries the BOM-level total — so every
+    // subtotal/total appears directly below the rows it summarises.
+    const summarySections: XlsxSection[] = [];
     for (const bom of bomGroups) {
-      for (const sg of bom.subGroups) {
-        summaryXlsRows.push(...sg.rows);
-        summaryXlsSummaryRows.push({
-          label: `${bom.label} / ${sg.subType} Subtotal`,
-          values: {
-            releaseBalanceCalcMt: sg.subtotal.releaseBalanceCalcMt,
-            assignmentBalanceCalcMt: sg.subtotal.assignmentBalanceCalcMt,
-            cuttingBalanceMt: sg.subtotal.cuttingBalanceMt,
-            qualityCheckBalanceMt: sg.subtotal.qualityCheckBalanceMt,
-          },
+      bom.subGroups.forEach((sg, si) => {
+        const isLast = si === bom.subGroups.length - 1;
+        summarySections.push({
+          rows: sg.rows,
+          summaryRows: [
+            {
+              label: `${bom.label} / ${sg.subType} Subtotal`,
+              values: subtotalValues(sg.subtotal),
+              level: "subtotal" as const,
+            },
+            ...(isLast
+              ? [{ label: `${bom.label} Total`, values: subtotalValues(bom.subtotal), level: "total" as const }]
+              : []),
+          ],
         });
-      }
-      summaryXlsSummaryRows.push({
-        label: `${bom.label} Total`,
-        values: {
-          releaseBalanceCalcMt: bom.subtotal.releaseBalanceCalcMt,
-          assignmentBalanceCalcMt: bom.subtotal.assignmentBalanceCalcMt,
-          cuttingBalanceMt: bom.subtotal.cuttingBalanceMt,
-          qualityCheckBalanceMt: bom.subtotal.qualityCheckBalanceMt,
-        },
       });
     }
-    // Per-BOM-label sheets (rows for that label, sub-type subtotals).
-    const bomSheets = bomGroups.map((bom) => {
-      const sheetRows: FabricationProjectCompletionRow[] = [];
-      const sheetSummaryRows: XlsxSummaryRow[] = [];
-      for (const sg of bom.subGroups) {
-        sheetRows.push(...sg.rows);
-        sheetSummaryRows.push({
-          label: `${sg.subType} Subtotal`,
-          values: {
-            releaseBalanceCalcMt: sg.subtotal.releaseBalanceCalcMt,
-            assignmentBalanceCalcMt: sg.subtotal.assignmentBalanceCalcMt,
-            cuttingBalanceMt: sg.subtotal.cuttingBalanceMt,
-            qualityCheckBalanceMt: sg.subtotal.qualityCheckBalanceMt,
+
+    // Per-BOM-label sheets: one section per sub-group with its subtotal inline.
+    const bomSheets = bomGroups.map((bom) => ({
+      name: bom.label,
+      columns: FAB_COMP_COLUMNS,
+      sections: bom.subGroups.map((sg) => ({
+        rows: sg.rows,
+        summaryRows: [
+          {
+            label: `${sg.subType} Subtotal`,
+            values: subtotalValues(sg.subtotal),
+            level: "subtotal" as const,
           },
-        });
-      }
-      return { name: bom.label, columns: FAB_COMP_COLUMNS, rows: sheetRows, summaryRows: sheetSummaryRows };
-    });
+        ],
+      })),
+    }));
+
     exportToXlsxSheets(`fab_completion_tlt_${date}.xlsx`, [
-      { name: "Summary", columns: FAB_COMP_COLUMNS, rows: summaryXlsRows, summaryRows: summaryXlsSummaryRows },
+      { name: "Summary", columns: FAB_COMP_COLUMNS, sections: summarySections },
       ...bomSheets,
     ]);
   }

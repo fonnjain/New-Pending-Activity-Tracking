@@ -73,6 +73,10 @@ export type XlsxColumn = {
 export type XlsxSummaryRow = {
   label: string;
   values: Record<string, number>;
+  // "subtotal" = sub-group row (medium dark border + light fill);
+  // "total" = top-level group total (heavy border + slightly darker fill).
+  // Omit for a plain bold section heading (empty values row).
+  level?: "subtotal" | "total";
 };
 
 function numFmt(decimals: number): string {
@@ -172,6 +176,9 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
     };
   });
 
+  // Track summary row numbers → level so borders/fills can differ from data rows.
+  const summaryRowLevel = new Map<number, "subtotal" | "total">();
+
   // Write each section: data rows then that section's summary rows.
   for (const section of sections) {
     for (const r of section.rows) {
@@ -189,10 +196,13 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
         else if (c.field in s.values) obj[c.field] = s.values[c.field];
       });
       const row = ws.addRow(obj);
-      for (let c = 1; c <= columns.length; c++) {
-        const cell = row.getCell(c);
+      const level = s.level;
+      if (level) summaryRowLevel.set(row.number as number, level);
+      const fillColor = level === "total" ? "FFE5E7EB" : "FFF3F4F6";
+      for (let ci = 1; ci <= columns.length; ci++) {
+        const cell = row.getCell(ci);
         cell.font = { bold: true };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fillColor } };
       }
     }
   }
@@ -218,19 +228,25 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
     totalRow.eachCell((cell: any) => { cell.font = { bold: true }; });
   }
 
-  // Grid borders.
-  const thin = { style: "thin" as const, color: { argb: "FFD1D5DB" } };
+  // Grid borders — data rows get light borders; summary rows get level-aware
+  // darker borders so major category rows visually stand out.
+  const thin      = { style: "thin"   as const, color: { argb: "FFD1D5DB" } };
+  const medDark   = { style: "medium" as const, color: { argb: "FF6B7280" } };
+  const heavy     = { style: "medium" as const, color: { argb: "FF111827" } };
   const headerBottom = { style: "thin" as const, color: { argb: "FF111827" } };
-  const totalsTop = { style: "thin" as const, color: { argb: "FF9CA3AF" } };
+  const totalsTop    = { style: "thin" as const, color: { argb: "FF9CA3AF" } };
   const totalsRowNum = hasTotals && allRows.length ? ws.rowCount : -1;
+
   for (let r = 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
+    const level = summaryRowLevel.get(r);
+    const side = level === "total" ? heavy : level === "subtotal" ? medDark : thin;
     for (let c = 1; c <= columns.length; c++) {
       row.getCell(c).border = {
-        top: r === totalsRowNum ? totalsTop : thin,
-        bottom: r === 1 ? headerBottom : thin,
-        left: thin,
-        right: thin,
+        top:    r === totalsRowNum ? totalsTop : (r === 1 ? thin : side),
+        bottom: r === 1 ? headerBottom : side,
+        left:   side,
+        right:  side,
       };
     }
   }
