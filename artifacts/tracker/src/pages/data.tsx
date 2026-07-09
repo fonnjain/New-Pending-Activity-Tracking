@@ -1,6 +1,6 @@
 import { useMemo, useState, Fragment } from "react";
 import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetAccumulatedWip, getGetAccumulatedWipQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow } from "@workspace/api-client-react";
-import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
+import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
 import { contractorCategoryLabel } from "@workspace/domain";
@@ -656,7 +656,12 @@ function AccumulatedWipContent() {
   const { data: order } = useGetOrderStatus({ query: { queryKey: getGetOrderStatusQueryKey() } });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { filters } = useTracker();
-  const activeJob = filters.job && filters.job !== CURRENT_JOBS_FILTER_VALUE ? filters.job : null;
+  const activeJobSet = useMemo(() => {
+    if (filters.job === MULTI_JOBS_FILTER_VALUE)
+      return filters.selectedJobs.length > 0 ? new Set(filters.selectedJobs) : null;
+    if (filters.job && filters.job !== CURRENT_JOBS_FILTER_VALUE) return new Set([filters.job]);
+    return null;
+  }, [filters.job, filters.selectedJobs]);
 
   const byProject = useMemo(() => data?.byProject ?? [], [data]);
   const byStructure = useMemo(() => data?.byStructure ?? [], [data]);
@@ -690,8 +695,8 @@ function AccumulatedWipContent() {
       m.set(k, e);
     }
     const all = Array.from(m.values()).sort((a, b) => a.project.localeCompare(b.project) || a.structure.localeCompare(b.structure));
-    return activeJob ? all.filter((r) => r.project === activeJob) : all;
-  }, [byStructure, order, activeJob]);
+    return activeJobSet ? all.filter((r) => activeJobSet.has(r.project ?? "")) : all;
+  }, [byStructure, order, activeJobSet]);
 
   // Group structures by project for expand/collapse
   const structuresByProject = useMemo(() => {
@@ -725,8 +730,8 @@ function AccumulatedWipContent() {
       m.set(r.project, cur);
     }
     const all = Array.from(m.values()).sort((a, b) => a.project.localeCompare(b.project));
-    return activeJob ? all.filter((r) => r.project === activeJob) : all;
-  }, [byProject, order, activeJob]);
+    return activeJobSet ? all.filter((r) => activeJobSet.has(r.project ?? "")) : all;
+  }, [byProject, order, activeJobSet]);
 
   // Grand totals across all project rows
   const totals = useMemo(() => projectRows.reduce(
@@ -1011,21 +1016,26 @@ function ReleaseBalanceContent() {
     query: { queryKey: getGetReleaseBalanceQueryKey() },
   });
   const { filters } = useTracker();
-  const activeJob = filters.job && filters.job !== CURRENT_JOBS_FILTER_VALUE ? filters.job : null;
+  const activeJobSet = useMemo(() => {
+    if (filters.job === MULTI_JOBS_FILTER_VALUE)
+      return filters.selectedJobs.length > 0 ? new Set(filters.selectedJobs) : null;
+    if (filters.job && filters.job !== CURRENT_JOBS_FILTER_VALUE) return new Set([filters.job]);
+    return null;
+  }, [filters.job, filters.selectedJobs]);
   const allRows = useMemo(() => data?.rows ?? [], [data]);
   const rows = useMemo(
-    () => (activeJob ? allRows.filter((r) => r.project === activeJob) : allRows),
-    [allRows, activeJob],
+    () => (activeJobSet ? allRows.filter((r) => activeJobSet.has(r.project ?? "")) : allRows),
+    [allRows, activeJobSet],
   );
   const totals = useMemo(() => {
-    if (!activeJob) return data?.totals;
+    if (!activeJobSet) return data?.totals;
     return {
       releaseBalanceComputedMt: rows.reduce((s, r) => s + (r.releaseBalanceComputedMt ?? 0), 0),
       releaseBalanceOrderReviewMt: rows.reduce((s, r) => s + (r.releaseBalanceOrderReviewMt ?? 0), 0),
       diffMt: rows.reduce((s, r) => s + (r.diffMt ?? 0), 0),
       rowCount: rows.length,
     };
-  }, [activeJob, data, rows]);
+  }, [activeJobSet, data, rows]);
 
   const handleExport = () => {
     exportToXlsx(
@@ -1393,21 +1403,26 @@ function OrderReconciliationContent() {
     query: { queryKey: getGetOrderStatusQueryKey() },
   });
   const { filters } = useTracker();
-  const activeJob = filters.job && filters.job !== CURRENT_JOBS_FILTER_VALUE ? filters.job : null;
+  const activeJobSet = useMemo(() => {
+    if (filters.job === MULTI_JOBS_FILTER_VALUE)
+      return filters.selectedJobs.length > 0 ? new Set(filters.selectedJobs) : null;
+    if (filters.job && filters.job !== CURRENT_JOBS_FILTER_VALUE) return new Set([filters.job]);
+    return null;
+  }, [filters.job, filters.selectedJobs]);
 
   const recon = order?.reconciliation;
   const allReconRows = recon?.rows ?? [];
   const rows = useMemo(
-    () => (activeJob ? allReconRows.filter((r) => r.project === activeJob) : allReconRows),
-    [allReconRows, activeJob],
+    () => (activeJobSet ? allReconRows.filter((r) => activeJobSet.has(r.project ?? "")) : allReconRows),
+    [allReconRows, activeJobSet],
   );
   const visibleMatched = useMemo(() => rows.filter((r) => r.status === "match").length, [rows]);
   const visibleMismatched = useMemo(() => rows.filter((r) => r.status === "mismatch").length, [rows]);
 
   const allBalRows = order?.balanceReconciliation?.rows ?? [];
   const visibleBalRows = useMemo<BalanceReconciliationRow[]>(
-    () => (activeJob ? allBalRows.filter((r) => r.project === activeJob) : allBalRows),
-    [allBalRows, activeJob],
+    () => (activeJobSet ? allBalRows.filter((r) => activeJobSet.has(r.project ?? "")) : allBalRows),
+    [allBalRows, activeJobSet],
   );
   const visibleRelMatched = useMemo(() => visibleBalRows.filter((r) => r.releaseStatus === "match").length, [visibleBalRows]);
   const visibleRelMismatched = useMemo(() => visibleBalRows.filter((r) => r.releaseStatus === "mismatch").length, [visibleBalRows]);

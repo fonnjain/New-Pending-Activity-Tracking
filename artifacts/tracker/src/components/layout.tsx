@@ -738,7 +738,29 @@ function FilterBar() {
             </CollapsibleTrigger>
           </div>
         </div>
-        
+
+        {/* Selected-job chip strip — shows which jobs are pinned when multi-select is active */}
+        {isMultiJobs && filters.selectedJobs.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-3 md:px-6 pb-2">
+            {filters.selectedJobs.map((job) => (
+              <span
+                key={job}
+                className="inline-flex items-center gap-1 bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-full border border-primary/20"
+              >
+                {job}
+                <button
+                  type="button"
+                  onClick={() => setSelectedJobs(filters.selectedJobs.filter((j) => j !== job))}
+                  className="leading-none opacity-70 hover:opacity-100"
+                  aria-label={`Remove ${job}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
         <CollapsibleContent>
           <div className="p-3 md:px-6 pt-0 border-t bg-muted/30 grid grid-cols-2 gap-3">
             {!isNtlt && (
