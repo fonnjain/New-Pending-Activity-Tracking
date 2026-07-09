@@ -1,4 +1,4 @@
-import { useState, useMemo, Fragment } from "react";
+import { useState, useMemo, useEffect, Fragment } from "react";
 import {
   compareActivity,
   sortActivities,
@@ -7,11 +7,12 @@ import {
   processPhasesForMode,
   type ProcessPhaseKey,
 } from "@workspace/domain";
-import { useTracker, useContractorCategoryMap, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
+import { useTracker, useContractorCategoryMap, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE, dateRangeWindow } from "@/lib/store";
 import {
   buildContractorGroups,
   matchesContractorSelection,
 } from "@/lib/contractorFilter";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   useGetImportRecords,
   getGetImportRecordsQueryKey,
@@ -33,8 +34,6 @@ import {
   TableCell,
   TableFooter,
 } from "@/components/ui/table";
-import { SearchableSelect } from "@/components/ui/searchable-select";
-import { Segmented } from "@/components/ui/segmented";
 import { SortControl } from "@/components/sort-control";
 import {
   Select,
@@ -74,7 +73,7 @@ export default function JobDashboard() {
 }
 
 function JobDashboardContent() {
-  const { selectedImportId, filters, setFilter } = useTracker();
+  const { selectedImportId, filters } = useTracker();
   // Project Wise drills down by Project (TLT) or Section (NTLT). "All" Order
   // Type shows BOTH — every row is resolved by its own category below.
   const isAll = filters.category === "ALL";
@@ -168,119 +167,58 @@ function JobDashboardContent() {
   // Structure. Blank-origin batches resolve to "Z" so they sort/group last.
   const mfcOf = (r: { mfcBatch?: string | null }) => r.mfcBatch || "Z";
 
-  const [project, setProject] = useState<string | null>(null);
-  const [mfcBatch, setMfcBatch] = useState<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [projectSort, setProjectSort] = useState<ProjectSortKey>("assignDate");
-  const [activityFilter, setActivityFilter] = useState<string | null>(null);
-  const [contractorFilter, setContractorFilter] = useState<string | null>(null);
-  const [dateFrom, setDateFrom] = useState<string>("");
-  const [dateTo, setDateTo] = useState<string>("");
 
   const primaryLabel = isAll ? "Group" : isNtlt ? "Section" : "Project";
 
-  // Switching mode clears any stale cross-mode local selection.
-  const switchMode = (v: string | null) => {
-    if (!v || v === filters.category) return;
-    setProject(null);
-    setMfcBatch(null);
-    setSelectedJob(null);
-    setActivityFilter(null);
-    setContractorFilter(null);
-    setDateFrom("");
-    setDateTo("");
-    setFilter("category", v);
-  };
+  // Clear drill-down when the global Order Type changes.
+  useEffect(() => { setSelectedJob(null); }, [filters.category]);
 
-  // Cascading dropdown options
   const { set: currentJobsSet } = useCurrentJobsSet();
 
-  const projectOptions = useMemo(
-    () => Array.from(new Set(records.map((r) => primaryOf(r)).filter((k) => k !== "Unknown"))).sort(),
-    [records, isNtlt, isAll],
-  );
-
-  // In TLT/ALL mode prepend a "Current Jobs" sentinel at the top so users can
-  // narrow to their uploaded project-code list without picking each one.
-  const projectGroups = useMemo(() => {
-    const projectItems = projectOptions.map((p) => ({ value: p, label: p }));
-    if (isNtlt) return [{ options: projectItems }];
-    return [
-      { options: [{ value: CURRENT_JOBS_FILTER_VALUE, label: "Current Jobs" }] },
-      { heading: "Projects", options: projectItems },
-    ];
-  }, [projectOptions, isNtlt]);
-
-  // MFC options are TLT-only, scoped to the active project. Sorted A..Z so the
-  // blank-origin "Z" bucket always lands last.
-  const mfcOptions = useMemo(
-    () =>
-      isNtlt
-        ? []
-        : Array.from(
-            new Set(
-              records
-                .filter((r) => {
-                  if (!project) return true;
-                  if (project === CURRENT_JOBS_FILTER_VALUE) return !currentJobsSet || currentJobsSet.has(r.job ?? "");
-                  return primaryOf(r) === project;
-                })
-                .map((r) => mfcOf(r)),
-            ),
-          ).sort(),
-    [records, project, isNtlt, currentJobsSet],
-  );
-
-  const setProjectCascade = (v: string | null) => {
-    setProject(v);
-    setMfcBatch(null);
-  };
-  const setMfcCascade = (v: string | null) => {
-    setMfcBatch(v);
-  };
-
-  // Pre-filter: project + MFC scope (drives option lists for activity/contractor).
+  // Pre-filter: apply global job/section + MFC selections.
   const preFiltered = useMemo(
     () =>
       records.filter((r) => {
-        if (project) {
-          if (project === CURRENT_JOBS_FILTER_VALUE) {
-            if (currentJobsSet && !currentJobsSet.has(r.job ?? "")) return false;
-          } else {
-            if (primaryOf(r) !== project) return false;
+        if (isNtlt) {
+          if (filters.section && r.groupKey !== filters.section) return false;
+        } else {
+          if (filters.job === CURRENT_JOBS_FILTER_VALUE) {
+            if (!currentJobsSet.has(r.job ?? "")) return false;
+          } else if (filters.job === MULTI_JOBS_FILTER_VALUE) {
+            if (filters.selectedJobs.length > 0 && !filters.selectedJobs.includes(r.job ?? "")) return false;
+          } else if (filters.job) {
+            if (r.job !== filters.job) return false;
           }
         }
-        if (mfcBatch && mfcOf(r) !== mfcBatch) return false;
+        if (!isNtlt && filters.mfcBatch && mfcOf(r) !== filters.mfcBatch) return false;
         return true;
       }),
-    [records, project, mfcBatch, isNtlt, isAll, currentJobsSet],
+    [records, isNtlt, filters.job, filters.selectedJobs, filters.section, filters.mfcBatch, currentJobsSet],
   );
 
-  // Options for activity + contractor dropdowns scoped to the project/MFC selection.
-  const activityOptions = useMemo(
-    () => sortActivities(Array.from(new Set(preFiltered.map((r) => r.activity).filter((a): a is string => !!a)))),
-    [preFiltered],
+  // Date window from the global date-range preset/custom filter.
+  const dateWindow = useMemo(
+    () => (filters.dateRange ? dateRangeWindow(filters.dateRange) : null),
+    [filters.dateRange],
   );
+  const dateFrom = dateWindow?.start ? dateWindow.start.toISOString().slice(0, 10) : "";
+  const dateTo = dateWindow?.end ? dateWindow.end.toISOString().slice(0, 10) : "";
+
   const categoryMap = useContractorCategoryMap();
-  const contractorGroups = useMemo(
-    () =>
-      buildContractorGroups(
-        Array.from(new Set(preFiltered.map((r) => r.contractor).filter((c): c is string => !!c))).sort(),
-      ),
-    [preFiltered],
-  );
 
-  // Final filter: apply activity, contractor, and assign-date range on top of preFiltered.
+  // Final filter: apply global activity + contractor + date range.
   const filtered = useMemo(
     () =>
       preFiltered.filter((r) => {
-        if (activityFilter && r.activity !== activityFilter) return false;
-        if (!matchesContractorSelection(r.contractor, contractorFilter, categoryMap)) return false;
+        if (filters.activity && r.activity !== filters.activity) return false;
+        if (!matchesContractorSelection(r.contractor, filters.contractor ?? null, categoryMap)) return false;
         if (dateFrom && (r.assignDate == null || String(r.assignDate) < dateFrom)) return false;
         if (dateTo && (r.assignDate == null || String(r.assignDate) > dateTo)) return false;
         return true;
       }),
-    [preFiltered, activityFilter, contractorFilter, dateFrom, dateTo, categoryMap],
+    [preFiltered, filters.activity, filters.contractor, dateFrom, dateTo, categoryMap],
   );
 
   const { totalProjects, totalMarks, totalQty, totalWt, avgAgeing, byProject, byActivity } =
@@ -499,80 +437,6 @@ function JobDashboardContent() {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardContent className="p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">
-              Order Type
-            </span>
-            <Segmented
-              value={filters.category}
-              onChange={switchMode}
-              options={[
-                { value: "ALL", label: "All" },
-                { value: "TLT", label: "TLT" },
-                { value: "NTLT", label: "NTLT" },
-              ]}
-            />
-            <div className="w-[200px]">
-              <SearchableSelect
-                value={project}
-                onChange={setProjectCascade}
-                groups={projectGroups}
-                allLabel={`All ${primaryLabel}s`}
-                searchPlaceholder={`Search ${primaryLabel.toLowerCase()}s...`}
-              />
-            </div>
-            {!isNtlt && (
-              <div className="w-[140px]">
-                <SearchableSelect
-                  value={mfcBatch}
-                  onChange={setMfcCascade}
-                  options={mfcOptions}
-                  allLabel="All MFC"
-                  searchPlaceholder="Search MFC..."
-                  disabled={mfcOptions.length === 0}
-                />
-              </div>
-            )}
-            <div className="w-[160px]">
-              <SearchableSelect
-                value={activityFilter}
-                onChange={setActivityFilter}
-                options={activityOptions}
-                allLabel="All Activities"
-                searchPlaceholder="Search activities..."
-                disabled={activityOptions.length === 0}
-              />
-            </div>
-            <div className="w-[180px]">
-              <SearchableSelect
-                value={contractorFilter}
-                onChange={setContractorFilter}
-                groups={contractorGroups}
-                allLabel="All Contractors"
-                searchPlaceholder="Search contractors..."
-              />
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <Input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="h-9 w-[132px]"
-              />
-              <span className="text-muted-foreground text-xs select-none">–</span>
-              <Input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="h-9 w-[132px]"
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <KpiTile title={`${primaryLabel}s`} value={totalProjects} />
         <KpiTile title="Pending Marks" value={totalMarks} />
