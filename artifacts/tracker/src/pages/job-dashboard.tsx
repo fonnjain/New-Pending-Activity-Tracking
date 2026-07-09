@@ -7,7 +7,7 @@ import {
   processPhasesForMode,
   type ProcessPhaseKey,
 } from "@workspace/domain";
-import { useTracker, useContractorCategoryMap } from "@/lib/store";
+import { useTracker, useContractorCategoryMap, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
 import {
   buildContractorGroups,
   matchesContractorSelection,
@@ -193,10 +193,23 @@ function JobDashboardContent() {
   };
 
   // Cascading dropdown options
+  const { set: currentJobsSet } = useCurrentJobsSet();
+
   const projectOptions = useMemo(
     () => Array.from(new Set(records.map((r) => primaryOf(r)).filter((k) => k !== "Unknown"))).sort(),
     [records, isNtlt, isAll],
   );
+
+  // In TLT/ALL mode prepend a "Current Jobs" sentinel at the top so users can
+  // narrow to their uploaded project-code list without picking each one.
+  const projectGroups = useMemo(() => {
+    const projectItems = projectOptions.map((p) => ({ value: p, label: p }));
+    if (isNtlt) return [{ options: projectItems }];
+    return [
+      { options: [{ value: CURRENT_JOBS_FILTER_VALUE, label: "Current Jobs" }] },
+      { heading: "Projects", options: projectItems },
+    ];
+  }, [projectOptions, isNtlt]);
 
   // MFC options are TLT-only, scoped to the active project. Sorted A..Z so the
   // blank-origin "Z" bucket always lands last.
@@ -207,11 +220,15 @@ function JobDashboardContent() {
         : Array.from(
             new Set(
               records
-                .filter((r) => !project || primaryOf(r) === project)
+                .filter((r) => {
+                  if (!project) return true;
+                  if (project === CURRENT_JOBS_FILTER_VALUE) return !currentJobsSet || currentJobsSet.has(r.job ?? "");
+                  return primaryOf(r) === project;
+                })
                 .map((r) => mfcOf(r)),
             ),
           ).sort(),
-    [records, project, isNtlt],
+    [records, project, isNtlt, currentJobsSet],
   );
 
   const setProjectCascade = (v: string | null) => {
@@ -226,11 +243,17 @@ function JobDashboardContent() {
   const preFiltered = useMemo(
     () =>
       records.filter((r) => {
-        if (project && primaryOf(r) !== project) return false;
+        if (project) {
+          if (project === CURRENT_JOBS_FILTER_VALUE) {
+            if (currentJobsSet && !currentJobsSet.has(r.job ?? "")) return false;
+          } else {
+            if (primaryOf(r) !== project) return false;
+          }
+        }
         if (mfcBatch && mfcOf(r) !== mfcBatch) return false;
         return true;
       }),
-    [records, project, mfcBatch, isNtlt, isAll],
+    [records, project, mfcBatch, isNtlt, isAll, currentJobsSet],
   );
 
   // Options for activity + contractor dropdowns scoped to the project/MFC selection.
@@ -495,7 +518,7 @@ function JobDashboardContent() {
               <SearchableSelect
                 value={project}
                 onChange={setProjectCascade}
-                options={projectOptions}
+                groups={projectGroups}
                 allLabel={`All ${primaryLabel}s`}
                 searchPlaceholder={`Search ${primaryLabel.toLowerCase()}s...`}
               />
