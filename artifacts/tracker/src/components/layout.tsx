@@ -363,7 +363,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
     location !== "/contractor-setup" &&
     location !== "/warning-parameters" &&
     location !== "/thickness" &&
-    location !== "/jobs" &&
     selectedImportId != null;
 
   return (
