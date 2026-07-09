@@ -1033,8 +1033,8 @@ function ReleaseBalanceContent() {
       [
         { label: "Project", field: "project" },
         { label: "Structure", field: "structure" },
-        { label: "Release Balance Computed WIP (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
         { label: "Release Balance Order Review (MT)", field: "releaseBalanceOrderReviewMt", numeric: true, decimals: 3, total: true },
+        { label: "Release Balance Computed WIP (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
         { label: "Diff (MT)", field: "diffMt", numeric: true, decimals: 3, total: true },
       ] as XlsxColumn[],
       rows,
@@ -1083,19 +1083,6 @@ function ReleaseBalanceContent() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Computed WIP (MT)</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold tabular-nums">
-                  {mt3(totals?.releaseBalanceComputedMt)}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {totals?.rowCount ?? 0} structures
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
                 <CardTitle className="text-base">Order Review (MT)</CardTitle>
               </CardHeader>
               <CardContent>
@@ -1109,6 +1096,19 @@ function ReleaseBalanceContent() {
                     as on {data.orderReviewAsOnDate}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Computed WIP (MT)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold tabular-nums">
+                  {mt3(totals?.releaseBalanceComputedMt)}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {totals?.rowCount ?? 0} structures
+                </div>
               </CardContent>
             </Card>
             <Card>
@@ -1137,8 +1137,8 @@ function ReleaseBalanceContent() {
                     <tr>
                       <th className="px-3 py-2 text-left font-semibold">Project</th>
                       <th className="px-3 py-2 text-left font-semibold">Structure</th>
-                      <th className="px-3 py-2 text-right font-semibold">Computed WIP (MT)</th>
                       <th className="px-3 py-2 text-right font-semibold">Order Review (MT)</th>
+                      <th className="px-3 py-2 text-right font-semibold">Computed WIP (MT)</th>
                       <th className="px-3 py-2 text-right font-semibold">Diff (MT)</th>
                     </tr>
                   </thead>
@@ -1147,8 +1147,8 @@ function ReleaseBalanceContent() {
                       <tr key={`${r.project}|${r.structure}`} className="hover:bg-muted/40">
                         <td className="px-3 py-2">{r.project}</td>
                         <td className="px-3 py-2">{r.structure}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{mt3(r.releaseBalanceComputedMt)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{mt3(r.releaseBalanceOrderReviewMt ?? undefined)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{mt3(r.releaseBalanceComputedMt)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{mt3(r.diffMt ?? undefined)}</td>
                       </tr>
                     ))}
@@ -1156,8 +1156,8 @@ function ReleaseBalanceContent() {
                   <tfoot className="sticky bottom-0 bg-background border-t font-semibold">
                     <tr>
                       <td className="px-3 py-2" colSpan={2}>Total</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{mt3(totals?.releaseBalanceComputedMt)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{mt3(totals?.releaseBalanceOrderReviewMt)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{mt3(totals?.releaseBalanceComputedMt)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{mt3(totals?.diffMt)}</td>
                     </tr>
                   </tfoot>

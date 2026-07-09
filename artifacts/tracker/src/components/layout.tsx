@@ -19,18 +19,24 @@ import {
   decodeContractorCategory,
 } from "@/lib/contractorFilter";
 
-// Multi-job checkbox picker — shown instead of the single-job SearchableSelect
-// when the user has activated the "Select Multiple Jobs" mode.
+// Job picker with checkbox multi-select. Always rendered for the TLT job
+// dimension — clicking "All Jobs" or "Current Jobs" sets those modes; clicking
+// individual project codes toggles them in/out of a multi-selection. No
+// separate "Select Multiple Jobs" activation step is required.
 function MultiJobPicker({
   jobs,
+  filterJob,
   selectedJobs,
+  onAllJobs,
+  onCurrentJobs,
   onSelectedJobsChange,
-  onClear,
 }: {
   jobs: string[];
+  filterJob: string | null;
   selectedJobs: string[];
+  onAllJobs: () => void;
+  onCurrentJobs: () => void;
   onSelectedJobsChange: (jobs: string[]) => void;
-  onClear: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -46,12 +52,16 @@ function MultiJobPicker({
     onSelectedJobsChange(Array.from(next).sort());
   };
 
-  const label =
-    selectedJobs.length === 0
-      ? "Select Jobs..."
-      : selectedJobs.length === 1
-        ? selectedJobs[0]
-        : `${selectedJobs.length} Jobs`;
+  const isCurrentJobs = filterJob === CURRENT_JOBS_FILTER_VALUE;
+  const isMultiJobs = filterJob === MULTI_JOBS_FILTER_VALUE;
+
+  const label = isCurrentJobs
+    ? "Current Jobs"
+    : isMultiJobs && selectedJobs.length === 1
+      ? selectedJobs[0]
+      : isMultiJobs && selectedJobs.length > 1
+        ? `${selectedJobs.length} Jobs`
+        : "All Jobs";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -67,52 +77,53 @@ function MultiJobPicker({
       </PopoverTrigger>
       <PopoverContent className="w-[240px] p-2" align="start">
         <div className="space-y-2">
-          <div className="flex items-center justify-between text-xs px-0.5">
-            <span className="text-muted-foreground">{selectedJobs.length} selected</span>
-            <div className="flex gap-2">
-              <button
-                className="text-primary hover:underline"
-                onClick={() => onSelectedJobsChange([...jobs])}
-              >
-                Select All
-              </button>
-              <button
-                className="text-muted-foreground hover:underline"
-                onClick={() => onSelectedJobsChange([])}
-              >
-                Clear
-              </button>
-              <button
-                className="text-destructive hover:underline"
-                onClick={() => { setOpen(false); onClear(); }}
-              >
-                Back
-              </button>
-            </div>
+          {/* Special-mode rows */}
+          <div className="space-y-0.5">
+            <button
+              onClick={() => { onAllJobs(); setOpen(false); }}
+              className={`w-full text-left px-2 py-1.5 rounded text-sm hover:bg-accent ${!filterJob ? "bg-accent font-medium" : ""}`}
+            >
+              All Jobs
+            </button>
+            <button
+              onClick={() => { onCurrentJobs(); setOpen(false); }}
+              className={`w-full text-left px-2 py-1.5 rounded text-sm hover:bg-accent ${isCurrentJobs ? "bg-accent font-medium" : ""}`}
+            >
+              Current Jobs
+            </button>
           </div>
-          <input
-            type="text"
-            placeholder="Search jobs..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring bg-background"
-          />
-          <div className="max-h-56 overflow-y-auto space-y-0.5 pr-0.5">
-            {filtered.length === 0 && (
-              <p className="text-xs text-muted-foreground text-center py-2">No jobs found</p>
-            )}
-            {filtered.map((job) => (
-              <label
-                key={job}
-                className="flex items-center gap-2 px-1.5 py-1 rounded cursor-pointer hover:bg-accent text-sm select-none"
-              >
-                <Checkbox
-                  checked={selected.has(job)}
-                  onCheckedChange={() => toggle(job)}
-                />
-                <span className="truncate">{job}</span>
-              </label>
-            ))}
+          <div className="border-t pt-2 space-y-1.5">
+            <div className="flex items-center justify-between text-xs px-0.5">
+              <span className="text-muted-foreground font-medium">Projects</span>
+              <div className="flex gap-2">
+                <button className="text-primary hover:underline" onClick={() => onSelectedJobsChange([...jobs])}>All</button>
+                <button className="text-muted-foreground hover:underline" onClick={() => onSelectedJobsChange([])}>None</button>
+              </div>
+            </div>
+            <input
+              type="text"
+              placeholder="Search..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full rounded border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring bg-background"
+            />
+            <div className="max-h-52 overflow-y-auto space-y-0.5 pr-0.5">
+              {filtered.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-2">No jobs found</p>
+              )}
+              {filtered.map((job) => (
+                <label
+                  key={job}
+                  className="flex items-center gap-2 px-1.5 py-1 rounded cursor-pointer hover:bg-accent text-sm select-none"
+                >
+                  <Checkbox
+                    checked={isMultiJobs ? selected.has(job) : false}
+                    onCheckedChange={() => toggle(job)}
+                  />
+                  <span className="truncate">{job}</span>
+                </label>
+              ))}
+            </div>
           </div>
         </div>
       </PopoverContent>
@@ -509,17 +520,7 @@ function FilterBar() {
         (!filters.structure || r.structure === filters.structure)),
     [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.selectedJobs, filters.mfcBatch, filters.structure, currentJobsSet]
   );
-  const jobGroups = useMemo(
-    () => [
-      { options: [
-        { value: CURRENT_JOBS_FILTER_VALUE, label: "Current Jobs" },
-        { value: MULTI_JOBS_FILTER_VALUE, label: "Select Multiple Jobs" },
-      ]},
-      { heading: "Projects", options: jobs.map(j => ({ value: j, label: j })) },
-    ],
-    [jobs]
-  );
-
+  // isMultiJobs = job filter is in checkbox multi-select mode.
   const isMultiJobs = filters.job === MULTI_JOBS_FILTER_VALUE;
 
   // NTLT primary dimension = Section (the cleaned group_key), narrowed to the
@@ -653,20 +654,14 @@ function FilterBar() {
                 allLabel="All Sections"
                 searchPlaceholder="Search sections..."
               />
-            ) : isMultiJobs ? (
+            ) : (
               <MultiJobPicker
                 jobs={jobs as string[]}
+                filterJob={filters.job}
                 selectedJobs={filters.selectedJobs}
+                onAllJobs={() => setFilter("job", null)}
+                onCurrentJobs={() => setFilter("job", CURRENT_JOBS_FILTER_VALUE)}
                 onSelectedJobsChange={setSelectedJobs}
-                onClear={() => setFilter("job", null)}
-              />
-            ) : (
-              <SearchableSelect
-                value={filters.job}
-                onChange={(v) => setFilter("job", v)}
-                groups={jobGroups}
-                allLabel="All Jobs"
-                searchPlaceholder="Search jobs..."
               />
             )}
           </div>
