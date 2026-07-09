@@ -11,7 +11,9 @@ tags:
   - name: health
     description: Health operations
   - name: auth
-    description: Login/logout and session status for the protected Data view
+    description: Login/logout, session status, and password management
+  - name: users
+    description: User management (admin only)
   - name: imports
     description: Import, merge, and change-log operations
   - name: ai
@@ -357,10 +359,9 @@ paths:
       tags: [auth]
       summary: Log in
       description: >
-        Validates the submitted email and password against the server-side
-        AUTH_EMAIL/AUTH_PASSWORD credentials. On success, sets a signed, httpOnly
-        session cookie. Returns 401 on invalid credentials and 503 when no
-        credentials are configured on the server.
+        Validates the submitted email and password against the users table.
+        On success, sets a signed, httpOnly session cookie and returns user info.
+        Returns 401 on invalid credentials.
       requestBody:
         required: true
         content:
@@ -399,6 +400,258 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthStatus"
+  /auth/change-password:
+    post:
+      operationId: changePassword
+      tags: [auth]
+      summary: Change own password
+      description: >
+        Authenticated users can change their own password. Must provide the
+        current password for verification. Clears the mustChangePassword flag.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password changed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                required:
+                  - success
+        "400":
+          description: New password too short
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated or wrong current password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List all users
+      description: Admin only. Returns all registered users.
+      responses:
+        "200":
+          description: User list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AppUser"
+                required:
+                  - users
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createUser
+      tags: [users]
+      summary: Create a user
+      description: Admin only. Creates a new user with the default password.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/AppUser"
+                required:
+                  - user
+        "400":
+          description: Missing email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /users/{id}/reset-password:
+    put:
+      operationId: resetUserPassword
+      tags: [users]
+      summary: Reset a user's password
+      description: Admin only. Resets the user's password to the default and sets mustChangePassword.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Password reset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  email:
+                    type: string
+                required:
+                  - success
+                  - email
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /users/{id}/role:
+    put:
+      operationId: updateUserRole
+      tags: [users]
+      summary: Update a user's role
+      description: Admin only. Sets the user's role to "admin" or "user".
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetRoleRequest"
+      responses:
+        "200":
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                required:
+                  - success
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /users/{id}:
+    delete:
+      operationId: deleteUser
+      tags: [users]
+      summary: Delete a user
+      description: Admin only. Deletes a user account. Cannot delete your own account.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                required:
+                  - success
+        "400":
+          description: Cannot delete own account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /imports:
     get:
       operationId: listImports
@@ -1380,8 +1633,67 @@ components:
       properties:
         authenticated:
           type: boolean
+        email:
+          type: string
+        displayName:
+          type: ["string", "null"]
+        role:
+          type: string
+        mustChangePassword:
+          type: boolean
       required:
         - authenticated
+    ChangePasswordRequest:
+      type: object
+      properties:
+        currentPassword:
+          type: string
+        newPassword:
+          type: string
+      required:
+        - currentPassword
+        - newPassword
+    AppUser:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        displayName:
+          type: ["string", "null"]
+        role:
+          type: string
+        mustChangePassword:
+          type: boolean
+        createdAt:
+          type: string
+      required:
+        - id
+        - email
+        - role
+        - mustChangePassword
+        - createdAt
+    CreateUserRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        displayName:
+          type: string
+        role:
+          type: string
+          enum: [admin, user]
+      required:
+        - email
+    SetRoleRequest:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [admin, user]
+      required:
+        - role
     ImportUpload:
       type: object
       properties:

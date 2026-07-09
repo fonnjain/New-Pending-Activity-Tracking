@@ -54,6 +54,7 @@ function ProductionTracker() {
         <Route path="/reports" component={ReportsView} />
         <Route path="/thickness" component={DataView} />
         <Route path="/warning-parameters" component={DataView} />
+        <Route path="/users" component={DataView} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

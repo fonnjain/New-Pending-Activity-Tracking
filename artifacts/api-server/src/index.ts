@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { backfillClassification, backfillHoleOperation } from "./lib/backfill";
 import { seedContractorCategories } from "./lib/seedContractorCategories";
 import { seedRsjThickness } from "./lib/seedRsjThickness";
+import { seedUsersIfEmpty } from "./lib/seedUsers";
 
 const rawPort = process.env["PORT"];
 
@@ -53,5 +54,11 @@ app.listen(port, (err) => {
   // overwrites user edits. Never blocks or fails startup.
   seedRsjThickness().catch((err) => {
     logger.error({ err }, "RSJ thickness seed failed");
+  });
+
+  // Best-effort seed of all company users from the directory list. Fire-and-
+  // forget; skipped if the table already has rows (idempotent check first).
+  seedUsersIfEmpty().catch((err) => {
+    logger.error({ err }, "User seed failed");
   });
 });

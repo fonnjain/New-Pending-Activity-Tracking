@@ -811,12 +811,16 @@ export const HealthCheckResponse = zod.object({
  * @summary Current authentication status
  */
 export const GetAuthStatusResponse = zod.object({
-  "authenticated": zod.boolean()
+  "authenticated": zod.boolean(),
+  "email": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.string().optional(),
+  "mustChangePassword": zod.boolean().optional()
 })
 
 
 /**
- * Validates the submitted email and password against the server-side AUTH_EMAIL/AUTH_PASSWORD credentials. On success, sets a signed, httpOnly session cookie. Returns 401 on invalid credentials and 503 when no credentials are configured on the server.
+ * Validates the submitted email and password against the users table. On success, sets a signed, httpOnly session cookie and returns user info. Returns 401 on invalid credentials.
 
  * @summary Log in
  */
@@ -826,7 +830,11 @@ export const LoginBody = zod.object({
 })
 
 export const LoginResponse = zod.object({
-  "authenticated": zod.boolean()
+  "authenticated": zod.boolean(),
+  "email": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.string().optional(),
+  "mustChangePassword": zod.boolean().optional()
 })
 
 
@@ -835,7 +843,97 @@ export const LoginResponse = zod.object({
  * @summary Log out
  */
 export const LogoutResponse = zod.object({
-  "authenticated": zod.boolean()
+  "authenticated": zod.boolean(),
+  "email": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.string().optional(),
+  "mustChangePassword": zod.boolean().optional()
+})
+
+
+/**
+ * Authenticated users can change their own password. Must provide the current password for verification. Clears the mustChangePassword flag.
+
+ * @summary Change own password
+ */
+export const ChangePasswordBody = zod.object({
+  "currentPassword": zod.string(),
+  "newPassword": zod.string()
+})
+
+export const ChangePasswordResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
+ * Admin only. Returns all registered users.
+ * @summary List all users
+ */
+export const ListUsersResponse = zod.object({
+  "users": zod.array(zod.object({
+  "id": zod.string(),
+  "email": zod.string(),
+  "displayName": zod.string().nullish(),
+  "role": zod.string(),
+  "mustChangePassword": zod.boolean(),
+  "createdAt": zod.string()
+}))
+})
+
+
+/**
+ * Admin only. Creates a new user with the default password.
+ * @summary Create a user
+ */
+export const CreateUserBody = zod.object({
+  "email": zod.string(),
+  "displayName": zod.string().optional(),
+  "role": zod.enum(['admin', 'user']).optional()
+})
+
+
+/**
+ * Admin only. Resets the user's password to the default and sets mustChangePassword.
+ * @summary Reset a user's password
+ */
+export const ResetUserPasswordParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const ResetUserPasswordResponse = zod.object({
+  "success": zod.boolean(),
+  "email": zod.string()
+})
+
+
+/**
+ * Admin only. Sets the user's role to "admin" or "user".
+ * @summary Update a user's role
+ */
+export const UpdateUserRoleParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const UpdateUserRoleBody = zod.object({
+  "role": zod.enum(['admin', 'user'])
+})
+
+export const UpdateUserRoleResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
+ * Admin only. Deletes a user account. Cannot delete your own account.
+ * @summary Delete a user
+ */
+export const DeleteUserParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteUserResponse = zod.object({
+  "success": zod.boolean()
 })
 
 

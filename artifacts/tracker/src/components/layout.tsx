@@ -3,7 +3,8 @@ import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes, ChevronsUpDown } from "lucide-react";
 import { useTracker, dateRangeWindow, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
-import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
+import { useGetImportRecords, useGetAuthStatus, getGetImportRecordsQueryKey, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
+import { LoginForm, ChangePasswordForm, LogoutButton } from "@/components/login-gate";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -357,13 +358,42 @@ const navItems: NavItem[] = [
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { selectedImportId } = useTracker();
+
+  // Auth — all hooks must be called before any conditional return.
+  const { data: authStatus, isLoading: authLoading } = useGetAuthStatus({
+    query: { queryKey: getGetAuthStatusQueryKey(), staleTime: 30_000 },
+  });
+
+  const isAuthenticated = authStatus?.authenticated === true;
+  const mustChangePassword = isAuthenticated && authStatus?.mustChangePassword === true;
+  const isAdmin = authStatus?.role === "admin";
+  const displayLabel = authStatus?.displayName || authStatus?.email || "";
+
   const showFilters =
     location !== "/data" &&
     location !== "/order-reconciliation" &&
     location !== "/contractor-setup" &&
     location !== "/warning-parameters" &&
     location !== "/thickness" &&
+    location !== "/users" &&
     selectedImportId != null;
+
+  // While the initial auth check is in-flight, show a blank screen so there
+  // is no flash of un-gated content.
+  if (authLoading) {
+    return (
+      <div className="min-h-[100dvh] bg-background" />
+    );
+  }
+
+  // Not logged in → full-screen login form (no nav chrome).
+  if (!isAuthenticated) return <LoginForm />;
+
+  // Must change password → force the change before any page loads.
+  if (mustChangePassword) return <ChangePasswordForm />;
+
+  // Admin-only Data nav link; regular users see everything else.
+  const visibleNavItems = isAdmin ? navItems : navItems.filter((i) => i.href !== "/data");
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground pb-16 md:pb-0">
@@ -373,6 +403,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <span className="font-bold text-base text-primary tracking-tight">VTPL</span>
           <span className="text-[11px] text-sidebar-foreground/60">Production Tracker</span>
         </Link>
+        <LogoutButton />
       </div>
 
       {/* Top Nav (Desktop) */}
@@ -382,7 +413,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <span className="text-xs text-sidebar-foreground/60 hidden lg:inline">Production Activity Tracker</span>
         </Link>
         <nav className="flex flex-1 items-center justify-center flex-nowrap gap-x-0.5">
-          {navItems.map((item) =>
+          {visibleNavItems.map((item) =>
             item.disabled ? (
               <div
                 key={item.href}
@@ -408,6 +439,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
             ),
           )}
         </nav>
+        {/* Signed-in user + logout */}
+        <div className="shrink-0 flex items-center gap-2 ml-2">
+          {displayLabel && (
+            <span className="text-xs text-sidebar-foreground/70 hidden xl:block max-w-[180px] truncate" title={displayLabel}>
+              {displayLabel}
+            </span>
+          )}
+          <LogoutButton />
+        </div>
       </header>
 
       {/* Active WIP cutoff indicator (visible on every page/breakpoint) */}
@@ -423,7 +463,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Bottom Nav (Mobile) */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-sidebar border-t border-sidebar-border z-50 flex items-stretch pb-safe">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const isActive = location === item.href;
           const Icon = item.icon;
           if (item.disabled) {

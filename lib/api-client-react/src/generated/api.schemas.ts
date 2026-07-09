@@ -20,6 +20,52 @@ export interface AuthCredentials {
 
 export interface AuthStatus {
   authenticated: boolean;
+  email?: string;
+  /** @nullable */
+  displayName?: string | null;
+  role?: string;
+  mustChangePassword?: boolean;
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface AppUser {
+  id: string;
+  email: string;
+  /** @nullable */
+  displayName?: string | null;
+  role: string;
+  mustChangePassword: boolean;
+  createdAt: string;
+}
+
+export type CreateUserRequestRole = typeof CreateUserRequestRole[keyof typeof CreateUserRequestRole];
+
+
+export const CreateUserRequestRole = {
+  admin: 'admin',
+  user: 'user',
+} as const;
+
+export interface CreateUserRequest {
+  email: string;
+  displayName?: string;
+  role?: CreateUserRequestRole;
+}
+
+export type SetRoleRequestRole = typeof SetRoleRequestRole[keyof typeof SetRoleRequestRole];
+
+
+export const SetRoleRequestRole = {
+  admin: 'admin',
+  user: 'user',
+} as const;
+
+export interface SetRoleRequest {
+  role: SetRoleRequestRole;
 }
 
 export interface ImportUpload {
@@ -2010,6 +2056,31 @@ project: string;
 
 export type DeleteContractorCategoryParams = {
 nameKey: string;
+};
+
+export type ChangePassword200 = {
+  success: boolean;
+};
+
+export type ListUsers200 = {
+  users: AppUser[];
+};
+
+export type CreateUser201 = {
+  user: AppUser;
+};
+
+export type ResetUserPassword200 = {
+  success: boolean;
+  email: string;
+};
+
+export type UpdateUserRole200 = {
+  success: boolean;
+};
+
+export type DeleteUser200 = {
+  success: boolean;
 };
 
 export type ListImportsParams = {

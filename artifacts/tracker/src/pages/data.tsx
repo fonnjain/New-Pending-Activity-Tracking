@@ -1,19 +1,21 @@
 import { useMemo, useState, Fragment } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetAccumulatedWip, getGetAccumulatedWipQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetAccumulatedWip, getGetAccumulatedWipQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, getGetAuthStatusQueryKey, getListUsersQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
 import { contractorCategoryLabel } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, ListChecks, ChevronDown, ChevronRight } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, ListChecks, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx, exportToJson, type XlsxColumn } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
 import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { AiReviewPanel } from "@/components/ai-review-panel";
 import { StagedUploadPanel } from "@/components/staged-upload-panel";
-import { LoginGate, LogoutButton } from "@/components/login-gate";
+import { AccessDenied, LogoutButton } from "@/components/login-gate";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Segmented } from "@/components/ui/segmented";
@@ -30,14 +32,17 @@ const ADMIN_TABS = [
   { path: "/contractor-setup", label: "Contractor Setup" },
   { path: "/warning-parameters", label: "Warning Parameters" },
   { path: "/thickness", label: "Thickness" },
+  { path: "/users", label: "Users" },
 ] as const;
 
 export default function DataView() {
-  return (
-    <LoginGate>
-      <AdminTabbedPage />
-    </LoginGate>
-  );
+  const { data: authStatus } = useGetAuthStatus({
+    query: { queryKey: getGetAuthStatusQueryKey() },
+  });
+  if (authStatus && authStatus.role !== "admin") {
+    return <AccessDenied />;
+  }
+  return <AdminTabbedPage />;
 }
 
 function AdminTabbedPage() {
@@ -66,6 +71,8 @@ function AdminTabbedPage() {
         <WarningParametersContent />
       ) : active === "/thickness" ? (
         <ThicknessContent />
+      ) : active === "/users" ? (
+        <UsersContent />
       ) : (
         <DataViewContent />
       )}
@@ -1723,6 +1730,294 @@ function OrderReconciliationContent() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// ── Users Management (admin only) ────────────────────────────────────────────
+
+function RoleBadge({ role }: { role: string }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
+        role === "admin"
+          ? "bg-primary/10 text-primary"
+          : "bg-muted text-muted-foreground"
+      }`}
+    >
+      {role === "admin" ? <ShieldCheck className="w-3 h-3" /> : <Shield className="w-3 h-3" />}
+      {role === "admin" ? "Admin" : "User"}
+    </span>
+  );
+}
+
+function AddUserForm({ onClose }: { onClose: () => void }) {
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [role, setRole] = useState<"user" | "admin">("user");
+  const createUser = useCreateUser();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    createUser.mutate(
+      { data: { email: email.trim().toLowerCase(), displayName: displayName.trim() || undefined, role } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+          toast({ title: "User created", description: `${email} added with default password.` });
+          onClose();
+        },
+        onError: (err) => {
+          const status = (err as { status?: number })?.status;
+          toast({
+            title: "Failed to create user",
+            description: status === 409 ? "Email already exists." : "An error occurred.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
+  };
+
+  return (
+    <Card className="border-border mb-6">
+      <CardHeader>
+        <CardTitle className="text-base">Add user</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={onSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="new-email">Email</Label>
+              <Input
+                id="new-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                placeholder="user@vijaytransmission.com"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="new-display">Display name (optional)</Label>
+              <Input
+                id="new-display"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="Full name"
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Role</Label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input type="radio" name="role" value="user" checked={role === "user"} onChange={() => setRole("user")} />
+                User
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input type="radio" name="role" value="admin" checked={role === "admin"} onChange={() => setRole("admin")} />
+                Admin
+              </label>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The user will be created with the default password and must set a new one on first login.
+          </p>
+          <div className="flex gap-2">
+            <Button type="submit" disabled={createUser.isPending} size="sm">
+              {createUser.isPending ? "Creating..." : "Create user"}
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function UserRow({ user, currentUserId }: { user: AppUser; currentUserId: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const resetPassword = useResetUserPassword();
+  const updateRole = useUpdateUserRole();
+  const deleteUserMutation = useDeleteUser();
+  const isSelf = user.id === currentUserId;
+
+  const handleResetPassword = () => {
+    if (!confirm(`Reset password for ${user.email}? They will need to set a new one on next login.`)) return;
+    resetPassword.mutate(
+      { id: user.id },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+          toast({ title: "Password reset", description: `${user.email} will set a new password on next login.` });
+        },
+        onError: () => toast({ title: "Failed to reset password", variant: "destructive" }),
+      },
+    );
+  };
+
+  const handleToggleRole = () => {
+    const newRole = user.role === "admin" ? "user" : "admin";
+    updateRole.mutate(
+      { id: user.id, data: { role: newRole } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+          toast({ title: "Role updated", description: `${user.email} is now ${newRole}.` });
+        },
+        onError: () => toast({ title: "Failed to update role", variant: "destructive" }),
+      },
+    );
+  };
+
+  const handleDelete = () => {
+    if (!confirm(`Delete user ${user.email}? This cannot be undone.`)) return;
+    deleteUserMutation.mutate(
+      { id: user.id },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+          toast({ title: "User deleted", description: `${user.email} has been removed.` });
+        },
+        onError: () => toast({ title: "Failed to delete user", variant: "destructive" }),
+      },
+    );
+  };
+
+  return (
+    <tr className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+      <td className="py-2.5 px-3">
+        <div className="font-medium text-sm">{user.displayName || <span className="text-muted-foreground italic">—</span>}</div>
+        <div className="text-xs text-muted-foreground">{user.email}</div>
+      </td>
+      <td className="py-2.5 px-3">
+        <RoleBadge role={user.role} />
+      </td>
+      <td className="py-2.5 px-3 text-xs">
+        {user.mustChangePassword ? (
+          <span className="text-amber-600 font-medium">Must change</span>
+        ) : (
+          <span className="text-muted-foreground">Set</span>
+        )}
+      </td>
+      <td className="py-2.5 px-3 text-xs text-muted-foreground tabular-nums">
+        {formatDate(user.createdAt.split("T")[0]!)}
+      </td>
+      <td className="py-2.5 px-3">
+        <div className="flex items-center gap-1 justify-end flex-wrap">
+          <Button
+            variant="ghost" size="sm" className="h-7 px-2 text-xs"
+            onClick={handleResetPassword} disabled={resetPassword.isPending}
+            title="Reset password to default"
+          >
+            <RotateCcw className="w-3 h-3 mr-1" /> Reset pw
+          </Button>
+          {!isSelf && (
+            <>
+              <Button
+                variant="ghost" size="sm" className="h-7 px-2 text-xs"
+                onClick={handleToggleRole} disabled={updateRole.isPending}
+                title={user.role === "admin" ? "Demote to user" : "Promote to admin"}
+              >
+                {user.role === "admin" ? <Shield className="w-3 h-3 mr-1" /> : <ShieldCheck className="w-3 h-3 mr-1" />}
+                {user.role === "admin" ? "Make user" : "Make admin"}
+              </Button>
+              <Button
+                variant="ghost" size="sm"
+                className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                onClick={handleDelete} disabled={deleteUserMutation.isPending}
+                title="Delete user"
+              >
+                <Trash2 className="w-3 h-3 mr-1" /> Delete
+              </Button>
+            </>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function UsersContent() {
+  const { data: authStatus } = useGetAuthStatus({ query: { queryKey: getGetAuthStatusQueryKey() } });
+  const { data, isLoading } = useListUsers({ query: { queryKey: getListUsersQueryKey() } });
+  const [showAdd, setShowAdd] = useState(false);
+  const [search, setSearch] = useState("");
+  const users = data?.users ?? [];
+  const currentUserId = (authStatus as unknown as { id?: string } | undefined)?.id ?? "";
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return q
+      ? users.filter((u) => u.email.toLowerCase().includes(q) || (u.displayName ?? "").toLowerCase().includes(q))
+      : users;
+  }, [users, search]);
+
+  const adminCount = users.filter((u) => u.role === "admin").length;
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-border">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <CardTitle className="text-lg">Users</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {users.length} total — {adminCount} admin{adminCount !== 1 ? "s" : ""}
+              </p>
+            </div>
+            <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
+              <UserPlus className="w-4 h-4 mr-1.5" />
+              Add user
+            </Button>
+          </div>
+        </CardHeader>
+      </Card>
+
+      {showAdd && <AddUserForm onClose={() => setShowAdd(false)} />}
+
+      <Card className="border-border">
+        <CardContent className="p-0">
+          <div className="p-3 border-b border-border">
+            <Input
+              placeholder="Search by name or email..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-8 text-sm"
+            />
+          </div>
+          {isLoading ? (
+            <div className="p-6 text-center text-muted-foreground text-sm">Loading users...</div>
+          ) : filtered.length === 0 ? (
+            <div className="p-6 text-center text-muted-foreground text-sm">No users found.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">User</th>
+                    <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Role</th>
+                    <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Password</th>
+                    <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Created</th>
+                    <th className="py-2 px-3" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((user) => (
+                    <UserRow key={user.id} user={user} currentUserId={currentUserId} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

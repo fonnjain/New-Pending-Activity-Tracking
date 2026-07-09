@@ -6,11 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface AuthStatus {
-  authenticated: boolean;
-  email?: string;
+export interface AppUser {
+  id: string;
+  email: string;
   /** @nullable */
   displayName?: string | null;
-  role?: string;
-  mustChangePassword?: boolean;
+  role: string;
+  mustChangePassword: boolean;
+  createdAt: string;
 }

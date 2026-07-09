@@ -5,26 +5,28 @@ import {
   type Response,
   type NextFunction,
 } from "express";
-import crypto from "node:crypto";
+import bcrypt from "bcryptjs";
+import { db } from "@workspace/db";
+import { appUsersTable, type AppUserRow } from "@workspace/db";
+import { eq } from "drizzle-orm";
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      user?: AppUserRow;
+    }
+  }
+}
 
 const router: IRouter = Router();
 
 const COOKIE_NAME = "vtpl_auth";
 const MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
-function credsConfigured(): boolean {
-  return Boolean(process.env.AUTH_EMAIL && process.env.AUTH_PASSWORD);
-}
-
-function safeEqual(a: string, b: string): boolean {
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ba.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ba, bb);
-}
-
-function isAuthed(req: Request): boolean {
-  return req.signedCookies?.[COOKIE_NAME] === "1";
+function getSessionUserId(req: Request): string | null {
+  const val = req.signedCookies?.[COOKIE_NAME];
+  return typeof val === "string" && val.length > 0 ? val : null;
 }
 
 function cookieOptions() {
@@ -36,57 +38,173 @@ function cookieOptions() {
   };
 }
 
-export function requireAuth(
+async function loadUser(userId: string): Promise<AppUserRow | null> {
+  const rows = await db
+    .select()
+    .from(appUsersTable)
+    .where(eq(appUsersTable.id, userId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function requireAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const userId = getSessionUserId(req);
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  try {
+    const user = await loadUser(userId);
+    if (!user) {
+      res.clearCookie(COOKIE_NAME, cookieOptions());
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    req.user = user;
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+export function requireAdmin(
   req: Request,
   res: Response,
   next: NextFunction,
 ): void {
-  if (isAuthed(req)) {
-    next();
+  if (req.user?.role !== "admin") {
+    res.status(403).json({ error: "Admin access required" });
     return;
   }
-  res.status(401).json({ error: "Authentication required" });
+  next();
 }
 
-router.get("/auth/me", (req, res): void => {
-  res.json({ authenticated: isAuthed(req) });
-});
-
-router.post("/auth/login", (req, res): void => {
-  if (!credsConfigured()) {
-    req.log.warn("Login attempted but AUTH_EMAIL/AUTH_PASSWORD are not set");
-    res.status(503).json({
-      error: "Login is not configured on the server",
-    });
+router.get("/auth/me", async (req, res): Promise<void> => {
+  const userId = getSessionUserId(req);
+  if (!userId) {
+    res.json({ authenticated: false });
     return;
   }
+  try {
+    const user = await loadUser(userId);
+    if (!user) {
+      res.clearCookie(COOKIE_NAME, cookieOptions());
+      res.json({ authenticated: false });
+      return;
+    }
+    res.json({
+      authenticated: true,
+      email: user.email,
+      displayName: user.displayName,
+      role: user.role,
+      mustChangePassword: user.mustChangePassword,
+    });
+  } catch {
+    res.json({ authenticated: false });
+  }
+});
 
+router.post("/auth/login", async (req, res): Promise<void> => {
   const body = (req.body ?? {}) as { email?: unknown; password?: unknown };
-  const email = typeof body.email === "string" ? body.email : "";
+  const email =
+    typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   const password = typeof body.password === "string" ? body.password : "";
 
-  const emailOk = safeEqual(
-    email.trim().toLowerCase(),
-    process.env.AUTH_EMAIL!.trim().toLowerCase(),
-  );
-  const passwordOk = safeEqual(password, process.env.AUTH_PASSWORD!);
-
-  if (!emailOk || !passwordOk) {
+  if (!email || !password) {
     res.status(401).json({ error: "Invalid email or password" });
     return;
   }
 
-  res.cookie(COOKIE_NAME, "1", {
-    ...cookieOptions(),
-    signed: true,
-    maxAge: MAX_AGE_MS,
-  });
-  res.json({ authenticated: true });
+  try {
+    const rows = await db
+      .select()
+      .from(appUsersTable)
+      .where(eq(appUsersTable.email, email))
+      .limit(1);
+    const user = rows[0];
+
+    if (!user) {
+      res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+
+    const passwordOk = await bcrypt.compare(password, user.passwordHash);
+    if (!passwordOk) {
+      res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+
+    res.cookie(COOKIE_NAME, user.id, {
+      ...cookieOptions(),
+      signed: true,
+      maxAge: MAX_AGE_MS,
+    });
+    res.json({
+      authenticated: true,
+      email: user.email,
+      displayName: user.displayName,
+      role: user.role,
+      mustChangePassword: user.mustChangePassword,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Login error");
+    res.status(500).json({ error: "Login failed" });
+  }
 });
 
 router.post("/auth/logout", (_req, res): void => {
   res.clearCookie(COOKIE_NAME, cookieOptions());
   res.json({ authenticated: false });
 });
+
+router.post(
+  "/auth/change-password",
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const user = req.user!;
+    const body = (req.body ?? {}) as {
+      currentPassword?: unknown;
+      newPassword?: unknown;
+    };
+    const currentPassword =
+      typeof body.currentPassword === "string" ? body.currentPassword : "";
+    const newPassword =
+      typeof body.newPassword === "string" ? body.newPassword : "";
+
+    if (!newPassword || newPassword.length < 6) {
+      res
+        .status(400)
+        .json({ error: "New password must be at least 6 characters" });
+      return;
+    }
+
+    try {
+      const currentOk = await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!currentOk) {
+        res.status(401).json({ error: "Current password is incorrect" });
+        return;
+      }
+
+      const newHash = await bcrypt.hash(newPassword, 10);
+      await db
+        .update(appUsersTable)
+        .set({
+          passwordHash: newHash,
+          mustChangePassword: false,
+          updatedAt: new Date(),
+        })
+        .where(eq(appUsersTable.id, user.id));
+
+      res.json({ success: true });
+    } catch (err) {
+      req.log.error({ err }, "Change password error");
+      res.status(500).json({ error: "Failed to change password" });
+    }
+  },
+);
 
 export default router;
