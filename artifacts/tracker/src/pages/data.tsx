@@ -1,6 +1,6 @@
 import { useMemo, useState, Fragment } from "react";
 import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetAccumulatedWip, getGetAccumulatedWipQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow } from "@workspace/api-client-react";
-import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor } from "@/lib/store";
+import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
 import { contractorCategoryLabel } from "@workspace/domain";
@@ -655,6 +655,8 @@ function AccumulatedWipContent() {
   const { data, isLoading } = useGetAccumulatedWip();
   const { data: order } = useGetOrderStatus({ query: { queryKey: getGetOrderStatusQueryKey() } });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const { filters } = useTracker();
+  const activeJob = filters.job && filters.job !== CURRENT_JOBS_FILTER_VALUE ? filters.job : null;
 
   const byProject = useMemo(() => data?.byProject ?? [], [data]);
   const byStructure = useMemo(() => data?.byStructure ?? [], [data]);
@@ -687,8 +689,9 @@ function AccumulatedWipContent() {
       e.balGalvMt = r.balGalvMt;
       m.set(k, e);
     }
-    return Array.from(m.values()).sort((a, b) => a.project.localeCompare(b.project) || a.structure.localeCompare(b.structure));
-  }, [byStructure, order]);
+    const all = Array.from(m.values()).sort((a, b) => a.project.localeCompare(b.project) || a.structure.localeCompare(b.structure));
+    return activeJob ? all.filter((r) => r.project === activeJob) : all;
+  }, [byStructure, order, activeJob]);
 
   // Group structures by project for expand/collapse
   const structuresByProject = useMemo(() => {
@@ -721,8 +724,9 @@ function AccumulatedWipContent() {
       cur.balGalvMt += r.balGalvMt ?? 0;
       m.set(r.project, cur);
     }
-    return Array.from(m.values()).sort((a, b) => a.project.localeCompare(b.project));
-  }, [byProject, order]);
+    const all = Array.from(m.values()).sort((a, b) => a.project.localeCompare(b.project));
+    return activeJob ? all.filter((r) => r.project === activeJob) : all;
+  }, [byProject, order, activeJob]);
 
   // Grand totals across all project rows
   const totals = useMemo(() => projectRows.reduce(
@@ -831,7 +835,7 @@ function AccumulatedWipContent() {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold tabular-nums">
-                  {mt3(data?.overall.fabricationMt)} MT
+                  {mt3(totals.fabricationMt)} MT
                 </div>
               </CardContent>
             </Card>
@@ -841,7 +845,7 @@ function AccumulatedWipContent() {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold tabular-nums">
-                  {mt3(data?.overall.galvanizingMt)} MT
+                  {mt3(totals.galvanizingMt)} MT
                 </div>
               </CardContent>
             </Card>
@@ -976,8 +980,8 @@ function AccumulatedWipContent() {
                     <tfoot className="border-t-2 bg-muted font-semibold sticky bottom-0 z-10">
                       <tr>
                         <td className="px-3 py-2">Grand total ({projectRows.length} projects)</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{mt3(data?.overall.fabricationMt)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{mt3(data?.overall.galvanizingMt)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.fabricationMt)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.galvanizingMt)}</td>
                         {hasOrder && (
                           <>
                             <td className="px-3 py-2 text-right tabular-nums">{totals.releaseMt.toFixed(3)}</td>
@@ -1006,8 +1010,22 @@ function ReleaseBalanceContent() {
   const { data, isLoading } = useGetReleaseBalance({
     query: { queryKey: getGetReleaseBalanceQueryKey() },
   });
-  const rows = useMemo(() => data?.rows ?? [], [data]);
-  const totals = useMemo(() => data?.totals, [data]);
+  const { filters } = useTracker();
+  const activeJob = filters.job && filters.job !== CURRENT_JOBS_FILTER_VALUE ? filters.job : null;
+  const allRows = useMemo(() => data?.rows ?? [], [data]);
+  const rows = useMemo(
+    () => (activeJob ? allRows.filter((r) => r.project === activeJob) : allRows),
+    [allRows, activeJob],
+  );
+  const totals = useMemo(() => {
+    if (!activeJob) return data?.totals;
+    return {
+      releaseBalanceComputedMt: rows.reduce((s, r) => s + (r.releaseBalanceComputedMt ?? 0), 0),
+      releaseBalanceOrderReviewMt: rows.reduce((s, r) => s + (r.releaseBalanceOrderReviewMt ?? 0), 0),
+      diffMt: rows.reduce((s, r) => s + (r.diffMt ?? 0), 0),
+      rowCount: rows.length,
+    };
+  }, [activeJob, data, rows]);
 
   const handleExport = () => {
     exportToXlsx(
@@ -1374,9 +1392,27 @@ function OrderReconciliationContent() {
   const { data: order, isLoading } = useGetOrderStatus({
     query: { queryKey: getGetOrderStatusQueryKey() },
   });
+  const { filters } = useTracker();
+  const activeJob = filters.job && filters.job !== CURRENT_JOBS_FILTER_VALUE ? filters.job : null;
 
   const recon = order?.reconciliation;
-  const rows = recon?.rows ?? [];
+  const allReconRows = recon?.rows ?? [];
+  const rows = useMemo(
+    () => (activeJob ? allReconRows.filter((r) => r.project === activeJob) : allReconRows),
+    [allReconRows, activeJob],
+  );
+  const visibleMatched = useMemo(() => rows.filter((r) => r.status === "match").length, [rows]);
+  const visibleMismatched = useMemo(() => rows.filter((r) => r.status === "mismatch").length, [rows]);
+
+  const allBalRows = order?.balanceReconciliation?.rows ?? [];
+  const visibleBalRows = useMemo<BalanceReconciliationRow[]>(
+    () => (activeJob ? allBalRows.filter((r) => r.project === activeJob) : allBalRows),
+    [allBalRows, activeJob],
+  );
+  const visibleRelMatched = useMemo(() => visibleBalRows.filter((r) => r.releaseStatus === "match").length, [visibleBalRows]);
+  const visibleRelMismatched = useMemo(() => visibleBalRows.filter((r) => r.releaseStatus === "mismatch").length, [visibleBalRows]);
+  const visibleDispMatched = useMemo(() => visibleBalRows.filter((r) => r.dispatchStatus === "match").length, [visibleBalRows]);
+  const visibleDispMismatched = useMemo(() => visibleBalRows.filter((r) => r.dispatchStatus === "mismatch").length, [visibleBalRows]);
 
   return (
     <div className="space-y-6">
@@ -1512,13 +1548,13 @@ function OrderReconciliationContent() {
             <Card>
               <CardContent className="py-4">
                 <div className="text-xs text-muted-foreground uppercase tracking-wide">Matched</div>
-                <div className="text-2xl font-bold mt-1 tabular-nums text-emerald-600 dark:text-emerald-400">{recon?.matched ?? 0}</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums text-emerald-600 dark:text-emerald-400">{visibleMatched}</div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="py-4">
                 <div className="text-xs text-muted-foreground uppercase tracking-wide">Mismatched</div>
-                <div className="text-2xl font-bold mt-1 tabular-nums text-red-600 dark:text-red-400">{recon?.mismatched ?? 0}</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums text-red-600 dark:text-red-400">{visibleMismatched}</div>
               </CardContent>
             </Card>
           </div>
@@ -1587,32 +1623,32 @@ function OrderReconciliationContent() {
                 <Card>
                   <CardContent className="py-4">
                     <div className="text-xs text-muted-foreground uppercase tracking-wide">Release Matched</div>
-                    <div className="text-2xl font-bold mt-1 tabular-nums text-emerald-600 dark:text-emerald-400">{order.balanceReconciliation.releaseMatched}</div>
+                    <div className="text-2xl font-bold mt-1 tabular-nums text-emerald-600 dark:text-emerald-400">{visibleRelMatched}</div>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="py-4">
                     <div className="text-xs text-muted-foreground uppercase tracking-wide">Release Mismatched</div>
-                    <div className="text-2xl font-bold mt-1 tabular-nums text-red-600 dark:text-red-400">{order.balanceReconciliation.releaseMismatched}</div>
+                    <div className="text-2xl font-bold mt-1 tabular-nums text-red-600 dark:text-red-400">{visibleRelMismatched}</div>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="py-4">
                     <div className="text-xs text-muted-foreground uppercase tracking-wide">Dispatch Matched</div>
-                    <div className="text-2xl font-bold mt-1 tabular-nums text-emerald-600 dark:text-emerald-400">{order.balanceReconciliation.dispatchMatched}</div>
+                    <div className="text-2xl font-bold mt-1 tabular-nums text-emerald-600 dark:text-emerald-400">{visibleDispMatched}</div>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="py-4">
                     <div className="text-xs text-muted-foreground uppercase tracking-wide">Dispatch Mismatched</div>
-                    <div className="text-2xl font-bold mt-1 tabular-nums text-red-600 dark:text-red-400">{order.balanceReconciliation.dispatchMismatched}</div>
+                    <div className="text-2xl font-bold mt-1 tabular-nums text-red-600 dark:text-red-400">{visibleDispMismatched}</div>
                   </CardContent>
                 </Card>
               </div>
 
               <Card>
                 <CardContent className="p-0">
-                  {order.balanceReconciliation.rows.length === 0 ? (
+                  {visibleBalRows.length === 0 ? (
                     <div className="py-10 text-center text-muted-foreground text-sm">
                       No structures to reconcile.
                     </div>
@@ -1635,7 +1671,7 @@ function OrderReconciliationContent() {
                           </tr>
                         </thead>
                         <tbody>
-                          {order.balanceReconciliation.rows.map((r: BalanceReconciliationRow) => {
+                          {visibleBalRows.map((r: BalanceReconciliationRow) => {
                             const rMeta = RECON_STATUS_META[r.releaseStatus];
                             const dMeta = RECON_STATUS_META[r.dispatchStatus];
                             return (
