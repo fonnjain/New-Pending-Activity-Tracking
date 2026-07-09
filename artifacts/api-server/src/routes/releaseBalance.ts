@@ -4,6 +4,16 @@ import { loadLatestOrderReview } from "../lib/dispatch";
 
 const router: IRouter = Router();
 
+// Mirror the OR parser's leading-dash normalization for structure keys.
+// Strips exactly one leading "-" when the result is non-empty and contains at
+// least one non-dash character. All-dash VR082 placeholders are left untouched.
+function stripLeadingDash(structure: string): string {
+  if (!structure.startsWith("-")) return structure;
+  const stripped = structure.slice(1);
+  if (!stripped || !/[^-]/.test(stripped)) return structure;
+  return stripped;
+}
+
 // GET /release-balance — per-(project, structure) Release Balance Computed from
 // the latest WIP file (Not Started + Initial rows, Col Q ÷ 1000 MT), joined to
 // the Order Review's stated Release Balance (fileBalReleaseMt). Full outer join:
@@ -16,16 +26,27 @@ router.get("/release-balance", async (_req, res): Promise<void> => {
   ]);
 
   // Build WIP lookup keyed by project\u0001structure.
+  // Apply the same leading-dash normalization the OR parser uses so that
+  // e.g. WIP "-069-2NBD2" and OR "069-2NBD2" resolve to the same key and
+  // collapse into a single joined row instead of splitting into two.
   const wipMap = new Map<
     string,
     { project: string; structure: string; computedMt: number }
   >();
   for (const w of wipRows) {
-    wipMap.set(`${w.project}\u0001${w.structure}`, {
-      project: w.project,
-      structure: w.structure,
-      computedMt: w.releaseBalanceComputedMt,
-    });
+    const normalizedStructure = stripLeadingDash(w.structure);
+    const key = `${w.project}\u0001${normalizedStructure}`;
+    const existing = wipMap.get(key);
+    if (existing) {
+      // Two WIP structures collapsed to the same normalized key — sum them.
+      existing.computedMt += w.releaseBalanceComputedMt;
+    } else {
+      wipMap.set(key, {
+        project: w.project,
+        structure: normalizedStructure,
+        computedMt: w.releaseBalanceComputedMt,
+      });
+    }
   }
 
   // Build OR lookup — scoped to the LATEST Order Review import only.
