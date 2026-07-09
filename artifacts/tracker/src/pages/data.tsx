@@ -1,5 +1,5 @@
 import { useMemo, useState, Fragment } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetAccumulatedWip, getGetAccumulatedWipQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, getGetAuthStatusQueryKey, getListUsersQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, useGetAccumulatedWip, getGetAccumulatedWipQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
@@ -2018,6 +2018,121 @@ function UsersContent() {
           )}
         </CardContent>
       </Card>
+
+      <LoginActivitySection />
+    </div>
+  );
+}
+
+// ── Login Activity ────────────────────────────────────────────────────────────
+
+function formatDuration(seconds: number | null): string {
+  if (seconds === null || seconds < 0) return "—";
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m < 60) return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm > 0 ? `${h}h ${rm}m` : `${h}h`;
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
+function DayBlock({ date, sessions }: { date: string; sessions: UserSessionEntry[] }) {
+  const [open, setOpen] = useState(true);
+
+  // Parse date for display (YYYY-MM-DD → dd-mm-yyyy)
+  const [y, m, d] = date.split("-");
+  const displayDate = `${d}-${m}-${y}`;
+
+  const uniqueUsers = new Set(sessions.map((s) => s.userId)).size;
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <button
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/40 hover:bg-muted/60 transition-colors text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <div className="flex items-center gap-3">
+          {open ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+          <span className="font-semibold text-sm">{displayDate}</span>
+          <span className="text-xs text-muted-foreground">
+            {sessions.length} session{sessions.length !== 1 ? "s" : ""} — {uniqueUsers} user{uniqueUsers !== 1 ? "s" : ""}
+          </span>
+        </div>
+      </button>
+      {open && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/20">
+                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">User</th>
+                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Login</th>
+                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Logout</th>
+                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.map((s) => (
+                <tr key={s.id} className="border-b border-border last:border-0 hover:bg-muted/20 transition-colors">
+                  <td className="py-2 px-3">
+                    <div className="font-medium text-sm">{s.displayName || <span className="italic text-muted-foreground">—</span>}</div>
+                    <div className="text-xs text-muted-foreground">{s.email}</div>
+                  </td>
+                  <td className="py-2 px-3 text-xs tabular-nums">{formatTime(s.loginAt)}</td>
+                  <td className="py-2 px-3 text-xs tabular-nums">
+                    {s.logoutAt ? (
+                      formatTime(s.logoutAt)
+                    ) : (
+                      <span className="text-green-600 font-medium">Active</span>
+                    )}
+                  </td>
+                  <td className="py-2 px-3 text-xs tabular-nums">{formatDuration(s.durationSeconds ?? null)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LoginActivitySection() {
+  const { data, isLoading } = useGetUserActivity({ query: { queryKey: getGetUserActivityQueryKey() } });
+  const days = data?.days ?? [];
+  const totalSessions = data?.totalSessions ?? 0;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Login Activity</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {isLoading ? "Loading..." : `${totalSessions} session${totalSessions !== 1 ? "s" : ""} total`}
+          </p>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <Card className="border-border">
+          <CardContent className="p-6 text-center text-muted-foreground text-sm">Loading activity...</CardContent>
+        </Card>
+      ) : days.length === 0 ? (
+        <Card className="border-border">
+          <CardContent className="p-6 text-center text-muted-foreground text-sm">No login activity yet.</CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {days.map((day) => (
+            <DayBlock key={day.date} date={day.date} sessions={day.sessions} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

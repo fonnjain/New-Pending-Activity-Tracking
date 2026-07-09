@@ -925,6 +925,27 @@ export const UpdateUserRoleResponse = zod.object({
 
 
 /**
+ * Admin only. Returns per-user login sessions grouped by day.
+ * @summary Get login activity for all users
+ */
+export const GetUserActivityResponse = zod.object({
+  "days": zod.array(zod.object({
+  "date": zod.string().describe('YYYY-MM-DD'),
+  "sessions": zod.array(zod.object({
+  "id": zod.string(),
+  "userId": zod.string(),
+  "email": zod.string(),
+  "displayName": zod.string().nullish(),
+  "loginAt": zod.string(),
+  "logoutAt": zod.string().nullish(),
+  "durationSeconds": zod.number().nullish()
+}))
+})),
+  "totalSessions": zod.number()
+})
+
+
+/**
  * Admin only. Deletes a user account. Cannot delete your own account.
  * @summary Delete a user
  */

@@ -82,6 +82,7 @@ import type {
   TurnaroundSettings,
   UpdateUserRole200,
   UploadResult,
+  UserActivityResponse,
   ValidateRequest,
   ValidationResult,
   VelocityResponse
@@ -1842,6 +1843,84 @@ export const useUpdateUserRole = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getUpdateUserRoleMutationOptions(options));
     }
+
+export const getGetUserActivityUrl = () => {
+
+
+
+
+  return `/api/users/activity`
+}
+
+/**
+ * Admin only. Returns per-user login sessions grouped by day.
+ * @summary Get login activity for all users
+ */
+export const getUserActivity = async ( options?: RequestInit): Promise<UserActivityResponse> => {
+
+  return customFetch<UserActivityResponse>(getGetUserActivityUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetUserActivityQueryKey = () => {
+    return [
+    `/api/users/activity`
+    ] as const;
+    }
+
+
+export const getGetUserActivityQueryOptions = <TData = Awaited<ReturnType<typeof getUserActivity>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getUserActivity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetUserActivityQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getUserActivity>>> = ({ signal }) => getUserActivity({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getUserActivity>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetUserActivityQueryResult = NonNullable<Awaited<ReturnType<typeof getUserActivity>>>
+export type GetUserActivityQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get login activity for all users
+ */
+
+export function useGetUserActivity<TData = Awaited<ReturnType<typeof getUserActivity>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getUserActivity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetUserActivityQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getDeleteUserUrl = (id: string,) => {
 

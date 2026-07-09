@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import { db } from "@workspace/db";
-import { appUsersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { appUsersTable, userSessionLogTable } from "@workspace/db";
+import { eq, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "./auth";
 
 const DEFAULT_PASSWORD = "Vtpl@2026";
@@ -176,6 +176,51 @@ router.delete(
     } catch (err) {
       req.log.error({ err }, "Delete user error");
       res.status(500).json({ error: "Failed to delete user" });
+    }
+  },
+);
+
+router.get(
+  "/users/activity",
+  requireAuth,
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    try {
+      const sessions = await db
+        .select()
+        .from(userSessionLogTable)
+        .orderBy(desc(userSessionLogTable.loginAt));
+
+      // Group by UTC date (YYYY-MM-DD)
+      const byDate = new Map<
+        string,
+        Array<typeof sessions[number]>
+      >();
+      for (const s of sessions) {
+        const day = s.loginAt.toISOString().slice(0, 10);
+        if (!byDate.has(day)) byDate.set(day, []);
+        byDate.get(day)!.push(s);
+      }
+
+      const days = Array.from(byDate.entries())
+        .sort(([a], [b]) => b.localeCompare(a))
+        .map(([date, sess]) => ({
+          date,
+          sessions: sess.map((s) => ({
+            id: s.id,
+            userId: s.userId,
+            email: s.email,
+            displayName: s.displayName ?? null,
+            loginAt: s.loginAt.toISOString(),
+            logoutAt: s.logoutAt ? s.logoutAt.toISOString() : null,
+            durationSeconds: s.durationSeconds ?? null,
+          })),
+        }));
+
+      res.json({ days, totalSessions: sessions.length });
+    } catch (err) {
+      req.log.error({ err }, "Get user activity error");
+      res.status(500).json({ error: "Failed to get user activity" });
     }
   },
 );

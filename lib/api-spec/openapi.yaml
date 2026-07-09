@@ -604,6 +604,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /users/activity:
+    get:
+      operationId: getUserActivity
+      tags: [users]
+      summary: Get login activity for all users
+      description: Admin only. Returns per-user login sessions grouped by day.
+      responses:
+        "200":
+          description: User activity data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserActivityResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not an admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /users/{id}:
     delete:
       operationId: deleteUser
@@ -1686,6 +1711,53 @@ components:
           enum: [admin, user]
       required:
         - email
+    UserSessionEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        email:
+          type: string
+        displayName:
+          type: ["string", "null"]
+        loginAt:
+          type: string
+        logoutAt:
+          type: ["string", "null"]
+        durationSeconds:
+          type: ["integer", "null"]
+      required:
+        - id
+        - userId
+        - email
+        - loginAt
+    UserActivityDay:
+      type: object
+      properties:
+        date:
+          type: string
+          description: YYYY-MM-DD
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserSessionEntry"
+      required:
+        - date
+        - sessions
+    UserActivityResponse:
+      type: object
+      properties:
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserActivityDay"
+        totalSessions:
+          type: integer
+      required:
+        - days
+        - totalSessions
     SetRoleRequest:
       type: object
       properties:

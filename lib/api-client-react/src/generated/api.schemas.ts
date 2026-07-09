@@ -56,6 +56,30 @@ export interface CreateUserRequest {
   role?: CreateUserRequestRole;
 }
 
+export interface UserSessionEntry {
+  id: string;
+  userId: string;
+  email: string;
+  /** @nullable */
+  displayName?: string | null;
+  loginAt: string;
+  /** @nullable */
+  logoutAt?: string | null;
+  /** @nullable */
+  durationSeconds?: number | null;
+}
+
+export interface UserActivityDay {
+  /** YYYY-MM-DD */
+  date: string;
+  sessions: UserSessionEntry[];
+}
+
+export interface UserActivityResponse {
+  days: UserActivityDay[];
+  totalSessions: number;
+}
+
 export type SetRoleRequestRole = typeof SetRoleRequestRole[keyof typeof SetRoleRequestRole];
 
 
