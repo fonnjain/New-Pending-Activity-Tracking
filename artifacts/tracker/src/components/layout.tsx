@@ -609,7 +609,11 @@ function FilterBar() {
 
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => {
     if (k === "category") return false; // Order Type is a mode, not a filter
+    if (k === "selectedJobs") return false; // accounted for via filters.job
     if (v === null || v === "") return false;
+    if (Array.isArray(v)) return false; // empty or not — arrays handled via their owning key
+    // MULTI_JOBS_FILTER_VALUE with nothing selected = effectively "All Jobs"
+    if (k === "job" && v === MULTI_JOBS_FILTER_VALUE && filters.selectedJobs.length === 0) return false;
     if (k === "dateRange") return dateRangeWindow(v) !== null;
     return true;
   }).length;
