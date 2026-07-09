@@ -1,0 +1,46 @@
+TASK: Fix a split-row bug in the "Release Balance" report caused by inconsistent leading-dash
+normalization between the two sides of the WIP↔Order Review join.
+
+=====================================================================
+BUG (verified)
+=====================================================================
+Structure 946 / "069-2NBD2" appears as TWO rows instead of one:
+   "-069-2NBD2" (dashed)  → Release Balance Computed WIP = 2.783,  Order Review = blank
+   "069-2NBD2"  (no dash) → WIP = blank,                          Order Review = 2.783
+The leading-dash strip was applied to the ORDER REVIEW structure key (good), but the WIP
+Release Balance Computed side still keys this structure WITH the leading dash. So the same
+physical structure fails to join and splits into two rows. It is currently the ONLY affected
+structure (946 is the only project with dashed OR codes that also carry a WIP-computed
+value), but the normalization is inconsistent and should be fixed.
+
+=====================================================================
+FIX
+=====================================================================
+Apply the SAME leading-dash normalization to BOTH sides of the structure key used to join
+WIP-derived data to Order Review in the Release Balance report (and anywhere else that joins
+WIP structures to Order Review structures). Strip a single leading "-" from the structure
+code on the WIP/record_pool side too — mirroring what the OR parser already does — so
+"-069-2NBD2" and "069-2NBD2" resolve to the same key and collapse into ONE row showing
+WIP = 2.783 and Order Review = 2.783 side by side.
+
+Keep the existing guard: do NOT strip if the code is all dashes, and do NOT merge two
+genuinely-distinct structures on collision (e.g. VR082 "-","--","---"). Only strip a single
+leading dash when the result is non-empty and contains a non-dash character.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change the VALUES of either measure (both verified correct).
+- Do NOT change WIP parsing identity/hash/dedup, ageing, Activity, or qty — only the
+  structure KEY used for the WIP↔OR join is normalized.
+- Do NOT alter the report scope (rows where either side > 0) or the grand totals.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- 946 / "069-2NBD2" is now a SINGLE row: WIP = 2.783, Order Review = 2.783 (not two split
+  rows), and no row with a leading-dash structure key remains.
+- Grand totals UNCHANGED: WIP Computed ≈ 2386.952 MT, Order Review ≈ 2861.269 MT.
+- Row count drops by exactly 1 (the two 946 rows merge into one); ~273 rows / 45 projects.
+- VR082 all-dash structures are untouched (not merged).
+- Report: confirm the single merged 946 row, the unchanged grand totals, and the new row count.
