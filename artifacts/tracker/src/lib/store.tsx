@@ -13,6 +13,11 @@ const BUNDLE_PREFIX = "bundle:";
 // a record's `job` field.
 export const CURRENT_JOBS_FILTER_VALUE = "__CURRENT_JOBS__";
 
+// Sentinel stored in `filters.job` when the user picks "Select Multiple Jobs".
+// The actual selected codes live in `filters.selectedJobs` (string[]). Resolved
+// into `RecordFilters.jobIn` by resolveActiveFilters.
+export const MULTI_JOBS_FILTER_VALUE = "__MULTI_JOBS__";
+
 export interface Filters {
   category: string; // "TLT" | "NTLT" (Order type) — a MODE, never null
   ntltSubtype: string | null; // "RSJ" | "EARTHING" | "GENERAL" (only within NTLT)
@@ -28,6 +33,9 @@ export interface Filters {
   holeOperation: string | null; // "PUNCHING" | "DRILLING" | "NOT_SET" (derived)
   dateRange: string | null;
   search: string;
+  // Active only when job === MULTI_JOBS_FILTER_VALUE. Stores the user's checked
+  // project codes. Cleared whenever job is changed to anything else.
+  selectedJobs: string[];
 }
 
 interface TrackerContextType {
@@ -35,6 +43,7 @@ interface TrackerContextType {
   setSelectedImportId: (id: number | null) => void;
   filters: Filters;
   setFilter: (key: keyof Filters, value: string | null) => void;
+  setSelectedJobs: (jobs: string[]) => void;
   clearFilters: () => void;
 }
 
@@ -53,6 +62,7 @@ const defaultFilters: Filters = {
   holeOperation: null,
   dateRange: null,
   search: "",
+  selectedJobs: [],
 };
 
 const TrackerContext = createContext<TrackerContextType | undefined>(undefined);
@@ -74,6 +84,10 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
       setSelectedImportId(imports[0].id);
     }
   }, [imports, selectedImportId]);
+
+  const setSelectedJobs = (jobs: string[]) => {
+    setFilters((prev) => ({ ...prev, selectedJobs: jobs }));
+  };
 
   const setFilter = (key: keyof Filters, value: string | null) => {
     setFilters((prev) => {
@@ -101,6 +115,8 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
         next.mfcBatch = null;
         next.structure = null;
         next.mark = null;
+        // Clear the multi-select checked list whenever leaving multi-jobs mode.
+        if (value !== MULTI_JOBS_FILTER_VALUE) next.selectedJobs = [];
       } else if (key === "mfcBatch") {
         // MFC sits between Project and Structure in TLT; narrowing it drops any
         // stale structure/mark selection from a different batch.
@@ -133,7 +149,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
     setFilters((prev) => ({ ...defaultFilters, category: prev.category }));
 
   return (
-    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, clearFilters }}>
+    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, clearFilters }}>
       {children}
     </TrackerContext.Provider>
   );
@@ -283,12 +299,17 @@ export function resolveActiveFilters(
 } {
   const win = dateRangeWindow(filters.dateRange);
   const isCurrentJobs = filters.job === CURRENT_JOBS_FILTER_VALUE;
+  const isMultiJobs = filters.job === MULTI_JOBS_FILTER_VALUE;
   return {
     filters: {
       category: filters.category,
       ntltSubtype: filters.ntltSubtype,
-      job: isCurrentJobs ? null : filters.job,
-      jobIn: isCurrentJobs ? (currentJobsSet ?? new Set<string>()) : null,
+      job: (isCurrentJobs || isMultiJobs) ? null : filters.job,
+      jobIn: isCurrentJobs
+        ? (currentJobsSet ?? new Set<string>())
+        : isMultiJobs
+          ? new Set(filters.selectedJobs)
+          : null,
       section: filters.section,
       mfcBatch: filters.mfcBatch,
       structure: filters.structure,

@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
-import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes } from "lucide-react";
-import { useTracker, dateRangeWindow, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
+import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes, ChevronsUpDown } from "lucide-react";
+import { useTracker, dateRangeWindow, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Segmented } from "@/components/ui/segmented";
@@ -17,6 +18,107 @@ import {
   encodeContractorCategory,
   decodeContractorCategory,
 } from "@/lib/contractorFilter";
+
+// Multi-job checkbox picker — shown instead of the single-job SearchableSelect
+// when the user has activated the "Select Multiple Jobs" mode.
+function MultiJobPicker({
+  jobs,
+  selectedJobs,
+  onSelectedJobsChange,
+  onClear,
+}: {
+  jobs: string[];
+  selectedJobs: string[];
+  onSelectedJobsChange: (jobs: string[]) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const selected = useMemo(() => new Set(selectedJobs), [selectedJobs]);
+  const filtered = useMemo(
+    () => (search ? jobs.filter((j) => j.toLowerCase().includes(search.toLowerCase())) : jobs),
+    [jobs, search],
+  );
+
+  const toggle = (job: string) => {
+    const next = new Set(selected);
+    if (next.has(job)) next.delete(job); else next.add(job);
+    onSelectedJobsChange(Array.from(next).sort());
+  };
+
+  const label =
+    selectedJobs.length === 0
+      ? "Select Jobs..."
+      : selectedJobs.length === 1
+        ? selectedJobs[0]
+        : `${selectedJobs.length} Jobs`;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 w-full justify-between font-normal text-sm"
+        >
+          <span className="truncate">{label}</span>
+          <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0 ml-1" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[240px] p-2" align="start">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs px-0.5">
+            <span className="text-muted-foreground">{selectedJobs.length} selected</span>
+            <div className="flex gap-2">
+              <button
+                className="text-primary hover:underline"
+                onClick={() => onSelectedJobsChange([...jobs])}
+              >
+                Select All
+              </button>
+              <button
+                className="text-muted-foreground hover:underline"
+                onClick={() => onSelectedJobsChange([])}
+              >
+                Clear
+              </button>
+              <button
+                className="text-destructive hover:underline"
+                onClick={() => { setOpen(false); onClear(); }}
+              >
+                Back
+              </button>
+            </div>
+          </div>
+          <input
+            type="text"
+            placeholder="Search jobs..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring bg-background"
+          />
+          <div className="max-h-56 overflow-y-auto space-y-0.5 pr-0.5">
+            {filtered.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-2">No jobs found</p>
+            )}
+            {filtered.map((job) => (
+              <label
+                key={job}
+                className="flex items-center gap-2 px-1.5 py-1 rounded cursor-pointer hover:bg-accent text-sm select-none"
+              >
+                <Checkbox
+                  checked={selected.has(job)}
+                  onCheckedChange={() => toggle(job)}
+                />
+                <span className="truncate">{job}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // Date Range filter: presets encoded as short codes, a custom range as
 // "custom:YYYY-MM-DD:YYYY-MM-DD" (either side may be blank while the user is
@@ -357,7 +459,7 @@ function CutoffBanner() {
 }
 
 function FilterBar() {
-  const { filters, setFilter, clearFilters, selectedImportId } = useTracker();
+  const { filters, setFilter, setSelectedJobs, clearFilters, selectedImportId } = useTracker();
   const [isOpen, setIsOpen] = useState(false);
   const { data: records = [] } = useGetImportRecords(selectedImportId as number, {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
@@ -375,6 +477,26 @@ function FilterBar() {
     [records, filters.category, isAll]
   );
 
+  // TLT primary dimension = Project (job).
+  const jobs = useMemo(
+    () => Array.from(new Set(modeRecords.map(r => r.job).filter(Boolean))).sort(),
+    [modeRecords]
+  );
+
+  // "Current Jobs" / "Select Multiple Jobs" sentinels — must be declared
+  // before matchesJobFilter which references currentJobsSet.
+  const { set: currentJobsSet } = useCurrentJobsSet();
+
+  // Helper: does a record match the current job filter (handles sentinels).
+  const matchesJobFilter = (rJob: string | null | undefined) => {
+    if (!filters.job) return true;
+    if (filters.job === CURRENT_JOBS_FILTER_VALUE) return currentJobsSet.has(rJob ?? "");
+    if (filters.job === MULTI_JOBS_FILTER_VALUE) {
+      return filters.selectedJobs.length === 0 || filters.selectedJobs.includes(rJob ?? "");
+    }
+    return rJob === filters.job;
+  };
+
   // Rows narrowed by the active PRIMARY-dimension selection(s), so the
   // secondary option lists (Contractor / Activity / Mark) only offer values
   // that actually exist within the current drill-down.
@@ -382,28 +504,23 @@ function FilterBar() {
     () => modeRecords.filter(r => isNtlt
       ? (!filters.ntltSubtype || r.ntltSubtype === filters.ntltSubtype) &&
         (!filters.section || r.groupKey === filters.section)
-      : (!filters.job || r.job === filters.job) &&
+      : matchesJobFilter(r.job) &&
         (!filters.mfcBatch || (r.mfcBatch || "Z") === filters.mfcBatch) &&
         (!filters.structure || r.structure === filters.structure)),
-    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.mfcBatch, filters.structure]
+    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.selectedJobs, filters.mfcBatch, filters.structure, currentJobsSet]
   );
-
-  // TLT primary dimension = Project (job).
-  const jobs = useMemo(
-    () => Array.from(new Set(modeRecords.map(r => r.job).filter(Boolean))).sort(),
-    [modeRecords]
-  );
-
-  // "Current Jobs" is a separate top-of-list group (a set-membership mode, not
-  // a real job value) so it never collides with an actual project code.
-  const { set: currentJobsSet } = useCurrentJobsSet();
   const jobGroups = useMemo(
     () => [
-      { options: [{ value: CURRENT_JOBS_FILTER_VALUE, label: "Current Jobs" }] },
+      { options: [
+        { value: CURRENT_JOBS_FILTER_VALUE, label: "Current Jobs" },
+        { value: MULTI_JOBS_FILTER_VALUE, label: "Select Multiple Jobs" },
+      ]},
       { heading: "Projects", options: jobs.map(j => ({ value: j, label: j })) },
     ],
     [jobs]
   );
+
+  const isMultiJobs = filters.job === MULTI_JOBS_FILTER_VALUE;
 
   // NTLT primary dimension = Section (the cleaned group_key), narrowed to the
   // active sub-category so only relevant sections are offered.
@@ -419,19 +536,19 @@ function FilterBar() {
   // always lands last.
   const mfcBatches = useMemo(
     () => Array.from(new Set(modeRecords
-      .filter(r => !filters.job || r.job === filters.job)
+      .filter(r => matchesJobFilter(r.job))
       .map(r => r.mfcBatch || "Z")
     )).sort(),
-    [modeRecords, filters.job]
+    [modeRecords, filters.job, filters.selectedJobs, currentJobsSet]
   );
 
   const structures = useMemo(
     () => Array.from(new Set(modeRecords
-      .filter(r => (!filters.job || r.job === filters.job) && (!filters.mfcBatch || (r.mfcBatch || "Z") === filters.mfcBatch))
+      .filter(r => matchesJobFilter(r.job) && (!filters.mfcBatch || (r.mfcBatch || "Z") === filters.mfcBatch))
       .map(r => r.structure)
       .filter(Boolean)
     )).sort(),
-    [modeRecords, filters.job, filters.mfcBatch]
+    [modeRecords, filters.job, filters.selectedJobs, filters.mfcBatch, currentJobsSet]
   );
 
   const marks = useMemo(
@@ -535,6 +652,13 @@ function FilterBar() {
                 options={sections}
                 allLabel="All Sections"
                 searchPlaceholder="Search sections..."
+              />
+            ) : isMultiJobs ? (
+              <MultiJobPicker
+                jobs={jobs as string[]}
+                selectedJobs={filters.selectedJobs}
+                onSelectedJobsChange={setSelectedJobs}
+                onClear={() => setFilter("job", null)}
               />
             ) : (
               <SearchableSelect
