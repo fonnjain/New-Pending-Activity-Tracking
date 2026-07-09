@@ -86,7 +86,13 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
   }, [imports, selectedImportId]);
 
   const setSelectedJobs = (jobs: string[]) => {
-    setFilters((prev) => ({ ...prev, selectedJobs: jobs }));
+    setFilters((prev) => ({
+      ...prev,
+      selectedJobs: jobs,
+      // Enter MULTI_JOBS mode when any job is checked; exit to "All Jobs" when
+      // every checkbox is cleared so the label reverts to "All Jobs".
+      job: jobs.length > 0 ? MULTI_JOBS_FILTER_VALUE : null,
+    }));
   };
 
   const setFilter = (key: keyof Filters, value: string | null) => {
