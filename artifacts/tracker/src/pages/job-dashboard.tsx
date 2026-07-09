@@ -100,13 +100,14 @@ function JobDashboardContent() {
     query: { queryKey: getGetOrderStatusQueryKey() },
   });
   const orderByJob = useMemo(() => {
-    const m = new Map<string, { wo: number; rel: number; disp: number }>();
+    const m = new Map<string, { wo: number; rel: number; disp: number; fileBalRelease: number }>();
     for (const r of order?.rows ?? []) {
       const key = isAll ? `TLT: ${r.project}` : r.project;
-      const agg = m.get(key) ?? { wo: 0, rel: 0, disp: 0 };
+      const agg = m.get(key) ?? { wo: 0, rel: 0, disp: 0, fileBalRelease: 0 };
       agg.wo += r.weightMt ?? 0;
       agg.rel += r.releaseMt ?? 0;
       agg.disp += r.fileDespatchMt ?? 0;
+      agg.fileBalRelease += r.fileBalReleaseMt ?? 0;
       m.set(key, agg);
     }
     return m;
@@ -386,10 +387,11 @@ function JobDashboardContent() {
           acc.wo += o.wo;
           acc.rel += o.rel;
           acc.disp += o.disp;
+          acc.fileBalRelease += o.fileBalRelease;
         }
         return acc;
       },
-      { wo: 0, rel: 0, disp: 0 },
+      { wo: 0, rel: 0, disp: 0, fileBalRelease: 0 },
     );
   }, [byProject, orderByJob]);
 
@@ -420,7 +422,7 @@ function JobDashboardContent() {
           workOrderMt: orderByJob.get(p.job)?.wo ?? 0,
           dispatchMt: orderByJob.get(p.job)?.disp ?? 0,
           dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
-          releaseBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.rel ?? 0),
+          releaseBalanceMt: orderByJob.get(p.job)?.fileBalRelease ?? 0,
           releaseBalanceComputedMt: relBalComputedByJob.get(p.job) ?? 0,
           structures: p.structures,
           marks: p.marks,
@@ -643,7 +645,7 @@ function JobDashboardContent() {
                       {o ? formatWeight((o.wo - o.disp) * 1000) : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {o ? formatWeight((o.wo - o.rel) * 1000) : <span className="text-muted-foreground">-</span>}
+                      {o ? formatWeight(o.fileBalRelease * 1000) : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {(() => { const v = relBalComputedByJob.get(p.job); return v ? formatWeight(v * 1000) : <span className="text-muted-foreground">-</span>; })()}
@@ -706,7 +708,7 @@ function JobDashboardContent() {
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.wo * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.disp * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.disp) * 1000)}</TableCell>
-                    <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.rel) * 1000)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.fileBalRelease * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(byProject.reduce((s, p) => s + (relBalComputedByJob.get(p.job) ?? 0), 0) * 1000)}</TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       if (ph.key === "dispatch") {
@@ -830,8 +832,8 @@ function JobDetail({
   records: any[];
   onBack: () => void;
   headerPhases?: typeof PROCESS_PHASES;
-  orderEntry?: { wo: number; rel: number; disp: number };
-  orderRows?: Array<{ structure: string; weightMt: number | null; woOrderQtyMt: number | null; releaseMt: number | null; fileDespatchMt: number | null }>;
+  orderEntry?: { wo: number; rel: number; disp: number; fileBalRelease: number };
+  orderRows?: Array<{ structure: string; weightMt: number | null; woOrderQtyMt: number | null; releaseMt: number | null; fileDespatchMt: number | null; fileBalReleaseMt: number | null }>;
 }) {
   const jobIsNtlt = records.some((r) => (r.category || "TLT") === "NTLT");
   const isNtlt = jobIsNtlt;
@@ -840,20 +842,21 @@ function JobDetail({
   // Per-MFC order figures: map structure → mfcBatch using WIP records, then
   // sum woOrderQtyMt / releaseMt / fileDespatchMt per mfc batch.
   const orderByMfc = useMemo(() => {
-    if (!orderRows.length) return new Map<string, { wo: number; rel: number; disp: number }>();
+    if (!orderRows.length) return new Map<string, { wo: number; rel: number; disp: number; fileBalRelease: number }>();
     const structToMfc = new Map<string, string>();
     for (const r of records) {
       if (r.structure && !structToMfc.has(r.structure)) {
         structToMfc.set(r.structure, mfcVal(r));
       }
     }
-    const m = new Map<string, { wo: number; rel: number; disp: number }>();
+    const m = new Map<string, { wo: number; rel: number; disp: number; fileBalRelease: number }>();
     for (const r of orderRows) {
       const mfc = structToMfc.get(r.structure) ?? "Z";
-      const agg = m.get(mfc) ?? { wo: 0, rel: 0, disp: 0 };
+      const agg = m.get(mfc) ?? { wo: 0, rel: 0, disp: 0, fileBalRelease: 0 };
       agg.wo += r.weightMt ?? 0;
       agg.rel += r.releaseMt ?? 0;
       agg.disp += r.fileDespatchMt ?? 0;
+      agg.fileBalRelease += r.fileBalReleaseMt ?? 0;
       m.set(mfc, agg);
     }
     return m;
@@ -997,7 +1000,7 @@ function JobDetail({
                           <TableCell className="text-right tabular-nums">{formatWeight((moe?.wo ?? 0) * 1000)}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatWeight((moe?.disp ?? 0) * 1000)}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatWeight(((moe?.wo ?? 0) - (moe?.disp ?? 0)) * 1000)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatWeight(((moe?.wo ?? 0) - (moe?.rel ?? 0)) * 1000)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatWeight((moe?.fileBalRelease ?? 0) * 1000)}</TableCell>
                         </>
                       )}
                       {PROCESS_PHASES.map((ph) => {
@@ -1056,7 +1059,7 @@ function JobDetail({
                           <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderEntry.wo * 1000)}</TableCell>
                           <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderEntry.disp * 1000)}</TableCell>
                           <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderEntry.wo - orderEntry.disp) * 1000)}</TableCell>
-                          <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderEntry.wo - orderEntry.rel) * 1000)}</TableCell>
+                          <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderEntry.fileBalRelease * 1000)}</TableCell>
                         </>
                       )}
                       {PROCESS_PHASES.map((ph) => {
