@@ -18,6 +18,8 @@ import {
   useGetOrderStatus,
   getGetOrderStatusQueryKey,
   useListImports,
+  useGetReleaseBalance,
+  getGetReleaseBalanceQueryKey,
 } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
@@ -109,6 +111,21 @@ function JobDashboardContent() {
     }
     return m;
   }, [order, isAll]);
+
+  // Release Balance Computed (from WIP file) aggregated per project.
+  // The API returns per-structure rows keyed by plain project code. Map to the
+  // same job key used by orderByJob (with "TLT: " prefix in ALL mode).
+  const { data: relBalData } = useGetReleaseBalance({
+    query: { queryKey: getGetReleaseBalanceQueryKey() },
+  });
+  const relBalComputedByJob = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of relBalData?.rows ?? []) {
+      const key = isAll ? `TLT: ${r.project}` : r.project;
+      m.set(key, (m.get(key) ?? 0) + (r.releaseBalanceComputedMt ?? 0));
+    }
+    return m;
+  }, [relBalData, isAll]);
 
   // Finished Goods WIP per project from the WIP file's parseSummary. Keyed by
   // raw project code (no category prefix). React Query cache — no extra request.
@@ -387,6 +404,7 @@ function JobDashboardContent() {
           { label: "Dispatch (MT)", field: "dispatchMt", numeric: true, decimals: 3, total: true },
           { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
           { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
+          { label: "Release Balance Computed (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
           { label: "Structures", field: "structures", numeric: true, decimals: 0 },
           { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
           { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
@@ -403,6 +421,7 @@ function JobDashboardContent() {
           dispatchMt: orderByJob.get(p.job)?.disp ?? 0,
           dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
           releaseBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.rel ?? 0),
+          releaseBalanceComputedMt: relBalComputedByJob.get(p.job) ?? 0,
           structures: p.structures,
           marks: p.marks,
           qty: p.qty,
@@ -579,6 +598,7 @@ function JobDashboardContent() {
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Qty</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Balance</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Balance</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Balance Computed</TableHead>
                   {headerPhases.map((ph) => (
                     <TableHead key={ph.key} className="text-right align-bottom">
                       <span className="block whitespace-normal leading-tight">{ph.label}</span>
@@ -624,6 +644,9 @@ function JobDashboardContent() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {o ? formatWeight((o.wo - o.rel) * 1000) : <span className="text-muted-foreground">-</span>}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {(() => { const v = relBalComputedByJob.get(p.job); return v ? formatWeight(v * 1000) : <span className="text-muted-foreground">-</span>; })()}
                     </TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       if (ph.key === "dispatch") {
@@ -684,6 +707,7 @@ function JobDashboardContent() {
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.disp * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.disp) * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.rel) * 1000)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-bold">{formatWeight(byProject.reduce((s, p) => s + (relBalComputedByJob.get(p.job) ?? 0), 0) * 1000)}</TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       if (ph.key === "dispatch") {
                         const totalFgWt = byProject.reduce((s, p) => s + fgWipForJob(p.job), 0);
