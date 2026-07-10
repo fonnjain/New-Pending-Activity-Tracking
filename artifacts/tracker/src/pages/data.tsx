@@ -856,7 +856,8 @@ type FgSortKey =
   | "structure"
   | "releaseMt"
   | "fileDespatchMt"
-  | "computedFgMt";
+  | "computedFgMt"
+  | "fgWipMt";
 
 function ComputedFgContent() {
   const { available, asOnDate, rows, isLoading } = useFgRows();
@@ -885,8 +886,9 @@ function ComputedFgContent() {
             releaseMt: acc.releaseMt + (r.releaseMt ?? 0),
             fileDespatchMt: acc.fileDespatchMt + (r.fileDespatchMt ?? 0),
             computedFgMt: acc.computedFgMt + (r.computedFgMt ?? 0),
+            fgWipMt: r.fgWipMt != null ? (acc.fgWipMt ?? 0) + r.fgWipMt : acc.fgWipMt,
           }),
-          { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0 },
+          { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0, fgWipMt: null as number | null },
         );
         return { project, list: sorted, subtotal };
       });
@@ -898,8 +900,9 @@ function ComputedFgContent() {
         releaseMt: acc.releaseMt + (r.releaseMt ?? 0),
         fileDespatchMt: acc.fileDespatchMt + (r.fileDespatchMt ?? 0),
         computedFgMt: acc.computedFgMt + (r.computedFgMt ?? 0),
+        fgWipMt: r.fgWipMt != null ? (acc.fgWipMt ?? 0) + r.fgWipMt : acc.fgWipMt,
       }),
-      { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0 },
+      { releaseMt: 0, fileDespatchMt: 0, computedFgMt: 0, fgWipMt: null as number | null },
     );
   }, [rows]);
 
@@ -922,6 +925,7 @@ function ComputedFgContent() {
         { label: "Release (MT)", field: "releaseMt", numeric: true, decimals: 3, total: true },
         { label: "File Despatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
         { label: "FG Overview Computed (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
+        { label: "FG WIP (MT)", field: "fgWipMt", numeric: true, decimals: 3, total: true },
       ],
       rows,
       { sheetName: "Computed FG" },
@@ -990,6 +994,9 @@ function ComputedFgContent() {
                     <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("computedFgMt")}>
                       FG Overview Computed (MT){sortArrow("computedFgMt")}
                     </th>
+                    <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("fgWipMt")}>
+                      FG WIP (MT){sortArrow("fgWipMt")}
+                    </th>
                   </tr>
                 </thead>
                 {groups.map((g) => (
@@ -1001,6 +1008,7 @@ function ComputedFgContent() {
                         <td className="px-3 py-2 text-right tabular-nums">{mt3(r.releaseMt)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fileDespatchMt)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{mt3(r.computedFgMt)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{mt3(r.fgWipMt)}</td>
                       </tr>
                     ))}
                     <tr className="bg-muted/20 text-xs font-medium">
@@ -1010,6 +1018,7 @@ function ComputedFgContent() {
                       <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.releaseMt)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.fileDespatchMt)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.computedFgMt)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{mt3(g.subtotal.fgWipMt)}</td>
                     </tr>
                   </tbody>
                 ))}
@@ -1019,6 +1028,7 @@ function ComputedFgContent() {
                     <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.releaseMt)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.fileDespatchMt)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.computedFgMt)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{mt3(totals.fgWipMt)}</td>
                   </tr>
                 </tfoot>
               </table>
