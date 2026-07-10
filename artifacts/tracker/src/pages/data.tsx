@@ -1,6 +1,6 @@
 import { useMemo, useState, Fragment } from "react";
 import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry } from "@workspace/api-client-react";
-import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
+import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
 import { contractorCategoryLabel } from "@workspace/domain";
@@ -659,12 +659,14 @@ function ReleaseBalanceContent() {
     query: { queryKey: getGetReleaseBalanceQueryKey() },
   });
   const { filters } = useTracker();
+  const { set: currentJobsSet } = useCurrentJobsSet();
   const activeJobSet = useMemo(() => {
+    if (filters.job === CURRENT_JOBS_FILTER_VALUE) return currentJobsSet;
     if (filters.job === MULTI_JOBS_FILTER_VALUE)
       return filters.selectedJobs.length > 0 ? new Set(filters.selectedJobs) : null;
-    if (filters.job && filters.job !== CURRENT_JOBS_FILTER_VALUE) return new Set([filters.job]);
+    if (filters.job) return new Set([filters.job]);
     return null;
-  }, [filters.job, filters.selectedJobs]);
+  }, [filters.job, filters.selectedJobs, currentJobsSet]);
   const allRows = useMemo(() => data?.rows ?? [], [data]);
   const rows = useMemo(
     () => (activeJobSet ? allRows.filter((r) => activeJobSet.has(r.project ?? "")) : allRows),
@@ -1045,12 +1047,14 @@ function OrderReconciliationContent() {
     query: { queryKey: getGetOrderStatusQueryKey() },
   });
   const { filters } = useTracker();
+  const { set: currentJobsSet } = useCurrentJobsSet();
   const activeJobSet = useMemo(() => {
+    if (filters.job === CURRENT_JOBS_FILTER_VALUE) return currentJobsSet;
     if (filters.job === MULTI_JOBS_FILTER_VALUE)
       return filters.selectedJobs.length > 0 ? new Set(filters.selectedJobs) : null;
-    if (filters.job && filters.job !== CURRENT_JOBS_FILTER_VALUE) return new Set([filters.job]);
+    if (filters.job) return new Set([filters.job]);
     return null;
-  }, [filters.job, filters.selectedJobs]);
+  }, [filters.job, filters.selectedJobs, currentJobsSet]);
 
   const recon = order?.reconciliation;
   const allReconRows = recon?.rows ?? [];

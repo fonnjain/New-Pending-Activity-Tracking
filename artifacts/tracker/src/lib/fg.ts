@@ -1,5 +1,10 @@
 import { useMemo } from "react";
-import { useTracker } from "@/lib/store";
+import {
+  useTracker,
+  useCurrentJobsSet,
+  CURRENT_JOBS_FILTER_VALUE,
+  MULTI_JOBS_FILTER_VALUE,
+} from "@/lib/store";
 import {
   useGetOrderStatus,
   getGetOrderStatusQueryKey,
@@ -44,9 +49,21 @@ export function useFgRows(): {
     return imp?.summary?.fgWipByStructure ?? {};
   }, [imports, selectedImportId]);
 
+  const { set: currentJobsSet } = useCurrentJobsSet();
+
   const rows = useMemo<FgComputedRow[]>(() => {
     const all = order?.rows ?? [];
-    const filtered = filters.job ? all.filter((r) => r.project === filters.job) : all;
+    let filtered: typeof all;
+    if (filters.job === CURRENT_JOBS_FILTER_VALUE) {
+      filtered = all.filter((r) => currentJobsSet.has(r.project));
+    } else if (filters.job === MULTI_JOBS_FILTER_VALUE) {
+      const s = new Set(filters.selectedJobs);
+      filtered = s.size > 0 ? all.filter((r) => s.has(r.project)) : all;
+    } else if (filters.job) {
+      filtered = all.filter((r) => r.project === filters.job);
+    } else {
+      filtered = all;
+    }
     return filtered.map((r) => {
       const structKey = (r.structure ?? "").trim().toUpperCase();
       const fgWipKg = fgWipByStructure[r.project]?.[structKey];
@@ -60,7 +77,7 @@ export function useFgRows(): {
         fgWipMt: typeof fgWipKg === "number" ? fgWipKg / 1000 : null,
       };
     });
-  }, [order, filters.job, fgWipByStructure]);
+  }, [order, filters.job, filters.selectedJobs, currentJobsSet, fgWipByStructure]);
 
   return {
     available: order?.available ?? false,
