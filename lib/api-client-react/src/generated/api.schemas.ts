@@ -307,6 +307,59 @@ export interface OrderReviewSummary {
   unmatchedToWip: number;
 }
 
+export interface OrFormatRename {
+  expected: string;
+  foundAs: string;
+}
+
+/**
+ * Part 1 format drift check for an Order Review file: compares the two-row composite header against the EXPECTED_OR_COLUMNS baseline.
+
+ */
+export interface OrFormatCheck {
+  ok: boolean;
+  headerFound: boolean;
+  twoRowHeader: boolean;
+  foundCount: number;
+  expectedCount: number;
+  missingExpected: string[];
+  criticalMissing: string[];
+  renames: OrFormatRename[];
+  /** @nullable */
+  impactNote: string | null;
+}
+
+export type OrDataFlagSeverity = typeof OrDataFlagSeverity[keyof typeof OrDataFlagSeverity];
+
+
+export const OrDataFlagSeverity = {
+  warn: 'warn',
+  info: 'info',
+} as const;
+
+/**
+ * A single deterministic data quality finding for an Order Review file.
+ */
+export interface OrDataFlag {
+  /** Machine-readable check identifier. */
+  check: string;
+  severity: OrDataFlagSeverity;
+  message: string;
+  /** Which downstream feature is affected. */
+  impact: string;
+}
+
+/**
+ * Combined result of the Order Review format drift check (Part 1) and deterministic data sanity checks (Part 2). All findings are warn-only.
+
+ */
+export interface OrSanityResult {
+  formatCheck: OrFormatCheck;
+  dataFlags: OrDataFlag[];
+  /** True only when format passed and no warn-severity data flags were raised. */
+  passedAll: boolean;
+}
+
 /**
  * Deterministic structural read of a staged Order Review file.
  */
@@ -314,6 +367,8 @@ export interface OrderReviewStageInfo {
   /** @nullable */
   asOnDate: string | null;
   summary: OrderReviewSummary | null;
+  /** Format drift + data sanity results; null when the file could not be parsed. */
+  sanityCheck: OrSanityResult | null;
 }
 
 export interface StageResult {
@@ -409,6 +464,12 @@ export interface ValidationResult {
   sanitize: StagedSanitizeSuggestion[];
   /** Detected file type; present for Order Review and unknown files. */
   fileType?: ValidationResultFileType;
+  /**
+     * AI-generated advisory narrative for Order Review files (Part 3 of the sanity check). Null when AI is unavailable, when the file is not Order Review, or when the AI call failed. Advisory only — never blocks the import.
+
+     * @nullable
+     */
+  aiAdvisory?: string | null;
 }
 
 export interface AcceptedSuggestion {

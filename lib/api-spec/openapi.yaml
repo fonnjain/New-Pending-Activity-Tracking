@@ -2164,6 +2164,95 @@ components:
         - sourceFilename
         - fileType
         - structural
+    OrDataFlag:
+      type: object
+      description: A single deterministic data quality finding for an Order Review file.
+      properties:
+        check:
+          type: string
+          description: Machine-readable check identifier.
+        severity:
+          type: string
+          enum: [warn, info]
+        message:
+          type: string
+        impact:
+          type: string
+          description: Which downstream feature is affected.
+      required:
+        - check
+        - severity
+        - message
+        - impact
+    OrFormatRename:
+      type: object
+      properties:
+        expected:
+          type: string
+        foundAs:
+          type: string
+      required:
+        - expected
+        - foundAs
+    OrFormatCheck:
+      type: object
+      description: >
+        Part 1 format drift check for an Order Review file: compares the two-row
+        composite header against the EXPECTED_OR_COLUMNS baseline.
+      properties:
+        ok:
+          type: boolean
+        headerFound:
+          type: boolean
+        twoRowHeader:
+          type: boolean
+        foundCount:
+          type: number
+        expectedCount:
+          type: number
+        missingExpected:
+          type: array
+          items:
+            type: string
+        criticalMissing:
+          type: array
+          items:
+            type: string
+        renames:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrFormatRename"
+        impactNote:
+          type: ["string", "null"]
+      required:
+        - ok
+        - headerFound
+        - twoRowHeader
+        - foundCount
+        - expectedCount
+        - missingExpected
+        - criticalMissing
+        - renames
+        - impactNote
+    OrSanityResult:
+      type: object
+      description: >
+        Combined result of the Order Review format drift check (Part 1) and
+        deterministic data sanity checks (Part 2). All findings are warn-only.
+      properties:
+        formatCheck:
+          $ref: "#/components/schemas/OrFormatCheck"
+        dataFlags:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrDataFlag"
+        passedAll:
+          type: boolean
+          description: True only when format passed and no warn-severity data flags were raised.
+      required:
+        - formatCheck
+        - dataFlags
+        - passedAll
     OrderReviewStageInfo:
       type: object
       description: Deterministic structural read of a staged Order Review file.
@@ -2174,9 +2263,15 @@ components:
           oneOf:
             - $ref: "#/components/schemas/OrderReviewSummary"
             - type: "null"
+        sanityCheck:
+          oneOf:
+            - $ref: "#/components/schemas/OrSanityResult"
+            - type: "null"
+          description: Format drift + data sanity results; null when the file could not be parsed.
       required:
         - asOnDate
         - summary
+        - sanityCheck
     ValidateRequest:
       type: object
       properties:
@@ -2238,6 +2333,12 @@ components:
           type: string
           enum: [wip, order-review, unknown]
           description: Detected file type; present for Order Review and unknown files.
+        aiAdvisory:
+          type: ["string", "null"]
+          description: >
+            AI-generated advisory narrative for Order Review files (Part 3 of the sanity
+            check). Null when AI is unavailable, when the file is not Order Review, or
+            when the AI call failed. Advisory only — never blocks the import.
       required:
         - available
         - verdict

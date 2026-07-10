@@ -1,0 +1,135 @@
+TASK: Add a sanity check to the Order Review upload/staging step (currently "ingested
+deterministically, no AI check"). It must (1) run Order-Review-specific DATA sanity checks,
+(2) run an AI review mirroring the WIP AI check, and (3) detect FORMAT drift. All findings
+are WARN-ONLY and non-blocking — the user still chooses Import or Discard.
+
+=====================================================================
+CONTEXT
+=====================================================================
+Order Review currently ingests deterministically with NO validation — bad or format-changed
+files flow straight in silently and corrupt every downstream number (buckets, release
+balance, order status, fabrication report). This adds a review panel in the SAME staging
+screen that already shows Rows Read / Rows Kept / Projects / Order Wt / Released / Despatch /
+Matched-to-WIP / Unmatched / Skipped. This is ADDITIVE and read-only: it does NOT change
+parsing, the BOM-summing aggregation, dedup, or any measure. It inspects the staged file and
+reports.
+
+The Order Review file has a TWO-ROW merged header (a block row + a sub-column row). The data
+starts a few rows below. Structures span multiple BOM rows (Proto/Mass/Pre); the structure
+code (Tower Type, Col C) is on the first row only, continuation rows have Col C blank. A
+"Grand Total"/"Sub Total"/"Total" footer row must be excluded. Reuse the EXISTING parser's
+row/boundary handling — do not re-implement it; the checks run over the parsed result plus a
+light header inspection.
+
+=====================================================================
+PART 1 — FORMAT DRIFT CHECK (Order Review baseline)
+=====================================================================
+Store the expected Order Review column layout as a named constant (EXPECTED_OR_COLUMNS),
+updatable in one place. Baseline (by position; the meaningful header text is on the 2-row
+header, block row + sub-row):
+   C  Tower Type            (structure code / join key)
+   D  Tower Sub Type
+   E  Weight / Set (MT)
+   F  Order Qty. — Sets
+   G  Order Qty. — Weight
+   H  WO Order Qty. — Sets
+   J  WO Order Qty. — Weight (MT)
+   K  BOM Label
+   L  Progress — Release (MT)
+   M  Progress — Fabrication (MT)
+   N  Progress — Galvanising (MT)
+   O  Progress — Inspection (MT)
+   Q  Progress — Despatch (MT)
+   R  Balance — Work Order (MT)
+   S  Balance — Release (MT)
+   T  Balance — Fabrication (MT)
+   U  Balance — Galvanising (MT)
+   V  Balance — Inspection (MT)
+   W  Balance — Despatch (MT)
+
+Detect and report, in plain language (normalized text match — trim/case/whitespace — so
+trivial spacing isn't a false alarm):
+  - Column COUNT change vs baseline.
+  - MISSING expected columns (CRITICAL if any of these: Tower Type, BOM Label, Balance
+    Release (S), Progress Inspection (O), Progress Galvanising (N), Balance Fabrication (T),
+    Balance Galvanising (U), WO Order Qty Weight (J)). If a critical column is missing, name
+    the features that break (buckets, release balance, order status).
+  - NEW/unexpected columns (list names).
+  - RENAMED columns (position whose header text changed, e.g. "Despatch" vs "Dispatch").
+  - REORDERED columns (same names, different positions — map each expected column to where it
+    was found; flag moves). Critically important because the parser reads by position: a
+    reorder silently corrupts values.
+  - HEADER STRUCTURE change: if the two-row merged header can't be located, or the
+    Progress/Balance block labels are missing → flag "header layout changed".
+
+=====================================================================
+PART 2 — DATA SANITY CHECKS (Order-Review-specific, deterministic)
+=====================================================================
+Over the parsed (BOM-summed) structures, compute and flag:
+  1. TOTALS RECONCILIATION: the parser's summed totals (Order Wt, Released, Despatch,
+     Balance Release, etc.) should reconcile to the file's own "Grand Total" footer row (if
+     present) within a small tolerance. Flag any column whose parsed total deviates from the
+     footer by > 0.5 MT (catches dropped BOM rows / boundary bugs).
+  2. NEGATIVES where implausible: Balance Release (S) can be slightly negative (over-release)
+     — allowed but report the count and total of negatives so the user is aware. Order Qty,
+     WO Order Qty, Weight/Set should NOT be negative → flag any.
+  3. INTERNAL CONSISTENCY per structure (report counts, not blocking):
+       - Balance ≈ WO Order Qty − Progress for each stream where that identity should hold
+         (e.g. Balance Release ≈ WO Order Wt − Progress Release), flag structures off by a
+         material amount.
+       - Progress values should not exceed WO Order Qty (can't fabricate more than ordered)
+         → flag structures where Progress > Order by > tolerance.
+  4. STRUCTURE/JOIN health: count rows with NO structure code (the panel already shows "N
+     rows had no structure and will not join to WIP marks" — surface it here too), and
+     Matched/Unmatched to WIP. Flag if Unmatched jumps sharply vs the previous import (e.g.
+     >20% increase) — a sign of a naming/format change upstream.
+  5. DUPLICATES: same (project, structure) appearing as two separate stored rows (e.g. the
+     leading-dash vs non-dash case) → flag potential duplicate keys.
+  6. EMPTY/È ZERO file guards: 0 structures, 0 projects, or all-zero measures → flag loudly.
+  7. AS-ON DATE sanity: if the file's as-on date is older than the currently-imported Order
+     Review's date, warn "this file is older than the current data".
+
+=====================================================================
+PART 3 — AI REVIEW (mirror the existing WIP AI check)
+=====================================================================
+Apply the SAME AI-review mechanism the WIP upload uses (same model/endpoint/pattern — reuse
+it, don't invent a new one), adapted to Order Review: feed it a compact summary (per-project
+totals, the deterministic flags from Part 2, and the format-drift findings from Part 1) and
+have it produce a short plain-language assessment highlighting anything anomalous or risky
+for the user to review. The AI output is ADVISORY only and clearly labelled as such — the
+deterministic checks (Parts 1–2) are authoritative; the AI never changes numbers and never
+blocks. If the WIP flow's AI is BYO-key/optional, keep the same behaviour here (skip AI
+gracefully if no key; deterministic checks still run).
+
+=====================================================================
+SURFACING / BEHAVIOUR
+=====================================================================
+- Show the results in the Order Review staging panel, next to the existing stats, BEFORE the
+  user clicks Import. A clean file → small "Sanity check passed" confirmation. Any finding →
+  a warning panel grouping: Format changes / Data flags / AI assessment.
+- WARN-ONLY, NON-BLOCKING: keep the existing "Import Order Review" and "Discard" buttons
+  active regardless of findings. Never auto-import, never auto-block. Just inform.
+- Each finding states its IMPACT (which downstream feature is affected) so the user can judge.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change Order Review parsing, BOM-summing, dedup, or any measure — read-only checks.
+- Do NOT block or auto-import; warn only.
+- One EXPECTED_OR_COLUMNS constant; no scattered baselines.
+- Reuse the existing WIP AI mechanism; do not build a parallel one.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- Upload the current Order Review (as-on 2026-07-10: ~2,371 rows, 158 projects, 2,371 kept,
+  854 matched to WIP, 1,309 unmatched, 3 rows no structure) → format check passes, data
+  checks surface the "3 rows no structure" note and the negative-Balance-Release count, AI
+  gives an advisory summary; Import/Discard remain enabled.
+- Simulate a column rename ("Despatch"→"Dispatch") or a reorder → format warning fires with
+  the exact position/name.
+- Simulate a totals mismatch (drop a BOM row) → Part-2 reconciliation flags the affected
+  column.
+- Confirm nothing blocks; a clean file shows a passed state.
+- Report: the warnings generated for the current file, and confirmation the buttons stay
+  enabled.

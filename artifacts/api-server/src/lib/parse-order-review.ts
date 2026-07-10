@@ -610,3 +610,390 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
 
   return { asOnDate, rows, summary };
 }
+
+// ── Order Review format & sanity check ──────────────────────────────────────
+// All checks are WARN-ONLY and never block the import. They run synchronously
+// at stage time (Parts 1 & 2) and optionally via a Claude call (Part 3).
+
+export interface OrFormatCheck {
+  ok: boolean;
+  /** True when the two-row header block could be located in the grid. */
+  headerFound: boolean;
+  /** True when the sub-header row (carrying "Sets", "Weight (MT)", …) was detected. */
+  twoRowHeader: boolean;
+  /** Number of non-empty composite label columns found. */
+  foundCount: number;
+  /** Number of columns in the EXPECTED_OR_COLUMNS baseline. */
+  expectedCount: number;
+  /** Display names of expected columns not found in the file (not counting renames). */
+  missingExpected: string[];
+  /** Subset of missingExpected whose absence breaks key features (buckets / join). */
+  criticalMissing: string[];
+  /** Columns where text changed (e.g. "Despatch" → "Dispatch"). */
+  renames: { expected: string; foundAs: string }[];
+  /** Human-readable summary of the combined impact, or null when the check passed. */
+  impactNote: string | null;
+}
+
+export interface OrDataFlag {
+  check: string;
+  severity: "warn" | "info";
+  message: string;
+  impact: string;
+}
+
+export interface OrSanityResult {
+  formatCheck: OrFormatCheck;
+  dataFlags: OrDataFlag[];
+  /** True only when format passed and no warn-severity data flags were raised. */
+  passedAll: boolean;
+}
+
+interface OrSpec {
+  display: string;
+  /** All terms must appear in at least one composite label for the column to be "found". */
+  terms: string[];
+  /** Optional alternate term-sets; if matched while primary terms fail → rename. */
+  alternates?: string[][];
+  critical: boolean;
+}
+
+/**
+ * Canonical column layout for the Order Review two-row merged-header export.
+ * One entry per expected logical column (display names only — the actual matching
+ * is done by OR_SPECS below). This is the single source of truth for "what the
+ * format should look like"; update here when the export format changes.
+ */
+export const EXPECTED_OR_COLUMNS: readonly string[] = [
+  "Tower Type",
+  "Tower Sub Type",
+  "Weight / Set (MT)",
+  "Order Qty — Sets",
+  "Order Qty — Weight (MT)",
+  "WO Order Qty — Sets",
+  "WO Order Qty — Weight (MT)",
+  "BOM Label",
+  "Progress — Release (MT)",
+  "Progress — Fabrication (MT)",
+  "Progress — Galvanising (MT)",
+  "Progress — Inspection (MT)",
+  "Progress — Despatch (MT)",
+  "Balance — Work Order (MT)",
+  "Balance — Release (MT)",
+  "Balance — Fabrication (MT)",
+  "Balance — Galvanising (MT)",
+  "Balance — Inspection (MT)",
+  "Balance — Despatch (MT)",
+];
+
+// Fuzzy-matching specs for format drift detection.  Each column is matched
+// against composite labels by requiring ALL `terms` to appear in at least one
+// label. `alternates` triggers rename detection (primary terms absent, alt terms
+// present → same concept with a different spelling).
+const OR_SPECS: OrSpec[] = [
+  { display: "Tower Type",                 terms: ["tower type"],                    critical: true  },
+  { display: "Tower Sub Type",             terms: ["tower sub"],                     critical: false },
+  { display: "Weight / Set (MT)",          terms: ["weight", "set"],                 critical: false },
+  { display: "Order Qty — Sets",           terms: ["order qty", "sets"],             critical: false },
+  { display: "Order Qty — Weight (MT)",    terms: ["order qty", "weight"],           critical: false },
+  { display: "WO Order Qty — Sets",        terms: ["wo order qty", "sets"],          critical: false },
+  { display: "WO Order Qty — Weight (MT)", terms: ["wo", "order", "weight"],         critical: true  },
+  { display: "BOM Label",                  terms: ["bom"],                           critical: true  },
+  { display: "Progress — Release (MT)",    terms: ["progress", "release"],           critical: false },
+  { display: "Progress — Fabrication (MT)",terms: ["progress", "fab"],               critical: false },
+  {
+    display: "Progress — Galvanising (MT)", terms: ["progress", "galvanis"],         critical: true,
+    alternates: [["progress", "galvaniz"]],
+  },
+  { display: "Progress — Inspection (MT)", terms: ["progress", "inspection"],        critical: true  },
+  {
+    display: "Progress — Despatch (MT)",   terms: ["progress", "despatch"],          critical: false,
+    alternates: [["progress", "dispatch"]],
+  },
+  { display: "Balance — Work Order (MT)",  terms: ["balance", "work order"],         critical: false },
+  { display: "Balance — Release (MT)",     terms: ["balance", "release"],            critical: true  },
+  { display: "Balance — Fabrication (MT)", terms: ["balance", "fab"],                critical: true  },
+  {
+    display: "Balance — Galvanising (MT)", terms: ["balance", "galvanis"],           critical: true,
+    alternates: [["balance", "galvaniz"]],
+  },
+  { display: "Balance — Inspection (MT)", terms: ["balance", "inspection"],          critical: false },
+  {
+    display: "Balance — Despatch (MT)",    terms: ["balance", "despatch"],           critical: false,
+    alternates: [["balance", "dispatch"]],
+  },
+];
+
+function labelsContainAll(labels: string[], terms: string[]): boolean {
+  return labels.some((lbl) => terms.every((t) => lbl.includes(t)));
+}
+
+/** Part 1 — Format drift check. Runs purely on the raw buffer (no DB). */
+export function checkOrderReviewFormat(buffer: Buffer): OrFormatCheck {
+  let grid: unknown[][];
+  try {
+    grid = getGrid(buffer);
+  } catch {
+    return {
+      ok: false, headerFound: false, twoRowHeader: false,
+      foundCount: 0, expectedCount: EXPECTED_OR_COLUMNS.length,
+      missingExpected: [...EXPECTED_OR_COLUMNS],
+      criticalMissing: OR_SPECS.filter((s) => s.critical).map((s) => s.display),
+      renames: [],
+      impactNote: "The file could not be read as a spreadsheet.",
+    };
+  }
+
+  const headerRow = detectHeaderRow(grid);
+  const headerFound = headerRow >= 0;
+  const { labels } = buildHeaderModel(grid, headerRow);
+  const nextRow = grid[headerRow + 1];
+  const twoRowHeader =
+    headerFound && Array.isArray(nextRow) && looksLikeSubHeader(nextRow);
+
+  const missingExpected: string[] = [];
+  const criticalMissing: string[] = [];
+  const renames: { expected: string; foundAs: string }[] = [];
+
+  for (const spec of OR_SPECS) {
+    if (labelsContainAll(labels, spec.terms)) continue;
+    let renamed = false;
+    if (spec.alternates) {
+      for (const altTerms of spec.alternates) {
+        if (labelsContainAll(labels, altTerms)) {
+          renames.push({
+            expected: spec.display,
+            foundAs: spec.display
+              .replace("Despatch", "Dispatch")
+              .replace("Galvanising", "Galvanizing"),
+          });
+          renamed = true;
+          break;
+        }
+      }
+    }
+    if (!renamed) {
+      missingExpected.push(spec.display);
+      if (spec.critical) criticalMissing.push(spec.display);
+    }
+  }
+
+  const ok = headerFound && missingExpected.length === 0 && renames.length === 0;
+  const nonEmpty = labels.filter((l) => l.trim()).length;
+
+  let impactNote: string | null = null;
+  if (!headerFound) {
+    impactNote =
+      "The two-row header block could not be located — the file layout may have changed significantly. All measures fall back to fixed column positions and may be read from the wrong columns.";
+  } else if (criticalMissing.includes("Tower Type")) {
+    impactNote =
+      '"Tower Type" (structure code) is missing — structures cannot be identified and no WIP join is possible.';
+  } else if (criticalMissing.length > 0) {
+    const balCrit = criticalMissing.filter((c) => c.startsWith("Balance"));
+    impactNote = balCrit.length > 0
+      ? `Critical balance columns missing (${balCrit.join(", ")}) — order status figures and release balance will be incorrect.`
+      : `Critical columns missing (${criticalMissing.join(", ")}) — some features will show incorrect values.`;
+  } else if (renames.length > 0) {
+    impactNote =
+      "Column text differs from the expected layout (e.g. spelling variants). The parser falls back to position-based matching; verify that parsed values are correct.";
+  }
+
+  return {
+    ok, headerFound, twoRowHeader,
+    foundCount: nonEmpty,
+    expectedCount: EXPECTED_OR_COLUMNS.length,
+    missingExpected, criticalMissing, renames, impactNote,
+  };
+}
+
+const OR_TOL_MT = 0.5;
+
+/** Part 2 — Deterministic data sanity checks over the parsed result. */
+export function runOrderReviewDataChecks(
+  parseResult: OrderReviewParseResult,
+  buffer: Buffer,
+  opts?: {
+    prevSummary?: { unmatchedToWip?: number } | null;
+    prevAsOnDate?: string | null;
+  },
+): OrDataFlag[] {
+  const flags: OrDataFlag[] = [];
+  const { rows, summary, asOnDate } = parseResult;
+
+  if (!summary || rows.length === 0) {
+    flags.push({
+      check: "empty_file", severity: "warn",
+      message: "No structure rows were parsed from this file.",
+      impact: "All Order Status figures will show zero. Verify this is the correct file.",
+    });
+    return flags;
+  }
+
+  if ((summary.projectsFound ?? 0) === 0) {
+    flags.push({
+      check: "no_projects", severity: "warn",
+      message: "No project codes were found in the file.",
+      impact: "All project-level order figures will be absent from Order Status.",
+    });
+  }
+
+  const allZero = rows.every(
+    (r) => (r.weightMt ?? 0) === 0 && (r.releaseMt ?? 0) === 0 && (r.fileDespatchMt ?? 0) === 0,
+  );
+  if (allZero) {
+    flags.push({
+      check: "all_zero_measures", severity: "warn",
+      message: "All weight, release, and despatch measures are zero across every structure.",
+      impact: "Release Balance Computed, Assignment Balance, and the Fabrication Report will all show zero. The file may be empty or the column mapping may have failed.",
+    });
+  }
+
+  if ((summary.missingStructure ?? 0) > 0) {
+    flags.push({
+      check: "missing_structure", severity: "info",
+      message: `${summary.missingStructure} row${summary.missingStructure === 1 ? "" : "s"} had no structure code (Tower Type) and will not join to WIP marks.`,
+      impact: "Those rows are excluded from Order Status. Check if a Tower Type column rename caused them to be missed.",
+    });
+  }
+
+  const prevSummary = opts?.prevSummary;
+  if (prevSummary != null) {
+    const prevUnmatched = prevSummary.unmatchedToWip ?? 0;
+    const currUnmatched = summary.unmatchedToWip ?? 0;
+    if (prevUnmatched > 0 && currUnmatched > prevUnmatched * 1.2) {
+      const pct = Math.round(((currUnmatched - prevUnmatched) / prevUnmatched) * 100);
+      flags.push({
+        check: "unmatched_spike", severity: "warn",
+        message: `Unmatched-to-WIP structures jumped from ${prevUnmatched} to ${currUnmatched} (+${pct}%) vs the previous import.`,
+        impact: "More structures won't contribute to Order Status figures. This may indicate a naming or format change in the file or a WIP pairing mismatch.",
+      });
+    }
+  }
+
+  // Duplicate (project, structure) keys
+  const structureKeys = new Map<string, number>();
+  for (const r of rows) {
+    const key = `${r.project}\u0001${r.structure}`;
+    structureKeys.set(key, (structureKeys.get(key) ?? 0) + 1);
+  }
+  const dupCount = [...structureKeys.values()].filter((v) => v > 1).length;
+  if (dupCount > 0) {
+    flags.push({
+      check: "duplicate_structures", severity: "warn",
+      message: `${dupCount} (project, structure) pair${dupCount === 1 ? "" : "s"} appear more than once in the parsed data.`,
+      impact: "Duplicate keys are UPSERT'd — the last row wins. Verify no BOM-summing boundary was lost.",
+    });
+  }
+
+  // Negative values
+  let negBalReleaseCount = 0;
+  let negBalReleaseTotalMt = 0;
+  let implausibleNegCount = 0;
+  for (const r of rows) {
+    if ((r.fileBalReleaseMt ?? 0) < 0) {
+      negBalReleaseCount++;
+      negBalReleaseTotalMt += r.fileBalReleaseMt ?? 0;
+    }
+    if ((r.sets ?? 0) < 0 || (r.weightMt ?? 0) < 0 || (r.woOrderQtyMt ?? 0) < 0) {
+      implausibleNegCount++;
+    }
+  }
+  if (negBalReleaseCount > 0) {
+    flags.push({
+      check: "negative_balance_release", severity: "info",
+      message: `${negBalReleaseCount} structure${negBalReleaseCount === 1 ? "" : "s"} have negative Balance Release (total: ${negBalReleaseTotalMt.toFixed(2)} MT), indicating over-release.`,
+      impact: "Over-released structures are allowed but review whether the quantities are intentional.",
+    });
+  }
+  if (implausibleNegCount > 0) {
+    flags.push({
+      check: "negative_quantities", severity: "warn",
+      message: `${implausibleNegCount} structure${implausibleNegCount === 1 ? "" : "s"} have negative Order Qty, WO Order Qty, or Weight values.`,
+      impact: "Negative quantities are unexpected and may indicate a column mapping error. Check the file.",
+    });
+  }
+
+  // Totals reconciliation vs file Grand Total footer
+  try {
+    const grid = getGrid(buffer);
+    const hRow = detectHeaderRow(grid);
+    const { labels, dataStart } = buildHeaderModel(grid, hRow);
+    const cols = buildColumnIndex(labels);
+
+    let footerWoOrderQty: number | null = null;
+    let footerRelease: number | null = null;
+    let footerDespatch: number | null = null;
+    let footerBalRelease: number | null = null;
+
+    for (let i = dataStart; i < grid.length; i++) {
+      const cells = grid[i];
+      if (!Array.isArray(cells)) continue;
+      const firstText =
+        cells.map((c) => cellStr(c as Cell)).find((s) => s !== "") ?? "";
+      if (/^(grand\s*total|total)\b/i.test(firstText)) {
+        footerWoOrderQty = toNumber(cells[cols.woOrderQtyMt] as Cell);
+        footerRelease    = toNumber(cells[cols.releaseMt]    as Cell);
+        footerDespatch   = toNumber(cells[cols.fileDespatchMt] as Cell);
+        footerBalRelease = toNumber(cells[cols.fileBalReleaseMt] as Cell);
+        break;
+      }
+    }
+
+    if (footerWoOrderQty !== null || footerRelease !== null || footerDespatch !== null) {
+      const sumWo       = rows.reduce((s, r) => s + (r.woOrderQtyMt    ?? 0), 0);
+      const sumRelease  = rows.reduce((s, r) => s + (r.releaseMt       ?? 0), 0);
+      const sumDespatch = rows.reduce((s, r) => s + (r.fileDespatchMt  ?? 0), 0);
+      const sumBalRel   = rows.reduce((s, r) => s + (r.fileBalReleaseMt ?? 0), 0);
+
+      const mismatches: string[] = [];
+      if (footerWoOrderQty !== null && Math.abs(sumWo - footerWoOrderQty) > OR_TOL_MT)
+        mismatches.push(`WO Order Qty (parsed ${sumWo.toFixed(2)} MT vs footer ${footerWoOrderQty.toFixed(2)} MT)`);
+      if (footerRelease !== null && Math.abs(sumRelease - footerRelease) > OR_TOL_MT)
+        mismatches.push(`Progress Release (parsed ${sumRelease.toFixed(2)} MT vs footer ${footerRelease.toFixed(2)} MT)`);
+      if (footerDespatch !== null && Math.abs(sumDespatch - footerDespatch) > OR_TOL_MT)
+        mismatches.push(`Progress Despatch (parsed ${sumDespatch.toFixed(2)} MT vs footer ${footerDespatch.toFixed(2)} MT)`);
+      if (footerBalRelease !== null && Math.abs(sumBalRel - footerBalRelease) > OR_TOL_MT)
+        mismatches.push(`Balance Release (parsed ${sumBalRel.toFixed(2)} MT vs footer ${footerBalRelease.toFixed(2)} MT)`);
+
+      if (mismatches.length > 0) {
+        flags.push({
+          check: "totals_reconciliation", severity: "warn",
+          message: `Parsed totals differ from the file Grand Total footer by > ${OR_TOL_MT} MT: ${mismatches.join("; ")}.`,
+          impact: "Some BOM rows may have been missed or double-counted. Verify the parsed row count matches the expected total.",
+        });
+      }
+    }
+  } catch {
+    // Non-critical — skip totals check silently
+  }
+
+  // As-on date sanity
+  if (opts?.prevAsOnDate && asOnDate && asOnDate < opts.prevAsOnDate) {
+    flags.push({
+      check: "stale_date", severity: "warn",
+      message: `This file's as-on date (${asOnDate}) is older than the current Order Review import (${opts.prevAsOnDate}).`,
+      impact: "Importing this file will replace more recent Order Review data with older data.",
+    });
+  }
+
+  return flags;
+}
+
+/**
+ * Run Parts 1 & 2 and combine into a single OrSanityResult.
+ * Called at stage time; the buffer is still in memory (not yet in the DB).
+ */
+export function checkOrderReview(
+  buffer: Buffer,
+  parseResult: OrderReviewParseResult,
+  opts?: {
+    prevSummary?: { unmatchedToWip?: number } | null;
+    prevAsOnDate?: string | null;
+  },
+): OrSanityResult {
+  const formatCheck = checkOrderReviewFormat(buffer);
+  const dataFlags   = runOrderReviewDataChecks(parseResult, buffer, opts);
+  const passedAll   =
+    formatCheck.ok && dataFlags.filter((f) => f.severity === "warn").length === 0;
+  return { formatCheck, dataFlags, passedAll };
+}

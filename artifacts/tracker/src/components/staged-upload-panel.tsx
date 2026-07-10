@@ -11,6 +11,8 @@ import {
   type StagedSanitizeSuggestion,
   type CommitResult,
   type OrderReviewStageInfo,
+  type OrSanityResult,
+  type OrDataFlag,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -333,9 +335,18 @@ export function StagedUploadPanel({
                 {phase === "staged" && (formatOk || formatAcknowledged) && isOrderReview && (
                   <div className="flex flex-col sm:flex-row gap-2">
                     <Button
-                      onClick={doCommit}
+                      onClick={runValidate}
                       disabled={busy}
                       className="gap-2 text-primary-foreground"
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                      {validate.isPending ? "Checking..." : "Check with AI"}
+                    </Button>
+                    <Button
+                      onClick={doCommit}
+                      disabled={busy}
+                      variant="outline"
+                      className="gap-2"
                     >
                       <ClipboardList className="w-4 h-4" />
                       {commit.isPending ? "Importing..." : "Import Order Review"}
@@ -373,15 +384,27 @@ export function StagedUploadPanel({
 
                 {phase === "validating" && (
                   <div className="text-sm text-muted-foreground">
-                    Checking the file with Claude...
+                    {isOrderReview
+                      ? "Running AI advisory review..."
+                      : "Checking the file with Claude..."}
                   </div>
                 )}
 
-                {phase === "validated" && validation && (
+                {phase === "validated" && validation && !isOrderReview && (
                   <ValidationView
                     validation={validation}
                     accepted={accepted}
                     onToggle={toggle}
+                    onCommit={doCommit}
+                    onDiscard={doDiscard}
+                    busy={busy}
+                    committing={commit.isPending}
+                  />
+                )}
+
+                {phase === "validated" && validation && isOrderReview && (
+                  <OrAiAdvisoryView
+                    validation={validation}
                     onCommit={doCommit}
                     onDiscard={doDiscard}
                     busy={busy}
@@ -623,59 +646,208 @@ function WipFormatWarning({
 function OrderReviewSummary({ info }: { info: OrderReviewStageInfo }) {
   const s = info.summary;
   return (
-    <div className="rounded-md border bg-muted/20 p-3 space-y-2 text-sm">
-      <div className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground">
-        <ClipboardList className="w-3.5 h-3.5" />
-        Order Review file
+    <div className="space-y-3">
+      <div className="rounded-md border bg-muted/20 p-3 space-y-2 text-sm">
+        <div className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground">
+          <ClipboardList className="w-3.5 h-3.5" />
+          Order Review file
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <Stat label="As-on date" value={info.asOnDate ?? "—"} />
+          <Stat
+            label="Rows read"
+            value={s ? s.rowsRead.toLocaleString() : "—"}
+          />
+          <Stat label="Rows kept" value={s ? s.rowsKept.toLocaleString() : "—"} />
+          <Stat
+            label="Projects"
+            value={s ? s.projectsFound.toLocaleString() : "—"}
+          />
+          <Stat
+            label="Order wt (MT)"
+            value={s ? s.totalWeightMt.toLocaleString() : "—"}
+          />
+          <Stat
+            label="Released (MT)"
+            value={s ? s.totalReleaseMt.toLocaleString() : "—"}
+          />
+          <Stat
+            label="File despatch (MT)"
+            value={s ? s.totalFileDespatchMt.toLocaleString() : "—"}
+          />
+          <Stat
+            label="Matched to WIP"
+            value={s ? s.matchedToWip.toLocaleString() : "—"}
+          />
+          <Stat
+            label="Unmatched to WIP"
+            value={s ? s.unmatchedToWip.toLocaleString() : "—"}
+          />
+          <Stat
+            label="Skipped totals"
+            value={s ? s.skippedTotals.toLocaleString() : "—"}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Dispatch totals are seeded once, then accrued from WIP yard
+          departures.
+        </p>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Stat label="As-on date" value={info.asOnDate ?? "—"} />
-        <Stat
-          label="Rows read"
-          value={s ? s.rowsRead.toLocaleString() : "—"}
-        />
-        <Stat label="Rows kept" value={s ? s.rowsKept.toLocaleString() : "—"} />
-        <Stat
-          label="Projects"
-          value={s ? s.projectsFound.toLocaleString() : "—"}
-        />
-        <Stat
-          label="Order wt (MT)"
-          value={s ? s.totalWeightMt.toLocaleString() : "—"}
-        />
-        <Stat
-          label="Released (MT)"
-          value={s ? s.totalReleaseMt.toLocaleString() : "—"}
-        />
-        <Stat
-          label="File despatch (MT)"
-          value={s ? s.totalFileDespatchMt.toLocaleString() : "—"}
-        />
-        <Stat
-          label="Matched to WIP"
-          value={s ? s.matchedToWip.toLocaleString() : "—"}
-        />
-        <Stat
-          label="Unmatched to WIP"
-          value={s ? s.unmatchedToWip.toLocaleString() : "—"}
-        />
-        <Stat
-          label="Skipped totals"
-          value={s ? s.skippedTotals.toLocaleString() : "—"}
-        />
+      {info.sanityCheck && <OrSanityCheckPanel result={info.sanityCheck} />}
+    </div>
+  );
+}
+
+function OrSanityCheckPanel({ result }: { result: OrSanityResult }) {
+  const { formatCheck: fc, dataFlags, passedAll } = result;
+  const warnFlags = dataFlags.filter((f) => f.severity === "warn");
+  const infoFlags = dataFlags.filter((f) => f.severity === "info");
+
+  if (passedAll) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-green-700 dark:text-green-400 font-medium py-1">
+        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+        Sanity check passed — format and data look correct.
       </div>
-      {s && s.missingStructure > 0 && (
-        <div className="text-xs text-amber-600 dark:text-amber-400">
-          {s.missingStructure.toLocaleString()} row
-          {s.missingStructure === 1 ? "" : "s"} had no structure and will not
-          join to WIP marks.
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-amber-300/60 bg-amber-50/50 dark:border-amber-600/30 dark:bg-amber-950/20 p-3 text-sm space-y-3">
+      <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
+        <AlertTriangle className="w-4 h-4 shrink-0" />
+        Sanity check findings
+      </div>
+
+      {/* Format drift */}
+      {!fc.ok && (
+        <div className="space-y-1.5">
+          <div className="text-xs font-bold uppercase text-muted-foreground">
+            Format
+          </div>
+          {!fc.headerFound && (
+            <OrFlag
+              severity="warn"
+              message="Two-row header block could not be located."
+              impact="All column positions fall back to fixed offsets — verify parsed values."
+            />
+          )}
+          {fc.criticalMissing.length > 0 && (
+            <OrFlag
+              severity="warn"
+              message={`Critical columns missing: ${fc.criticalMissing.join(", ")}.`}
+              impact={fc.impactNote ?? "Key features may show incorrect values."}
+            />
+          )}
+          {fc.missingExpected
+            .filter((m) => !fc.criticalMissing.includes(m))
+            .map((m) => (
+              <OrFlag
+                key={m}
+                severity="warn"
+                message={`Column not found: "${m}".`}
+                impact="Parser falls back to fixed position."
+              />
+            ))}
+          {fc.renames.map((r) => (
+            <OrFlag
+              key={r.expected}
+              severity="warn"
+              message={`"${r.expected}" appears to have been renamed to "${r.foundAs}".`}
+              impact='Parser falls back to position-based matching — verify parsed values are correct.'
+            />
+          ))}
         </div>
       )}
-      <p className="text-xs text-muted-foreground">
-        Order Review files are ingested deterministically. No AI check is
-        applied. Dispatch totals are seeded once, then accrued from WIP yard
-        departures.
-      </p>
+      {fc.ok && (
+        <div className="flex items-center gap-1.5 text-xs text-green-700 dark:text-green-400">
+          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+          Format OK — {fc.foundCount} columns, matches expected layout.
+        </div>
+      )}
+
+      {/* Data flags */}
+      {(warnFlags.length > 0 || infoFlags.length > 0) && (
+        <div className="space-y-1.5">
+          <div className="text-xs font-bold uppercase text-muted-foreground">
+            Data
+          </div>
+          {warnFlags.map((f) => (
+            <OrFlag key={f.check} severity="warn" message={f.message} impact={f.impact} />
+          ))}
+          {infoFlags.map((f) => (
+            <OrFlag key={f.check} severity="info" message={f.message} impact={f.impact} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrFlag({
+  severity,
+  message,
+  impact,
+}: Pick<OrDataFlag, "severity" | "message" | "impact">) {
+  return (
+    <div
+      className={`rounded border p-2 text-xs space-y-0.5 ${
+        severity === "warn"
+          ? "border-amber-400/50 bg-amber-50 dark:border-amber-600/30 dark:bg-amber-950/30"
+          : "border-sky-300/40 bg-sky-50/50 dark:border-sky-700/30 dark:bg-sky-950/20"
+      }`}
+    >
+      <div className={`font-medium ${severity === "warn" ? "text-amber-800 dark:text-amber-300" : "text-sky-700 dark:text-sky-300"}`}>
+        {message}
+      </div>
+      <div className="text-muted-foreground">Impact: {impact}</div>
+    </div>
+  );
+}
+
+function OrAiAdvisoryView({
+  validation,
+  onCommit,
+  onDiscard,
+  busy,
+  committing,
+}: {
+  validation: ValidationResult;
+  onCommit: () => void;
+  onDiscard: () => void;
+  busy: boolean;
+  committing: boolean;
+}) {
+  return (
+    <div className="space-y-3">
+      {validation.aiAdvisory ? (
+        <div className="rounded-md border border-sky-300/50 bg-sky-50/50 dark:border-sky-700/30 dark:bg-sky-950/20 p-3 text-sm space-y-2">
+          <div className="flex items-center gap-2 font-bold text-sky-800 dark:text-sky-300">
+            <Info className="w-4 h-4 shrink-0" />
+            AI advisory (read-only — import decision is yours)
+          </div>
+          <p className="text-foreground/90 leading-relaxed">{validation.aiAdvisory}</p>
+        </div>
+      ) : (
+        <div className="rounded-md border border-muted bg-muted/20 p-3 text-sm text-muted-foreground">
+          {validation.available
+            ? "AI review completed but returned no output."
+            : "AI advisory is unavailable (ANTHROPIC_API_KEY not set). You can still import the file — the deterministic checks above are the authoritative guide."}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Button
+          onClick={onCommit}
+          disabled={busy}
+          className="gap-2 text-primary-foreground"
+        >
+          <ClipboardList className="w-4 h-4" />
+          {committing ? "Importing..." : "Import Order Review"}
+        </Button>
+        <Button variant="outline" onClick={onDiscard} disabled={busy}>
+          Discard
+        </Button>
+      </div>
     </div>
   );
 }

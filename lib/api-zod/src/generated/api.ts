@@ -1060,7 +1060,8 @@ export const ValidateStagedImportResponse = zod.object({
   "reason": zod.string(),
   "count": zod.number().describe('Number of staged rows whose field currently equals \"from\".')
 }).describe('A descriptive-only cleanup the user may accept before commit.')).describe('Optional descriptive cleanups, present only when verdict is ok.'),
-  "fileType": zod.enum(['wip', 'order-review', 'unknown']).optional().describe('Detected file type; present for Order Review and unknown files.')
+  "fileType": zod.enum(['wip', 'order-review', 'unknown']).optional().describe('Detected file type; present for Order Review and unknown files.'),
+  "aiAdvisory": zod.string().nullish().describe('AI-generated advisory narrative for Order Review files (Part 3 of the sanity check). Null when AI is unavailable, when the file is not Order Review, or when the AI call failed. Advisory only — never blocks the import.\n')
 })
 
 

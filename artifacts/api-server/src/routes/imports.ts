@@ -64,6 +64,7 @@ import {
   detectFileType,
   parseOrderReview,
   detectReportAsOnDate,
+  checkOrderReview,
   type OrderReviewFileType,
 } from "../lib/parse-order-review";
 import {
@@ -675,6 +676,7 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
   // its own; it never goes through the WIP structural reader / AI gatekeeper.
   if (fileType === "order-review") {
     let orderReview;
+    let sanityCheck = null;
     try {
       orderReview = parseOrderReview(file.buffer);
       const coverage = await computeWipCoverage(orderReview.rows);
@@ -682,6 +684,22 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
         ...orderReview,
         summary: { ...orderReview.summary, ...coverage },
       };
+      // Query the latest committed Order Review import for prev-date and prev
+      // unmatched count — used by the stale-date and unmatched-spike checks.
+      const prevOrRows = await db
+        .select({
+          asOnDate: orderReviewImportsTable.asOnDate,
+          summary: orderReviewImportsTable.summary,
+        })
+        .from(orderReviewImportsTable)
+        .orderBy(desc(orderReviewImportsTable.id))
+        .limit(1);
+      const prevOr = prevOrRows[0] ?? null;
+      const prevSummary = prevOr?.summary as { unmatchedToWip?: number } | null;
+      sanityCheck = checkOrderReview(file.buffer, orderReview, {
+        prevSummary,
+        prevAsOnDate: prevOr?.asOnDate ?? null,
+      });
     } catch (err) {
       req.log.warn({ err }, "Order Review parse failed for staged upload");
       orderReview = { asOnDate: null, rows: [], summary: null };
@@ -697,6 +715,7 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
           detectReportAsOnDate(file.buffer, file.originalname) ??
           orderReview.asOnDate,
         summary: orderReview.summary,
+        sanityCheck,
       },
       structural: null,
     });
@@ -788,16 +807,82 @@ router.post("/imports/validate", requireAuth, async (req, res): Promise<void> =>
       parsedOr = null;
     }
     const ok = !!parsedOr && parsedOr.rows.length > 0;
+    if (!ok) {
+      res.json({
+        available: false,
+        fileType,
+        verdict: "reject",
+        reason:
+          "No order rows found. Expected a per-structure Order Review export with Tower Type Code and Despatch MT columns.",
+        expectedShape:
+          "An .xlsx Order Review export: a 'Project Code : NNN' banner with rows carrying Tower Type Code, Weight MT, and Despatch MT.",
+        sanitize: [],
+        aiAdvisory: null,
+      });
+      return;
+    }
+
+    // AI advisory (Part 3): when a key is configured, pass a compact summary of
+    // the file + the sanity-check findings to Claude for a plain-language review.
+    let aiAdvisory: string | null = null;
+    if (isAiAvailable() && parsedOr) {
+      try {
+        const s = parsedOr.summary;
+        // Re-run the sanity check so the AI sees the same flags the user sees.
+        const sc = checkOrderReview(staged.fileData, parsedOr);
+        const compactSummary = {
+          rowsRead: s.rowsRead,
+          rowsKept: s.rowsKept,
+          projects: s.projectsFound,
+          totalWeightMt: s.totalWeightMt,
+          totalReleaseMt: s.totalReleaseMt,
+          totalDespatchMt: s.totalFileDespatchMt,
+          matchedToWip: s.matchedToWip,
+          unmatchedToWip: s.unmatchedToWip,
+          missingStructure: s.missingStructure,
+          formatOk: sc.formatCheck.ok,
+          missingColumns: sc.formatCheck.missingExpected,
+          criticalMissing: sc.formatCheck.criticalMissing,
+          renames: sc.formatCheck.renames,
+          dataFlags: sc.dataFlags,
+        };
+        const system =
+          "You are a concise data quality reviewer for a steel-fabrication Order Review file. " +
+          "The deterministic engine has already run format and data sanity checks. " +
+          "Your role is ADVISORY ONLY — you synthesize the findings into a short, plain-language assessment " +
+          "that helps the operator decide whether to import. " +
+          "Produce 3-6 sentences maximum. Focus on the most important risks. " +
+          "Do NOT restate numbers verbatim — describe what they imply. " +
+          "Do NOT approve or reject the import — the user always decides. " +
+          "Do NOT use markdown, bullet points, or headers — plain prose only.";
+        const user =
+          "Order Review file summary and sanity-check findings:\n" +
+          JSON.stringify(compactSummary, null, 2);
+        const result = await callClaude({
+          model: AI_MODEL_STANDARD,
+          system,
+          user,
+          maxTokens: 512,
+        });
+        if (result.ok) {
+          aiAdvisory = result.text.trim();
+        } else {
+          req.log.warn({ stagingId }, "OR AI advisory call failed");
+        }
+      } catch (err) {
+        req.log.warn({ err, stagingId }, "OR AI advisory threw unexpectedly");
+      }
+    }
+
     res.json({
-      available: false,
+      available: isAiAvailable(),
       fileType,
-      verdict: ok ? "ok" : "reject",
-      reason: ok
-        ? null
-        : "No order rows found. Expected a per-structure Order Review export with Tower Type Code and Despatch MT columns.",
+      verdict: "ok",
+      reason: null,
       expectedShape:
         "An .xlsx Order Review export: a 'Project Code : NNN' banner with rows carrying Tower Type Code, Weight MT, and Despatch MT.",
       sanitize: [],
+      aiAdvisory,
     });
     return;
   }

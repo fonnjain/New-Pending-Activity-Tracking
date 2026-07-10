@@ -28,4 +28,10 @@ export interface ValidationResult {
   sanitize: StagedSanitizeSuggestion[];
   /** Detected file type; present for Order Review and unknown files. */
   fileType?: ValidationResultFileType;
+  /**
+     * AI-generated advisory narrative for Order Review files (Part 3 of the sanity check). Null when AI is unavailable, when the file is not Order Review, or when the AI call failed. Advisory only — never blocks the import.
+
+     * @nullable
+     */
+  aiAdvisory?: string | null;
 }

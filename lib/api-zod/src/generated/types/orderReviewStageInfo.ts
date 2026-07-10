@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { OrderReviewSummary } from './orderReviewSummary';
+import type { OrSanityResult } from './orSanityResult';
 
 /**
  * Deterministic structural read of a staged Order Review file.
@@ -14,4 +15,6 @@ export interface OrderReviewStageInfo {
   /** @nullable */
   asOnDate: string | null;
   summary: OrderReviewSummary | null;
+  /** Format drift + data sanity results; null when the file could not be parsed. */
+  sanityCheck: OrSanityResult | null;
 }
