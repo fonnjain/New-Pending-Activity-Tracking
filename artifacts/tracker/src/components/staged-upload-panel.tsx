@@ -6,6 +6,7 @@ import {
   useDiscardStagedImport,
   type StageResult,
   type StructuralRead,
+  type WipFormatCheck,
   type ValidationResult,
   type StagedSanitizeSuggestion,
   type CommitResult,
@@ -20,6 +21,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Lock,
+  Info,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -73,6 +75,7 @@ export function StagedUploadPanel({
   const [staged, setStaged] = useState<StageResult | null>(null);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [accepted, setAccepted] = useState<Set<number>>(new Set());
+  const [formatAcknowledged, setFormatAcknowledged] = useState(false);
 
   const busy =
     stage.isPending ||
@@ -85,7 +88,12 @@ export function StagedUploadPanel({
     setStaged(null);
     setValidation(null);
     setAccepted(new Set());
+    setFormatAcknowledged(false);
   };
+
+  // Format check gate: null wipFormatCheck (non-WIP or unreadable) = pass through.
+  const wipCheck = staged?.structural?.wipFormatCheck ?? null;
+  const formatOk = wipCheck === null || wipCheck.ok;
 
   const isOrderReview = expectedType === "order-review";
   // Slot gate: the file the user picked must match THIS slot's expected type.
@@ -116,6 +124,7 @@ export function StagedUploadPanel({
           setStaged(res);
           setValidation(null);
           setAccepted(new Set());
+          setFormatAcknowledged(false);
           setPhase("staged");
         },
         onError: (err) => {
@@ -312,7 +321,16 @@ export function StagedUploadPanel({
                   <OrderReviewSummary info={staged.orderReview} />
                 )}
 
-                {phase === "staged" && isOrderReview && (
+                {phase === "staged" && !formatOk && !formatAcknowledged && (
+                  <WipFormatWarning
+                    check={wipCheck!}
+                    onProceed={() => setFormatAcknowledged(true)}
+                    onDiscard={doDiscard}
+                    busy={busy}
+                  />
+                )}
+
+                {phase === "staged" && (formatOk || formatAcknowledged) && isOrderReview && (
                   <div className="flex flex-col sm:flex-row gap-2">
                     <Button
                       onClick={doCommit}
@@ -332,7 +350,7 @@ export function StagedUploadPanel({
                   </div>
                 )}
 
-                {phase === "staged" && !isOrderReview && (
+                {phase === "staged" && (formatOk || formatAcknowledged) && !isOrderReview && (
                   <div className="flex flex-col sm:flex-row gap-2">
                     <Button
                       onClick={runValidate}
@@ -405,6 +423,7 @@ function TypeMismatchView({
 }
 
 function StructuralSummary({ structural }: { structural: StructuralRead }) {
+  const fc = structural.wipFormatCheck;
   return (
     <div className="rounded-md border bg-muted/20 p-3 space-y-2 text-sm">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -435,6 +454,168 @@ function StructuralSummary({ structural }: { structural: StructuralRead }) {
           ))}
         </ul>
       )}
+      {fc !== null && fc !== undefined && fc.ok && (
+        <div className="flex items-center gap-1.5 text-xs text-green-700 dark:text-green-400 font-medium">
+          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+          Format OK — {fc.foundCount} columns, matches expected layout.
+        </div>
+      )}
+      {fc !== null && fc !== undefined && !fc.ok && (
+        <div className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">
+            Column layout differs
+          </span>{" "}
+          — {fc.foundCount} columns found, {fc.expectedCount} expected.
+          {fc.isOldFormat && (
+            <span className="ml-1 text-amber-600 dark:text-amber-400">
+              Looks like the older 21-column format.
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WipFormatWarning({
+  check,
+  onProceed,
+  onDiscard,
+  busy,
+}: {
+  check: WipFormatCheck;
+  onProceed: () => void;
+  onDiscard: () => void;
+  busy: boolean;
+}) {
+  const hasCritical = check.criticalMissing.length > 0;
+  return (
+    <div className="space-y-3">
+      <div
+        className={`rounded-md border p-3 text-sm space-y-2.5 ${
+          hasCritical
+            ? "border-destructive/40 bg-destructive/5"
+            : "border-amber-300/60 bg-amber-50/50 dark:border-amber-600/30 dark:bg-amber-950/20"
+        }`}
+      >
+        <div
+          className={`flex items-center gap-2 font-bold ${
+            hasCritical
+              ? "text-destructive"
+              : "text-amber-700 dark:text-amber-400"
+          }`}
+        >
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          Column layout mismatch detected
+        </div>
+
+        <div className="text-xs space-y-1 text-foreground/80">
+          <div>
+            Found <strong>{check.foundCount}</strong> column
+            {check.foundCount === 1 ? "" : "s"}, expected{" "}
+            <strong>{check.expectedCount}</strong>.
+            {check.isOldFormat && (
+              <span className="ml-1 text-amber-700 dark:text-amber-400">
+                This appears to be the older 21-column format.
+              </span>
+            )}
+          </div>
+
+          {check.missingExpected.length > 0 && (
+            <div>
+              <span className="font-medium">
+                Missing ({check.missingExpected.length}):
+              </span>{" "}
+              {check.missingExpected.map((col, i) => (
+                <span key={col}>
+                  {i > 0 && ", "}
+                  <span
+                    className={
+                      check.criticalMissing.includes(col)
+                        ? "text-destructive font-semibold"
+                        : undefined
+                    }
+                  >
+                    {col}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {check.unexpectedFound.length > 0 && (
+            <div>
+              <span className="font-medium">
+                New / unexpected ({check.unexpectedFound.length}):
+              </span>{" "}
+              {check.unexpectedFound.join(", ")}
+            </div>
+          )}
+
+          {check.renames.length > 0 && (
+            <div>
+              <span className="font-medium">
+                Possible renames ({check.renames.length}):
+              </span>
+              <ul className="mt-0.5 ml-3 list-disc list-inside space-y-0.5">
+                {check.renames.map((r) => (
+                  <li key={r.position}>
+                    Column {r.position}: expected &quot;{r.expected}&quot;,
+                    found &quot;{r.found}&quot;
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {check.reorders.length > 0 && (
+            <div>
+              <span className="font-medium">
+                Reordered ({check.reorders.length}):
+              </span>{" "}
+              {check.reorders
+                .slice(0, 6)
+                .map(
+                  (r) =>
+                    `"${r.name}" (pos ${r.foundPosition}, expected ${r.expectedPosition})`,
+                )
+                .join("; ")}
+              {check.reorders.length > 6 && (
+                <span className="text-muted-foreground">
+                  {" "}
+                  + {check.reorders.length - 6} more
+                </span>
+              )}
+            </div>
+          )}
+
+          {check.impactNote && (
+            <div className="flex items-start gap-1.5 mt-1 pt-1.5 border-t border-current/10">
+              <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-muted-foreground" />
+              <span>{check.impactNote}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Button
+          variant="outline"
+          onClick={onProceed}
+          disabled={busy}
+          className="gap-2"
+        >
+          Proceed anyway
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={onDiscard}
+          disabled={busy}
+          className="text-muted-foreground hover:text-destructive"
+        >
+          Cancel upload
+        </Button>
+      </div>
     </div>
   );
 }

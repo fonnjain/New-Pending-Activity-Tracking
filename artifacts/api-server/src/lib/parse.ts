@@ -214,7 +214,181 @@ const COL = {
   woBatchNo: "WO Batch No.",
 } as const;
 
-// Derived identity for a Mark No. (col H). See the consolidated Rules 0, A-D
+// ── WIP format baseline & sanity check ──────────────────────────────────────
+// Update EXPECTED_WIP_COLUMNS here (ONE place) when the ERP format changes.
+export const EXPECTED_WIP_COLUMNS: readonly string[] = [
+  "Type",
+  "Project Code",
+  "Order Nature",
+  "Contractor",
+  "Job Card No.",
+  "Job Card Date",
+  "Job Card Status",
+  "Tower Type",
+  "Tower Sub Type",
+  "Alias",
+  "Mark No.",
+  "Section",
+  "Length",
+  "Width",
+  "Wt/Pcs",
+  "Balance Qty.",
+  "Balance Wt.",
+  "Assign Date",
+  "Activity",
+  "Operation",
+  "Ref. Job Card No.",
+  "Last Production Entry Date",
+  "Work Order No.",
+  "Batch No.",
+];
+
+// Columns whose absence breaks core computed features.
+const CRITICAL_WIP_COLUMNS = new Set<string>([
+  "Type",
+  "Job Card Status",
+  "Contractor",
+  "Alias",
+  "Activity",
+  "Balance Wt.",
+  "Tower Sub Type",
+  "Project Code",
+]);
+
+export interface WipColumnRename {
+  position: number; // 1-based
+  expected: string;
+  found: string;
+}
+export interface WipColumnReorder {
+  name: string;
+  expectedPosition: number; // 1-based
+  foundPosition: number; // 1-based
+}
+export interface WipFormatCheck {
+  ok: boolean;
+  expectedCount: number;
+  foundCount: number;
+  missingExpected: string[];
+  unexpectedFound: string[];
+  renames: WipColumnRename[];
+  reorders: WipColumnReorder[];
+  criticalMissing: string[];
+  isOldFormat: boolean;
+  impactNote: string | null;
+}
+
+function normHeader(s: string): string {
+  return s.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export function checkWipFormat(columnsFound: string[]): WipFormatCheck {
+  const expected = EXPECTED_WIP_COLUMNS as readonly string[];
+  const expNorm = expected.map(normHeader);
+  const fndNorm = columnsFound.map(normHeader);
+
+  // Quick exact-match (normalized) — common happy path
+  if (
+    fndNorm.length === expNorm.length &&
+    fndNorm.every((n, i) => n === expNorm[i])
+  ) {
+    return {
+      ok: true,
+      expectedCount: expected.length,
+      foundCount: columnsFound.length,
+      missingExpected: [],
+      unexpectedFound: [],
+      renames: [],
+      reorders: [],
+      criticalMissing: [],
+      isOldFormat: false,
+      impactNote: null,
+    };
+  }
+
+  // Build position maps (normalized name → 1-based position, first occurrence)
+  const foundPosByNorm = new Map<string, number>();
+  fndNorm.forEach((n, i) => {
+    if (!foundPosByNorm.has(n)) foundPosByNorm.set(n, i + 1);
+  });
+  const expPosByNorm = new Map<string, number>();
+  expNorm.forEach((n, i) => expPosByNorm.set(n, i + 1));
+
+  // Missing: expected names not anywhere in file
+  const missingExpected: string[] = [];
+  for (let i = 0; i < expected.length; i++) {
+    if (!foundPosByNorm.has(expNorm[i]!)) missingExpected.push(expected[i]!);
+  }
+  // Unexpected: file names not in expected
+  const unexpectedFound: string[] = [];
+  for (let i = 0; i < columnsFound.length; i++) {
+    if (!expPosByNorm.has(fndNorm[i]!)) unexpectedFound.push(columnsFound[i]!);
+  }
+
+  // Renames: at position i, the expected name is missing AND the found name is
+  // unexpected (i.e. both ends of the slot belong to the "unmatched" sets).
+  const missingNormSet = new Set(missingExpected.map(normHeader));
+  const unexpectedNormSet = new Set(unexpectedFound.map(normHeader));
+  const renames: WipColumnRename[] = [];
+  const minLen = Math.min(expected.length, columnsFound.length);
+  for (let i = 0; i < minLen; i++) {
+    if (missingNormSet.has(expNorm[i]!) && unexpectedNormSet.has(fndNorm[i]!)) {
+      renames.push({
+        position: i + 1,
+        expected: expected[i]!,
+        found: columnsFound[i]!,
+      });
+    }
+  }
+
+  // Reorders: expected column IS in file but at a different position
+  const reorders: WipColumnReorder[] = [];
+  for (let i = 0; i < expected.length; i++) {
+    const foundPos = foundPosByNorm.get(expNorm[i]!);
+    if (foundPos !== undefined && foundPos !== i + 1) {
+      reorders.push({
+        name: expected[i]!,
+        expectedPosition: i + 1,
+        foundPosition: foundPos,
+      });
+    }
+  }
+
+  const criticalMissing = missingExpected.filter((c) =>
+    CRITICAL_WIP_COLUMNS.has(c),
+  );
+  const isOldFormat =
+    !foundPosByNorm.has("type") && foundPosByNorm.has("project code");
+
+  let impactNote: string | null = null;
+  if (
+    criticalMissing.includes("Type") ||
+    criticalMissing.includes("Job Card Status")
+  ) {
+    impactNote =
+      '"Type" and/or "Job Card Status" are missing — Release Balance Computed, Assignment Balance, and the Fabrication Report cannot be computed from this file.';
+  } else if (criticalMissing.length > 0) {
+    impactNote = `Critical columns missing (${criticalMissing.join(", ")}) — some features may be unavailable or show incorrect values.`;
+  } else if (reorders.length > 0) {
+    impactNote =
+      "Column positions differ — if the parser uses fixed positions for any column, parsed values may be wrong.";
+  }
+
+  return {
+    ok: false,
+    expectedCount: expected.length,
+    foundCount: columnsFound.length,
+    missingExpected,
+    unexpectedFound,
+    renames,
+    reorders,
+    criticalMissing,
+    isOldFormat,
+    impactNote,
+  };
+}
+
+// ── Derived identity for a Mark No. (col H). See the consolidated Rules 0, A-D
 // below (VTPL Mark-Number parsing). Only IS/SC/S rows (col G) get a `proMno`
 // and a 4-part markNumber; every other row keeps the 3-part form.
 export interface DerivedMark {
@@ -531,6 +705,7 @@ export interface StructuralRead {
   rowsRead: number;
   rowsWithMark: number;
   problems: string[];
+  wipFormatCheck: WipFormatCheck | null;
 }
 
 // Best-effort, AI-free structural read of an uploaded file. Never authoritative;
@@ -549,6 +724,7 @@ export function readStructural(buffer: Buffer): StructuralRead {
       rowsRead: 0,
       rowsWithMark: 0,
       problems: ["The file could not be read as a spreadsheet."],
+      wipFormatCheck: null,
     };
   }
 
@@ -607,6 +783,7 @@ export function readStructural(buffer: Buffer): StructuralRead {
     rowsRead,
     rowsWithMark,
     problems,
+    wipFormatCheck: checkWipFormat(columnsFound),
   };
 }
 

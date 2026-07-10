@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { WipFormatCheck } from './wipFormatCheck';
 
 /**
  * Best-effort structural read of a staged file; never authoritative.
@@ -30,4 +31,6 @@ export interface StructuralRead {
   rowsWithMark: number;
   /** Human-readable structural problems detected without AI. */
   problems: string[];
+  /** WIP column format check vs the 24-column baseline; null for non-WIP files. */
+  wipFormatCheck: WipFormatCheck | null;
 }

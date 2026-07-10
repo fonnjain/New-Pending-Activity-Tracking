@@ -180,5 +180,8 @@ export * from './velocityItemTrend';
 export * from './velocityProjectAgg';
 export * from './velocityResponse';
 export * from './velocityStageAgg';
+export * from './wipColumnRename';
+export * from './wipColumnReorder';
 export * from './wipCommitResult';
 export * from './wipCommitResultKind';
+export * from './wipFormatCheck';

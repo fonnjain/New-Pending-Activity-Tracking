@@ -1,0 +1,118 @@
+TASK: Add a WIP FORMAT SANITY CHECK to the existing post-upload sanity review. When a WIP
+file is uploaded, compare its column structure to the expected baseline and, if anything has
+drifted, clearly tell the user WHAT changed before they rely on the data.
+
+=====================================================================
+WHY
+=====================================================================
+The ERP's WIP export format changes over time (columns added, renamed, reordered). The app
+parses WIP by a fixed structure; a silent format change makes the parser read the wrong
+column and corrupt every downstream number (Release Balance Computed, Assignment Balance,
+Cutting/QC, ageing, etc.) with NO visible error. This check surfaces format drift at upload
+time so the user is warned instead of trusting bad numbers.
+
+This is ADDITIVE to the existing sanity-review step. Do NOT change parsing, hashing/dedup,
+ageing, Activity, qty, or any measure. It only inspects the uploaded file's HEADER and
+reports differences.
+
+=====================================================================
+EXPECTED BASELINE (current WIP format — 24 columns, in this exact order)
+=====================================================================
+ 1 Type
+ 2 Project Code
+ 3 Order Nature
+ 4 Contractor
+ 5 Job Card No.
+ 6 Job Card Date
+ 7 Job Card Status
+ 8 Tower Type
+ 9 Tower Sub Type
+10 Alias
+11 Mark No.
+12 Section
+13 Length
+14 Width
+15 Wt/Pcs
+16 Balance Qty.
+17 Balance Wt.
+18 Assign Date
+19 Activity
+20 Operation
+21 Ref. Job Card No.
+22 Last Production Entry Date
+23 Work Order No.
+24 Batch No.
+
+Store this baseline as a named constant (e.g. EXPECTED_WIP_COLUMNS) so it can be updated in
+ONE place when the format legitimately changes. The header row is not row 1 — it is the row
+whose first cell equals "Type" (there are title/blank rows above it); locate it by scanning
+the first ~8 rows for a cell == "Type" (or, for older formats, == "Project Code").
+
+=====================================================================
+WHAT THE CHECK MUST DETECT AND REPORT
+=====================================================================
+On WIP upload, read the header row and compare to EXPECTED_WIP_COLUMNS. Detect and report,
+in plain language, ALL of the following:
+
+1. COLUMN COUNT CHANGE — file has more/fewer columns than 24.
+2. MISSING COLUMNS — expected columns not present in the upload (by name). CRITICAL if any of
+   these are missing, because core features depend on them:
+      Type, Job Card Status, Contractor, Alias, Activity, Balance Wt., Tower Sub Type,
+      Project Code.
+   Missing "Type" or "Job Card Status" specifically → warn that Release Balance Computed,
+   Assignment Balance, and the Fabrication Report cannot be computed from this file.
+3. NEW / UNEXPECTED COLUMNS — columns in the upload not in the baseline (list their names).
+4. RENAMED COLUMNS — a position whose header text changed vs baseline (e.g. "WO Batch No."
+   vs "Batch No."). Report as "position N: expected 'X', found 'Y'".
+5. REORDERED COLUMNS — same set of names but in a different order (map each expected column
+   to the position where it was actually found; flag any that moved).
+6. HEADER-ROW LOCATION CHANGE — if the "Type" header is not found at all (e.g. an older
+   "Project Code"-first layout), flag that the file looks like a DIFFERENT/OLDER format.
+
+Matching is by NORMALIZED header text (trim, collapse internal whitespace, case-insensitive)
+so trivial spacing/case differences don't cause false alarms — but DO report a genuine text
+change like "WO Batch No." → "Batch No.".
+
+=====================================================================
+HOW TO SURFACE IT (in the existing sanity review UI)
+=====================================================================
+- If the header EXACTLY matches the baseline → show a small "Format OK (24 columns, matches
+  expected)" confirmation; proceed normally.
+- If ANYTHING differs → show a clear, non-blocking WARNING panel in the sanity review titled
+  e.g. "WIP format change detected", listing each change in plain language:
+      • Column count: expected 24, found N
+      • Missing: [names]  (with the CRITICAL note if Type/Job Card Status/etc. are missing)
+      • New columns: [names]
+      • Renamed: position N expected 'X' found 'Y'
+      • Reordered: 'X' expected at position N, found at position M
+      • "This file looks like an older/different format (starts with 'Project Code', no
+        'Type' column)" when applicable.
+- The warning should also state the IMPACT: which features may be affected (e.g. "Column
+  positions differ — parsed values may be wrong" or "Type/Status missing — release/assignment
+  measures unavailable").
+- Let the user decide: show a "Proceed anyway" and a "Cancel upload" option. Do NOT silently
+  auto-accept a drifted format, and do NOT silently reject it — inform and let them choose.
+- Recommended (if feasible): map columns by HEADER NAME rather than fixed position when
+  parsing, so a reorder or an added column doesn't corrupt values; the sanity warning still
+  reports the drift. If name-based mapping is out of scope now, at minimum WARN loudly.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change how WIP is parsed, hashed, deduped, aged, or any measure. This is a
+  read-only header inspection + user warning.
+- Do NOT hard-code the baseline in multiple places — one constant, easily updated.
+- Do NOT block a valid, exactly-matching upload with any warning.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- Uploading a current 24-column file (e.g. 08-Jul or 09-Jul WIP) → "Format OK", no warning,
+  proceeds normally. (Verify both 8-Jul and 9-Jul pass identically — same 24 headers.)
+- Uploading a 21-column "Project Code"-first file (e.g. 04-Jul) → warns: older/different
+  format, missing Type/Job Card Date/Job Card Status, "Batch No." appears as "WO Batch No.",
+  and lists the count change 24→21; states release/assignment/fab measures unavailable.
+- Simulate a RENAME ("Batch No." → "WO Batch No.") → reported as a rename at that position.
+- Simulate a NEW column inserted → reported as new + a reorder warning for everything after it.
+- Warning is non-blocking (Proceed/Cancel offered); exact-match upload shows no warning.
+- Report: the warning text generated for the 04-Jul file, and confirmation 08/09-Jul pass.

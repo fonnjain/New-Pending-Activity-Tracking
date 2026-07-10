@@ -716,6 +716,7 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
       rowsRead: 0,
       rowsWithMark: 0,
       problems: ["The file could not be read as a spreadsheet."],
+      wipFormatCheck: null,
     };
   }
 

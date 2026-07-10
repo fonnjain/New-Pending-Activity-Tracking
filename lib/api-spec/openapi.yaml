@@ -1758,6 +1758,80 @@ components:
       required:
         - days
         - totalSessions
+    WipColumnRename:
+      type: object
+      properties:
+        position:
+          type: integer
+          description: 1-based column position
+        expected:
+          type: string
+        found:
+          type: string
+      required: [position, expected, found]
+    WipColumnReorder:
+      type: object
+      properties:
+        name:
+          type: string
+        expectedPosition:
+          type: integer
+        foundPosition:
+          type: integer
+      required: [name, expectedPosition, foundPosition]
+    WipFormatCheck:
+      type: object
+      description: Result of comparing uploaded WIP file headers against the expected 24-column baseline.
+      properties:
+        ok:
+          type: boolean
+          description: True only when headers exactly match the baseline.
+        expectedCount:
+          type: integer
+        foundCount:
+          type: integer
+        missingExpected:
+          type: array
+          items:
+            type: string
+          description: Expected columns not found anywhere in the file.
+        unexpectedFound:
+          type: array
+          items:
+            type: string
+          description: Columns in the file not in the baseline.
+        renames:
+          type: array
+          items:
+            $ref: "#/components/schemas/WipColumnRename"
+          description: Positions where the header text changed and neither name appears elsewhere.
+        reorders:
+          type: array
+          items:
+            $ref: "#/components/schemas/WipColumnReorder"
+          description: Expected columns that are present but at a different position.
+        criticalMissing:
+          type: array
+          items:
+            type: string
+          description: Subset of missingExpected that are critical to core features.
+        isOldFormat:
+          type: boolean
+          description: File appears to be the older 21-column Project-Code-first layout.
+        impactNote:
+          type: ["string", "null"]
+          description: Human-readable description of downstream impact.
+      required:
+        - ok
+        - expectedCount
+        - foundCount
+        - missingExpected
+        - unexpectedFound
+        - renames
+        - reorders
+        - criticalMissing
+        - isOldFormat
+        - impactNote
     SetRoleRequest:
       type: object
       properties:
@@ -2050,6 +2124,11 @@ components:
           items:
             type: string
           description: Human-readable structural problems detected without AI.
+        wipFormatCheck:
+          oneOf:
+            - $ref: "#/components/schemas/WipFormatCheck"
+            - type: "null"
+          description: WIP column format check vs the 24-column baseline; null for non-WIP files.
       required:
         - sheetName
         - headerRow
@@ -2058,6 +2137,7 @@ components:
         - rowsRead
         - rowsWithMark
         - problems
+        - wipFormatCheck
     StageResult:
       type: object
       properties:

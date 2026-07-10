@@ -80,6 +80,46 @@ export interface UserActivityResponse {
   totalSessions: number;
 }
 
+export interface WipColumnRename {
+  /** 1-based column position */
+  position: number;
+  expected: string;
+  found: string;
+}
+
+export interface WipColumnReorder {
+  name: string;
+  expectedPosition: number;
+  foundPosition: number;
+}
+
+/**
+ * Result of comparing uploaded WIP file headers against the expected 24-column baseline.
+ */
+export interface WipFormatCheck {
+  /** True only when headers exactly match the baseline. */
+  ok: boolean;
+  expectedCount: number;
+  foundCount: number;
+  /** Expected columns not found anywhere in the file. */
+  missingExpected: string[];
+  /** Columns in the file not in the baseline. */
+  unexpectedFound: string[];
+  /** Positions where the header text changed and neither name appears elsewhere. */
+  renames: WipColumnRename[];
+  /** Expected columns that are present but at a different position. */
+  reorders: WipColumnReorder[];
+  /** Subset of missingExpected that are critical to core features. */
+  criticalMissing: string[];
+  /** File appears to be the older 21-column Project-Code-first layout. */
+  isOldFormat: boolean;
+  /**
+     * Human-readable description of downstream impact.
+     * @nullable
+     */
+  impactNote: string | null;
+}
+
 export type SetRoleRequestRole = typeof SetRoleRequestRole[keyof typeof SetRoleRequestRole];
 
 
@@ -233,6 +273,8 @@ export interface StructuralRead {
   rowsWithMark: number;
   /** Human-readable structural problems detected without AI. */
   problems: string[];
+  /** WIP column format check vs the 24-column baseline; null for non-WIP files. */
+  wipFormatCheck: WipFormatCheck | null;
 }
 
 /**
