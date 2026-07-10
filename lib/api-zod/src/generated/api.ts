@@ -985,7 +985,8 @@ export const ListImportsResponseItem = zod.object({
   "notStarted": zod.number().describe('Blank Last Production Entry Date AND activity == C (production not begun).'),
   "noProductionDate": zod.number().describe('Blank Last Production Entry Date AND activity != C (progressed past cutting; data-quality flag).'),
   "futureProductionDate": zod.number().describe('Last Production Entry Date later than today (clamped to today for ageing).'),
-  "fgWipByJob": zod.record(zod.string(), zod.number()).optional().describe('Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = \"FG Pending For Dispatch\". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.\n')
+  "fgWipByJob": zod.record(zod.string(), zod.number()).optional().describe('Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = \"FG Pending For Dispatch\". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.\n'),
+  "fgWipByStructure": zod.record(zod.string(), zod.record(zod.string(), zod.number())).optional().describe('Same as fgWipByJob but broken down by structure. Outer key = project; inner key = alias\/structure (uppercased). Values in kg (same unit as balanceWt). Absent when the file has no Type column or no FG rows.\n')
 }),
   "changeSummary": zod.union([zod.object({
   "prevImportId": zod.number().nullable(),
@@ -1100,7 +1101,8 @@ export const CommitStagedImportResponse = zod.union([zod.object({
   "notStarted": zod.number().describe('Blank Last Production Entry Date AND activity == C (production not begun).'),
   "noProductionDate": zod.number().describe('Blank Last Production Entry Date AND activity != C (progressed past cutting; data-quality flag).'),
   "futureProductionDate": zod.number().describe('Last Production Entry Date later than today (clamped to today for ageing).'),
-  "fgWipByJob": zod.record(zod.string(), zod.number()).optional().describe('Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = \"FG Pending For Dispatch\". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.\n')
+  "fgWipByJob": zod.record(zod.string(), zod.number()).optional().describe('Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = \"FG Pending For Dispatch\". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.\n'),
+  "fgWipByStructure": zod.record(zod.string(), zod.record(zod.string(), zod.number())).optional().describe('Same as fgWipByJob but broken down by structure. Outer key = project; inner key = alias\/structure (uppercased). Values in kg (same unit as balanceWt). Absent when the file has no Type column or no FG rows.\n')
 }),
   "changeSummary": zod.union([zod.object({
   "prevImportId": zod.number().nullable(),
@@ -1344,7 +1346,8 @@ export const GetImportResponse = zod.object({
   "notStarted": zod.number().describe('Blank Last Production Entry Date AND activity == C (production not begun).'),
   "noProductionDate": zod.number().describe('Blank Last Production Entry Date AND activity != C (progressed past cutting; data-quality flag).'),
   "futureProductionDate": zod.number().describe('Last Production Entry Date later than today (clamped to today for ageing).'),
-  "fgWipByJob": zod.record(zod.string(), zod.number()).optional().describe('Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = \"FG Pending For Dispatch\". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.\n')
+  "fgWipByJob": zod.record(zod.string(), zod.number()).optional().describe('Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = \"FG Pending For Dispatch\". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.\n'),
+  "fgWipByStructure": zod.record(zod.string(), zod.record(zod.string(), zod.number())).optional().describe('Same as fgWipByJob but broken down by structure. Outer key = project; inner key = alias\/structure (uppercased). Values in kg (same unit as balanceWt). Absent when the file has no Type column or no FG rows.\n')
 }),
   "changeSummary": zod.union([zod.object({
   "prevImportId": zod.number().nullable(),

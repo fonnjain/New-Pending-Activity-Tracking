@@ -811,6 +811,7 @@ export function parseWorkbook(
   const rows: ParsedRow[] = [];
   // Finished Goods WIP per project: additive, does NOT change row identity.
   const fgWipByJob: Record<string, number> = {};
+  const fgWipByStructure: Record<string, Record<string, number>> = {};
 
   for (const row of rawRows) {
     rowsRead++;
@@ -833,9 +834,15 @@ export function parseWorkbook(
     const rowType = cellToString(row["Type"]);
     if (rowType && rowType.trim().toUpperCase() === "FG PENDING FOR DISPATCH") {
       const fgProject = rawProject || lastProject;
+      const fgWt = toNumber(row[COL.balanceWt]) ?? 0;
       if (fgProject) {
-        fgWipByJob[fgProject] =
-          (fgWipByJob[fgProject] ?? 0) + (toNumber(row[COL.balanceWt]) ?? 0);
+        fgWipByJob[fgProject] = (fgWipByJob[fgProject] ?? 0) + fgWt;
+        const fgStructure = cellToString(row[COL.alias]).trim().toUpperCase();
+        if (fgStructure) {
+          fgWipByStructure[fgProject] = fgWipByStructure[fgProject] ?? {};
+          fgWipByStructure[fgProject][fgStructure] =
+            (fgWipByStructure[fgProject][fgStructure] ?? 0) + fgWt;
+        }
       }
     }
 
@@ -987,6 +994,7 @@ export function parseWorkbook(
       futureProductionDate,
       classificationConflicts,
       ...(Object.keys(fgWipByJob).length > 0 && { fgWipByJob }),
+      ...(Object.keys(fgWipByStructure).length > 0 && { fgWipByStructure }),
     },
   };
 }

@@ -29,10 +29,12 @@ export interface ParseSummary {
   classificationConflicts?: number;
   // Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where
   // the WIP file's "Type" column (Col A, new ≥Jul-2026 format) equals
-  // "FG Pending For Dispatch". Values in the same unit as balanceWt (kg raw
-  // from the file). Absent when the file has no FG rows or no "Type" column
-  // (old format). Currently null/0 in practice; infrastructure for future use.
+  // "FG Pending For Dispatch". Values in kg (same unit as balanceWt).
+  // Absent when the file has no FG rows or no "Type" column (old format).
   fgWipByJob?: Record<string, number>;
+  // Same breakdown at project+structure granularity. Outer key = project;
+  // inner key = alias (uppercased) = structure identifier.
+  fgWipByStructure?: Record<string, Record<string, number>>;
 }
 
 export interface ChangeSummary {

@@ -1863,6 +1863,16 @@ components:
             no Type column (old format) or no FG rows.
           additionalProperties:
             type: number
+        fgWipByStructure:
+          type: object
+          description: >
+            Same as fgWipByJob but broken down by structure. Outer key = project;
+            inner key = alias/structure (uppercased). Values in kg (same unit as
+            balanceWt). Absent when the file has no Type column or no FG rows.
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: number
       required:
         - rowsRead
         - rowsKept

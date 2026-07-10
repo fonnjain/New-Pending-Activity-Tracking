@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ParseSummaryFgWipByJob } from './parseSummaryFgWipByJob';
+import type { ParseSummaryFgWipByStructure } from './parseSummaryFgWipByStructure';
 
 export interface ParseSummary {
   rowsRead: number;
@@ -24,4 +25,7 @@ export interface ParseSummary {
   /** Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = "FG Pending For Dispatch". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.
    */
   fgWipByJob?: ParseSummaryFgWipByJob;
+  /** Same as fgWipByJob but broken down by structure. Outer key = project; inner key = alias/structure (uppercased). Values in kg (same unit as balanceWt). Absent when the file has no Type column or no FG rows.
+   */
+  fgWipByStructure?: ParseSummaryFgWipByStructure;
 }

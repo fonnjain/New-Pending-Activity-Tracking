@@ -107,6 +107,7 @@ export * from './orFormatRename';
 export * from './orSanityResult';
 export * from './parseSummary';
 export * from './parseSummaryFgWipByJob';
+export * from './parseSummaryFgWipByStructure';
 export * from './partialActivityConfig';
 export * from './partialPreWarnConfig';
 export * from './preWarnConfig';
