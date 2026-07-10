@@ -56,7 +56,6 @@ import {
   ingestOrderReview,
   computeWipCoverage,
 } from "../lib/dispatch";
-import { recomputeAccumulatedWip } from "../lib/accumulatedWip";
 import { recomputeContractorMovement } from "../lib/contractorMovement";
 import { recomputeReleaseBalance, recomputeAssignmentBalance } from "../lib/parseWipReleaseBalance";
 import { cutoffSql, loadValidFrom, importDayKey } from "../lib/cutoff";
@@ -570,12 +569,6 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
     await recomputeDispatch();
   } catch (err) {
     req.log.warn({ err }, "Dispatch recompute failed after import");
-  }
-  // Refresh accumulated WIP totals (Fabrication/Galvanizing; best-effort).
-  try {
-    await recomputeAccumulatedWip();
-  } catch (err) {
-    req.log.warn({ err }, "Accumulated WIP recompute failed after import");
   }
   // Refresh contractor movement ledger (best-effort).
   try {
@@ -1326,12 +1319,6 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   } catch (err) {
     req.log.warn({ err }, "Dispatch recompute failed after commit");
   }
-  // Refresh accumulated WIP totals (Fabrication/Galvanizing; best-effort).
-  try {
-    await recomputeAccumulatedWip();
-  } catch (err) {
-    req.log.warn({ err }, "Accumulated WIP recompute failed after commit");
-  }
   // Refresh contractor movement ledger (best-effort).
   try {
     await recomputeContractorMovement();
@@ -1476,12 +1463,6 @@ router.delete("/imports/:id", requireAuth, async (req, res): Promise<void> => {
     await recomputeDispatch();
   } catch (err) {
     req.log.warn({ err }, "Dispatch recompute failed after import delete");
-  }
-  // Refresh accumulated WIP totals after the deletion (best-effort).
-  try {
-    await recomputeAccumulatedWip();
-  } catch (err) {
-    req.log.warn({ err }, "Accumulated WIP recompute failed after import delete");
   }
   // Refresh contractor movement ledger after the deletion (best-effort).
   try {
@@ -2081,16 +2062,6 @@ router.get("/imports/:id/velocity", async (req, res): Promise<void> => {
 router.get("/milestones", async (_req, res): Promise<void> => {
   const items = await recomputeMilestones();
   res.json({ items, generatedAt: new Date().toISOString() });
-});
-
-// Permanent lifetime accumulated-WIP totals (Fabrication / Galvanizing).
-// Computed mark-wise, rolled up structure-wise (byStructure) then
-// project-wise (byProject). Recomputed deterministically from the full WIP
-// import history on each read (and on each upload/delete/settings change).
-// Purely additive.
-router.get("/accumulated-wip", async (_req, res): Promise<void> => {
-  const result = await recomputeAccumulatedWip();
-  res.json({ ...result, generatedAt: new Date().toISOString() });
 });
 
 // Contractor Performance report: a daily log of how much work (marks +

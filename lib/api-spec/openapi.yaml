@@ -1108,30 +1108,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MilestonesResponse"
-  /accumulated-wip:
-    get:
-      operationId: getAccumulatedWip
-      tags: [imports]
-      summary: Get lifetime accumulated WIP throughput totals (Fabrication / Galvanizing)
-      description: >
-        Deterministically recomputes, from the full append-only WIP import
-        history (no cutoff — a lifetime throughput counter, not a
-        point-in-time balance), two cumulative figures: Fabrication WIP
-        Accumulated (tonnage added each time a mark left TS into G, TLT
-        projects only) and Galvanizing WIP Accumulated (tonnage added each
-        time a mark left Y / was dispatched). "Each time" is intentional —
-        a mark that re-enters an earlier activity and crosses the same
-        boundary again later is counted again. Returns both the overall sum
-        and a per-project breakdown. Purely additive — never changes
-        parsing, activity values, dedup, ageing, warning, milestone, or
-        dispatch state.
-      responses:
-        "200":
-          description: Lifetime accumulated WIP totals
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AccumulatedWipResponse"
   /contractor-movement:
     get:
       operationId: getContractorMovement
@@ -3614,77 +3590,6 @@ components:
       required:
         - items
         - generatedAt
-    AccumulatedWipProject:
-      type: object
-      description: Lifetime accumulated WIP totals for one project.
-      properties:
-        project:
-          type: string
-        fabricationMt:
-          type: number
-          description: Tonnage added each time a mark left TS into G (TLT projects only).
-        galvanizingMt:
-          type: number
-          description: Tonnage added each time a mark left Y (dispatched/completed).
-      required:
-        - project
-        - fabricationMt
-        - galvanizingMt
-    AccumulatedWipTotals:
-      type: object
-      description: Overall (all-project) lifetime accumulated WIP totals.
-      properties:
-        fabricationMt:
-          type: number
-        galvanizingMt:
-          type: number
-      required:
-        - fabricationMt
-        - galvanizingMt
-    AccumulatedWipStructure:
-      type: object
-      description: >
-        Lifetime accumulated WIP totals for one project+structure -- the
-        structure-wise rollup of the mark-wise ledger, sitting between the
-        mark-level events and the project-wise byProject totals.
-      properties:
-        project:
-          type: string
-        structure:
-          type: string
-        fabricationMt:
-          type: number
-        galvanizingMt:
-          type: number
-      required:
-        - project
-        - structure
-        - fabricationMt
-        - galvanizingMt
-    AccumulatedWipResponse:
-      type: object
-      description: >
-        Lifetime accumulated WIP throughput totals, computed mark-wise then
-        rolled up structure-wise (byStructure) then project-wise (byProject),
-        plus the overall (all-project) sum.
-      properties:
-        overall:
-          $ref: "#/components/schemas/AccumulatedWipTotals"
-        byProject:
-          type: array
-          items:
-            $ref: "#/components/schemas/AccumulatedWipProject"
-        byStructure:
-          type: array
-          items:
-            $ref: "#/components/schemas/AccumulatedWipStructure"
-        generatedAt:
-          type: string
-      required:
-        - overall
-        - byProject
-        - byStructure
-        - generatedAt
     ContractorMovementEntry:
       type: object
       description: >
@@ -3743,9 +3648,6 @@ components:
         milestonesCount:
           type: integer
           description: Per-project milestone rows after recompute.
-        accumulatedWipProjects:
-          type: integer
-          description: Projects covered by the recomputed accumulated-WIP totals.
         contractorMovementEntries:
           type: integer
           description: Contractor movement ledger entries after recompute.
@@ -3755,7 +3657,6 @@ components:
         - classificationBackfilled
         - holeOperationBackfilled
         - milestonesCount
-        - accumulatedWipProjects
         - contractorMovementEntries
         - generatedAt
     OrderReviewFieldChange:

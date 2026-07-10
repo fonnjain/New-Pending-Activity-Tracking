@@ -49,7 +49,6 @@ function ProductionTracker() {
         <Route path="/data" component={DataView} />
         <Route path="/computed-fg" component={DataView} />
         <Route path="/order-reconciliation" component={DataView} />
-        <Route path="/accumulated-wip" component={DataView} />
         <Route path="/release-balance" component={DataView} />
         <Route path="/reports" component={ReportsView} />
         <Route path="/thickness" component={DataView} />

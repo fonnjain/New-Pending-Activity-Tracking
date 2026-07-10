@@ -1602,31 +1602,6 @@ export const GetMilestonesResponse = zod.object({
 
 
 /**
- * Deterministically recomputes, from the full append-only WIP import history (no cutoff — a lifetime throughput counter, not a point-in-time balance), two cumulative figures: Fabrication WIP Accumulated (tonnage added each time a mark left TS into G, TLT projects only) and Galvanizing WIP Accumulated (tonnage added each time a mark left Y / was dispatched). "Each time" is intentional — a mark that re-enters an earlier activity and crosses the same boundary again later is counted again. Returns both the overall sum and a per-project breakdown. Purely additive — never changes parsing, activity values, dedup, ageing, warning, milestone, or dispatch state.
-
- * @summary Get lifetime accumulated WIP throughput totals (Fabrication / Galvanizing)
- */
-export const GetAccumulatedWipResponse = zod.object({
-  "overall": zod.object({
-  "fabricationMt": zod.number(),
-  "galvanizingMt": zod.number()
-}).describe('Overall (all-project) lifetime accumulated WIP totals.'),
-  "byProject": zod.array(zod.object({
-  "project": zod.string(),
-  "fabricationMt": zod.number().describe('Tonnage added each time a mark left TS into G (TLT projects only).'),
-  "galvanizingMt": zod.number().describe('Tonnage added each time a mark left Y (dispatched\/completed).')
-}).describe('Lifetime accumulated WIP totals for one project.')),
-  "byStructure": zod.array(zod.object({
-  "project": zod.string(),
-  "structure": zod.string(),
-  "fabricationMt": zod.number(),
-  "galvanizingMt": zod.number()
-}).describe('Lifetime accumulated WIP totals for one project+structure -- the structure-wise rollup of the mark-wise ledger, sitting between the mark-level events and the project-wise byProject totals.\n')),
-  "generatedAt": zod.string()
-}).describe('Lifetime accumulated WIP throughput totals, computed mark-wise then rolled up structure-wise (byStructure) then project-wise (byProject), plus the overall (all-project) sum.\n')
-
-
-/**
  * Deterministically recomputes, from the full append-only import history (no cutoff), a daily log of how much work (mark count + weight) moved from one activity to the next. Credit for a move is attributed to the contractor of the FROM activity — the one who completed and released that stage. One entry per (date, project, contractor, fromActivity, toActivity), already aggregated. Purely additive — never changes parsing, activity values, dedup, ageing, warning, milestone, or dispatch state.
 
  * @summary Get the Contractor Performance daily activity-movement ledger
@@ -1712,7 +1687,6 @@ export const AdminRecomputeResponse = zod.object({
   "classificationBackfilled": zod.number().describe('Record-pool rows whose classification columns were backfilled.'),
   "holeOperationBackfilled": zod.number().describe('Record-pool rows whose hole-operation columns were backfilled.'),
   "milestonesCount": zod.number().describe('Per-project milestone rows after recompute.'),
-  "accumulatedWipProjects": zod.number().describe('Projects covered by the recomputed accumulated-WIP totals.'),
   "contractorMovementEntries": zod.number().describe('Contractor movement ledger entries after recompute.'),
   "generatedAt": zod.string()
 }).describe('Result summary of a manual admin recompute run.')

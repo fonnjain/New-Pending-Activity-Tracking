@@ -2,7 +2,6 @@ import { Router, type IRouter } from "express";
 import { requireAuth } from "./auth";
 import { recomputeMilestones } from "../lib/milestones";
 import { recomputeDispatch } from "../lib/dispatch";
-import { recomputeAccumulatedWip } from "../lib/accumulatedWip";
 import { recomputeContractorMovement } from "../lib/contractorMovement";
 import { backfillClassification, backfillHoleOperation } from "../lib/backfill";
 
@@ -20,13 +19,11 @@ router.post("/admin/recompute", requireAuth, async (_req, res): Promise<void> =>
     classificationBackfilled,
     holeOperationBackfilled,
     milestones,
-    accumulatedWip,
     contractorMovement,
   ] = await Promise.all([
     backfillClassification(),
     backfillHoleOperation(),
     recomputeMilestones(),
-    recomputeAccumulatedWip(),
     recomputeContractorMovement(),
   ]);
   await recomputeDispatch();
@@ -35,7 +32,6 @@ router.post("/admin/recompute", requireAuth, async (_req, res): Promise<void> =>
     classificationBackfilled,
     holeOperationBackfilled,
     milestonesCount: milestones.length,
-    accumulatedWipProjects: accumulatedWip.byProject.length,
     contractorMovementEntries: contractorMovement.length,
     generatedAt: new Date().toISOString(),
   });

@@ -16,8 +16,6 @@ export interface AdminRecomputeResult {
   holeOperationBackfilled: number;
   /** Per-project milestone rows after recompute. */
   milestonesCount: number;
-  /** Projects covered by the recomputed accumulated-WIP totals. */
-  accumulatedWipProjects: number;
   /** Contractor movement ledger entries after recompute. */
   contractorMovementEntries: number;
   generatedAt: string;

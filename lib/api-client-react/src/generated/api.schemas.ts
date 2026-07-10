@@ -1555,47 +1555,6 @@ export interface MilestonesResponse {
 }
 
 /**
- * Lifetime accumulated WIP totals for one project.
- */
-export interface AccumulatedWipProject {
-  project: string;
-  /** Tonnage added each time a mark left TS into G (TLT projects only). */
-  fabricationMt: number;
-  /** Tonnage added each time a mark left Y (dispatched/completed). */
-  galvanizingMt: number;
-}
-
-/**
- * Overall (all-project) lifetime accumulated WIP totals.
- */
-export interface AccumulatedWipTotals {
-  fabricationMt: number;
-  galvanizingMt: number;
-}
-
-/**
- * Lifetime accumulated WIP totals for one project+structure -- the structure-wise rollup of the mark-wise ledger, sitting between the mark-level events and the project-wise byProject totals.
-
- */
-export interface AccumulatedWipStructure {
-  project: string;
-  structure: string;
-  fabricationMt: number;
-  galvanizingMt: number;
-}
-
-/**
- * Lifetime accumulated WIP throughput totals, computed mark-wise then rolled up structure-wise (byStructure) then project-wise (byProject), plus the overall (all-project) sum.
-
- */
-export interface AccumulatedWipResponse {
-  overall: AccumulatedWipTotals;
-  byProject: AccumulatedWipProject[];
-  byStructure: AccumulatedWipStructure[];
-  generatedAt: string;
-}
-
-/**
  * One aggregated activity move: how many marks (and how much weight) moved from `fromActivity` to `toActivity` on `date`, within `project`, credited to `contractor` (the contractor of the FROM activity). Null contractor displays as "Unassigned".
 
  */
@@ -1628,8 +1587,6 @@ export interface AdminRecomputeResult {
   holeOperationBackfilled: number;
   /** Per-project milestone rows after recompute. */
   milestonesCount: number;
-  /** Projects covered by the recomputed accumulated-WIP totals. */
-  accumulatedWipProjects: number;
   /** Contractor movement ledger entries after recompute. */
   contractorMovementEntries: number;
   generatedAt: string;
