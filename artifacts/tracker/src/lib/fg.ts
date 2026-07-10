@@ -8,7 +8,6 @@ import {
 import {
   useGetOrderStatus,
   getGetOrderStatusQueryKey,
-  useListImports,
 } from "@workspace/api-client-react";
 
 export interface FgComputedRow {
@@ -19,10 +18,6 @@ export interface FgComputedRow {
   // Finished Good Overview Computed = Order Review file Galvanising (col N)
   // minus file Dispatch (col Q). Purely file-sourced.
   computedFgMt: number | null;
-  // Finished Good WIP = WIP file "FG Pending For Dispatch" balance weight for
-  // this (project, structure), converted from kg to MT. Null when the WIP
-  // file has no "Type" column (old format) or no matching FG row.
-  fgWipMt: number | null;
 }
 
 // Shared, additive Finished Good computation used by both the Order Status
@@ -36,18 +31,11 @@ export function useFgRows(): {
   rows: FgComputedRow[];
   isLoading: boolean;
 } {
-  const { filters, selectedImportId } = useTracker();
+  const { filters } = useTracker();
 
-  const { data: order, isLoading: orderLoading } = useGetOrderStatus({
+  const { data: order, isLoading } = useGetOrderStatus({
     query: { queryKey: getGetOrderStatusQueryKey() },
   });
-
-  const { data: imports, isLoading: importsLoading } = useListImports();
-
-  const fgWipByStructure = useMemo(() => {
-    const imp = imports?.find((i) => i.id === selectedImportId);
-    return imp?.summary?.fgWipByStructure ?? {};
-  }, [imports, selectedImportId]);
 
   const { set: currentJobsSet } = useCurrentJobsSet();
 
@@ -64,25 +52,20 @@ export function useFgRows(): {
     } else {
       filtered = all;
     }
-    return filtered.map((r) => {
-      const structKey = (r.structure ?? "").trim().toUpperCase();
-      const fgWipKg = fgWipByStructure[r.project]?.[structKey];
-      return {
-        project: r.project,
-        structure: r.structure,
-        releaseMt: r.releaseMt,
-        fileDespatchMt: r.fileDespatchMt,
-        computedFgMt:
-          r.fileGalvMt == null ? null : r.fileGalvMt - (r.fileDespatchMt ?? 0),
-        fgWipMt: typeof fgWipKg === "number" ? fgWipKg / 1000 : null,
-      };
-    });
-  }, [order, filters.job, filters.selectedJobs, currentJobsSet, fgWipByStructure]);
+    return filtered.map((r) => ({
+      project: r.project,
+      structure: r.structure,
+      releaseMt: r.releaseMt,
+      fileDespatchMt: r.fileDespatchMt,
+      computedFgMt:
+        r.fileGalvMt == null ? null : r.fileGalvMt - (r.fileDespatchMt ?? 0),
+    }));
+  }, [order, filters.job, filters.selectedJobs, currentJobsSet]);
 
   return {
     available: order?.available ?? false,
     asOnDate: order?.asOnDate ?? null,
     rows,
-    isLoading: orderLoading || importsLoading,
+    isLoading,
   };
 }

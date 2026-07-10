@@ -99,14 +99,15 @@ function JobDashboardContent() {
     query: { queryKey: getGetOrderStatusQueryKey() },
   });
   const orderByJob = useMemo(() => {
-    const m = new Map<string, { wo: number; rel: number; disp: number; fileBalRelease: number }>();
+    const m = new Map<string, { wo: number; rel: number; disp: number; fileBalRelease: number; computedFg: number }>();
     for (const r of order?.rows ?? []) {
       const key = isAll ? `TLT: ${r.project}` : r.project;
-      const agg = m.get(key) ?? { wo: 0, rel: 0, disp: 0, fileBalRelease: 0 };
+      const agg = m.get(key) ?? { wo: 0, rel: 0, disp: 0, fileBalRelease: 0, computedFg: 0 };
       agg.wo += r.weightMt ?? 0;
       agg.rel += r.releaseMt ?? 0;
       agg.disp += r.fileDespatchMt ?? 0;
       agg.fileBalRelease += r.fileBalReleaseMt ?? 0;
+      agg.computedFg += r.fileGalvMt != null ? r.fileGalvMt - (r.fileDespatchMt ?? 0) : 0;
       m.set(key, agg);
     }
     return m;
@@ -349,10 +350,11 @@ function JobDashboardContent() {
           acc.rel += o.rel;
           acc.disp += o.disp;
           acc.fileBalRelease += o.fileBalRelease;
+          acc.computedFg += o.computedFg;
         }
         return acc;
       },
-      { wo: 0, rel: 0, disp: 0, fileBalRelease: 0 },
+      { wo: 0, rel: 0, disp: 0, fileBalRelease: 0, computedFg: 0 },
     );
   }, [byProject, orderByJob]);
 
@@ -368,6 +370,7 @@ function JobDashboardContent() {
           { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
           { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
           { label: "Release Balance Computed (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
+          { label: "FG (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
           { label: "Structures", field: "structures", numeric: true, decimals: 0 },
           { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
           { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
@@ -385,6 +388,7 @@ function JobDashboardContent() {
           dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
           releaseBalanceMt: orderByJob.get(p.job)?.fileBalRelease ?? 0,
           releaseBalanceComputedMt: relBalComputedByJob.get(p.job) ?? 0,
+          computedFgMt: orderByJob.get(p.job)?.computedFg ?? 0,
           structures: p.structures,
           marks: p.marks,
           qty: p.qty,
@@ -488,6 +492,7 @@ function JobDashboardContent() {
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Balance</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Balance</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Balance Computed</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">FG (MT)</TableHead>
                   {headerPhases.map((ph) => (
                     <TableHead key={ph.key} className="text-right align-bottom">
                       <span className="block whitespace-normal leading-tight">{ph.label}</span>
@@ -537,6 +542,9 @@ function JobDashboardContent() {
                     <TableCell className="text-right tabular-nums">
                       {(() => { const v = relBalComputedByJob.get(p.job); return v ? formatWeight(v * 1000) : <span className="text-muted-foreground">-</span>; })()}
                     </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {(() => { const v = o?.computedFg; return v != null && v !== 0 ? formatWeight(v * 1000) : <span className="text-muted-foreground">-</span>; })()}
+                    </TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       if (ph.key === "dispatch") {
                         const wt = fgWipForJob(p.job);
@@ -582,7 +590,7 @@ function JobDashboardContent() {
                 })}
                 {byProject.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={PROCESS_PHASES.length + 7} className="text-center py-4 text-muted-foreground">
+                    <TableCell colSpan={PROCESS_PHASES.length + 8} className="text-center py-4 text-muted-foreground">
                       No data for the selected filters.
                     </TableCell>
                   </TableRow>
@@ -597,6 +605,7 @@ function JobDashboardContent() {
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.disp) * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.fileBalRelease * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(byProject.reduce((s, p) => s + (relBalComputedByJob.get(p.job) ?? 0), 0) * 1000)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-bold">{orderTotals.computedFg !== 0 ? formatWeight(orderTotals.computedFg * 1000) : <span className="text-muted-foreground">-</span>}</TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       if (ph.key === "dispatch") {
                         const totalFgWt = byProject.reduce((s, p) => s + fgWipForJob(p.job), 0);
