@@ -64,6 +64,16 @@ function cleanRsjGroupKey(section: string | null): string {
   return s.startsWith("RSJ") ? s : `RSJ ${s}`;
 }
 
+// The four known Order Nature values (Col C). Any other value is treated as
+// NTLT by default and counted in the upload sanity check.
+const KNOWN_ORDER_NATURES = new Set([
+  "STRUCTURE",
+  "RSJ POLE",
+  "EARTHING",
+  "GENERAL",
+  "FOUNDATION BOLT",
+]);
+
 // Classify a row from its Order Nature (authoritative), Tower Sub Type (confirm
 // only), Section, and resolved job. Returns the classification plus whether the
 // Tower Sub Type disagreed with the derived category.
@@ -119,12 +129,13 @@ export function classifyMark(input: {
       active: false,
     };
   } else {
-    // Unknown / blank Order Nature: leave unclassified (no borrowing).
+    // Unknown / blank Order Nature: treat as NTLT (safe default — keeps the row
+    // out of TLT reports). Caller should also increment unknownOrderNatureCount.
     c = {
-      category: null,
-      ntltSubtype: null,
-      groupType: null,
-      groupKey: null,
+      category: "NTLT",
+      ntltSubtype: "GENERAL",
+      groupType: "section",
+      groupKey: normalizeSectionKey(input.section) || "UNKNOWN",
       active: true,
     };
   }
@@ -808,6 +819,10 @@ export function parseWorkbook(
   let classificationConflicts = 0;
   let ntltOrphanCount = 0;
   let ntltOrphanWtMt = 0;
+  let unknownOrderNatureCount = 0;
+  // Per-NTLT-section: distinct Tower Types seen. Used to flag Section→TowerType
+  // mismatches (a source-data quality signal, not a parse error).
+  const ntltSectionTowerTypes = new Map<string, { types: Set<string>; marks: number }>();
   const projects = new Set<string>();
   const rows: ParsedRow[] = [];
   // Finished Goods WIP per project: additive, does NOT change row identity.
@@ -891,12 +906,30 @@ export function parseWorkbook(
     });
     if (conflict) classificationConflicts++;
 
+    // Track rows with unknown/blank Order Nature for the upload sanity check.
+    if (!KNOWN_ORDER_NATURES.has((orderNature ?? "").trim().toUpperCase())) {
+      unknownOrderNatureCount++;
+    }
+
     // Track NTLT marks that have no project code for the upload data-quality
     // summary. These are the 282 RSJ POLE / EARTHING / GENERAL rows attributed
     // to "(Unassigned)"; surfaced as ntltOrphanCount + ntltOrphanWtMt.
     if (classification.category === "NTLT" && !rawProject) {
       ntltOrphanCount++;
       ntltOrphanWtMt += toNumber(row[COL.balanceWt]) ?? 0;
+    }
+
+    // Track Section→TowerType mapping for NTLT rows to surface mismatches.
+    if (classification.category === "NTLT" && section) {
+      const sectionKey = normalizeSectionKey(section);
+      const towerTypeVal = cellToString(row[COL.towerType]).trim() || "(blank)";
+      const existing = ntltSectionTowerTypes.get(sectionKey);
+      if (existing) {
+        existing.types.add(towerTypeVal);
+        existing.marks++;
+      } else {
+        ntltSectionTowerTypes.set(sectionKey, { types: new Set([towerTypeVal]), marks: 1 });
+      }
     }
 
     const base: Omit<InsertRecordPool, "hash"> = {
@@ -1001,6 +1034,17 @@ export function parseWorkbook(
       futureProductionDate,
       classificationConflicts,
       ...(ntltOrphanCount > 0 && { ntltOrphanCount, ntltOrphanWtMt }),
+      ...(unknownOrderNatureCount > 0 && { unknownOrderNatureCount }),
+      ...(() => {
+        const mismatches = Array.from(ntltSectionTowerTypes.entries())
+          .filter(([, v]) => v.types.size > 1)
+          .map(([section, v]) => ({
+            section,
+            towerTypes: Array.from(v.types).sort(),
+            marks: v.marks,
+          }));
+        return mismatches.length > 0 ? { ntltSectionMismatches: mismatches } : {};
+      })(),
       ...(Object.keys(fgWipByJob).length > 0 && { fgWipByJob }),
       ...(Object.keys(fgWipByStructure).length > 0 && { fgWipByStructure }),
     },

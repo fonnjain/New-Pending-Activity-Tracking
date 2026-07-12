@@ -31,6 +31,15 @@ export interface ParseSummary {
   // to "(Unassigned)" grouped by Section (Col L). Absent when zero such rows exist.
   ntltOrphanCount?: number;
   ntltOrphanWtMt?: number;
+  // Rows whose Order Nature (Col C) was not one of the four known values
+  // (Structure / RSJ POLE / EARTHING / GENERAL). Treated as NTLT by default.
+  // Absent when zero such rows exist (the normal case).
+  unknownOrderNatureCount?: number;
+  // NTLT Sections (Col L) that map to more than one Tower Type (Col H) within
+  // this file — a source-data quality signal, not a parse error. Each entry:
+  //   { section, towerTypes: string[], marks: number }
+  // Absent when all Sections are 1:1 with a Tower Type.
+  ntltSectionMismatches?: Array<{ section: string; towerTypes: string[]; marks: number }>;
   // Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where
   // the WIP file's "Type" column (Col A, new ≥Jul-2026 format) equals
   // "FG Pending For Dispatch". Values in kg (same unit as balanceWt).
