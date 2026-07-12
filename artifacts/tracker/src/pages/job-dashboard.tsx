@@ -395,7 +395,7 @@ function JobDashboardContent() {
             dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
             releaseBalanceMt: orderByJob.get(p.job)?.fileBalRelease ?? 0,
             releaseBalanceComputedMt: relBalComputedByJob.get(p.job) ?? 0,
-            computedFgMt: fgWipForJob(p.job),
+            computedFgMt: fgWipForJob(p.job) / 1000,
             structures: p.structures,
             marks: p.marks,
             qty: p.qty,
