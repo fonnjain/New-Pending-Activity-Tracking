@@ -54,3 +54,9 @@ id = "c15Rq3KCofb5gWPL6G5s6"
 uri = "file://docs/fg-calculation.md"
 type = "text"
 title = "FG Calculation — Project Wise Page"
+
+[[outputs]]
+id = "Zh7GSC8tsVIbogAVLuhH8"
+uri = "file://docs/inventory-bucket-logic.docx"
+type = "word_document"
+title = "Inventory Bucket Board — Logic Reference"
