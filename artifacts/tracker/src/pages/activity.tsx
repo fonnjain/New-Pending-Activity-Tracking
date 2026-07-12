@@ -39,7 +39,7 @@ function ActivityContent() {
   });
   const records = useFilteredRecords(allRecords);
 
-  const { activities, sortedActivities, totalWt, totalMarks, avgAge } = useMemo(() => {
+  const { activities, sortedActivities, totalWt, totalMarks, avgAge, notAgedCount, notAgedWt, agedCount } = useMemo(() => {
     // Group by activity
     const activities = new Map<string, any[]>();
     records.forEach(r => {
@@ -51,11 +51,14 @@ function ActivityContent() {
     const sortedActivities = Array.from(activities.keys()).sort(compareActivity);
     const totalWt = records.reduce((sum, r) => sum + (r.balanceWt ?? 0), 0);
     const aged = records.filter((r) => r.ageingDays !== null);
+    const notAged = records.filter((r) => r.ageingDays === null);
     const avgAge = aged.length
       ? Math.round(aged.reduce((s, r) => s + (r.ageingDays || 0), 0) / aged.length)
       : null;
+    const notAgedCount = notAged.length;
+    const notAgedWt = notAged.reduce((s, r) => s + (r.balanceWt ?? 0), 0);
 
-    return { activities, sortedActivities, totalWt, totalMarks: records.length, avgAge };
+    return { activities, sortedActivities, totalWt, totalMarks: records.length, avgAge, notAgedCount, notAgedWt, agedCount: aged.length };
   }, [records]);
 
   const handleExport = () => {
@@ -143,9 +146,14 @@ function ActivityContent() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiTile title="Marks" value={totalMarks.toLocaleString()} />
         <KpiTile title="Balance Weight" value={formatWeight(totalWt)} />
-        <KpiTile title="Avg Age" value={avgAge !== null ? `${avgAge}d` : "-"} />
+        <KpiTile title={`Avg Age (${agedCount.toLocaleString()} ageable)`} value={avgAge !== null ? `${avgAge}d` : "-"} />
         <KpiTile title="Activities" value={sortedActivities.length.toLocaleString()} />
       </div>
+      {notAgedCount > 0 && (
+        <div className="text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2 border border-border">
+          Not aged: <span className="font-semibold text-foreground">{notAgedCount.toLocaleString()} marks ({notAgedWt.toFixed(3)} MT)</span> have no reference date (no Assign Date for pre-production, no Last Production Entry Date otherwise) — excluded from ageing buckets and averages above.
+        </div>
+      )}
 
       <div className="space-y-3">
         {sortedActivities.map(act => (
@@ -165,6 +173,9 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
   
   const withAge = records.filter(r => r.ageingDays !== null);
   const avgAge = withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays, 0) / withAge.length) : null;
+  const notAged = records.filter(r => r.ageingDays === null);
+  const notAgedCount = notAged.length;
+  const notAgedWt = notAged.reduce((s, r) => s + (r.balanceWt ?? 0), 0);
 
   const sortedRows = useMemo(() => {
     return [...records].sort((a, b) => {
@@ -194,8 +205,13 @@ function ActivityCard({ activity, records }: { activity: string, records: any[] 
             </div>
             <div className="flex items-center gap-4 text-right">
               <div className="hidden sm:block">
-                <div className="text-xs uppercase text-muted-foreground font-semibold">Avg Age</div>
+                <div className="text-xs uppercase text-muted-foreground font-semibold">Avg Age ({withAge.length.toLocaleString()} ageable)</div>
                 <div className={`font-bold text-lg ${getAgeingColor(avgAge)}`}>{avgAge !== null ? `${avgAge}d` : '-'}</div>
+                {notAgedCount > 0 && (
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    Not aged: {notAgedCount.toLocaleString()} marks ({notAgedWt.toFixed(3)} MT)
+                  </div>
+                )}
               </div>
               <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
             </div>

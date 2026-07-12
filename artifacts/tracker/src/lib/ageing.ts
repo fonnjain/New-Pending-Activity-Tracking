@@ -1,6 +1,6 @@
 // Ageing display helpers, shared across all views. Ageing itself is computed
-// server-side (ageingDays = today - Last Production Entry Date, future clamped
-// to 0, null when there is no production date). The frontend only formats it and
+// server-side (ageingDays = today - reference date, future clamped to 0, null
+// when the reference date is missing). The frontend only formats it and
 // classifies the no-date rows by activity.
 
 export const AGEING_BUCKETS = ["0-30", "31-60", "60+"] as const;
@@ -22,16 +22,30 @@ export function ageingBucket(days: number): AgeingBucket {
   return "60+";
 }
 
-// Activity "C" (Cutting) means production has genuinely not begun.
+// Pre-production activities: production has not yet begun so the mark ages from
+// Assign Date (Last Production Entry Date is always blank at this stage).
+// Must mirror PRE_PRODUCTION_ACTIVITIES in parse.ts — update both together.
+//   C     = TLT Cutting
+//   NTF   = NTLT Non-TLT Fabrication
+//   NTFSW = NTLT Non-TLT Fabrication with Stiffener Welding
+//   BL    = NTLT Bending/Lapping
+export const PRE_PRODUCTION_ACTIVITIES = new Set(["C", "NTF", "NTFSW", "BL"]);
+
+export function isPreProduction(activity: string | null | undefined): boolean {
+  return PRE_PRODUCTION_ACTIVITIES.has((activity ?? "").trim().toUpperCase());
+}
+
+// Activity "C" (Cutting) means TLT production has genuinely not begun.
+// Kept for callers that specifically need to check TLT cutting only.
 export function isCutting(activity: string | null | undefined): boolean {
   return (activity ?? "").trim().toUpperCase() === "C";
 }
 
-// Label for a row with no ageing (blank production date): "Not started" at
-// activity C (production not begun), else "No production date" (the mark has
-// progressed past cutting but the date is missing — a data-quality state).
+// Label for a row with no ageing date:
+//   pre-production (C, NTF, NTFSW, BL) + no Assign Date -> "Not started"
+//   everything else + no Last Production Entry Date      -> "No production date"
 export function noDateLabel(activity: string | null | undefined): string {
-  return isCutting(activity) ? NOT_STARTED_LABEL : NO_PROD_DATE_LABEL;
+  return isPreProduction(activity) ? NOT_STARTED_LABEL : NO_PROD_DATE_LABEL;
 }
 
 // Cell text for a record's ageing: "12d" when dated, else the no-date label.

@@ -1,0 +1,123 @@
+TASK: Two refinements to the ageing logic. (1) Make the "cannot be aged" exclusion explicit
+and VISIBLE — these rows must not enter ANY ageing calculation. (2) Extend the reference-date
+rule to cover NTLT first-stage activities. NOTHING ELSE CHANGES.
+
+=====================================================================
+CONTEXT — the existing ageing rule (keep it)
+=====================================================================
+Ageing = whole calendar days a mark has sat at its current activity stage. Recomputed live at
+read time, never stored. Current rule (resolveAgeingDate in parse.ts):
+
+    Activity == "C" (Cutting)  ->  age from Assign Date
+    everything else            ->  age from Last Production Entry Date
+
+This rule is CORRECT and must be kept. It is validated by the data: of 24,276 Cutting marks,
+ZERO have a Last Production Entry Date (production hasn't started), so C can only age from
+Assign Date. Every post-C activity has Last Production Entry Date populated.
+
+Also keep, unchanged: no cross-fallbacks; UTC-midnight whole-day arithmetic; future dates
+clamp to 0 (flagged, never dropped); null ageing is NOT zero; buckets 0-30 / 31-60 / 60+.
+
+COLUMN NOTE (the internal doc has STALE column letters — fix the doc, not the code):
+In the CURRENT 24-column WIP format the fields are:
+    Assign Date                = Col R
+    Activity                   = Col S   (doc wrongly says Col P)
+    Last Production Entry Date = Col V   (doc wrongly says Col S)
+The old letters match the previous 21-column layout. The app currently reads correctly (it
+maps by header NAME, not by letter) — do NOT "fix" the code to the stale letters. Update the
+documentation to R / S / V, and keep reading by header name.
+
+=====================================================================
+CHANGE 1 — "Cannot be aged" rows: excluded from AGEING ONLY, and made visible
+=====================================================================
+A row cannot be aged when its resolved reference date is missing (ageingDays == null).
+
+*** SCOPE OF EXCLUSION: AGEING ONLY. NOTHING ELSE. ***
+These rows MUST still be counted normally in every other calculation — balance weight, mark
+counts, balance qty, activity totals, project totals, buckets B/C/D, release/assignment
+balances, reports, everything. Do NOT drop them from the data. Do NOT change any other logic.
+The ONLY thing they are excluded from is ageing: bucket counts (0-30/31-60/60+), average
+ageing, ageing colour bands, and any ageing chart/statistic.
+
+They are already excluded from ageing buckets today (null != 0) — verify that holds and that
+no ageing average silently treats null as 0.
+
+MAKE THE GAP VISIBLE (this is the real change). The scale is material and currently invisible:
+    Cutting (C): 24,276 marks / 5,027.046 MT total
+      - 14,118 marks (58.2%) have NO Assign Date -> cannot be aged
+      - those carry 3,640.480 MT = 72.4% of ALL cutting weight
+      - only 10,158 marks / 1,386.566 MT are actually ageable
+So nearly three-quarters of the cutting balance is not represented in any ageing statistic,
+yet the Ageing page looks complete.
+
+Required:
+- On the Ageing page (and anywhere ageing buckets/averages are shown), display a clear
+  companion figure, e.g.:
+      "Not aged: 14,118 marks (3,640.480 MT) have no Assign Date — excluded from ageing."
+  Show BOTH the mark count and the weight, and ideally the % of that activity's weight.
+- Keep the existing null labels: activity C + no Assign Date -> "Not started";
+  non-C + no Last Production Entry Date -> "No production date".
+- Any ageing average/bucket total must state the population it is computed over (the ageable
+  rows), so a user cannot mistake it for the full balance.
+- Keep the existing upload-summary counts (notStarted / noProductionDate /
+  futureProductionDate) and make sure they reconcile with what the Ageing page reports.
+
+=====================================================================
+CHANGE 2 — Extend the reference-date rule to NTLT first-stage activities
+=====================================================================
+The current rule was designed for TLT and silently nulls out NTLT's first fabrication stage.
+
+Verified in the data: activities NTF, NTFSW and BL have NO Last Production Entry Date at all
+(NTF 0/88, NTFSW 0/5, BL 0/1) — because, like Cutting, production has not started. But because
+they are not "C", the current rule sends them to Last Production Entry Date -> ageingDays is
+ALWAYS null. They can never be aged. That is 94 marks carrying 3,557.367 MT.
+
+NTF is to NTLT what C is to TLT: the first fabrication step, with an Assign Date but no
+production entry yet.
+
+NEW RULE (extend resolveAgeingDate):
+
+    if activity in { "C", "NTF", "NTFSW", "BL" }  ->  age from Assign Date
+    else                                          ->  age from Last Production Entry Date
+
+Implement as a named constant set (e.g. PRE_PRODUCTION_ACTIVITIES = {"C","NTF","NTFSW","BL"})
+in ONE place so it can be extended if the ERP adds another first-stage code.
+
+Null-label handling extends accordingly:
+    activity in PRE_PRODUCTION_ACTIVITIES + no Assign Date -> "Not started"
+    otherwise + no Last Production Entry Date              -> "No production date"
+
+Everything else stays: no fallback between the two dates, UTC-midnight whole days, future
+clamps to 0, null is excluded from buckets/averages (per CHANGE 1).
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change the C -> Assign Date / else -> Last Production Entry Date principle; only ADD
+  NTF/NTFSW/BL to the Assign-Date side.
+- Do NOT exclude un-ageable rows from anything except ageing. Weight, marks, balances, buckets
+  B/C/D, reports, release/assignment measures all keep counting them exactly as today.
+- Do NOT introduce a fallback (e.g. using Assign Date when Last Production Entry Date is
+  blank for a post-production activity). A missing production date stays a visible gap.
+- Do NOT store ageingDays; keep it computed live at read time.
+- Do NOT change parsing identity/hash/dedup, Activity values, or qty.
+- Do NOT re-point column reads to the stale letters (P/R/S). Keep header-name mapping.
+
+=====================================================================
+ACCEPTANCE CHECK (report actual numbers)
+=====================================================================
+- resolveAgeingDate now returns Assign Date for C, NTF, NTFSW and BL; Last Production Entry
+  Date for all others.
+- The 94 NTF/NTFSW/BL marks (3,557.367 MT) now produce a numeric ageingDays where an Assign
+  Date exists (NTF: 49 of 88 have one), instead of always null. Report how many became ageable.
+- Cutting: 24,276 marks / 5,027.046 MT total; 14,118 marks / 3,640.480 MT NOT ageable (no
+  Assign Date); 10,158 marks / 1,386.566 MT ageable. The Ageing page must SHOW the not-aged
+  count AND weight, not just silently omit them.
+- Verify null ageing rows are excluded from bucket counts and averages (never counted as 0),
+  and that ageing averages state the ageable population.
+- Verify these same rows are STILL fully counted in balance weight, mark counts, activity
+  totals, project totals and every non-ageing report — no other number moves.
+- Confirm documentation updated to the correct columns: Assign Date = R, Activity = S,
+  Last Production Entry Date = V.
+- Report: the not-aged count/weight shown on the Ageing page, how many NTF/NTFSW/BL became
+  ageable, and confirmation that no non-ageing total changed.

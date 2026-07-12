@@ -978,7 +978,7 @@ export function parseWorkbook(
       r.lastProductionDate ?? null,
     );
     if (date == null) {
-      if (isCuttingActivity(r.activity ?? null)) notStarted++;
+      if (isPreProductionActivity(r.activity ?? null)) notStarted++;
       else noProductionDate++;
     } else if (isFutureDate(date)) {
       futureProductionDate++;
@@ -1012,7 +1012,21 @@ function todayUtcMs(): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
 }
 
+// Activities where production has not yet begun. Marks at these stages age from
+// Assign Date (Last Production Entry Date is always blank at this point).
+//   C         = TLT Cutting (the first TLT fabrication step)
+//   NTF       = NTLT Non-TLT Fabrication (first NTLT fab step)
+//   NTFSW     = NTLT Non-TLT Fabrication with Stiffener Welding
+//   BL        = NTLT Bending/Lapping
+// Add new first-stage codes here if the ERP introduces them.
+export const PRE_PRODUCTION_ACTIVITIES = new Set(["C", "NTF", "NTFSW", "BL"]);
+
+export function isPreProductionActivity(activity: string | null): boolean {
+  return PRE_PRODUCTION_ACTIVITIES.has((activity ?? "").trim().toUpperCase());
+}
+
 // Activity "C" (Cutting) means production has genuinely not begun.
+// Kept for callers that specifically need to check TLT cutting only.
 export function isCuttingActivity(activity: string | null): boolean {
   return (activity ?? "").trim().toUpperCase() === "C";
 }
@@ -1026,19 +1040,20 @@ export function isFutureDate(date: string | null): boolean {
   return d.getTime() > todayUtcMs();
 }
 
-// The date a mark's ageing is measured from: for activity "C" (Cutting),
-// production has not begun so there is NO Last Production Entry Date — age from
-// the Assign Date instead (how long the mark has waited to be cut since it was
-// assigned). Every other activity ages from Last Production Entry Date. A blank
-// chosen date yields null (the caller labels it). NOTE: do NOT fall back to
-// assignDate for non-C rows — a started mark with a blank production date is a
-// genuine data gap to surface ("No production date"), not to paper over.
+// The date a mark's ageing is measured from.
+// Pre-production activities (C, NTF, NTFSW, BL) have no Last Production Entry
+// Date yet — production has not begun — so they age from Assign Date (how long
+// the mark has waited to start). Every other activity ages from Last Production
+// Entry Date. A blank chosen date yields null (the caller labels it "Not started"
+// for pre-production, "No production date" otherwise). NOTE: do NOT fall back
+// to assignDate for post-production rows — a started mark with a blank
+// production date is a genuine data gap to surface, not to paper over.
 export function resolveAgeingDate(
   activity: string | null,
   assignDate: string | null,
   lastProductionDate: string | null,
 ): string | null {
-  return isCuttingActivity(activity) ? assignDate : lastProductionDate;
+  return isPreProductionActivity(activity) ? assignDate : lastProductionDate;
 }
 
 // Ageing = today - resolveAgeingDate (whole days, UTC), recomputed live and
