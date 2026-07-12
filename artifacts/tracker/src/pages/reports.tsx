@@ -51,6 +51,7 @@ import {
   contractorCategoryFor,
   dateRangeWindow,
   CURRENT_JOBS_FILTER_VALUE,
+  MULTI_JOBS_FILTER_VALUE,
   useCurrentJobsSet,
 } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -1102,6 +1103,7 @@ export function ContractorPerformanceReport() {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) },
   });
   const categoryMap = useContractorCategoryMap();
+  const { set: currentJobsSet } = useCurrentJobsSet();
   const [contractorFilter, setContractorFilter] = useState<string | null>(null);
   const [stageFilter, setStageFilter] = useState<Stage | null>(null);
 
@@ -1129,7 +1131,15 @@ export function ContractorPerformanceReport() {
       // milestones and the Fabrication Load guard: "(Unassigned)" is not a
       // real project and clutters a per-project contractor report.
       if (e.project === "(Unassigned)") return false;
-      if (filters.job && e.project !== filters.job) return false;
+      if (filters.job) {
+        if (filters.job === CURRENT_JOBS_FILTER_VALUE) {
+          if (!currentJobsSet.has(e.project)) return false;
+        } else if (filters.job === MULTI_JOBS_FILTER_VALUE) {
+          if (!filters.selectedJobs?.includes(e.project)) return false;
+        } else if (e.project !== filters.job) {
+          return false;
+        }
+      }
 
       if (filters.contractor && contractorLabel(e.contractor) !== filters.contractor) return false;
       if (filters.contractorCategory) {
@@ -1159,7 +1169,7 @@ export function ContractorPerformanceReport() {
 
       return true;
     });
-  }, [data, filters.job, filters.contractor, filters.contractorCategory, filters.outVendorType, filters.activity, filters.dateRange, filters.search, categoryMap]);
+  }, [data, filters.job, filters.selectedJobs, filters.contractor, filters.contractorCategory, filters.outVendorType, filters.activity, filters.dateRange, filters.search, categoryMap, currentJobsSet]);
 
   // Live-balance completion (additive): per contractor, how much balance
   // weight is still pending in the Fabrication (C..Q) / Galvanizing (GB)
