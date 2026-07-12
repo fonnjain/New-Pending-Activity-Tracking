@@ -1,0 +1,132 @@
+TASK: VERIFY (with numbers) whether the project-code forward-fill bug still exists in ANY
+per-project aggregate. The FG path was fixed and is now correct — but the SAME bug corrupts
+several OTHER aggregates. This prompt gives you the exact expected values for each. Report
+actual vs expected for every one.
+
+=====================================================================
+BACKGROUND — the bug, and why one fix was not enough
+=====================================================================
+WIP Col B (Project Code) is FULLY POPULATED on every TLT row (57,525 / 57,525). The ONLY rows
+with a blank Col B are 282 project-orphaned NTLT rows (RSJ POLE 245, EARTHING 21, GENERAL 16)
+carrying ~6,140 MT.
+
+If ANY accumulator uses a forward-filled / stale project variable (i.e. "last project seen"
+rather than the row's OWN Col B), those 282 orphan rows get glued onto whichever project
+happens to precede them in file order — silently inflating that project's totals.
+
+CONFIRMED: the "Finished Goods WIP" accumulator (fgWipByJob) had exactly this bug. It was
+fixed by using the row's own project code (rawProject || UNASSIGNED_JOB). FG is now correct
+(862 = 65.0 t; FG grand total = 847.8 t). THAT FIX TOUCHED ONE CODE PATH ONLY.
+
+Simulating the forward-fill against the source file shows it corrupts SIX of nine per-project
+aggregates — FG was merely the most visible. The others are still suspect.
+
+=====================================================================
+GROUND TRUTH — project 862 (verified from the source WIP file)
+=====================================================================
+862 sits immediately after 11 blank-project RSJ POLE rows (file rows 52632-52789), so it is
+the canonical victim. For each aggregate: the CORRECT value (row's own Col B) vs the value a
+FORWARD-FILL produces.
+
+  Aggregate                CORRECT        FORWARD-FILL     Corrupted?
+  ----------------------   ------------   --------------   ----------
+  Marks                    3,316          3,335            YES  (+19)
+  Balance Qty              14,865         19,580           YES  (+4,715)
+  Balance Wt (kg)          130,397.9      439,646.8        YES  (+309,248.8)
+  Cutting (kg)             2,995.6        2,995.6          no
+  Quality Check (kg)       15,536.7       15,536.7         no
+  Galvanising (kg)         46,912.4       51,032.0         YES  (+4,119.6)
+  FG (kg)                  64,953.3       286,548.7        YES  (+221,595.4)  [ALREADY FIXED]
+  Release Balance Computed 1,766.9        1,766.9          no
+  Assignment Balance (kg)  2,077.1        39,177.1         YES  (+37,100.0)
+
+Cutting / Quality Check / Release-Balance-Computed are immune only because the orphan NTLT
+rows carry activities (NTF/NTFSW/G/GB/Y/TS) and Types that happen not to land in those
+buckets. That is luck, not correctness — the underlying variable is still wrong if it is
+forward-filled.
+
+=====================================================================
+GROUND TRUTH — app-wide grand totals
+=====================================================================
+  Aggregate                  CORRECT           FORWARD-FILL      Inflation
+  ------------------------   ---------------   ---------------   ------------
+  Marks (TLT)                57,525            57,792            +267
+  Balance Wt (kg)            11,282,744.5      17,305,243.0      +6,022,498.6  (+6,022 MT)
+  FG (kg)                    847,806.0         1,444,753.4       +596,947.4    (+597 MT)
+  Assignment Balance (kg)    3,640,479.5       6,007,290.0       +2,366,810.5  (+2,367 MT)
+  Galvanising (kg)           3,329,512.9       5,069,168.5       +1,739,655.6  (+1,740 MT)
+  Release Balance Computed   2,267,323.2       2,267,323.2       0 (immune)
+
+*** WARNING — DO NOT USE GRAND TOTALS AS AN ALL-CLEAR. ***
+The app currently REPORTS correct-looking grand totals (TLT 11,282.7 t / 57,525 marks;
+Cutting 5,027.0 t / 24,276 marks) because the Order-Nature = "Structure" filter excludes NTLT
+and masks the forward-fill in those particular aggregates. A correct grand total does NOT mean
+the accumulator is bug-free. The corruption only surfaces in the specific projects that FOLLOW
+orphan rows in file order. CHECK THE CODE, NOT JUST THE TOTALS.
+
+=====================================================================
+WHAT TO DO — step by step
+=====================================================================
+STEP 1 — CODE AUDIT (the authoritative check)
+  Grep the WIP parse loop (and any other place WIP rows are iterated) for a project variable
+  that is assigned OUTSIDE the current row, e.g.:
+        if (projectCode) currentProject = projectCode;   // <-- stale carry-over
+        ... later ...  someAgg[currentProject] += value;  // <-- BUG
+  Every accumulator MUST use the row's OWN Col B (rawProject), with blank -> UNASSIGNED_JOB.
+  List EVERY per-project accumulator found, its current project source, and its verdict
+  (CORRECT / FORWARD-FILLED).
+
+  Accumulators to check at minimum:
+    - marks count per project
+    - Balance Qty per project
+    - Balance Wt per project
+    - per-activity buckets: Cutting (C), Quality Check (HG/RFI/NH/B/HAB/W/Q/TS),
+      Galvanising (G/GB/Y)
+    - Finished Goods WIP (already fixed — confirm it stays correct)
+    - Release Balance Computed (Not Started + Initial)
+    - Assignment Balance (Not Started + blank Contractor)
+    - ageing aggregates / first-assign date per project
+    - any summary.*ByJob or *ByProject jsonb built during parse
+    - record_pool's STORED project value itself — if that is forward-filled, EVERY downstream
+      number inherits the error, and fixing the display aggregates will not be enough.
+
+STEP 2 — NUMERIC VERIFICATION (project 862)
+  Report the app's ACTUAL value for each 862 aggregate against the CORRECT column above.
+  Any value matching the FORWARD-FILL column is a live bug.
+  Pass criteria: Marks 3,316 | Balance Qty 14,865 | Balance Wt 130,397.9 kg |
+  Galvanising 46,912.4 kg | FG 64,953.3 kg | Assignment Balance 2,077.1 kg.
+  862 must contain ZERO RSJ POLE / EARTHING / GENERAL rows.
+
+STEP 3 — APP-WIDE VERIFICATION
+  Report grand totals for Assignment Balance and Galvanising (the two still most likely wrong):
+      Assignment Balance must be 3,640,479.5 kg (3,640.5 MT) — NOT 6,007,290 kg.
+      Galvanising must be 3,329,512.9 kg (3,329.5 MT) — NOT 5,069,168.5 kg.
+      FG must stay 847,806 kg (847.8 MT) — regression guard on the already-fixed path.
+
+STEP 4 — ORPHAN BUCKET
+  Confirm the 282 blank-project NTLT rows land in an explicit "(No Project)" / UNASSIGNED_JOB
+  bucket (~6,140 MT total; FG portion ~597 MT), are NOT attached to any real project, and do
+  NOT appear in any TLT-filtered report.
+
+STEP 5 — SPOT-CHECK THE VICTIMS
+  Corruption appears only in projects that FOLLOW orphan rows. Identify every project that
+  immediately follows a blank-Col-B row in file order and verify none of its aggregates
+  include NTLT weight. 862 is the known case (11 RSJ POLE rows precede it).
+
+=====================================================================
+DO NOT
+=====================================================================
+- Do NOT declare success because a grand total looks right — it is masked by the NTLT filter.
+- Do NOT fix only the aggregates listed as "corrupted" today; fix the project variable at
+  source so every accumulator is correct by construction.
+- Do NOT change parsing identity/hash/dedup, ageing math, Activity values, or qty.
+- Do NOT drop the orphan rows — bucket them.
+
+=====================================================================
+REPORT
+=====================================================================
+1. The code-audit table: every per-project accumulator, its project source, verdict.
+2. Project 862: actual vs expected for all nine aggregates.
+3. App-wide: Assignment Balance, Galvanising, FG, Balance Wt, Marks — actual vs expected.
+4. Orphan bucket: count + weight, and confirmation nothing is attached to a real project.
+5. Whether record_pool's stored project is forward-filled (the deepest risk).
