@@ -825,19 +825,13 @@ export function parseWorkbook(
     // must NOT borrow one from an adjacent row.
     const rawProject = normalizeProject(row[COL.projectCode]);
 
-    // keep only rows with a Mark No. (read early so FG accumulation below is
-    // scoped to real mark rows — aggregate/header rows have no mark number and
-    // must not inflate fgWipByJob totals).
-    const markNo = cellToString(row[COL.markNo]);
-    if (!markNo) continue;
-
     // FG Pending For Dispatch: collect Balance Wt. (Col Q) per project.
-    // Only counted for rows that have a valid Mark No (checked above) so that
-    // aggregate/summary rows in the WIP file are excluded. Structure FG rows
-    // carry the project code in Col B directly (always populated). NTLT FG
-    // rows have no project code and are accumulated under UNASSIGNED_JOB,
-    // grouped by Section (Col L) — never under a neighbouring project.
-    // Falls through to normal mark processing so identity/hashing is unchanged.
+    // Structure FG rows carry the project code in Col B directly (always
+    // populated). NTLT FG rows have no project code and are accumulated under
+    // UNASSIGNED_JOB, grouped by Section (Col L) — never under a neighbouring
+    // project (no forward-fill; fgProject uses rawProject directly, not any
+    // stale/accumulated variable). Falls through to normal mark processing so
+    // identity/hashing is completely unchanged.
     const rowType = cellToString(row["Type"]);
     if (rowType && rowType.trim().toUpperCase() === "FG PENDING FOR DISPATCH") {
       const fgProject = rawProject || UNASSIGNED_JOB;
@@ -853,6 +847,10 @@ export function parseWorkbook(
           (fgWipByStructure[fgProject][fgStructKey] ?? 0) + fgWt;
       }
     }
+
+    // Keep only rows with a Mark No.
+    const markNo = cellToString(row[COL.markNo]);
+    if (!markNo) continue;
 
     // The project for this row is Col B read directly — no forward-fill.
     // NTLT rows have blank project codes and are bucketed under UNASSIGNED_JOB;

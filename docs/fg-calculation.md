@@ -60,9 +60,10 @@ FG WIP (kg) = Sum of Balance Weight (Col Q)
 
 `parse.ts`:
 ```typescript
-if (rowType === "FG PENDING FOR DISPATCH") {
-  fgWipByJob[fgProject] = (fgWipByJob[fgProject] ?? 0) + balanceWt;
-}
+// rawProject reads Col B directly — no forward-fill, no stale variable.
+// Blank Col B (NTLT orphan rows) → UNASSIGNED_JOB, never to the last TLT project.
+const fgProject = rawProject || UNASSIGNED_JOB;
+fgWipByJob[fgProject] = (fgWipByJob[fgProject] ?? 0) + balanceWt;
 ```
 
 `job-dashboard.tsx`:
@@ -70,6 +71,8 @@ if (rowType === "FG PENDING FOR DISPATCH") {
 const fgWipForJob = (job: string): number =>
   fgWipByJob[job.replace(/^(?:TLT|NTLT): /, "")] ?? 0;
 ```
+
+> **Historical note:** An earlier version of the code used `rawProject || lastProject` where `lastProject` was a running accumulator updated each iteration. This caused blank-Col-B NTLT rows (RSJ POLE / EARTHING / GENERAL) to be attributed to the last TLT project seen rather than `(Unassigned)`, inflating totals. The accumulator was removed; `fgProject` now reads each row's own Col B directly.
 
 ---
 
