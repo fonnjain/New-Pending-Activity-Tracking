@@ -42,3 +42,9 @@ id = "hO23Ap6g68bzL2UePNJ72"
 uri = "file://unknown_bom_analysis.docx"
 type = "word_document"
 title = "Unknown BOM Label Analysis — Fab Completion Report"
+
+[[outputs]]
+id = "78WaRGQ7naPFbPv6wbNMa"
+uri = "file://docs/ageing-calculation.md"
+type = "text"
+title = "Ageing Calculation Logic"
