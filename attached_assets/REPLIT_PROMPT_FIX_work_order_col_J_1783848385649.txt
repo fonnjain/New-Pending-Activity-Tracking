@@ -1,0 +1,87 @@
+TASK: Fix a WRONG-COLUMN bug. Everywhere the app uses "Work Order" weight from Order Review,
+it must use **Col J (WO Order Qty. → Weight (MT))**, NOT Col G (Order Qty. → Weight).
+This is app-wide, not just one report.
+
+=====================================================================
+THE BUG (verified against the source file)
+=====================================================================
+Order Review has TWO different order-quantity weight columns:
+   Col G = "Order Qty. → Weight"       — the FULL CUSTOMER ORDER
+   Col J = "WO Order Qty. → Weight (MT)" — the WORK ORDER actually raised to the shop
+These are DIFFERENT numbers. The business only cares about the WORK ORDER quantity (Col J):
+that is the steel actually committed to fabrication. Col G is the customer order and must
+NOT be used as "Work Order".
+
+The project-wise report's "Work Order (MT)" column is currently reading Col G. Verified on
+project 862: report shows 299.357 (= Col G) but the correct Work Order is 294.509 (= Col J).
+
+SCALE OF THE ERROR (whole file):
+   Col G total: 49,877.540 MT   ← currently used (WRONG)
+   Col J total: 41,356.758 MT   ← correct
+   Overstated by 8,520.782 MT = 17.1%
+   116 of 158 projects are affected.
+
+The error is NOT a uniform offset — it goes both ways and can be extreme:
+   963      Col G 1704.459  vs  Col J    0.000   (shown as 1704 MT but NO work order exists)
+   833      Col G  615.918  vs  Col J    0.000
+   VS-112   Col G  440.721  vs  Col J    0.000
+   960      Col G  303.230  vs  Col J    0.000
+   884      Col G 2521.871  vs  Col J  628.264   (4x overstated)
+   907      Col G 1817.176  vs  Col J  639.713
+   916F     Col G   94.686  vs  Col J 4935.990   (UNDERSTATED by 4841 MT — opposite direction)
+Projects with Col J = 0 have a customer order but NO work order raised to the shop yet —
+showing them with a large "Work Order" is materially misleading.
+
+=====================================================================
+THE FIX
+=====================================================================
+1. Audit EVERY place in the app that reads an order-quantity WEIGHT from Order Review and
+   presents/uses it as "Work Order". Change each to read **Col J (WO Order Qty. Weight (MT))**.
+   Known consumer: the Project-wise report's "Work Order (MT)" column. Grep for all others
+   (Order Status page, Inventory buckets, Reports, any completion/percentage calc, any
+   "Dispatch Balance = Work Order − Dispatch" style derivation) and fix them too. There must
+   be ONE canonical "work order weight" value per (project, structure), sourced from Col J.
+
+2. Everything DERIVED from Work Order must be recomputed from Col J, e.g.:
+      Dispatch Balance = Work Order (Col J) − Dispatch
+      any % complete / remaining-vs-ordered ratios
+   Do not leave a derived figure still based on Col G.
+
+3. Consistency with Release Balance: Order Review's own identity holds and must keep holding —
+      Balance Release (Col S) == WO Order Qty (Col J) − Progress Release (Col L)
+   (verified: holds for all 158 projects, zero failures). Using Col J for Work Order makes the
+   app internally consistent with its own Release Balance. Using Col G does not.
+
+4. Keep the BOM-summing rule: Col J is summed across a structure's Proto/Mass/Pre BOM rows,
+   same as every other Order Review value. Do not change that aggregation.
+
+5. If Col G (customer Order Qty) is genuinely needed somewhere, keep it as a SEPARATE,
+   clearly-labelled field ("Order Qty") — never as "Work Order". Do not silently conflate them.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change WIP parsing, hashing/dedup, ageing, Activity, qty, or the BOM-summing logic.
+- Do NOT change Release Balance (Col S) or Release Balance Computed (WIP) — both verified
+  correct.
+- Do NOT rename Col J's meaning; just point "Work Order" at the right column.
+- Do NOT clamp or adjust Col J = 0 projects — a zero work order is a real, meaningful state
+  (customer ordered, nothing released to the shop). Show 0.
+
+=====================================================================
+ACCEPTANCE CHECK (report actual numbers)
+=====================================================================
+- Project 862: Work Order (MT) now reads 294.509 (Col J), NOT 299.357 (Col G).
+  Its Dispatch Balance recomputes as 294.509 − 24.867 = 269.642 (was 274.490).
+- App-wide Work Order grand total ≈ 41,356.758 MT (Col J), NOT ≈ 49,877.540 MT (Col G).
+  If you still see ~49,877, the fix is not applied everywhere.
+- Projects 963, 833, VS-112, 960 now show Work Order = 0.000 (no work order raised), not
+  1704 / 616 / 441 / 303.
+- Project 916F now shows 4935.990 (was 94.686) — confirms the fix corrects BOTH directions.
+- Verify the identity still holds: Balance Release (S) == Work Order (J) − Progress Release (L)
+  for all projects.
+- Grep result: list every code path that reads an Order Review order-quantity weight and
+  confirm each now uses Col J (or, if it legitimately needs the customer Order Qty, that it is
+  separately labelled "Order Qty", not "Work Order").
+- Report: 862's new Work Order + Dispatch Balance, the new grand total, and the list of
+  consumers changed.

@@ -103,7 +103,7 @@ function JobDashboardContent() {
     for (const r of order?.rows ?? []) {
       const key = isAll ? `TLT: ${r.project}` : r.project;
       const agg = m.get(key) ?? { wo: 0, rel: 0, disp: 0, fileBalRelease: 0, computedFg: 0 };
-      agg.wo += r.weightMt ?? 0;
+      agg.wo += r.woOrderQtyMt ?? 0;
       agg.rel += r.releaseMt ?? 0;
       agg.disp += r.fileDespatchMt ?? 0;
       agg.fileBalRelease += r.fileBalReleaseMt ?? 0;
@@ -747,7 +747,7 @@ function JobDetail({
     for (const r of orderRows) {
       const mfc = structToMfc.get(r.structure) ?? "Z";
       const agg = m.get(mfc) ?? { wo: 0, rel: 0, disp: 0, fileBalRelease: 0 };
-      agg.wo += r.weightMt ?? 0;
+      agg.wo += r.woOrderQtyMt ?? 0;
       agg.rel += r.releaseMt ?? 0;
       agg.disp += r.fileDespatchMt ?? 0;
       agg.fileBalRelease += r.fileBalReleaseMt ?? 0;
