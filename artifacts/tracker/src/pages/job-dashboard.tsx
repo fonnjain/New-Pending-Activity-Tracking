@@ -482,9 +482,8 @@ function JobDashboardContent() {
           </Button>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
+          <Table>
+            <TableHeader>
                 <TableRow>
                   <TableHead>{primaryLabel}</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Work Order Qty</TableHead>
@@ -649,7 +648,6 @@ function JobDashboardContent() {
                 </TableFooter>
               )}
             </Table>
-          </div>
         </CardContent>
       </Card>
 
