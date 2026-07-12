@@ -48,3 +48,9 @@ id = "78WaRGQ7naPFbPv6wbNMa"
 uri = "file://docs/ageing-calculation.md"
 type = "text"
 title = "Ageing Calculation Logic"
+
+[[outputs]]
+id = "c15Rq3KCofb5gWPL6G5s6"
+uri = "file://docs/fg-calculation.md"
+type = "text"
+title = "FG Calculation — Project Wise Page"
