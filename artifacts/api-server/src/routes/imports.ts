@@ -111,6 +111,26 @@ const router: IRouter = Router();
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+// ---------------------------------------------------------------------------
+// In-process membership cache. Imports are append-only and immutable, so
+// the join result for a given importId never changes once written. Caching
+// eliminates the expensive 189K-row record_pool scan on every /records,
+// /summary, /velocity, and /movement call (especially on cold-start in prod
+// where the DB buffer cache is cold and the query takes 60-90 seconds).
+// Cache is keyed by importId and evicted only on explicit import deletion.
+// ---------------------------------------------------------------------------
+const membershipCache = new Map<
+  number,
+  { pool: RecordPoolRow; copies: number }[]
+>();
+function evictMembershipCache(importId?: number) {
+  if (importId === undefined) {
+    membershipCache.clear();
+  } else {
+    membershipCache.delete(importId);
+  }
+}
+
 function poolToLite(r: RecordPoolRow): PoolRowLite {
   return {
     hash: r.hash,
@@ -131,15 +151,27 @@ function poolToLite(r: RecordPoolRow): PoolRowLite {
 }
 
 // Load the expanded membership (pool rows + copies) for an import.
+// When called with the top-level `db` (not inside a transaction) the result is
+// served from the in-process membershipCache after the first load — the join
+// is otherwise the most expensive query in the app (~90 s on cold-start in
+// production). Transaction callers always bypass the cache because in-flight
+// data hasn't been committed yet.
 async function loadMembership(
   executor: typeof db | Tx,
   importId: number,
 ): Promise<{ pool: RecordPoolRow; copies: number }[]> {
+  // Only cache top-level db calls, not mid-transaction reads.
+  const useCache = executor === db;
+  if (useCache) {
+    const cached = membershipCache.get(importId);
+    if (cached) return cached;
+  }
   const rows = await executor
     .select({ pool: recordPoolTable, copies: importRowsTable.copies })
     .from(importRowsTable)
     .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
     .where(eq(importRowsTable.importId, importId));
+  if (useCache) membershipCache.set(importId, rows);
   return rows;
 }
 
@@ -1430,6 +1462,7 @@ router.delete("/imports", requireAuth, async (req, res): Promise<void> => {
     };
   });
 
+  evictMembershipCache();
   req.log.info(result, "deleted all imports and record pool");
   res.json(result);
 });
@@ -1450,6 +1483,8 @@ router.delete("/imports/:id", requireAuth, async (req, res): Promise<void> => {
     res.status(404).json({ error: "Import not found" });
     return;
   }
+
+  evictMembershipCache(params.data.id);
 
   // Refresh permanent project milestones so last-seen / dispatch state stays
   // consistent after the deletion (best-effort; never fails the request).
