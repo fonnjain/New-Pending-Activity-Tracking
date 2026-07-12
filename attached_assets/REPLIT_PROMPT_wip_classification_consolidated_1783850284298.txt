@@ -1,0 +1,173 @@
+TASK: Fix and lock down WIP classification and project attribution, based on verified
+research of the source files. Five related changes: (1) Order Nature is the SOLE TLT/NTLT
+classifier, (2) REMOVE any project-code forward-fill, (3) handle project-orphaned NTLT rows
+explicitly, (3b) NTLT is keyed by Section (Col L) alone — Tower Type is verification only,
+(4) treat WIP Tower Sub Type and Order Review Tower Sub Type as the same field.
+
+=====================================================================
+RESEARCH FINDINGS (verified against WIP 08/09/10/12-Jul + Order Review)
+=====================================================================
+WIP Col C ("Order Nature") has EXACTLY four values, and they partition the file perfectly:
+
+  Order Nature   Marks    Weight        Project Code      _NTLT subtype tag
+  -------------  -------  ------------  ----------------  ------------------
+  Structure      57,525   11,282.744MT  100% POPULATED    0% tagged
+  RSJ POLE          245    5,825.820MT  100% BLANK        100% tagged
+  EARTHING           21      212.384MT  100% BLANK        100% tagged
+  GENERAL            16      102.034MT  100% BLANK        mixed
+
+THREE INDEPENDENT SIGNALS ALL AGREE — the classification is unambiguous:
+  (a) Order Nature value itself.
+  (b) Project Code presence: EVERY "Structure" row has a project code (57,525/57,525);
+      EVERY RSJ POLE / EARTHING / GENERAL row has a BLANK project code (282/282).
+  (c) Tower Sub Type "_NTLT" tag: never on Structure; always on RSJ POLE and EARTHING.
+  (d) Activities: TLT-only = C, RFI, NH, B, HAB, W, Q. NTLT-only = NTF, NTFSW, BL.
+      Shared galvanising tail = TS, G, GB, Y.
+This pattern is IDENTICAL in every WIP file checked (8, 9, 10, 12 July) — not a one-off.
+
+=====================================================================
+CHANGE 1 — Order Nature is the SOLE TLT/NTLT classifier
+=====================================================================
+Define classification EXACTLY as:
+    TLT   <=> Order Nature (Col C) == "Structure"
+    NTLT  <=> Order Nature (Col C) in {"RSJ POLE", "EARTHING", "GENERAL"}
+Trim + case-insensitive compare. No other rule, no fallback, no subtype-string parsing, no
+inference from activity codes. It is exact, mutually exclusive and exhaustive.
+
+- Replace any existing TLT/NTLT derivation that uses subtype strings, "_NTLT" tags, activity
+  sets, or heuristics with this single rule, in ONE helper (e.g. classifyOrderNature(row)).
+- If a future file contains an Order Nature value outside these four, do NOT guess: flag it
+  in the upload sanity check as "unknown Order Nature — classification undefined" and treat
+  it as NTLT (safe default: keeps it out of TLT reports) until the user classifies it.
+- Keep the existing per-line sequences as-is (TLT sequence; NTLT_RSJ; NTLT_EARTHING/GENERAL).
+  This change only fixes HOW a mark is assigned to a line.
+
+=====================================================================
+CHANGE 2 — REMOVE project-code forward-fill (CRITICAL BUG)
+=====================================================================
+WIP Col B (Project Code) is FULLY POPULATED on every TLT row (57,525/57,525). Forward-filling
+the project code from a previous row is WRONG and actively corrupts data.
+
+*** If the WIP parser forward-fills Col B (e.g. carrying the last seen project down through
+rows where Col B is blank), REMOVE IT. ***
+
+Why this is critical: the ONLY rows with a blank Col B are the 282 project-orphaned NTLT rows.
+A forward-fill glues those orphans onto whatever project happens to precede them in the file,
+silently inflating that project's totals. Verified example: forward-fill wrongly attributed
+221.6 MT of RSJ POLE finished-goods weight to project 862, which has NO RSJ POLE rows at all.
+Orphan FG weight alone is ~597 MT; total orphan NTLT weight is ~6,140 MT.
+
+Read Col B directly. A blank Col B means "no project", NOT "same project as the row above".
+
+=====================================================================
+CHANGE 3 — Handle project-orphaned NTLT rows explicitly
+=====================================================================
+282 rows (RSJ POLE 245, EARTHING 21, GENERAL 16) have NO project code at all — ~6,140 MT
+total, including ~597 MT of "FG Pending For Dispatch" weight.
+
+Required behaviour:
+- NEVER attach them to a neighbouring project (that is what forward-fill did).
+- Attribute them to an explicit "(No Project)" bucket so the weight is not silently lost,
+  SUB-GROUPED BY SECTION (Col L) — see CHANGE 3b; Section is the NTLT identity.
+- They are NTLT, so they must NOT appear in any TLT-filtered report (project-wise TLT report,
+  Fabrication Report – TLT, etc.).
+- Surface a count + weight of orphan rows in the upload sanity check, e.g. "282 NTLT rows have
+  no project code (~6,140 MT) — attributed to (No Project), grouped by Section". This is a
+  data-quality signal worth showing, not hiding.
+
+=====================================================================
+CHANGE 3b — NTLT IDENTITY: Section (Col L) is the key
+=====================================================================
+NTLT rows have NO project and NO structure. Verified across all 282 NTLT rows:
+    Col B (Project Code)  : 100% BLANK
+    Col J (Alias/Structure): 100% BLANK
+    Col H (Tower Type)    : 100% populated
+    Col L (Section)       : 100% populated
+
+Therefore NTLT CANNOT be keyed by (project, structure) — that key is null for every NTLT row.
+Any join/grouping that assumes project+structure will silently produce nulls or drop all 282
+NTLT rows. NTLT also cannot join to Order Review at all (Order Review is organised by
+project+structure), which is why NTLT weight has no order-book counterpart. That is expected,
+not a bug.
+
+*** THE NTLT KEY IS SECTION (Col L), ALONE. ***
+    NTLT identity = Section (Col L)
+Verified sufficient: 38 distinct Sections cover all 282 NTLT marks / 6,140.238 MT, and ZERO
+Sections span more than one Order Nature — each Section belongs unambiguously to exactly one
+of RSJ POLE / EARTHING / GENERAL. So Section alone cleanly implies its NTLT line.
+
+Do NOT compound the key with Tower Type. Keep it simple: Section is the identity.
+
+Group/report NTLT by Section. Within the "(No Project)" bucket (CHANGE 3), sub-group by
+Section — that is the only meaningful NTLT breakdown available. For scale, RSJ POLE dominates:
+    RSJ 152X152X12 - [37.1]   38 marks  1405.496 MT
+    RSJ 152X152X11 - ([37.1)  71 marks  1350.403 MT
+    RSJ 152X152X13 - [37.1]   17 marks  1124.724 MT
+    RSJ 152X152X16 - [37.1]   28 marks   558.578 MT
+    ... 34 more sections ...  TOTAL 282 marks / 6140.238 MT
+
+TOWER TYPE (Col H) = VERIFICATION ONLY, never part of the key.
+Use it as a cross-check: each Section should map to exactly ONE Tower Type. Section is
+essentially Tower Type restated as a material spec (the "HDG" prefix dropped, dimensions
+carried over, "MS" appended) — e.g. "HDG RSJ POLE 203X203X13" -> "RSJ 203X203X13";
+"HDG FLAT 75X12" -> "FLAT 75X12 MS".
+37 of 38 Sections map 1:1 to a Tower Type. Flag the mismatches in the upload sanity check as
+a DATA-QUALITY warning (do not block, do not auto-correct):
+    KNOWN MISMATCH (1): Section "RSJ 152X152X10 - [37.1]" maps to TWO Tower Types —
+    "HDG RSJ POLE 152X152X10 - 37.1kg" AND "HDG RSJ POLE 152X152X5 - 37.1kg"
+    (Tower Type says thickness 5, Section says 10 — an ERP contradiction, 2 marks ~14.5 MT).
+Also worth flagging if seen: Tower Types whose Section drops or contradicts the thickness
+(e.g. "HDG PLATE 6MM" -> "PLATE 12 MM MS"; "HDG RSJ POLE 160X152X13" -> "RSJ 160X160X13").
+These are source-data errors for the ERP team, surfaced not fixed.
+
+=====================================================================
+CHANGE 4 — Tower Sub Type: WIP Col I == Order Review Col D
+=====================================================================
+Verified: for every matched (normalized project, structure), WIP Col I and Order Review Col D
+carry the SAME Tower Sub Type — 749/749 exact matches, ZERO disagreements. WIP's 20 subtype
+values are a strict SUBSET of Order Review's 27 (the 7 OR-only values — +1.5/+7/+24 MTR EXTN,
+FOUNDATION BOLTS, PORTAL, RSJ, S.P.S — simply have no live WIP marks). There are NO WIP-only
+subtypes.
+
+- Treat them as ONE field. Either source is valid for a given structure; do not build a
+  reconciliation layer, and do not treat a subtype seen in OR but not WIP as an error.
+- For WIP-derived measures (Fabrication Report Stub/SST bifurcation etc.) use WIP Col I.
+- KNOWN EXCEPTION — do not let it break anything: 4 structures carry TWO subtypes in WIP —
+  ('807','IS'), ('885','IS'), ('888','IS'), ('909','IS'), each mixing COLUMN and NORMAL TOWER
+  (Order Review lists only one). Any logic assuming "one structure = one subtype" must not
+  crash or double-count on these. They are neither STUB nor SST, so the Stub/SST grouping is
+  unaffected today — but handle multi-subtype structures gracefully (group by the MARK's own
+  subtype, not the structure's, which is already how the Stub/SST rule works).
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change parsing identity/hash/dedup, ageing, Activity, qty, or the sequences.
+- Do NOT drop the orphan NTLT rows — bucket them as "(No Project)".
+- Do NOT infer TLT/NTLT from subtype strings or activities — Order Nature only.
+- Do NOT reintroduce any project-code forward-fill anywhere.
+
+=====================================================================
+ACCEPTANCE CHECK (report actual numbers)
+=====================================================================
+1. FORWARD-FILL: confirm the WIP parser does NOT forward-fill Col B. Prove it: project 862's
+   marks must be 100% Order Nature = "Structure" with ZERO RSJ POLE rows. Its FG (Type = "FG
+   Pending For Dispatch", sum Col Q) must be 64.953 MT — NOT 286.549 MT (the forward-fill
+   corrupted value).
+2. CLASSIFICATION: TLT (Order Nature = Structure) = 57,525 marks / 11,282.744 MT.
+   NTLT = 282 marks / ~6,140 MT (RSJ POLE 245, EARTHING 21, GENERAL 16).
+   These two must sum to the full file — no mark unclassified.
+3. ORPHANS: all 282 NTLT rows have a blank project code and land in "(No Project)"; none are
+   attached to a real project. Orphan FG weight ≈ 597 MT.
+3b. NTLT IDENTITY: NTLT is keyed by Section (Col L) alone — 38 distinct Sections covering all
+   282 marks / 6,140.238 MT. Confirm NO Section spans more than one Order Nature (should be
+   0). Confirm project/structure are blank for 100% of NTLT rows, so no NTLT row is dropped
+   by a project+structure join. Tower Type (Col H) is used ONLY to verify: 37/38 Sections map
+   1:1; the sanity check must flag the 1 known mismatch (Section "RSJ 152X152X10 - [37.1]"
+   mapping to both "…152X152X10…" and "…152X152X5…" Tower Types).
+4. TLT REPORTS: no NTLT weight appears in any TLT-filtered report. Project-wise TLT totals
+   unchanged where they were already correct (they filter Order Nature = Structure).
+5. SUBTYPE: confirm WIP Col I and OR Col D agree on all matched structures (749/749); the 4
+   "IS" multi-subtype structures do not error or double-count.
+6. Report: 862's FG value, the TLT/NTLT mark+weight split, the orphan count/weight, and
+   confirmation that no forward-fill remains.

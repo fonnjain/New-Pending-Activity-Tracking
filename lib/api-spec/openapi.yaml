@@ -1854,6 +1854,17 @@ components:
         futureProductionDate:
           type: integer
           description: Last Production Entry Date later than today (clamped to today for ageing).
+        ntltOrphanCount:
+          type: integer
+          description: >
+            NTLT marks (RSJ POLE / EARTHING / GENERAL) with no project code,
+            attributed to "(Unassigned)" grouped by Section. Absent when zero
+            such rows exist.
+        ntltOrphanWtMt:
+          type: number
+          description: >
+            Total Balance Wt. (MT) of the NTLT orphan marks (same rows as
+            ntltOrphanCount). Absent when ntltOrphanCount is absent.
         fgWipByJob:
           type: object
           description: >

@@ -805,8 +805,9 @@ export function parseWorkbook(
   });
 
   let rowsRead = 0;
-  let lastProject = "";
   let classificationConflicts = 0;
+  let ntltOrphanCount = 0;
+  let ntltOrphanWtMt = 0;
   const projects = new Set<string>();
   const rows: ParsedRow[] = [];
   // Finished Goods WIP per project: additive, does NOT change row identity.
@@ -818,41 +819,38 @@ export function parseWorkbook(
 
     const orderNature = emptyToNull(row[COL.orderNature]);
 
-    // Conditional forward-fill of Project Code. A blank Project Code is only a
-    // "continuation of the structure group above" for Structure rows, which
-    // inherit the last seen project. Project-less item types (RSJ POLE,
-    // EARTHING, GENERAL) — and any row whose Order Nature is blank/unknown —
-    // genuinely have no project and must NOT borrow one from an adjacent row;
-    // they are bucketed under "(Unassigned)" instead.
+    // Read Col B (Project Code) directly — NO forward-fill. Every Structure
+    // (TLT) row carries a populated project code (verified: 57,525/57,525).
+    // NTLT rows (RSJ POLE, EARTHING, GENERAL) have a blank project code and
+    // must NOT borrow one from an adjacent row.
     const rawProject = normalizeProject(row[COL.projectCode]);
-    if (rawProject) lastProject = rawProject;
 
-    // FG Pending For Dispatch: collect Balance Wt. (Col Q) per project for the
-    // "Finished Goods WIP" column. Uses forward-filled lastProject because FG
-    // rows always carry a blank Project Code. Falls through to normal mark
-    // processing so identity/hashing is completely unchanged.
+    // FG Pending For Dispatch: collect Balance Wt. (Col Q) per project.
+    // Structure FG rows carry the project code in Col B directly (always
+    // populated). NTLT FG rows have no project code and are accumulated under
+    // UNASSIGNED_JOB, grouped by Section (Col L) — never under a neighbouring
+    // project. Falls through to normal mark processing so identity/hashing is
+    // completely unchanged.
     const rowType = cellToString(row["Type"]);
     if (rowType && rowType.trim().toUpperCase() === "FG PENDING FOR DISPATCH") {
-      const fgProject = rawProject || lastProject;
+      const fgProject = rawProject || UNASSIGNED_JOB;
       const fgWt = toNumber(row[COL.balanceWt]) ?? 0;
-      if (fgProject) {
-        fgWipByJob[fgProject] = (fgWipByJob[fgProject] ?? 0) + fgWt;
-        const fgStructure = cellToString(row[COL.alias]).trim().toUpperCase();
-        if (fgStructure) {
-          fgWipByStructure[fgProject] = fgWipByStructure[fgProject] ?? {};
-          fgWipByStructure[fgProject][fgStructure] =
-            (fgWipByStructure[fgProject][fgStructure] ?? 0) + fgWt;
-        }
+      fgWipByJob[fgProject] = (fgWipByJob[fgProject] ?? 0) + fgWt;
+      // TLT rows: group by alias/structure. NTLT rows: group by Section (alias is blank).
+      const fgStructKey = rawProject
+        ? cellToString(row[COL.alias]).trim().toUpperCase()
+        : cellToString(row[COL.section]).trim().toUpperCase();
+      if (fgStructKey) {
+        fgWipByStructure[fgProject] = fgWipByStructure[fgProject] ?? {};
+        fgWipByStructure[fgProject][fgStructKey] =
+          (fgWipByStructure[fgProject][fgStructKey] ?? 0) + fgWt;
       }
     }
 
-    // The real project for this row: its own code, or — only for Structure
-    // members with a blank code — the inherited group project. Project-less item
-    // types (RSJ POLE / EARTHING / GENERAL) and blank/unknown Order Nature get
-    // no project (and a leading Structure row with no project yet also falls
-    // through to "(Unassigned)" rather than a silent empty job).
-    const isStructure = (orderNature ?? "").trim().toLowerCase() === "structure";
-    const effectiveProject = rawProject || (isStructure ? lastProject : "");
+    // The project for this row is Col B read directly — no forward-fill.
+    // NTLT rows have blank project codes and are bucketed under UNASSIGNED_JOB;
+    // they never borrow a neighbouring project.
+    const effectiveProject = rawProject;
     // Stored/displayed grouping value.
     const job = effectiveProject || UNASSIGNED_JOB;
     // Value fed to mark derivation: empty for unassigned rows so their mark
@@ -891,6 +889,14 @@ export function parseWorkbook(
       job,
     });
     if (conflict) classificationConflicts++;
+
+    // Track NTLT marks that have no project code for the upload data-quality
+    // summary. These are the 282 RSJ POLE / EARTHING / GENERAL rows attributed
+    // to "(Unassigned)"; surfaced as ntltOrphanCount + ntltOrphanWtMt.
+    if (classification.category === "NTLT" && !rawProject) {
+      ntltOrphanCount++;
+      ntltOrphanWtMt += toNumber(row[COL.balanceWt]) ?? 0;
+    }
 
     const base: Omit<InsertRecordPool, "hash"> = {
       job,
@@ -993,6 +999,7 @@ export function parseWorkbook(
       noProductionDate,
       futureProductionDate,
       classificationConflicts,
+      ...(ntltOrphanCount > 0 && { ntltOrphanCount, ntltOrphanWtMt }),
       ...(Object.keys(fgWipByJob).length > 0 && { fgWipByJob }),
       ...(Object.keys(fgWipByStructure).length > 0 && { fgWipByStructure }),
     },

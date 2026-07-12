@@ -164,6 +164,12 @@ export interface ParseSummary {
   noProductionDate: number;
   /** Last Production Entry Date later than today (clamped to today for ageing). */
   futureProductionDate: number;
+  /** NTLT marks (RSJ POLE / EARTHING / GENERAL) with no project code, attributed to "(Unassigned)" grouped by Section. Absent when zero such rows exist.
+   */
+  ntltOrphanCount?: number;
+  /** Total Balance Wt. (MT) of the NTLT orphan marks (same rows as ntltOrphanCount). Absent when ntltOrphanCount is absent.
+   */
+  ntltOrphanWtMt?: number;
   /** Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = "FG Pending For Dispatch". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.
    */
   fgWipByJob?: ParseSummaryFgWipByJob;

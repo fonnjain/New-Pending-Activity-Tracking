@@ -27,6 +27,10 @@ export interface ParseSummary {
   // Rows where Tower Sub Type "NTLT" disagreed with the Order-Nature-derived
   // category (Order Nature is authoritative; the conflict is only counted/flagged).
   classificationConflicts?: number;
+  // NTLT rows (RSJ POLE / EARTHING / GENERAL) with no project code, attributed
+  // to "(Unassigned)" grouped by Section (Col L). Absent when zero such rows exist.
+  ntltOrphanCount?: number;
+  ntltOrphanWtMt?: number;
   // Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where
   // the WIP file's "Type" column (Col A, new ≥Jul-2026 format) equals
   // "FG Pending For Dispatch". Values in kg (same unit as balanceWt).

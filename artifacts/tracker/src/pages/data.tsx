@@ -352,6 +352,20 @@ function DataViewContent() {
                 <span className="block text-muted-foreground text-xs uppercase mb-1">Future Prod. Date</span>
                 <span className="font-bold text-lg tabular-nums">{selectedImport.summary.futureProductionDate.toLocaleString()}</span>
               </div>
+              {selectedImport.summary.ntltOrphanCount != null && (
+                <>
+                  <div>
+                    <span className="block text-muted-foreground text-xs uppercase mb-1">NTLT Orphan Marks</span>
+                    <span className="font-bold text-lg tabular-nums">{selectedImport.summary.ntltOrphanCount.toLocaleString()}</span>
+                    <span className="block text-xs text-muted-foreground">RSJ/Earthing/General — no project code</span>
+                  </div>
+                  <div>
+                    <span className="block text-muted-foreground text-xs uppercase mb-1">NTLT Orphan Weight</span>
+                    <span className="font-bold text-lg tabular-nums">{(selectedImport.summary.ntltOrphanWtMt ?? 0).toFixed(3)} MT</span>
+                    <span className="block text-xs text-muted-foreground">Attributed to (No Project), grouped by Section</span>
+                  </div>
+                </>
+              )}
             </div>
           </CardContent>
         </Card>
