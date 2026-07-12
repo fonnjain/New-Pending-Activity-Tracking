@@ -115,17 +115,19 @@ const fgWipForJob = (job: string): number =>
 From the latest WIP import (`imports.summary.fgWipByJob`):
 
 ```
-"862": 387,123.787 kg  =  387.1 MT
+"862": 64,953.307 kg  =  64.953 MT
 ```
 
-This is the sum of Balance Weight (Col Q) for all rows in the WIP file where the Type column (Col A) reads "FG PENDING FOR DISPATCH" and the Project Code (Col B) is 862. It reflects marks that are physically in the FG yard per the latest Balance Report, irrespective of what the Order Review file says.
+This is the sum of Balance Weight (Col Q) for all **mark rows** (rows with a non-blank Mark No.) in the WIP file where the Type column (Col A) reads "FG PENDING FOR DISPATCH" and the Project Code (Col B) is 862. It reflects individual marks physically in the FG yard per the latest Balance Report, irrespective of what the Order Review file says.
+
+> **Note on aggregate rows:** The WIP file also contains summary/subtotal rows with Type = "FG PENDING FOR DISPATCH" but no Mark No. (e.g. structure totals, project totals). These are excluded — only rows with a valid Mark No. are counted, so the figure equals the sum of individual mark weights.
 
 ### Why the two figures differ
 
 | Figure | Project 862 | What it means |
 |--------|-------------|---------------|
 | FG (MT) — Order Review | 180.964 MT | Galvanised − dispatched per the Order Review book |
-| FG WIP — WIP file | 387.1 MT | Balance weight of FG-pending marks in the WIP Balance Report |
+| FG WIP — WIP file | 64.953 MT | Balance weight of FG-pending marks in the WIP Balance Report |
 
 The two figures use completely different data sources and different methodologies. They are both "in yard, not yet dispatched" estimates but measured at different granularities and from different teams' records. A gap between them is normal and expected — it reflects timing differences between when the Order Review is updated vs when the WIP file is generated.
 
