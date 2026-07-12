@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, Fragment } from "react";
+import { useState, useMemo, useEffect, Fragment, useCallback } from "react";
 import {
   compareActivity,
   sortActivities,
@@ -48,6 +48,7 @@ import { formatWeight, formatDate } from "@/lib/utils";
 import { sortRecords, type RecordSortKey } from "@/lib/sort";
 import { ChevronLeft, ChevronRight, ChevronDown, Search, FileSpreadsheet } from "lucide-react";
 import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
+import { useToast } from "@/hooks/use-toast";
 
 const ROW_CAP = 300;
 
@@ -74,6 +75,7 @@ export default function JobDashboard() {
 
 function JobDashboardContent() {
   const { selectedImportId, filters } = useTracker();
+  const { toast } = useToast();
   // Project Wise drills down by Project (TLT) or Section (NTLT). "All" Order
   // Type shows BOTH — every row is resolved by its own category below.
   const isAll = filters.category === "ALL";
@@ -358,71 +360,85 @@ function JobDashboardContent() {
     );
   }, [byProject, orderByJob]);
 
-  const handleExport = () => {
-    const groupLabel = isAll ? "Group" : isNtlt ? "Section" : "Project";
-    const sheets: XlsxSheet[] = [
-      {
-        name: `By ${groupLabel}`,
-        columns: [
-          { label: groupLabel, field: "job" },
-          { label: "Work Order (MT)", field: "workOrderMt", numeric: true, decimals: 3, total: true },
-          { label: "Dispatch (MT)", field: "dispatchMt", numeric: true, decimals: 3, total: true },
-          { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
-          { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
-          { label: "Release Balance Computed (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
-          { label: "FG (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
-          { label: "Structures", field: "structures", numeric: true, decimals: 0 },
-          { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
-          { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
-          { label: "Balance Wt", field: "weight", numeric: true, decimals: 2, total: true },
-          { label: "Avg Ageing", field: "avgAge", numeric: true, decimals: 0 },
-          { label: "First Assign", field: "firstAssign" },
-          { label: "0-30d", field: "c0to30", numeric: true, decimals: 0 },
-          { label: "31-60d", field: "c31to60", numeric: true, decimals: 0 },
-          { label: "60d+", field: "c60Plus", numeric: true, decimals: 0 },
-        ],
-        rows: sortedProjects.map((p) => ({
-          job: p.job,
-          workOrderMt: orderByJob.get(p.job)?.wo ?? 0,
-          dispatchMt: orderByJob.get(p.job)?.disp ?? 0,
-          dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
-          releaseBalanceMt: orderByJob.get(p.job)?.fileBalRelease ?? 0,
-          releaseBalanceComputedMt: relBalComputedByJob.get(p.job) ?? 0,
-          computedFgMt: orderByJob.get(p.job)?.computedFg ?? 0,
-          structures: p.structures,
-          marks: p.marks,
-          qty: p.qty,
-          weight: p.weight,
-          avgAge: p.avgAge,
-          firstAssign: p.firstAssign ?? "",
-          c0to30: p.c0to30,
-          c31to60: p.c31to60,
-          c60Plus: p.c60Plus,
-        })),
-      },
-      {
-        name: "By Activity",
-        columns: [
-          { label: "Activity", field: "activity" },
-          { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
-          { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
-          { label: "Balance Wt", field: "weight", numeric: true, decimals: 2, total: true },
-          { label: "Avg Ageing", field: "avgAge", numeric: true, decimals: 0 },
-        ],
-        rows: byActivity.map((a) => ({
-          activity: a.activity,
-          marks: a.marks,
-          qty: a.qty,
-          weight: a.weight,
-          avgAge: a.avgAge,
-        })),
-      },
-    ];
-    void exportToXlsxSheets(
-      `project_wise_${new Date().toISOString().slice(0, 10)}.xlsx`,
-      sheets,
-    );
-  };
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = useCallback(async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const groupLabel = isAll ? "Group" : isNtlt ? "Section" : "Project";
+      const sheets: XlsxSheet[] = [
+        {
+          name: `By ${groupLabel}`,
+          columns: [
+            { label: groupLabel, field: "job" },
+            { label: "Work Order (MT)", field: "workOrderMt", numeric: true, decimals: 3, total: true },
+            { label: "Dispatch (MT)", field: "dispatchMt", numeric: true, decimals: 3, total: true },
+            { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
+            { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
+            { label: "Release Balance Computed (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
+            { label: "FG (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
+            { label: "Structures", field: "structures", numeric: true, decimals: 0 },
+            { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
+            { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
+            { label: "Balance Wt", field: "weight", numeric: true, decimals: 2, total: true },
+            { label: "Avg Ageing", field: "avgAge", numeric: true, decimals: 0 },
+            { label: "First Assign", field: "firstAssign" },
+            { label: "0-30d", field: "c0to30", numeric: true, decimals: 0 },
+            { label: "31-60d", field: "c31to60", numeric: true, decimals: 0 },
+            { label: "60d+", field: "c60Plus", numeric: true, decimals: 0 },
+          ],
+          rows: sortedProjects.map((p) => ({
+            job: p.job,
+            workOrderMt: orderByJob.get(p.job)?.wo ?? 0,
+            dispatchMt: orderByJob.get(p.job)?.disp ?? 0,
+            dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
+            releaseBalanceMt: orderByJob.get(p.job)?.fileBalRelease ?? 0,
+            releaseBalanceComputedMt: relBalComputedByJob.get(p.job) ?? 0,
+            computedFgMt: orderByJob.get(p.job)?.computedFg ?? 0,
+            structures: p.structures,
+            marks: p.marks,
+            qty: p.qty,
+            weight: p.weight,
+            avgAge: p.avgAge,
+            firstAssign: p.firstAssign ?? "",
+            c0to30: p.c0to30,
+            c31to60: p.c31to60,
+            c60Plus: p.c60Plus,
+          })),
+        },
+        {
+          name: "By Activity",
+          columns: [
+            { label: "Activity", field: "activity" },
+            { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
+            { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
+            { label: "Balance Wt", field: "weight", numeric: true, decimals: 2, total: true },
+            { label: "Avg Ageing", field: "avgAge", numeric: true, decimals: 0 },
+          ],
+          rows: byActivity.map((a) => ({
+            activity: a.activity,
+            marks: a.marks,
+            qty: a.qty,
+            weight: a.weight,
+            avgAge: a.avgAge,
+          })),
+        },
+      ];
+      await exportToXlsxSheets(
+        `project_wise_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        sheets,
+      );
+    } catch (err) {
+      toast({
+        title: "Export failed",
+        description: err instanceof Error ? err.message : "Unknown error — check browser console for details.",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
+  }, [exporting, isAll, isNtlt, sortedProjects, orderByJob, relBalComputedByJob, byActivity, toast]);
 
   if (selectedJob) {
     const rawJob = selectedJob.replace(/^(?:TLT|NTLT): /, "");
@@ -475,10 +491,10 @@ function JobDashboardContent() {
             variant="outline"
             size="sm"
             className="h-8 gap-2"
-            onClick={handleExport}
-            disabled={byProject.length === 0}
+            onClick={() => { void handleExport(); }}
+            disabled={byProject.length === 0 || exporting}
           >
-            <FileSpreadsheet className="h-4 w-4" /> Export Excel
+            <FileSpreadsheet className="h-4 w-4" /> {exporting ? "Exporting..." : "Export Excel"}
           </Button>
         </CardHeader>
         <CardContent className="p-0">
