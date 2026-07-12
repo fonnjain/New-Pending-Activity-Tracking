@@ -123,11 +123,20 @@ const membershipCache = new Map<
   number,
   { pool: RecordPoolRow; copies: number }[]
 >();
+// Same immutability guarantee: velocity states and identity signatures for a
+// given import never change once the import is committed, so caching is safe.
+const velocityStateCache = new Map<number, Map<string, VelocityState>>();
+const identityStateCache = new Map<number, Map<string, IdentityState>>();
+
 function evictMembershipCache(importId?: number) {
   if (importId === undefined) {
     membershipCache.clear();
+    velocityStateCache.clear();
+    identityStateCache.clear();
   } else {
     membershipCache.delete(importId);
+    velocityStateCache.delete(importId);
+    identityStateCache.delete(importId);
   }
 }
 
@@ -206,6 +215,9 @@ interface IdentityState {
 async function loadIdentityStates(
   importId: number,
 ): Promise<Map<string, IdentityState>> {
+  const cached = identityStateCache.get(importId);
+  if (cached) return cached;
+
   const rows = await db
     .select({
       markId: recordPoolTable.markId,
@@ -237,6 +249,7 @@ async function loadIdentityStates(
     const l = Array.from(lpds.get(key)!).sort().join(",");
     out.set(key, { markId: m.markId, jobCardNo: m.jobCardNo, sig: `${a}\u0002${l}` });
   }
+  identityStateCache.set(importId, out);
   return out;
 }
 
@@ -1778,6 +1791,9 @@ interface VelocityState {
 async function loadVelocityStates(
   importId: number,
 ): Promise<Map<string, VelocityState>> {
+  const cached = velocityStateCache.get(importId);
+  if (cached) return cached;
+
   const rows = await db
     .select({
       markId: recordPoolTable.markId,
@@ -1827,6 +1843,7 @@ async function loadVelocityStates(
       sequence,
     });
   }
+  velocityStateCache.set(importId, out);
   return out;
 }
 
