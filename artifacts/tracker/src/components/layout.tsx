@@ -351,7 +351,7 @@ const navItems: NavItem[] = [
   { href: "/inventory", icon: Boxes, label: "Bucket List", short: "Bucket List" },
   { href: "/reports", icon: FileText, label: "Reports", short: "Reports" },
   { href: "/turnaround", icon: Timer, label: "Turn Around Time", short: "Turnaround" },
-  { href: "/stuck", icon: Gauge, label: "Stuck Projects", short: "Stuck" },
+  { href: "/stuck", icon: Gauge, label: "Speed of Execution", short: "Speed" },
   { href: "/data", icon: Database, label: "Data", short: "Data" },
 ];
 

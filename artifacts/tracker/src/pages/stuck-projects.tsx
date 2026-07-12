@@ -199,7 +199,7 @@ function StuckContent({ importId }: { importId: number }) {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <AlertTriangle className="w-5 h-5 text-ageing-red" /> Stuck Projects
+          <AlertTriangle className="w-5 h-5 text-ageing-red" /> Speed of Execution
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
           Pace, projected ETA and movement across snapshot history. Deterministic

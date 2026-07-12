@@ -195,7 +195,7 @@ function SnapshotCards({
           <CardHeader className="pb-3">
             <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex items-center justify-between gap-2">
               <span className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-ageing-red" /> Stuck Projects
+                <AlertTriangle className="h-4 w-4 text-ageing-red" /> Speed of Execution
               </span>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </CardTitle>
