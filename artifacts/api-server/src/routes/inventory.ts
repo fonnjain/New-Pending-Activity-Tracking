@@ -56,31 +56,83 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
     .limit(1);
 
   const contractorsByKey = new Map<string, Set<string>>();
+  // (project, structure) keys that have at least one WIP mark with Order
+  // Nature = Structure. Drives completed-structure exclusion: a bucket row
+  // with no matching WIP marks is finished production and should be hidden.
+  const wipStructureKeys = new Set<string>();
+  // batch -> cumulative balance weight per (project, structure); used to
+  // resolve the representative MFC Batch when a structure has marks in more
+  // than one real batch (only one structure in the current files).
+  const mfcBatchWt = new Map<string, Map<string, number>>();
+
   if (newestWip) {
     const marks = await db
       .select({
         job: recordPoolTable.job,
         structure: recordPoolTable.structure,
         contractor: recordPoolTable.contractor,
+        orderNature: recordPoolTable.orderNature,
+        mfcBatch: recordPoolTable.mfcBatch,
+        balanceWt: recordPoolTable.balanceWt,
       })
       .from(importRowsTable)
       .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
       .where(eq(importRowsTable.importId, newestWip.id));
+
     for (const m of marks) {
-      if (!m.contractor) continue;
       const key = `${m.job}\u0001${m.structure}`;
-      let set = contractorsByKey.get(key);
-      if (!set) {
-        set = new Set();
-        contractorsByKey.set(key, set);
+
+      // Contractor side-classification (unchanged)
+      if (m.contractor) {
+        let set = contractorsByKey.get(key);
+        if (!set) {
+          set = new Set();
+          contractorsByKey.set(key, set);
+        }
+        set.add(m.contractor);
       }
-      set.add(m.contractor);
+
+      // Completed-exclusion: only Structure rows can ever match an Order
+      // Review (project, structure) key; NTLT rows have no structure so they
+      // can never collide. Restrict to Order Nature = Structure for clarity.
+      if (m.orderNature === "Structure") {
+        wipStructureKeys.add(key);
+        // Accumulate real batch (A/B/C/D) weights for MFC resolution.
+        // "Z" / null means "not yet batched" — not a real batch letter.
+        const batch = m.mfcBatch;
+        if (batch && batch !== "Z") {
+          let bmap = mfcBatchWt.get(key);
+          if (!bmap) {
+            bmap = new Map();
+            mfcBatchWt.set(key, bmap);
+          }
+          bmap.set(batch, (bmap.get(batch) ?? 0) + (m.balanceWt ?? 0));
+        }
+      }
     }
   }
 
   const rows = latestRows.map((r) => {
     const key = `${r.project}\u0001${r.structure}`;
     const contractors = contractorsByKey.get(key);
+
+    // Completed-exclusion flag: false = no WIP marks → structure is done.
+    const hasWipMarks = wipStructureKeys.has(key);
+
+    // MFC Batch: pick the real batch with the greatest cumulative Balance
+    // Weight; fall back to "Z" (= not yet batched) when none exist.
+    const bmap = mfcBatchWt.get(key);
+    let mfcBatch = "Z";
+    if (bmap && bmap.size > 0) {
+      let bestWt = -1;
+      for (const [b, wt] of bmap) {
+        if (wt > bestWt) {
+          bestWt = wt;
+          mfcBatch = b;
+        }
+      }
+    }
+
     return {
       project: r.project,
       structure: r.structure,
@@ -99,6 +151,8 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
       balGalvMt: r.balGalvMt,
       contractors: contractors ? Array.from(contractors) : [],
       notInLatest: false,
+      hasWipMarks,
+      mfcBatch,
     };
   });
 

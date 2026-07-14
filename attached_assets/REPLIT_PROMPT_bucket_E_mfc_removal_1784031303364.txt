@@ -1,0 +1,112 @@
+TASK: Extend Bucket E of the Inventory page: entry becomes Project + MFC Batch (cascading
+dropdowns), and adding an E entry REMOVES the matching structures from Buckets C and D
+(Bucket B is deliberately NOT affected).
+
+=====================================================================
+CONTEXT (already established — do not re-derive)
+=====================================================================
+- Buckets B/C/D come from Order Review, keyed by (normalized project, structure).
+- JOIN: Order Review Col C "Tower Type" == WIP Col J "Alias". (WIP Col H is ALSO called
+  "Tower Type" but is a long descriptive name — NEVER join on it.)
+- MFC Batch = WIP Col X "Batch No." (values A/B/C/D; blank = not yet batched).
+- STRUCTURE -> MFC BATCH: if any of the structure's WIP marks has a real batch (A/B/C/D), that
+  is the structure's batch; if all its marks are blank, the batch is "Z" (Not Yet Batched).
+  Edge case: if a structure has 2+ real batches, take the heaviest by balance weight (only ONE
+  structure in the file does this: 920/3LISO).
+- Completed structures (no WIP marks at all) are EXCLUDED from the buckets entirely.
+- Bucket B = Balance Release > 0; C = Balance Release <= 0; D = Progress Inspection > 0.
+
+=====================================================================
+CHANGE 1 — Bucket E entry: Project + MFC Batch (cascading dropdowns)
+=====================================================================
+Bucket E ("Material Ready But Not Dispatched") entry form becomes TWO cascading dropdowns:
+
+  1) PROJECT dropdown — known projects (as today).
+  2) MFC BATCH dropdown — populated ONLY with the MFC batches that actually exist for the
+     SELECTED project, derived from WIP (its real bifurcation). It must not offer batches the
+     project does not have.
+
+     The MFC-batch list per project comes from the structure->batch assignment above, grouped
+     by project. Examples from the current data:
+         824 -> [A, B, Z]        886 -> [A, B, C]        900 -> [B, C, Z]
+         862 -> [Z]              839 -> [B]              848 -> [A, Z]
+     (Across 63 projects: 33 have 1 batch, 14 have 2, 14 have 3, 2 have 4.)
+
+  The MFC dropdown must be DISABLED/empty until a project is chosen, and must refresh whenever
+  the project selection changes.
+
+Keep the rest of Bucket E as-is: it is manual, persisted, and split In-house / Out-vendor.
+Store the chosen mfcBatch alongside the project on the E record (add an `mfcBatch text` column
+to the existing Bucket-E table).
+
+=====================================================================
+CHANGE 2 — Adding to E REMOVES matching structures from C and D (NOT B)
+=====================================================================
+When a (project, mfcBatch) pair is added to Bucket E, every structure belonging to that pair
+is REMOVED from Bucket C and Bucket D.
+
+  Matching structure = a bucket structure whose normalized project == E.project
+                       AND whose assigned MFC batch == E.mfcBatch.
+
+  *** BUCKET B IS EXPLICITLY NOT AFFECTED. ***
+  Rationale: Bucket B means "Raw Material Incomplete" (Balance Release > 0) — steel is still
+  pending release, so that material genuinely is NOT ready and must remain visible. Only C
+  ("Under Production") and D ("Production Not Complete") are superseded by "Ready but not
+  dispatched". Do NOT remove anything from B.
+
+  Because C and D overlap by design, a structure present in BOTH is removed from BOTH.
+
+  Verified behaviour on current data:
+      Add (824, A)  -> C: 8 removed, D: 9 removed.  B: 1 structure (2HLA1) REMAINS.
+      Add (886, B)  -> C: 8 removed, D: 8 removed.  B: none.
+      Add (824, B)  -> C: 8 removed, D: 0 removed.  B: none.
+      Add (900, C)  -> C: 0, D: 0 removed.  B: 3 structures REMAIN (4QMD3, 4QMD3., 4QMD3M).
+        (The 900/C case removes nothing because all its structures are in B — the exemption
+         working as intended. This is CORRECT, not a bug.)
+
+  Removing the E entry restores the structures to C/D (the removal is a consequence of the E
+  entry, not a destructive edit).
+
+=====================================================================
+CHANGE 3 — Persistence: re-evaluate on every new upload
+=====================================================================
+The removal is NOT permanent. On EVERY new WIP or Order Review import, re-evaluate the buckets
+from the fresh data and re-apply the E-driven removals from scratch.
+
+  - The E entries themselves PERSIST (they are manual records — keep them across uploads).
+  - But bucket membership is recomputed from the new files, and only THEN are the E
+    (project, mfcBatch) removals applied to C and D.
+  - Do NOT store a "removed" flag on bucket rows. Removal is derived at read time:
+        show a C/D structure UNLESS an E entry exists for its (project, mfcBatch).
+    This makes it automatically correct after any upload, with no stale state.
+  - If a project's MFC bifurcation changes in a new WIP file such that an existing E entry's
+    batch no longer exists for that project, keep the E entry but flag it (e.g. "batch no
+    longer present in WIP") — do not silently delete the user's record.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT remove anything from Bucket B.
+- Do NOT change bucket membership rules, the In-house/Out-vendor split, the display columns,
+  the clamp, or the summaries.
+- Do NOT hard-delete bucket rows; derive the removal at read time from the E entries.
+- Do NOT offer MFC batches a project does not actually have.
+- Do NOT join on WIP Col H; join on WIP Col J (Alias).
+- Do NOT forward-fill the project code.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- Selecting project 824 in Bucket E offers exactly [A, B, Z] in the MFC dropdown; 886 offers
+  [A, B, C]; 862 offers [Z] only. No project offers a batch it does not have.
+- Adding (824, A) to E: Bucket C loses 8 structures, Bucket D loses 9. Bucket B still shows
+  2HLA1 (unchanged).
+- Adding (900, C) to E: nothing is removed from C or D; B still shows 4QMD3, 4QMD3., 4QMD3M.
+- A structure in BOTH C and D is removed from both.
+- Deleting the E entry restores the removed structures to C and D.
+- Re-uploading WIP/Order Review recomputes buckets from the new data and re-applies the E
+  removals; E entries survive the upload.
+- Bucket totals/summaries reflect the removals (removed structures are not counted in C/D).
+Report: the MFC dropdown contents for 824/886/862, the before/after counts for C and D when
+adding (824, A), and confirmation Bucket B is untouched.

@@ -1,0 +1,114 @@
+TASK: Add an "MFC Batch" column to the Inventory bucket list (B/C/D), and EXCLUDE completed
+structures from the buckets.
+
+=====================================================================
+CONTEXT — verified research
+=====================================================================
+The buckets (B/C/D) are built from Order Review, keyed by (normalized project, structure).
+
+CONFIRMED JOIN (100% complete, verified):
+    Order Review Col C "Tower Type"      ==  WIP Col J "Alias"        (the structure code)
+    Order Review Col D "Tower Sub Type"  ==  WIP Col I "Tower Sub Type" (identical, 733/733)
+    *** WARNING: WIP Col H is ALSO called "Tower Type" but is a DIFFERENT field — it holds a
+    long descriptive name (e.g. "220KV D/C TRANSMISSION LINE TOWER TYPE-DC (NORMAL TOWER WITH
+    X-ARM'S)"). NEVER join on WIP Col H. Join on WIP Col J (Alias). ***
+
+TLT-ONLY IS AUTOMATIC — no filter needed:
+NTLT rows in WIP have NO project code AND NO Alias (296 NTLT rows, 0 with an alias). Order
+Review is keyed by project+structure, so NTLT can never appear in it. The buckets are
+therefore TLT-only BY CONSTRUCTION. When joining to WIP marks (for In-house/Out-vendor and
+MFC batch), still restrict to Order Nature (WIP Col C) = "Structure" for safety/clarity.
+
+=====================================================================
+CHANGE 1 — EXCLUDE COMPLETED STRUCTURES from the buckets
+=====================================================================
+A bucket structure that has NO matching WIP marks is COMPLETE — production is finished, so it
+has dropped out of the WIP file (WIP only holds marks with remaining balance).
+
+Evidence: of the 916 no-WIP structures in Bucket D, Released == Inspected == the full Work
+Order qty; 91% have zero release balance; 81% are essentially fully dispatched.
+
+RULE: if a (project, structure) from Order Review has NO marks in the latest WIP import
+(joined on project + structure==Alias, Order Nature = "Structure"), EXCLUDE it from the bucket
+list entirely. It is completed work; the bucket list is for live work.
+
+Counts to expect (current files):
+    Bucket B: 285 -> 246 structures  (39 completed excluded)
+    Bucket C: 1429 -> 487 structures (942 completed excluded)
+    Bucket D: 1174 -> 258 structures (916 completed excluded)
+
+Show the excluded count somewhere unobtrusive (e.g. "39 completed structures excluded") so the
+user knows they were dropped deliberately, not lost.
+
+=====================================================================
+CHANGE 2 — MFC BATCH column
+=====================================================================
+MFC Batch = WIP Col X "Batch No.". It holds exactly four values: A, B, C, D. It is a per-MARK
+field; 53.5% of WIP rows have it BLANK (mostly marks not yet in production).
+
+STRUCTURE -> MFC BATCH assignment (deterministic; verified unambiguous):
+    Collect the MFC Batch of all the structure's WIP marks (blank -> treat as "not batched").
+      - If ANY mark has a real batch (A/B/C/D) -> the structure's MFC Batch is that batch.
+      - If NO mark has a real batch (all blank) -> the structure's MFC Batch is "Z"
+        (= Not Yet Batched). This matches the app's existing "blank batch -> Z" convention.
+      - EDGE CASE: if a structure somehow has TWO OR MORE real batches, take the one with the
+        greatest balance weight. (Verified: only ONE structure in the entire file does this —
+        920 / 3LISO with C and D. It is not a practical concern, but handle it deterministically
+        rather than crashing.)
+
+    IMPORTANT — Z is NOT a batch, it means "in production but no batch assigned yet". Do not
+    confuse it with completed structures (which are now excluded entirely per CHANGE 1). Those
+    are different states: Z = live work awaiting batch; completed = gone from WIP.
+
+DISPLAY: add "MFC Batch" as a COLUMN in the tabular data, positioned immediately AFTER the
+Project column. Do NOT restructure the table into an MFC hierarchy, and do NOT remove the
+existing In-house / Out-vendor split — that stays exactly as it is. MFC Batch is simply an
+extra column (values: A, B, C, D, Z), sortable/filterable like the others.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change bucket membership rules (B: Bal Release > 0; C: Bal Release <= 0; D: Progress
+  Inspection > 0), overlap behaviour, the display columns, the clamp, or the summaries — other
+  than removing completed structures from the population.
+- Do NOT remove or alter the In-house / Out-vendor split.
+- Do NOT join on WIP Col H (Tower Type). Join on WIP Col J (Alias).
+- Do NOT forward-fill the project code anywhere (Col B is fully populated on TLT rows).
+- Do NOT treat "Z" and "completed" as the same thing.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK (verified expected values, current files)
+=====================================================================
+Structure counts after excluding completed:
+    Bucket B: 246 (39 excluded)   Bucket C: 487 (942 excluded)   Bucket D: 258 (916 excluded)
+
+MFC Batch breakdown (structures | Release Balance | Fab+Galva | Yard, MT):
+
+  Bucket B — 246 structures
+      A:   39 |  312.498 | 1633.530 |  555.238
+      B:   43 |  448.013 | 1433.847 |  745.655
+      C:   40 |  745.958 |  965.596 |  166.738
+      D:   21 |   63.025 |   38.063 |    2.520
+      Z:  103 | 1042.142 |  194.549 | 1933.275
+
+  Bucket C — 487 structures  (Release Balance clamps to 0 by design)
+      A:  129 |    0.000 |  359.669 |  909.154
+      B:  137 |    0.000 |  877.768 | 2420.610
+      C:   33 |    0.000 |  238.914 |   51.986
+      D:    3 |    0.000 |    2.697 |    0.573
+      Z:  185 |    0.000 |  478.300 | 2888.453
+
+  Bucket D — 258 structures
+      A:   67 |  228.823 |  748.322 | 1069.473
+      B:   82 |   24.723 |  780.915 | 2697.728
+      C:    5 |   11.251 |   22.731 |    0.000
+      Z:  104 |  195.824 |  265.340 | 4608.665
+
+Also verify:
+- Every bucket row has an MFC Batch value in {A,B,C,D,Z} — none blank/null.
+- No completed (no-WIP-mark) structure appears in any bucket; the excluded count is shown.
+- The In-house / Out-vendor split still works alongside the new column.
+- Structure 920/3LISO (the only 2-real-batch case) resolves deterministically without error.
+Report: the three bucket structure counts, the MFC breakdown per bucket, and the excluded
+completed counts.

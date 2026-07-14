@@ -77,6 +77,8 @@ export interface InventoryStructureCard {
   contractors: string[];
   notInLatest: boolean;
   mixed: boolean;
+  /** MFC Batch letter (A/B/C/D) or "Z" (= not yet batched). Never null. */
+  mfcBatch: string;
 }
 
 // Release Balance display value (Col S). Bucket B shows the raw value (always
@@ -133,6 +135,8 @@ export interface InventoryBuckets {
   d: BucketSides;
   excludedNullReleaseCount: number;
   excludedNullInspectionCount: number;
+  /** Structures excluded because they have no WIP marks (production complete). */
+  excludedCompletedCount: number;
 }
 
 function toCard(
@@ -155,6 +159,7 @@ function toCard(
       contractors: row.contractors,
       notInLatest: row.notInLatest,
       mixed: sides.mixed,
+      mfcBatch: row.mfcBatch,
     },
     sides,
   };
@@ -178,7 +183,8 @@ export function splitBySide(
 // independently per bucket (a row can land in both B/C is impossible since
 // they partition on sign, but D is independent of B/C so overlap with either
 // is expected and allowed). Null-driving-field rows are excluded from that
-// bucket and counted so the page can flag them.
+// bucket and counted so the page can flag them. Rows with hasWipMarks=false
+// are excluded entirely (production complete; dropped out of the WIP file).
 export function computeAutoBuckets(
   rows: InventoryBucketRow[],
   map: Map<string, ContractorCategoryInfo>,
@@ -188,8 +194,14 @@ export function computeAutoBuckets(
   const d: { card: InventoryStructureCard; sides: StructureSides }[] = [];
   let excludedNullReleaseCount = 0;
   let excludedNullInspectionCount = 0;
+  let excludedCompletedCount = 0;
 
   for (const row of rows) {
+    // Exclude structures with no WIP marks — production is complete.
+    if (!row.hasWipMarks) {
+      excludedCompletedCount++;
+      continue;
+    }
     const built = toCard(row, map);
     if (row.fileBalReleaseMt == null) {
       excludedNullReleaseCount++;
@@ -211,6 +223,7 @@ export function computeAutoBuckets(
     d: splitBySide(d),
     excludedNullReleaseCount,
     excludedNullInspectionCount,
+    excludedCompletedCount,
   };
 }
 

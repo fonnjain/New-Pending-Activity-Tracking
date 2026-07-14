@@ -215,6 +215,9 @@ function ProjectRow({
                 {r.subType && (
                   <span className="text-muted-foreground shrink-0">({r.subType})</span>
                 )}
+                <span className="shrink-0 text-[10px] font-medium px-1 py-px rounded border border-border/60 text-muted-foreground">
+                  {r.mfcBatch}
+                </span>
                 {r.mixed && (
                   <span className="text-amber-600 dark:text-amber-400 shrink-0">(mixed)</span>
                 )}
@@ -643,6 +646,7 @@ export default function InventoryView() {
       const row: Record<string, string | number | null> = {
         side: SIDE_LABELS[side],
         project: r.project,
+        mfcBatch: r.mfcBatch,
         structure: r.structure ?? "",
         subType: r.subType ?? "",
         mixed: r.mixed ? "Yes" : "",
@@ -696,6 +700,7 @@ export default function InventoryView() {
     const baseColumns = [
       { label: "Side", field: "side" },
       { label: "Project", field: "project" },
+      { label: "MFC Batch", field: "mfcBatch" },
     ];
     const dataColumns = columns.map((c) => ({
       label: c.label,
@@ -770,6 +775,7 @@ export default function InventoryView() {
     // Helper: block columns without the "Side" column (side is the band label).
     const blockCols = (cols: ColumnDef[]) => [
       { label: "Project", field: "project" },
+      { label: "MFC Batch", field: "mfcBatch" },
       ...cols.map((c) => ({ label: c.label, field: c.key, numeric: true, decimals: 3, total: true })),
     ];
 
@@ -906,6 +912,13 @@ export default function InventoryView() {
             </span>
           </CardContent>
         </Card>
+      )}
+
+      {available && buckets.excludedCompletedCount > 0 && (
+        <div className="text-xs text-muted-foreground px-1">
+          {buckets.excludedCompletedCount} completed structure
+          {buckets.excludedCompletedCount === 1 ? "" : "s"} excluded (no remaining WIP marks).
+        </div>
       )}
 
       {available && (buckets.excludedNullReleaseCount > 0 || buckets.excludedNullInspectionCount > 0) && (

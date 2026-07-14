@@ -30,4 +30,10 @@ export interface InventoryBucketRow {
   contractors: string[];
   /** True when this row was last touched by an earlier Order Review upload, not the newest one. */
   notInLatest: boolean;
+  /** True when this (project, structure) has at least one mark in the latest WIP import with Order Nature = Structure. False means all production is finished and the structure has dropped out of the WIP file — these rows are excluded from Buckets B/C/D by the client.
+   */
+  hasWipMarks: boolean;
+  /** MFC Batch letter (A/B/C/D) resolved from the structure's WIP marks (the batch with the greatest cumulative Balance Weight wins when multiple real batches appear on one structure). "Z" when all marks have blank/no batch, meaning the structure is live but not yet assigned to a batch.
+   */
+  mfcBatch: string;
 }
