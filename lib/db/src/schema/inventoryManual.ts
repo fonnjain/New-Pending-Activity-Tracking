@@ -39,6 +39,10 @@ export type InventoryManualARow = typeof inventoryManualATable.$inferSelect;
 export const inventoryManualETable = pgTable("inventory_manual_e", {
   id: serial("id").primaryKey(),
   projectCode: text("project_code").notNull(),
+  // MFC Batch letter (A/B/C/D) or "Z" (= not yet batched). Governs which
+  // structures are removed from Buckets C and D when this E entry is active.
+  // Default "Z" handles any pre-migration rows.
+  mfcBatch: text("mfc_batch").notNull().default("Z"),
   side: text("side").notNull(),
   note: text("note"),
   createdAt: timestamp("created_at", { withTimezone: true })

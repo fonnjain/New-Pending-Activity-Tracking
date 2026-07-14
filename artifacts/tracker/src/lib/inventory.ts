@@ -137,6 +137,10 @@ export interface InventoryBuckets {
   excludedNullInspectionCount: number;
   /** Structures excluded because they have no WIP marks (production complete). */
   excludedCompletedCount: number;
+  /** Structures removed from C because a matching Bucket E entry (project+mfcBatch) exists. */
+  eRemovedFromCCount: number;
+  /** Structures removed from D because a matching Bucket E entry (project+mfcBatch) exists. */
+  eRemovedFromDCount: number;
 }
 
 function toCard(
@@ -185,9 +189,14 @@ export function splitBySide(
 // is expected and allowed). Null-driving-field rows are excluded from that
 // bucket and counted so the page can flag them. Rows with hasWipMarks=false
 // are excluded entirely (production complete; dropped out of the WIP file).
+//
+// eExcludeKeys: `${project}\u0001${mfcBatch}` keys from active Bucket E entries.
+// When a row matches a key: it is REMOVED from C and D (NOT from B — B = Raw
+// Material Incomplete and must always stay visible regardless of E entries).
 export function computeAutoBuckets(
   rows: InventoryBucketRow[],
   map: Map<string, ContractorCategoryInfo>,
+  eExcludeKeys?: Set<string>,
 ): InventoryBuckets {
   const b: { card: InventoryStructureCard; sides: StructureSides }[] = [];
   const c: { card: InventoryStructureCard; sides: StructureSides }[] = [];
@@ -195,6 +204,8 @@ export function computeAutoBuckets(
   let excludedNullReleaseCount = 0;
   let excludedNullInspectionCount = 0;
   let excludedCompletedCount = 0;
+  let eRemovedFromCCount = 0;
+  let eRemovedFromDCount = 0;
 
   for (const row of rows) {
     // Exclude structures with no WIP marks — production is complete.
@@ -202,18 +213,35 @@ export function computeAutoBuckets(
       excludedCompletedCount++;
       continue;
     }
+    // Check if an E entry covers this (project, mfcBatch) — suppresses C & D.
+    const eKey = `${row.project}\u0001${row.mfcBatch}`;
+    const suppressedByE = eExcludeKeys?.has(eKey) ?? false;
+
     const built = toCard(row, map);
+
+    // B is NEVER suppressed by E.
     if (row.fileBalReleaseMt == null) {
       excludedNullReleaseCount++;
     } else if (row.fileBalReleaseMt > 0) {
       b.push(built);
     } else {
-      c.push(built);
+      // fileBalReleaseMt <= 0 → eligible for C
+      if (suppressedByE) {
+        eRemovedFromCCount++;
+      } else {
+        c.push(built);
+      }
     }
+
+    // D is independent of B/C membership — check inspectionMt separately.
     if (row.inspectionMt == null) {
       excludedNullInspectionCount++;
     } else if (row.inspectionMt > 0) {
-      d.push(built);
+      if (suppressedByE) {
+        eRemovedFromDCount++;
+      } else {
+        d.push(built);
+      }
     }
   }
 
@@ -224,6 +252,8 @@ export function computeAutoBuckets(
     excludedNullReleaseCount,
     excludedNullInspectionCount,
     excludedCompletedCount,
+    eRemovedFromCCount,
+    eRemovedFromDCount,
   };
 }
 
@@ -235,15 +265,19 @@ export interface ProjectAggregate {
 }
 
 // Bucket E aggregation: sum the clamped Release Balance / Fab+Galva / Yard
-// data columns across ALL of a project's structures in the latest Order
-// Review (not side-filtered — E aggregates the whole project regardless of
-// which contractors touch it). Null-only columns across every structure
-// render as null ("-"); otherwise nulls contribute 0 per-structure.
+// data columns across the structures in the latest Order Review that belong
+// to the given project (and, when mfcBatch is supplied, to that MFC Batch
+// only). Not side-filtered — E aggregates regardless of which contractors
+// touch a structure. Null-only columns render as null ("-"); otherwise nulls
+// contribute 0 per-structure.
 export function aggregateProjectColumns(
   rows: InventoryBucketRow[],
   project: string,
+  mfcBatch?: string,
 ): ProjectAggregate {
-  const projectRows = rows.filter((r) => r.project === project);
+  const projectRows = rows.filter(
+    (r) => r.project === project && (mfcBatch == null || r.mfcBatch === mfcBatch),
+  );
   if (projectRows.length === 0) {
     return { releaseBalanceMt: null, fabGalvaMt: null, yardMt: null, structureCount: 0 };
   }
@@ -315,6 +349,12 @@ export interface InventoryPageData {
   buckets: InventoryBuckets;
   manualA: InventoryManualEntry[];
   manualE: InventoryManualEntry[];
+  /**
+   * Per-project MFC batch options derived from the latest WIP import.
+   * Only batches that actually appear in a project's WIP structures are
+   * included. Sorted A/B/C/D first, then Z (= not yet batched).
+   */
+  projectMfcBatches: Map<string, string[]>;
 }
 
 // Shared read hook for the Inventory page: raw joined rows + the two manual
@@ -329,9 +369,42 @@ export function useInventoryData(): InventoryPageData {
   const contractorMap = useContractorCategoryMap();
 
   const rawRows = bucketsData?.rows ?? [];
+
+  // Build per-project MFC batch options from the current WIP snapshot.
+  // Completed structures (no WIP marks) are excluded — they can't be "ready
+  // but not dispatched". Batches are sorted A/B/C/D before Z.
+  const projectMfcBatches = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const r of rawRows) {
+      if (!r.hasWipMarks) continue;
+      if (!map.has(r.project)) map.set(r.project, []);
+      const batches = map.get(r.project)!;
+      if (!batches.includes(r.mfcBatch)) batches.push(r.mfcBatch);
+    }
+    for (const [, batches] of map) {
+      batches.sort((a, b) => {
+        if (a === "Z") return 1;
+        if (b === "Z") return -1;
+        return a.localeCompare(b);
+      });
+    }
+    return map;
+  }, [rawRows]);
+
+  // Build the exclusion key set from active E entries so computeAutoBuckets
+  // can suppress matching structures from C and D (never from B).
+  const eExcludeKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of (manualE ?? [])) {
+      const batch = e.mfcBatch ?? "Z";
+      set.add(`${e.projectCode}\u0001${batch}`);
+    }
+    return set;
+  }, [manualE]);
+
   const buckets = useMemo(
-    () => computeAutoBuckets(rawRows, contractorMap),
-    [rawRows, contractorMap],
+    () => computeAutoBuckets(rawRows, contractorMap, eExcludeKeys),
+    [rawRows, contractorMap, eExcludeKeys],
   );
 
   return {
@@ -342,6 +415,7 @@ export function useInventoryData(): InventoryPageData {
     buckets,
     manualA: manualA ?? [],
     manualE: manualE ?? [],
+    projectMfcBatches,
   };
 }
 

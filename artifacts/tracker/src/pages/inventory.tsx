@@ -251,6 +251,7 @@ function ManualEntryList({
   deletingId,
   rawRows,
   showWeight,
+  projectMfcBatches,
 }: {
   entries: InventoryManualEntry[];
   onDelete: (id: number) => void;
@@ -258,6 +259,7 @@ function ManualEntryList({
   deletingId: number | null;
   rawRows?: Parameters<typeof aggregateProjectColumns>[0];
   showWeight?: boolean;
+  projectMfcBatches?: Map<string, string[]>;
 }) {
   if (entries.length === 0) {
     return <div className="py-4 text-center text-xs text-muted-foreground">No entries.</div>;
@@ -265,11 +267,27 @@ function ManualEntryList({
   return (
     <div className="divide-y">
       {entries.map((e) => {
-        const agg = rawRows ? aggregateProjectColumns(rawRows, e.projectCode) : null;
+        const batch = e.mfcBatch ?? null;
+        const agg = rawRows
+          ? aggregateProjectColumns(rawRows, e.projectCode, batch ?? undefined)
+          : null;
+        // Flag entries whose batch no longer appears in the project's current WIP.
+        const stale =
+          batch != null &&
+          projectMfcBatches != null &&
+          !projectMfcBatches.get(e.projectCode)?.includes(batch);
         return (
           <div key={e.id} className="flex flex-col gap-1 px-3 py-1.5 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="truncate">{e.projectCode}</span>
+            <div className="flex items-center justify-between gap-1">
+              <span className="flex items-center gap-1.5 min-w-0 truncate">
+                <span className="truncate">{e.projectCode}</span>
+                {batch && (
+                  <span className={`shrink-0 text-[10px] font-medium px-1 py-px rounded border ${stale ? "border-amber-500/60 text-amber-600 dark:text-amber-400" : "border-border/60 text-muted-foreground"}`}>
+                    {batch}
+                    {stale && " (not in WIP)"}
+                  </span>
+                )}
+              </span>
               <div className="flex items-center gap-2 shrink-0">
                 {showWeight && (
                   <span className="text-xs tabular-nums text-muted-foreground">
@@ -320,6 +338,7 @@ function ManualBucketSide({
   rawRows,
   showWeight,
   summary,
+  projectMfcBatches,
 }: {
   side: InventorySide;
   entries: InventoryManualEntry[];
@@ -329,6 +348,7 @@ function ManualBucketSide({
   rawRows?: Parameters<typeof aggregateProjectColumns>[0];
   showWeight?: boolean;
   summary?: BucketSummary;
+  projectMfcBatches?: Map<string, string[]>;
 }) {
   const filtered = entries.filter((e) => e.side === side);
   return (
@@ -348,6 +368,7 @@ function ManualBucketSide({
         deletingId={deletingId}
         rawRows={rawRows}
         showWeight={showWeight}
+        projectMfcBatches={projectMfcBatches}
       />
       {summary && <SummaryFooter summary={summary} />}
     </div>
@@ -435,26 +456,47 @@ function ProjectCheckboxFilter({
 function ManualAddForm({
   mode,
   knownProjects,
+  projectMfcBatches,
   onAdd,
   isPending,
 }: {
   mode: "a" | "e";
   knownProjects: string[];
-  onAdd: (projectCode: string, side: InventorySide, woOrderQtyMt: number | null) => void;
+  /** Per-project batch lists for the cascading MFC dropdown (mode "e" only). */
+  projectMfcBatches?: Map<string, string[]>;
+  onAdd: (projectCode: string, side: InventorySide, woOrderQtyMt: number | null, mfcBatch?: string) => void;
   isPending: boolean;
 }) {
   const [projectCode, setProjectCode] = useState("");
+  const [mfcBatch, setMfcBatch] = useState("");
   const [side, setSide] = useState<InventorySide>("in_house");
   const [woOrderQtyMt, setWoOrderQtyMt] = useState<number | "">("");
+
+  // Reset MFC batch whenever the project changes.
+  const handleProjectChange = (v: string | null) => {
+    setProjectCode(v ?? "");
+    setMfcBatch("");
+  };
+
+  const batchOptions = mode === "e" && projectCode
+    ? (projectMfcBatches?.get(projectCode) ?? [])
+    : [];
 
   const submit = () => {
     const code = projectCode.trim();
     if (!code) return;
     if (mode === "a" && woOrderQtyMt === "") return;
-    onAdd(code, side, mode === "a" ? (woOrderQtyMt as number) : null);
+    if (mode === "e" && !mfcBatch) return;
+    onAdd(code, side, mode === "a" ? (woOrderQtyMt as number) : null, mode === "e" ? mfcBatch : undefined);
     setProjectCode("");
+    setMfcBatch("");
     setWoOrderQtyMt("");
   };
+
+  const canSubmit =
+    !!projectCode.trim() &&
+    (mode === "a" ? woOrderQtyMt !== "" : !!mfcBatch) &&
+    !isPending;
 
   return (
     <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b">
@@ -474,14 +516,25 @@ function ManualAddForm({
           />
         </>
       ) : (
-        <div className="w-52">
-          <SearchableSelect
-            value={projectCode || null}
-            onChange={(v) => setProjectCode(v ?? "")}
-            options={knownProjects}
-            allLabel="Select project..."
-          />
-        </div>
+        <>
+          <div className="w-44">
+            <SearchableSelect
+              value={projectCode || null}
+              onChange={handleProjectChange}
+              options={knownProjects}
+              allLabel="Select project..."
+            />
+          </div>
+          <div className="w-36">
+            <SearchableSelect
+              value={mfcBatch || null}
+              onChange={(v) => setMfcBatch(v ?? "")}
+              options={batchOptions}
+              allLabel={projectCode ? "Select batch..." : "Select project first"}
+              disabled={!projectCode || batchOptions.length === 0}
+            />
+          </div>
+        </>
       )}
       <Segmented
         value={side}
@@ -494,7 +547,7 @@ function ManualAddForm({
       <Button
         size="sm"
         className="h-8"
-        disabled={!projectCode.trim() || (mode === "a" && woOrderQtyMt === "") || isPending}
+        disabled={!canSubmit}
         onClick={submit}
       >
         Add
@@ -506,7 +559,7 @@ function ManualAddForm({
 export default function InventoryView() {
   const { filters } = useTracker();
   const queryClient = useQueryClient();
-  const { available, asOnDate, isLoading, rawRows, buckets, manualA, manualE } = useInventoryData();
+  const { available, asOnDate, isLoading, rawRows, buckets, manualA, manualE, projectMfcBatches } = useInventoryData();
   const { data: authStatus } = useGetAuthStatus();
   const canEdit = !!authStatus?.authenticated;
 
@@ -590,14 +643,14 @@ export default function InventoryView() {
       },
     );
   };
-  const addE = (projectCode: string, side: InventorySide) => {
+  const addE = (projectCode: string, side: InventorySide, mfcBatch: string) => {
     upsertE.mutate(
-      { data: { projectCode, side } },
+      { data: { projectCode, side, mfcBatch } },
       { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListInventoryManualEQueryKey() }) },
     );
   };
-  const addESlot = (projectCode: string, side: InventorySide, _woOrderQtyMt: number | null) =>
-    addE(projectCode, side);
+  const addESlot = (projectCode: string, side: InventorySide, _woOrderQtyMt: number | null, mfcBatch?: string) =>
+    addE(projectCode, side, mfcBatch ?? "Z");
 
   const manualAWeightSum = manualA.reduce((s, e) => s + (e.woOrderQtyMt ?? 0), 0);
   const manualEInHouseSummary = useMemo(
@@ -605,7 +658,7 @@ export default function InventoryView() {
       computeManualESummary(
         manualE
           .filter((e) => e.side === "in_house")
-          .map((e) => aggregateProjectColumns(rawRows, e.projectCode)),
+          .map((e) => aggregateProjectColumns(rawRows, e.projectCode, e.mfcBatch ?? undefined)),
       ),
     [manualE, rawRows],
   );
@@ -614,7 +667,7 @@ export default function InventoryView() {
       computeManualESummary(
         manualE
           .filter((e) => e.side === "out_vendor")
-          .map((e) => aggregateProjectColumns(rawRows, e.projectCode)),
+          .map((e) => aggregateProjectColumns(rawRows, e.projectCode, e.mfcBatch ?? undefined)),
       ),
     [manualE, rawRows],
   );
@@ -727,10 +780,12 @@ export default function InventoryView() {
 
   const manualBucketRows = (entries: InventoryManualEntry[], includeAgg: boolean) =>
     entries.map((e) => {
-      const agg = includeAgg ? aggregateProjectColumns(rawRows, e.projectCode) : null;
+      const batch = e.mfcBatch ?? undefined;
+      const agg = includeAgg ? aggregateProjectColumns(rawRows, e.projectCode, batch) : null;
       return {
         side: SIDE_LABELS[e.side as InventorySide],
         project: e.projectCode,
+        mfcBatch: batch ?? "",
         woOrderQtyMt: e.woOrderQtyMt,
         note: e.note ?? "",
         releaseBalanceMt: agg?.releaseBalanceMt ?? null,
@@ -763,6 +818,7 @@ export default function InventoryView() {
         columns: [
           { label: "Side", field: "side" },
           { label: "Project", field: "project" },
+          { label: "MFC Batch", field: "mfcBatch" },
           { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
           { label: "Fab+Galva (MT)", field: "fabGalvaMt", numeric: true, decimals: 3, total: true },
           { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
@@ -1023,11 +1079,11 @@ export default function InventoryView() {
         </CardHeader>
         <CardContent className="space-y-3">
           {canEdit && (
-            <ManualAddForm mode="e" knownProjects={knownProjects} onAdd={addESlot} isPending={upsertE.isPending} />
+            <ManualAddForm mode="e" knownProjects={knownProjects} projectMfcBatches={projectMfcBatches} onAdd={addESlot} isPending={upsertE.isPending} />
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <ManualBucketSide side="in_house" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} rawRows={rawRows} summary={manualEInHouseSummary} />
-            <ManualBucketSide side="out_vendor" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} rawRows={rawRows} summary={manualEOutVendorSummary} />
+            <ManualBucketSide side="in_house" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} rawRows={rawRows} summary={manualEInHouseSummary} projectMfcBatches={projectMfcBatches} />
+            <ManualBucketSide side="out_vendor" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} rawRows={rawRows} summary={manualEOutVendorSummary} projectMfcBatches={projectMfcBatches} />
           </div>
         </CardContent>
       </Card>

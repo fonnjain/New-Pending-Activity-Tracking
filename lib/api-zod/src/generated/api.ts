@@ -1895,6 +1895,7 @@ export const GetInventoryBucketsResponse = zod.object({
 export const ListInventoryManualAResponseItem = zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
+  "mfcBatch": zod.string().nullable().describe('Bucket E only -- MFC Batch letter (A\/B\/C\/D) or \"Z\" (not yet batched). Governs which structures are removed from Buckets C and D. Always null for Bucket A entries.'),
   "woOrderQtyMt": zod.number().nullable().describe('Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries.'),
   "side": zod.enum(['in_house', 'out_vendor']),
   "note": zod.string().nullable(),
@@ -1911,6 +1912,7 @@ export const ListInventoryManualAResponse = zod.array(ListInventoryManualARespon
 export const UpsertInventoryManualABody = zod.object({
   "id": zod.number().optional().describe('Omit to insert a new entry; supply to update an existing one.'),
   "projectCode": zod.string(),
+  "mfcBatch": zod.string().nullish().describe('Bucket E only -- MFC Batch letter (A\/B\/C\/D) or \"Z\". Omit or null for Bucket A entries.'),
   "woOrderQtyMt": zod.number().nullish().describe('Bucket A only -- manually typed Work Order Qty weight (MT). Ignored for Bucket E entries.'),
   "side": zod.enum(['in_house', 'out_vendor']),
   "note": zod.string().nullish()
@@ -1919,6 +1921,7 @@ export const UpsertInventoryManualABody = zod.object({
 export const UpsertInventoryManualAResponse = zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
+  "mfcBatch": zod.string().nullable().describe('Bucket E only -- MFC Batch letter (A\/B\/C\/D) or \"Z\" (not yet batched). Governs which structures are removed from Buckets C and D. Always null for Bucket A entries.'),
   "woOrderQtyMt": zod.number().nullable().describe('Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries.'),
   "side": zod.enum(['in_house', 'out_vendor']),
   "note": zod.string().nullable(),
@@ -1944,6 +1947,7 @@ export const DeleteInventoryManualAQueryParams = zod.object({
 export const ListInventoryManualEResponseItem = zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
+  "mfcBatch": zod.string().nullable().describe('Bucket E only -- MFC Batch letter (A\/B\/C\/D) or \"Z\" (not yet batched). Governs which structures are removed from Buckets C and D. Always null for Bucket A entries.'),
   "woOrderQtyMt": zod.number().nullable().describe('Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries.'),
   "side": zod.enum(['in_house', 'out_vendor']),
   "note": zod.string().nullable(),
@@ -1960,6 +1964,7 @@ export const ListInventoryManualEResponse = zod.array(ListInventoryManualERespon
 export const UpsertInventoryManualEBody = zod.object({
   "id": zod.number().optional().describe('Omit to insert a new entry; supply to update an existing one.'),
   "projectCode": zod.string(),
+  "mfcBatch": zod.string().nullish().describe('Bucket E only -- MFC Batch letter (A\/B\/C\/D) or \"Z\". Omit or null for Bucket A entries.'),
   "woOrderQtyMt": zod.number().nullish().describe('Bucket A only -- manually typed Work Order Qty weight (MT). Ignored for Bucket E entries.'),
   "side": zod.enum(['in_house', 'out_vendor']),
   "note": zod.string().nullish()
@@ -1968,6 +1973,7 @@ export const UpsertInventoryManualEBody = zod.object({
 export const UpsertInventoryManualEResponse = zod.object({
   "id": zod.number(),
   "projectCode": zod.string(),
+  "mfcBatch": zod.string().nullable().describe('Bucket E only -- MFC Batch letter (A\/B\/C\/D) or \"Z\" (not yet batched). Governs which structures are removed from Buckets C and D. Always null for Bucket A entries.'),
   "woOrderQtyMt": zod.number().nullable().describe('Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries.'),
   "side": zod.enum(['in_house', 'out_vendor']),
   "note": zod.string().nullable(),

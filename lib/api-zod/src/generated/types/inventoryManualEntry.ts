@@ -14,6 +14,8 @@ import type { InventoryManualEntrySide } from './inventoryManualEntrySide';
 export interface InventoryManualEntry {
   id: number;
   projectCode: string;
+  /** Bucket E only -- MFC Batch letter (A/B/C/D) or "Z" (not yet batched). Governs which structures are removed from Buckets C and D. Always null for Bucket A entries. */
+  mfcBatch: string | null;
   /** Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries. */
   woOrderQtyMt: number | null;
   side: InventoryManualEntrySide;

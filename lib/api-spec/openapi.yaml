@@ -3181,6 +3181,10 @@ components:
           type: integer
         projectCode:
           type: string
+        mfcBatch:
+          type: string
+          nullable: true
+          description: Bucket E only -- MFC Batch letter (A/B/C/D) or "Z" (not yet batched). Governs which structures are removed from Buckets C and D. Always null for Bucket A entries.
         woOrderQtyMt:
           type: number
           nullable: true
@@ -3196,6 +3200,7 @@ components:
       required:
         - id
         - projectCode
+        - mfcBatch
         - woOrderQtyMt
         - side
         - note
@@ -3208,6 +3213,10 @@ components:
           description: Omit to insert a new entry; supply to update an existing one.
         projectCode:
           type: string
+        mfcBatch:
+          type: string
+          nullable: true
+          description: Bucket E only -- MFC Batch letter (A/B/C/D) or "Z". Omit or null for Bucket A entries.
         woOrderQtyMt:
           type: number
           nullable: true

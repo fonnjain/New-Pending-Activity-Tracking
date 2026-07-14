@@ -11,6 +11,8 @@ export interface InventoryManualEntryInput {
   /** Omit to insert a new entry; supply to update an existing one. */
   id?: number;
   projectCode: string;
+  /** Bucket E only -- MFC Batch letter (A/B/C/D) or "Z". Omit or null for Bucket A entries. */
+  mfcBatch?: string | null;
   /** Bucket A only -- manually typed Work Order Qty weight (MT). Ignored for Bucket E entries. */
   woOrderQtyMt?: number | null;
   side: InventoryManualEntryInputSide;

@@ -244,6 +244,7 @@ router.put("/inventory-manual/e", requireAuth, async (req, res): Promise<void> =
   }
   const values = {
     projectCode,
+    mfcBatch: (parsed.data.mfcBatch ?? "Z").trim().toUpperCase() || "Z",
     side: parsed.data.side,
     note: parsed.data.note ?? null,
   };
