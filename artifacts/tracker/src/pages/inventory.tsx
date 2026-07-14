@@ -67,6 +67,23 @@ function groupByProject(rows: InventoryStructureCard[]): ProjectGroup[] {
   return Array.from(map.values()).sort((a, b) => a.project.localeCompare(b.project));
 }
 
+function groupByMfcBatch(
+  rows: InventoryStructureCard[],
+): { mfcBatch: string; rows: InventoryStructureCard[] }[] {
+  const map = new Map<string, InventoryStructureCard[]>();
+  for (const r of rows) {
+    if (!map.has(r.mfcBatch)) map.set(r.mfcBatch, []);
+    map.get(r.mfcBatch)!.push(r);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => {
+      if (a === "Z") return 1;
+      if (b === "Z") return -1;
+      return a.localeCompare(b);
+    })
+    .map(([mfcBatch, bRows]) => ({ mfcBatch, rows: bRows }));
+}
+
 // Per-bucket data column definitions (spec-mandated). B shows the raw Release
 // Balance (always > 0 there) + a combined Fab+Galva; C/D show the CLAMPED
 // Release Balance (display-only; never affects bucket membership) + Fab and
@@ -131,13 +148,16 @@ function AutoBucketSide({
   rows,
   columns,
   clampRelease,
+  groupByMfc,
 }: {
   side: InventorySide;
   rows: InventoryStructureCard[];
   columns: ColumnDef[];
   clampRelease: boolean;
+  groupByMfc: boolean;
 }) {
   const groups = useMemo(() => groupByProject(rows), [rows]);
+  const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
   const totalWeight = groups.reduce((s, g) => s + g.weightMt, 0);
   const totalCount = groups.reduce((s, g) => s + g.count, 0);
   const summary = useMemo(() => computeBucketSummary(rows, clampRelease), [rows, clampRelease]);
@@ -153,10 +173,14 @@ function AutoBucketSide({
         </span>
       </div>
       <div className="max-h-96 overflow-auto divide-y">
-        {groups.length === 0 ? (
+        {rows.length === 0 ? (
           <div className="py-6 text-center text-xs text-muted-foreground">
             No structures.
           </div>
+        ) : groupByMfc ? (
+          mfcGroups.map(({ mfcBatch, rows: mfcRows }) => (
+            <MfcTopRow key={mfcBatch} mfcBatch={mfcBatch} rows={mfcRows} columns={columns} />
+          ))
         ) : (
           groups.map((g) => (
             <ProjectRow key={g.project} group={g} columns={columns} />
@@ -176,6 +200,7 @@ function ProjectRow({
   columns: ColumnDef[];
 }) {
   const [open, setOpen] = useState(false);
+  const mfcGroups = useMemo(() => groupByMfcBatch(group.rows), [group.rows]);
   return (
     <div>
       <button
@@ -190,8 +215,8 @@ function ProjectRow({
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           )}
           <span className="font-medium truncate">{group.project}</span>
-          <span className="text-[10px] uppercase text-muted-foreground shrink-0">
-            {group.count}
+          <span className="text-[10px] text-muted-foreground shrink-0">
+            {group.count} str
           </span>
         </span>
         <span className="flex items-center gap-3 shrink-0">
@@ -204,32 +229,88 @@ function ProjectRow({
         </span>
       </button>
       {open && (
-        <div className="pl-6 pb-1">
-          {group.rows.map((r) => (
+        <div className="pl-6 pb-0.5">
+          {mfcGroups.map(({ mfcBatch, rows: mfcRows }) => (
             <div
-              key={`${r.project}-${r.structure}`}
+              key={mfcBatch}
               className="flex items-center justify-between gap-2 px-2 py-1 text-xs border-t first:border-t-0"
             >
               <span className="flex items-center gap-1.5 min-w-0">
-                <span className="truncate">{r.structure ?? "-"}</span>
-                {r.subType && (
-                  <span className="text-muted-foreground shrink-0">({r.subType})</span>
-                )}
                 <span className="shrink-0 text-[10px] font-medium px-1 py-px rounded border border-border/60 text-muted-foreground">
-                  {r.mfcBatch}
+                  {mfcBatch}
                 </span>
-                {r.mixed && (
-                  <span className="text-amber-600 dark:text-amber-400 shrink-0">(mixed)</span>
-                )}
-                {r.notInLatest && (
-                  <span className="text-rose-600 dark:text-rose-400 shrink-0">not in latest</span>
-                )}
+                <span className="text-muted-foreground shrink-0">{mfcRows.length} str</span>
               </span>
               <span className="flex items-center gap-3 shrink-0">
                 {columns.map((col) => (
                   <span key={col.key} className="tabular-nums text-right">
                     <span className="text-muted-foreground mr-1">{col.label}</span>
-                    {mt(col.get(r))}
+                    {mt(sumColumnOrNull(mfcRows, col.get))}
+                  </span>
+                ))}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MfcTopRow({
+  mfcBatch,
+  rows,
+  columns,
+}: {
+  mfcBatch: string;
+  rows: InventoryStructureCard[];
+  columns: ColumnDef[];
+}) {
+  const [open, setOpen] = useState(false);
+  const projectGroups = useMemo(() => groupByProject(rows), [rows]);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-muted/30 gap-2"
+      >
+        <span className="flex items-center gap-1.5 min-w-0">
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          )}
+          <span className="font-medium shrink-0">MFC {mfcBatch}</span>
+          <span className="text-[10px] text-muted-foreground shrink-0">
+            {projectGroups.length} proj · {rows.length} str
+          </span>
+        </span>
+        <span className="flex items-center gap-3 shrink-0">
+          {columns.map((col) => (
+            <span key={col.key} className="text-[11px] tabular-nums text-right">
+              <span className="text-muted-foreground mr-1">{col.label}</span>
+              {mt(sumColumnOrNull(rows, col.get))}
+            </span>
+          ))}
+        </span>
+      </button>
+      {open && (
+        <div className="pl-6 pb-0.5">
+          {projectGroups.map((g) => (
+            <div
+              key={g.project}
+              className="flex items-center justify-between gap-2 px-2 py-1 text-xs border-t first:border-t-0"
+            >
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="font-medium truncate">{g.project}</span>
+                <span className="text-muted-foreground shrink-0">{g.count} str</span>
+              </span>
+              <span className="flex items-center gap-3 shrink-0">
+                {columns.map((col) => (
+                  <span key={col.key} className="tabular-nums text-right">
+                    <span className="text-muted-foreground mr-1">{col.label}</span>
+                    {mt(sumColumnOrNull(g.rows, col.get))}
                   </span>
                 ))}
               </span>
@@ -563,6 +644,9 @@ export default function InventoryView() {
   const { data: authStatus } = useGetAuthStatus();
   const canEdit = !!authStatus?.authenticated;
 
+  /** Controls grouping mode for Buckets B, C, D (not A or E). */
+  const [groupByMfc, setGroupByMfc] = useState(false);
+
   const jobFilter = filters.job;
   const isCurrentJobs = jobFilter === CURRENT_JOBS_FILTER_VALUE;
   const { set: currentJobsSet, meta: currentJobsMeta } = useCurrentJobsSet();
@@ -694,35 +778,30 @@ export default function InventoryView() {
     return out.filter((e) => matchesProjectSelection(e.projectCode));
   };
 
-  const structureRows = (side: InventorySide, rows: InventoryStructureCard[], columns: ColumnDef[]) =>
-    rows.map((r) => {
-      const row: Record<string, string | number | null> = {
-        side: SIDE_LABELS[side],
-        project: r.project,
-        mfcBatch: r.mfcBatch,
-        structure: r.structure ?? "",
-        subType: r.subType ?? "",
-        mixed: r.mixed ? "Yes" : "",
-        notInLatest: r.notInLatest ? "Yes" : "",
-      };
-      for (const col of columns) row[col.key] = col.get(r);
-      return row;
-    });
-
-  // Project-level aggregation for Excel export — one row per project, numeric
-  // columns summed across all structures in that project.
-  const projectRows = (side: InventorySide, rows: InventoryStructureCard[], columns: ColumnDef[]) => {
-    const projectMap = new Map<string, Record<string, string | number | null>>();
+  // Export grain: one row per (project, mfcBatch). sortMfcFirst=true orders
+  // MFC->Project (mirrors Group-by-MFC mode); false orders Project->MFC
+  // (mirrors Group-by-Project mode).
+  const projectMfcRows = (
+    side: InventorySide,
+    rows: InventoryStructureCard[],
+    columns: ColumnDef[],
+    sortMfcFirst: boolean,
+  ): Record<string, string | number | null>[] => {
+    const map = new Map<string, Record<string, string | number | null>>();
     for (const r of rows) {
-      const existing = projectMap.get(r.project);
+      const key = `${r.project}\u0001${r.mfcBatch}`;
+      const existing = map.get(key);
       if (!existing) {
         const row: Record<string, string | number | null> = {
           side: SIDE_LABELS[side],
           project: r.project,
+          mfcBatch: r.mfcBatch,
+          structureCount: 1,
         };
         for (const col of columns) row[col.key] = col.get(r) ?? 0;
-        projectMap.set(r.project, row);
+        map.set(key, row);
       } else {
+        (existing.structureCount as number) += 1;
         for (const col of columns) {
           const val = col.get(r);
           if (val !== null) {
@@ -731,7 +810,31 @@ export default function InventoryView() {
         }
       }
     }
-    return [...projectMap.values()];
+    const result = [...map.values()];
+    if (sortMfcFirst) {
+      result.sort((a, b) => {
+        const ma = a.mfcBatch as string;
+        const mb = b.mfcBatch as string;
+        if (ma === "Z" && mb !== "Z") return 1;
+        if (mb === "Z" && ma !== "Z") return -1;
+        const cmp = ma.localeCompare(mb);
+        if (cmp !== 0) return cmp;
+        return (a.project as string).localeCompare(b.project as string);
+      });
+    } else {
+      result.sort((a, b) => {
+        const pa = a.project as string;
+        const pb = b.project as string;
+        const cmp = pa.localeCompare(pb);
+        if (cmp !== 0) return cmp;
+        const ma = a.mfcBatch as string;
+        const mb = b.mfcBatch as string;
+        if (ma === "Z" && mb !== "Z") return 1;
+        if (mb === "Z" && ma !== "Z") return -1;
+        return ma.localeCompare(mb);
+      });
+    }
+    return result;
   };
 
   const summaryToRows = (label: string, summary: BucketSummary): XlsxSummaryRow[] => [
@@ -749,29 +852,42 @@ export default function InventoryView() {
     outVendor: InventoryStructureCard[],
     columns: ColumnDef[],
     clampRelease: boolean,
+    mfcFirst: boolean,
   ): XlsxSheet => {
-    const baseColumns = [
-      { label: "Side", field: "side" },
-      { label: "Project", field: "project" },
-      { label: "MFC Batch", field: "mfcBatch" },
+    // Column order mirrors the active grouping:
+    // Project-grouped → Side, Project, MFC Batch, data…, Structures
+    // MFC-grouped     → Side, MFC Batch, Project, data…, Structures
+    const baseColumns = mfcFirst
+      ? [
+          { label: "Side", field: "side" },
+          { label: "MFC Batch", field: "mfcBatch" },
+          { label: "Project", field: "project" },
+        ]
+      : [
+          { label: "Side", field: "side" },
+          { label: "Project", field: "project" },
+          { label: "MFC Batch", field: "mfcBatch" },
+        ];
+    const dataColumns = [
+      ...columns.map((c) => ({
+        label: c.label,
+        field: c.key,
+        numeric: true,
+        decimals: 3,
+        total: true,
+      })),
+      { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
     ];
-    const dataColumns = columns.map((c) => ({
-      label: c.label,
-      field: c.key,
-      numeric: true,
-      decimals: 3,
-      total: true,
-    }));
     return {
       name,
       columns: [...baseColumns, ...dataColumns],
       sections: [
         {
-          rows: projectRows("in_house", inHouse, columns),
+          rows: projectMfcRows("in_house", inHouse, columns, mfcFirst),
           summaryRows: summaryToRows("In-House", computeBucketSummary(inHouse, clampRelease)),
         },
         {
-          rows: projectRows("out_vendor", outVendor, columns),
+          rows: projectMfcRows("out_vendor", outVendor, columns, mfcFirst),
           summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(outVendor, clampRelease)),
         },
       ],
@@ -810,9 +926,9 @@ export default function InventoryView() {
         ],
         rows: manualBucketRows(filteredManualA, false),
       },
-      autoBucketSheet("B - Raw Material Incomplete", bInHouse, bOutVendor, BUCKET_B_COLUMNS, false),
-      autoBucketSheet("C - RM Complete", cInHouse, cOutVendor, BUCKET_CD_COLUMNS, true),
-      autoBucketSheet("D - Dispatch Clearance", dInHouse, dOutVendor, BUCKET_CD_COLUMNS, true),
+      autoBucketSheet("B - Raw Material Incomplete", bInHouse, bOutVendor, BUCKET_B_COLUMNS, false, groupByMfc),
+      autoBucketSheet("C - RM Complete", cInHouse, cOutVendor, BUCKET_CD_COLUMNS, true, groupByMfc),
+      autoBucketSheet("D - Dispatch Clearance", dInHouse, dOutVendor, BUCKET_CD_COLUMNS, true, groupByMfc),
       {
         name: "E - Ready Not Dispatched",
         columns: [
@@ -828,27 +944,22 @@ export default function InventoryView() {
       },
     ];
 
-    // Helper: block columns without the "Side" column (side is the band label).
+    // Combined sheet: InHouse blocks side-by-side on top, OutVendor below.
+    // B/C/D use projectMfcRows (project-first ordering in the combined sheet).
+    const allManualA = manualBucketRows(filteredManualA, false);
+    const allManualE = manualBucketRows(filteredManualE, true);
+    const aRowsIH = allManualA.filter((r) => r.side === SIDE_LABELS.in_house);
+    const aRowsOV = allManualA.filter((r) => r.side === SIDE_LABELS.out_vendor);
+    const eRowsIH = allManualE.filter((r) => r.side === SIDE_LABELS.in_house);
+    const eRowsOV = allManualE.filter((r) => r.side === SIDE_LABELS.out_vendor);
+
+    // blockCols: used in the Combined sheet; no "Side" column (side is the band label).
     const blockCols = (cols: ColumnDef[]) => [
       { label: "Project", field: "project" },
       { label: "MFC Batch", field: "mfcBatch" },
       ...cols.map((c) => ({ label: c.label, field: c.key, numeric: true, decimals: 3, total: true })),
+      { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
     ];
-
-    // Combined sheet: InHouse blocks side-by-side on top, OutVendor below.
-    // A/E manual rows filtered by side field; B/C/D use projectRows directly.
-    const aRowsIH = manualBucketRows(filteredManualA, false).filter(
-      (r) => r.side === SIDE_LABELS.in_house,
-    );
-    const aRowsOV = manualBucketRows(filteredManualA, false).filter(
-      (r) => r.side === SIDE_LABELS.out_vendor,
-    );
-    const eRowsIH = manualBucketRows(filteredManualE, true).filter(
-      (r) => r.side === SIDE_LABELS.in_house,
-    );
-    const eRowsOV = manualBucketRows(filteredManualE, true).filter(
-      (r) => r.side === SIDE_LABELS.out_vendor,
-    );
 
     const aCols: XlsxBlockGroup["columns"] = [
       { label: "Project", field: "project" },
@@ -856,6 +967,7 @@ export default function InventoryView() {
     ];
     const eCols: XlsxBlockGroup["columns"] = [
       { label: "Project", field: "project" },
+      { label: "MFC Batch", field: "mfcBatch" },
       { label: "Release Bal. (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
       { label: "Fab+Galva (MT)", field: "fabGalvaMt", numeric: true, decimals: 3, total: true },
       { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
@@ -868,19 +980,19 @@ export default function InventoryView() {
         {
           label: "B - Raw Material Incomplete",
           columns: blockCols(BUCKET_B_COLUMNS),
-          rows: projectRows("in_house", bInHouse, BUCKET_B_COLUMNS),
+          rows: projectMfcRows("in_house", bInHouse, BUCKET_B_COLUMNS, false),
           summaryRows: summaryToRows("In-House", computeBucketSummary(bInHouse, false)),
         },
         {
           label: "C - RM Complete",
           columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectRows("in_house", cInHouse, BUCKET_CD_COLUMNS),
+          rows: projectMfcRows("in_house", cInHouse, BUCKET_CD_COLUMNS, false),
           summaryRows: summaryToRows("In-House", computeBucketSummary(cInHouse, true)),
         },
         {
           label: "D - Dispatch Clearance",
           columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectRows("in_house", dInHouse, BUCKET_CD_COLUMNS),
+          rows: projectMfcRows("in_house", dInHouse, BUCKET_CD_COLUMNS, false),
           summaryRows: summaryToRows("In-House", computeBucketSummary(dInHouse, true)),
         },
         { label: "E - Ready Not Dispatched", columns: eCols, rows: eRowsIH },
@@ -890,19 +1002,19 @@ export default function InventoryView() {
         {
           label: "B - Raw Material Incomplete",
           columns: blockCols(BUCKET_B_COLUMNS),
-          rows: projectRows("out_vendor", bOutVendor, BUCKET_B_COLUMNS),
+          rows: projectMfcRows("out_vendor", bOutVendor, BUCKET_B_COLUMNS, false),
           summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(bOutVendor, false)),
         },
         {
           label: "C - RM Complete",
           columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectRows("out_vendor", cOutVendor, BUCKET_CD_COLUMNS),
+          rows: projectMfcRows("out_vendor", cOutVendor, BUCKET_CD_COLUMNS, false),
           summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(cOutVendor, true)),
         },
         {
           label: "D - Dispatch Clearance",
           columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectRows("out_vendor", dOutVendor, BUCKET_CD_COLUMNS),
+          rows: projectMfcRows("out_vendor", dOutVendor, BUCKET_CD_COLUMNS, false),
           summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(dOutVendor, true)),
         },
         { label: "E - Ready Not Dispatched", columns: eCols, rows: eRowsOV },
@@ -1021,6 +1133,20 @@ export default function InventoryView() {
         </CardContent>
       </Card>
 
+      {/* Group-by toggle for Buckets B / C / D */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Group by</span>
+        <Segmented
+          value={groupByMfc ? "mfc" : "project"}
+          onChange={(v) => setGroupByMfc(v === "mfc")}
+          options={[
+            { value: "project", label: "Project" },
+            { value: "mfc", label: "MFC Batch" },
+          ]}
+        />
+        <span className="text-xs text-muted-foreground">(applies to B, C, D)</span>
+      </div>
+
       {/* Bucket B */}
       <Card>
         <CardHeader>
@@ -1031,8 +1157,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide side="in_house" rows={bInHouse} columns={BUCKET_B_COLUMNS} clampRelease={false} />
-              <AutoBucketSide side="out_vendor" rows={bOutVendor} columns={BUCKET_B_COLUMNS} clampRelease={false} />
+              <AutoBucketSide side="in_house" rows={bInHouse} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} />
+              <AutoBucketSide side="out_vendor" rows={bOutVendor} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} />
             </div>
           )}
         </CardContent>
@@ -1048,8 +1174,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide side="in_house" rows={cInHouse} columns={BUCKET_CD_COLUMNS} clampRelease />
-              <AutoBucketSide side="out_vendor" rows={cOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease />
+              <AutoBucketSide side="in_house" rows={cInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} />
+              <AutoBucketSide side="out_vendor" rows={cOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} />
             </div>
           )}
         </CardContent>
@@ -1065,8 +1191,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide side="in_house" rows={dInHouse} columns={BUCKET_CD_COLUMNS} clampRelease />
-              <AutoBucketSide side="out_vendor" rows={dOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease />
+              <AutoBucketSide side="in_house" rows={dInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} />
+              <AutoBucketSide side="out_vendor" rows={dOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} />
             </div>
           )}
         </CardContent>

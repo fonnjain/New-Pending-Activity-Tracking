@@ -1,0 +1,109 @@
+TASK: Fix the Inventory bucket list grouping. (1) Remove structure rows entirely — a Project
+expands to MFC BATCH rows, not structures. (2) Add a "Group by MFC" toggle that inverts the
+hierarchy to MFC -> Projects. (3) The Excel export must show MFC as a COLUMN and mirror the
+active grouping.
+
+=====================================================================
+WHAT IS WRONG TODAY
+=====================================================================
+Expanding a project (e.g. 824) currently shows STRUCTURE rows — "2 (EQUIPMENT) [B]",
+"2 (EQUIPMENT) [B]" — with the MFC batch reduced to a small badge next to each structure.
+That is not the intended design.
+
+Structures must NOT be shown at all. The expansion level is MFC BATCH.
+
+=====================================================================
+CONTEXT (already established — do not re-derive)
+=====================================================================
+- Buckets B/C/D come from Order Review, keyed by (normalized project, structure).
+- JOIN: Order Review Col C "Tower Type" == WIP Col J "Alias".
+  (WIP Col H is ALSO called "Tower Type" but is a long descriptive name — NEVER join on it.)
+- MFC Batch = WIP Col X "Batch No." (A/B/C/D; blank = not yet batched).
+- STRUCTURE -> MFC BATCH: if any of the structure's WIP marks has a real batch (A/B/C/D) that
+  is the structure's batch; if all its marks are blank the batch is "Z" (Not Yet Batched).
+  If a structure has 2+ real batches, take the heaviest by balance weight (only ONE structure
+  in the file does this: 920/3LISO).
+- Completed structures (no WIP marks) are EXCLUDED from the buckets.
+- Each bucket keeps its IN-HOUSE / OUT-VENDOR split.
+- Bucket A is manual (project + WO qty) and has NO MFC grouping — this task does not change it.
+
+=====================================================================
+CHANGE 1 — Default grouping: PROJECT -> MFC BATCH (no structures)
+=====================================================================
+For buckets B, C and D (not A):
+  - Top level: PROJECT rows (as today), showing the project's totals.
+  - Expanding a project shows its MFC BATCH rows: A, B, C, D, Z — one row per batch that the
+    project actually has in this bucket. Each MFC row shows the SAME measure columns as the
+    project row (Release Balance, Fab+Galva or Fab/Galva, Yard), aggregated over that batch's
+    structures, plus a structure COUNT.
+  - *** DELETE the structure rows. Do not render individual structures at any level. ***
+  - Remove the small MFC badge from structure rows (the rows themselves are going away).
+
+A project row's totals must equal the SUM of its MFC rows (verify no double counting).
+
+=====================================================================
+CHANGE 2 — "Group by MFC" toggle: MFC BATCH -> PROJECTS
+=====================================================================
+Add a toggle/control (e.g. "Group by: Project | MFC") on the Bucket List page. It applies to
+buckets B, C and D (NOT bucket A).
+
+When "Group by MFC" is selected, the hierarchy INVERTS:
+  - Top level: MFC BATCH rows (A, B, C, D, Z), each showing that batch's totals across ALL
+    projects in the bucket, plus a PROJECT count and a STRUCTURE count.
+  - Expanding an MFC batch lists the PROJECTS in that batch, each with its measures and a
+    structure count.
+  - Still no structure rows.
+  - The IN-HOUSE / OUT-VENDOR split is preserved in both grouping modes.
+
+Verified expected values, Bucket B, grouped by MFC (In-house + Out-vendor combined):
+    MFC A: 10 projects |  39 structures | RelBal  312.498 | Fab+Galva 1633.530 | Yard  555.238
+    MFC B: 12 projects |  43 structures | RelBal  448.013 | Fab+Galva 1433.847 | Yard  745.655
+    MFC C:  5 projects |  40 structures | RelBal  745.958 | Fab+Galva  965.596 | Yard  166.738
+    MFC D:  1 project  |  21 structures | RelBal   63.025 | Fab+Galva   38.063 | Yard    2.520
+    MFC Z: 21 projects | 103 structures | RelBal 1042.142 | Fab+Galva  194.549 | Yard 1933.275
+    (Total 246 structures — matches the Project-grouped view. The two modes are the SAME data,
+     re-grouped; every total must reconcile between them.)
+
+Spot check inside MFC C: 900 (3 str), 912 (12 str), 920 (15 str), 935 (5 str), 940 (5 str).
+MFC D contains only project 920 (21 structures).
+
+=====================================================================
+CHANGE 3 — Excel export
+=====================================================================
+- The Bucket List Excel export must include "MFC Batch" as a COLUMN.
+- The export MIRRORS the currently active grouping:
+      Project-grouped  -> rows ordered Project, then MFC Batch, with an MFC Batch column.
+      MFC-grouped      -> rows ordered MFC Batch, then Project, with an MFC Batch column.
+- No structure rows in the export either — the grain is (Project, MFC Batch) [+ side].
+- Keep the In-house / Out-vendor identification in the export (a "Side" column is fine).
+- Include the same measure columns as the UI, in MT to 3 dp, plus per-group subtotals and a
+  grand total.
+- Bucket A's export is unchanged (no MFC column).
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT render structure or mark rows anywhere in the bucket list or its export.
+- Do NOT apply MFC grouping to Bucket A.
+- Do NOT change bucket membership rules, the completed-structure exclusion, the
+  In-house/Out-vendor split, the clamp, or the summaries.
+- Do NOT join on WIP Col H; join on WIP Col J (Alias).
+- Do NOT forward-fill the project code.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- Expanding project 824 in Bucket B shows MFC BATCH rows — NOT structure rows. No
+  "2 (EQUIPMENT)" style rows anywhere.
+- A project's totals == the sum of its MFC rows.
+- "Group by MFC" inverts the hierarchy; Bucket B shows MFC A/B/C/D/Z with the project and
+  structure counts above (A: 10 proj/39 str; B: 12/43; C: 5/40; D: 1/21; Z: 21/103), and the
+  totals reconcile exactly with the Project-grouped view (246 structures either way).
+- MFC D expands to exactly one project (920, 21 structures).
+- The In-house/Out-vendor split still works in BOTH grouping modes.
+- The Excel export contains an "MFC Batch" column, has no structure rows, and its row order
+  matches the active grouping.
+- Bucket A is unaffected.
+Report: the Bucket-B MFC breakdown in both grouping modes, and confirmation that structure
+rows are gone from the UI and the export.
