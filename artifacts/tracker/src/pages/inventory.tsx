@@ -954,25 +954,42 @@ export default function InventoryView() {
     const eRowsOV = allManualE.filter((r) => r.side === SIDE_LABELS.out_vendor);
 
     // blockCols: used in the Combined sheet; no "Side" column (side is the band label).
-    const blockCols = (cols: ColumnDef[]) => [
-      { label: "Project", field: "project" },
-      { label: "MFC Batch", field: "mfcBatch" },
-      ...cols.map((c) => ({ label: c.label, field: c.key, numeric: true, decimals: 3, total: true })),
-      { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
-    ];
+    // Column order mirrors the active grouping toggle.
+    const blockCols = (cols: ColumnDef[]) => groupByMfc
+      ? [
+          { label: "MFC Batch", field: "mfcBatch" },
+          { label: "Project", field: "project" },
+          ...cols.map((c) => ({ label: c.label, field: c.key, numeric: true, decimals: 3, total: true })),
+          { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
+        ]
+      : [
+          { label: "Project", field: "project" },
+          { label: "MFC Batch", field: "mfcBatch" },
+          ...cols.map((c) => ({ label: c.label, field: c.key, numeric: true, decimals: 3, total: true })),
+          { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
+        ];
 
     const aCols: XlsxBlockGroup["columns"] = [
       { label: "Project", field: "project" },
       { label: "WO Qty (MT)", field: "woOrderQtyMt", numeric: true, decimals: 3, total: true },
     ];
-    const eCols: XlsxBlockGroup["columns"] = [
-      { label: "Project", field: "project" },
-      { label: "MFC Batch", field: "mfcBatch" },
-      { label: "Release Bal. (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
-      { label: "Fab+Galva (MT)", field: "fabGalvaMt", numeric: true, decimals: 3, total: true },
-      { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
-      { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
-    ];
+    const eCols: XlsxBlockGroup["columns"] = groupByMfc
+      ? [
+          { label: "MFC Batch", field: "mfcBatch" },
+          { label: "Project", field: "project" },
+          { label: "Release Bal. (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
+          { label: "Fab+Galva (MT)", field: "fabGalvaMt", numeric: true, decimals: 3, total: true },
+          { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
+          { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
+        ]
+      : [
+          { label: "Project", field: "project" },
+          { label: "MFC Batch", field: "mfcBatch" },
+          { label: "Release Bal. (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
+          { label: "Fab+Galva (MT)", field: "fabGalvaMt", numeric: true, decimals: 3, total: true },
+          { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
+          { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
+        ];
 
     const combined = {
       inHouse: [
@@ -980,19 +997,19 @@ export default function InventoryView() {
         {
           label: "B - Raw Material Incomplete",
           columns: blockCols(BUCKET_B_COLUMNS),
-          rows: projectMfcRows("in_house", bInHouse, BUCKET_B_COLUMNS, false),
+          rows: projectMfcRows("in_house", bInHouse, BUCKET_B_COLUMNS, groupByMfc),
           summaryRows: summaryToRows("In-House", computeBucketSummary(bInHouse, false)),
         },
         {
           label: "C - RM Complete",
           columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectMfcRows("in_house", cInHouse, BUCKET_CD_COLUMNS, false),
+          rows: projectMfcRows("in_house", cInHouse, BUCKET_CD_COLUMNS, groupByMfc),
           summaryRows: summaryToRows("In-House", computeBucketSummary(cInHouse, true)),
         },
         {
           label: "D - Dispatch Clearance",
           columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectMfcRows("in_house", dInHouse, BUCKET_CD_COLUMNS, false),
+          rows: projectMfcRows("in_house", dInHouse, BUCKET_CD_COLUMNS, groupByMfc),
           summaryRows: summaryToRows("In-House", computeBucketSummary(dInHouse, true)),
         },
         { label: "E - Ready Not Dispatched", columns: eCols, rows: eRowsIH },
@@ -1002,19 +1019,19 @@ export default function InventoryView() {
         {
           label: "B - Raw Material Incomplete",
           columns: blockCols(BUCKET_B_COLUMNS),
-          rows: projectMfcRows("out_vendor", bOutVendor, BUCKET_B_COLUMNS, false),
+          rows: projectMfcRows("out_vendor", bOutVendor, BUCKET_B_COLUMNS, groupByMfc),
           summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(bOutVendor, false)),
         },
         {
           label: "C - RM Complete",
           columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectMfcRows("out_vendor", cOutVendor, BUCKET_CD_COLUMNS, false),
+          rows: projectMfcRows("out_vendor", cOutVendor, BUCKET_CD_COLUMNS, groupByMfc),
           summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(cOutVendor, true)),
         },
         {
           label: "D - Dispatch Clearance",
           columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectMfcRows("out_vendor", dOutVendor, BUCKET_CD_COLUMNS, false),
+          rows: projectMfcRows("out_vendor", dOutVendor, BUCKET_CD_COLUMNS, groupByMfc),
           summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(dOutVendor, true)),
         },
         { label: "E - Ready Not Dispatched", columns: eCols, rows: eRowsOV },
