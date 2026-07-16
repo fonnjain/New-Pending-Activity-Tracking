@@ -32,7 +32,21 @@ import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Segmented } from "@/components/ui/segmented";
-import { Boxes, ChevronRight, ChevronDown, Trash2, AlertTriangle, FileSpreadsheet } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Boxes, ChevronRight, ChevronDown, Trash2, AlertTriangle, FileSpreadsheet, ArrowRightLeft } from "lucide-react";
 import { exportToXlsxSheets, type XlsxSheet, type XlsxSummaryRow, type XlsxBlockGroup } from "@/lib/export";
 
 function mt(n: number | null | undefined): string {
@@ -44,6 +58,28 @@ const SIDE_LABELS: Record<InventorySide, string> = {
   in_house: "In-House",
   out_vendor: "Out-Vendor",
 };
+
+type BucketId = "b" | "c" | "d";
+
+const BUCKET_SOURCE_LABEL: Record<BucketId, string> = {
+  b: "B",
+  c: "C",
+  d: "D",
+};
+
+function makeBucketSelKey(bucket: BucketId, side: InventorySide, project: string) {
+  return `${bucket}|${side}|${project}`;
+}
+
+function parseBucketSelKey(key: string): { bucket: BucketId; side: InventorySide; project: string } {
+  const idx1 = key.indexOf("|");
+  const idx2 = key.indexOf("|", idx1 + 1);
+  return {
+    bucket: key.slice(0, idx1) as BucketId,
+    side: key.slice(idx1 + 1, idx2) as InventorySide,
+    project: key.slice(idx2 + 1),
+  };
+}
 
 interface ProjectGroup {
   project: string;
@@ -144,17 +180,23 @@ function SummaryFooter({ summary }: { summary: BucketSummary }) {
 }
 
 function AutoBucketSide({
+  bucket,
   side,
   rows,
   columns,
   clampRelease,
   groupByMfc,
+  selectedKeys,
+  onToggle,
 }: {
+  bucket: BucketId;
   side: InventorySide;
   rows: InventoryStructureCard[];
   columns: ColumnDef[];
   clampRelease: boolean;
   groupByMfc: boolean;
+  selectedKeys: Set<string>;
+  onToggle: (key: string) => void;
 }) {
   const groups = useMemo(() => groupByProject(rows), [rows]);
   const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
@@ -179,11 +221,24 @@ function AutoBucketSide({
           </div>
         ) : groupByMfc ? (
           mfcGroups.map(({ mfcBatch, rows: mfcRows }) => (
-            <MfcTopRow key={mfcBatch} mfcBatch={mfcBatch} rows={mfcRows} columns={columns} />
+            <MfcTopRow
+              key={mfcBatch}
+              mfcBatch={mfcBatch}
+              rows={mfcRows}
+              columns={columns}
+              getChecked={(project) => selectedKeys.has(makeBucketSelKey(bucket, side, project))}
+              onToggle={(project) => onToggle(makeBucketSelKey(bucket, side, project))}
+            />
           ))
         ) : (
           groups.map((g) => (
-            <ProjectRow key={g.project} group={g} columns={columns} />
+            <ProjectRow
+              key={g.project}
+              group={g}
+              columns={columns}
+              checked={selectedKeys.has(makeBucketSelKey(bucket, side, g.project))}
+              onToggle={() => onToggle(makeBucketSelKey(bucket, side, g.project))}
+            />
           ))
         )}
       </div>
@@ -195,39 +250,56 @@ function AutoBucketSide({
 function ProjectRow({
   group,
   columns,
+  checked,
+  onToggle,
 }: {
   group: ProjectGroup;
   columns: ColumnDef[];
+  checked: boolean;
+  onToggle: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const mfcGroups = useMemo(() => groupByMfcBatch(group.rows), [group.rows]);
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-muted/30 gap-2"
-      >
-        <span className="flex items-center gap-1.5 min-w-0">
-          {open ? (
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          )}
-          <span className="font-medium truncate">{group.project}</span>
-          <span className="text-[10px] text-muted-foreground shrink-0">
-            {group.count} str
-          </span>
-        </span>
-        <span className="flex items-center gap-3 shrink-0">
-          {columns.map((col) => (
-            <span key={col.key} className="text-[11px] tabular-nums text-right">
-              <span className="text-muted-foreground mr-1">{col.label}</span>
-              {mt(sumColumnOrNull(group.rows, col.get))}
+      <div className="flex items-center hover:bg-muted/30">
+        <label
+          className="flex items-center px-2.5 py-1.5 cursor-pointer shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 accent-primary"
+            checked={checked}
+            onChange={() => onToggle()}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex-1 flex items-center justify-between pr-3 py-1.5 text-sm gap-2 min-w-0"
+        >
+          <span className="flex items-center gap-1.5 min-w-0">
+            {open ? (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            )}
+            <span className="font-medium truncate">{group.project}</span>
+            <span className="text-[10px] text-muted-foreground shrink-0">
+              {group.count} str
             </span>
-          ))}
-        </span>
-      </button>
+          </span>
+          <span className="flex items-center gap-3 shrink-0">
+            {columns.map((col) => (
+              <span key={col.key} className="text-[11px] tabular-nums text-right">
+                <span className="text-muted-foreground mr-1">{col.label}</span>
+                {mt(sumColumnOrNull(group.rows, col.get))}
+              </span>
+            ))}
+          </span>
+        </button>
+      </div>
       {open && (
         <div className="pl-6 pb-0.5">
           {mfcGroups.map(({ mfcBatch, rows: mfcRows }) => (
@@ -261,10 +333,14 @@ function MfcTopRow({
   mfcBatch,
   rows,
   columns,
+  getChecked,
+  onToggle,
 }: {
   mfcBatch: string;
   rows: InventoryStructureCard[];
   columns: ColumnDef[];
+  getChecked: (project: string) => boolean;
+  onToggle: (project: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const projectGroups = useMemo(() => groupByProject(rows), [rows]);
@@ -300,20 +376,33 @@ function MfcTopRow({
           {projectGroups.map((g) => (
             <div
               key={g.project}
-              className="flex items-center justify-between gap-2 px-2 py-1 text-xs border-t first:border-t-0"
+              className="flex items-center gap-1 border-t first:border-t-0 hover:bg-muted/20"
             >
-              <span className="flex items-center gap-1.5 min-w-0">
-                <span className="font-medium truncate">{g.project}</span>
-                <span className="text-muted-foreground shrink-0">{g.count} str</span>
-              </span>
-              <span className="flex items-center gap-3 shrink-0">
-                {columns.map((col) => (
-                  <span key={col.key} className="tabular-nums text-right">
-                    <span className="text-muted-foreground mr-1">{col.label}</span>
-                    {mt(sumColumnOrNull(g.rows, col.get))}
-                  </span>
-                ))}
-              </span>
+              <label
+                className="flex items-center px-2 py-1 cursor-pointer shrink-0"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  type="checkbox"
+                  className="h-3 w-3 accent-primary"
+                  checked={getChecked(g.project)}
+                  onChange={() => onToggle(g.project)}
+                />
+              </label>
+              <div className="flex-1 flex items-center justify-between gap-2 pr-2 py-1 text-xs min-w-0">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-medium truncate">{g.project}</span>
+                  <span className="text-muted-foreground shrink-0">{g.count} str</span>
+                </span>
+                <span className="flex items-center gap-3 shrink-0">
+                  {columns.map((col) => (
+                    <span key={col.key} className="tabular-nums text-right">
+                      <span className="text-muted-foreground mr-1">{col.label}</span>
+                      {mt(sumColumnOrNull(g.rows, col.get))}
+                    </span>
+                  ))}
+                </span>
+              </div>
             </div>
           ))}
         </div>
@@ -701,6 +790,70 @@ export default function InventoryView() {
     for (const r of rawRows) set.add(r.project);
     return Array.from(set).sort();
   }, [rawRows]);
+
+  // ----- Bucket B/C/D row-selection state for the Move dialog -----
+  const [bucketSelection, setBucketSelection] = useState<Set<string>>(new Set());
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false);
+  const [moveSide, setMoveSide] = useState<InventorySide>("in_house");
+  const [moveBucket, setMoveBucket] = useState<"e" | "a">("e");
+  const [moveMfcBatch, setMoveMfcBatch] = useState("");
+  const [moveWoQty, setMoveWoQty] = useState<number | "">("");
+
+  const toggleBucketItem = (key: string) =>
+    setBucketSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const clearBucketSelection = () => setBucketSelection(new Set());
+
+  const selectedBucketItems = useMemo(
+    () => [...bucketSelection].map(parseBucketSelKey),
+    [bucketSelection],
+  );
+
+  const uniqueSelectedProjects = useMemo(
+    () => [...new Set(selectedBucketItems.map((i) => i.project))],
+    [selectedBucketItems],
+  );
+
+  const moveBatchOptions = useMemo(() => {
+    const batches = new Set<string>();
+    for (const proj of uniqueSelectedProjects) {
+      for (const b of projectMfcBatches?.get(proj) ?? []) batches.add(b);
+    }
+    return [...batches].sort((a, b) => {
+      if (a === "Z") return 1;
+      if (b === "Z") return -1;
+      return a.localeCompare(b);
+    });
+  }, [uniqueSelectedProjects, projectMfcBatches]);
+
+  const openMoveDialog = () => {
+    const inHouseCount = selectedBucketItems.filter((i) => i.side === "in_house").length;
+    setMoveSide(inHouseCount >= selectedBucketItems.length / 2 ? "in_house" : "out_vendor");
+    setMoveBucket("e");
+    setMoveMfcBatch(moveBatchOptions.length === 1 ? moveBatchOptions[0] : "");
+    setMoveWoQty("");
+    setMoveDialogOpen(true);
+  };
+
+  const applyMove = () => {
+    const canApply = moveBucket === "a" ? typeof moveWoQty === "number" : !!moveMfcBatch;
+    if (!canApply) return;
+    for (const proj of uniqueSelectedProjects) {
+      if (moveBucket === "e") {
+        addE(proj, moveSide, moveMfcBatch);
+      } else {
+        addA(proj, moveSide, typeof moveWoQty === "number" ? moveWoQty : null);
+      }
+    }
+    setMoveDialogOpen(false);
+    clearBucketSelection();
+  };
+  // ---------------------------------------------------------------
 
   const upsertA = useUpsertInventoryManualA();
   const deleteA = useDeleteInventoryManualA();
@@ -1150,6 +1303,25 @@ export default function InventoryView() {
         </CardContent>
       </Card>
 
+      {/* Selection action bar — appears when any B/C/D project rows are checked */}
+      {bucketSelection.size > 0 && (
+        <div className="flex items-center justify-between gap-3 px-3 py-2 bg-primary/5 border border-primary/20 rounded-md">
+          <span className="text-sm font-medium">
+            {bucketSelection.size} project{bucketSelection.size === 1 ? "" : "s"} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="h-8" onClick={clearBucketSelection}>
+              Clear
+            </Button>
+            {canEdit && (
+              <Button size="sm" className="h-8 gap-1.5" onClick={openMoveDialog}>
+                <ArrowRightLeft className="h-3.5 w-3.5" /> Move to bucket
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Group-by toggle for Buckets B / C / D */}
       <div className="flex items-center gap-2">
         <span className="text-xs text-muted-foreground">Group by</span>
@@ -1164,6 +1336,115 @@ export default function InventoryView() {
         <span className="text-xs text-muted-foreground">(applies to B, C, D)</span>
       </div>
 
+      {/* Move dialog */}
+      <Dialog open={moveDialogOpen} onOpenChange={setMoveDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Move selected projects</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Selected summary */}
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                Selected ({selectedBucketItems.length})
+              </p>
+              <div className="border rounded-md divide-y max-h-36 overflow-auto">
+                {selectedBucketItems.map((item) => (
+                  <div
+                    key={`${item.bucket}|${item.side}|${item.project}`}
+                    className="flex items-center justify-between px-2.5 py-1 text-xs"
+                  >
+                    <span className="font-medium truncate">{item.project}</span>
+                    <span className="text-muted-foreground shrink-0 ml-2">
+                      Bucket {BUCKET_SOURCE_LABEL[item.bucket]} · {SIDE_LABELS[item.side]}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Target side */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Target side</p>
+              <Segmented
+                value={moveSide}
+                onChange={(v) => setMoveSide(v as InventorySide)}
+                options={[
+                  { value: "in_house", label: "In-House" },
+                  { value: "out_vendor", label: "Out-Vendor" },
+                ]}
+              />
+            </div>
+
+            {/* Target bucket */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Target bucket</p>
+              <Select value={moveBucket} onValueChange={(v) => setMoveBucket(v as "e" | "a")}>
+                <SelectTrigger className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="e">E — {BUCKET_LABELS.e}</SelectItem>
+                  <SelectItem value="a">A — {BUCKET_LABELS.a}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Bucket-specific extra field */}
+            {moveBucket === "e" && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">MFC Batch</p>
+                {moveBatchOptions.length > 0 ? (
+                  <SearchableSelect
+                    value={moveMfcBatch || null}
+                    onChange={(v) => setMoveMfcBatch(v ?? "")}
+                    options={moveBatchOptions}
+                    allLabel="Select batch..."
+                  />
+                ) : (
+                  <Input
+                    placeholder="Batch code (e.g. Z)"
+                    value={moveMfcBatch}
+                    onChange={(e) => setMoveMfcBatch(e.target.value)}
+                    className="h-8"
+                  />
+                )}
+              </div>
+            )}
+
+            {moveBucket === "a" && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">WO Qty (MT)</p>
+                <NumberInput
+                  placeholder="Weight (MT)"
+                  value={moveWoQty}
+                  onValueChange={(raw) => setMoveWoQty(raw === "" ? "" : Number(raw))}
+                  className="h-8 w-36"
+                />
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setMoveDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                (moveBucket === "e" ? !moveMfcBatch : typeof moveWoQty !== "number") ||
+                upsertA.isPending ||
+                upsertE.isPending
+              }
+              onClick={applyMove}
+            >
+              Move {uniqueSelectedProjects.length} project
+              {uniqueSelectedProjects.length === 1 ? "" : "s"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Bucket B */}
       <Card>
         <CardHeader>
@@ -1174,8 +1455,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide side="in_house" rows={bInHouse} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} />
-              <AutoBucketSide side="out_vendor" rows={bOutVendor} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} />
+              <AutoBucketSide bucket="b" side="in_house" rows={bInHouse} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} />
+              <AutoBucketSide bucket="b" side="out_vendor" rows={bOutVendor} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} />
             </div>
           )}
         </CardContent>
@@ -1191,8 +1472,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide side="in_house" rows={cInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} />
-              <AutoBucketSide side="out_vendor" rows={cOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} />
+              <AutoBucketSide bucket="c" side="in_house" rows={cInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} />
+              <AutoBucketSide bucket="c" side="out_vendor" rows={cOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} />
             </div>
           )}
         </CardContent>
@@ -1208,8 +1489,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide side="in_house" rows={dInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} />
-              <AutoBucketSide side="out_vendor" rows={dOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} />
+              <AutoBucketSide bucket="d" side="in_house" rows={dInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} />
+              <AutoBucketSide bucket="d" side="out_vendor" rows={dOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} />
             </div>
           )}
         </CardContent>
