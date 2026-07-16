@@ -1403,6 +1403,74 @@ paths:
       responses:
         "204":
           description: Deleted
+  /inventory-manual/side-overrides:
+    get:
+      operationId: listInventorySideOverrides
+      tags: [inventory]
+      summary: List permanent side overrides for auto-computed Buckets B/C/D
+      description: >
+        Returns the full list of stored side overrides (In-House / Out-Vendor)
+        for projects in auto-computed Buckets B, C, and D. Overrides are
+        applied client-side on every render so the project always appears on
+        the correct side regardless of the contractor classification in the
+        latest WIP file. Public (read-only).
+      responses:
+        "200":
+          description: Side override entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InventorySideOverride"
+    put:
+      operationId: upsertInventorySideOverride
+      tags: [inventory]
+      summary: Create or replace a side override for a project in a given bucket
+      description: >
+        Inserts a new (projectCode, bucket) override or replaces the existing
+        one (upsert). Requires authentication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventorySideOverrideInput"
+      responses:
+        "200":
+          description: Saved override
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventorySideOverride"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteInventorySideOverride
+      tags: [inventory]
+      summary: Remove a side override for a project in a given bucket
+      description: >
+        Removes the stored side override for a (projectCode, bucket) pair.
+        After deletion the project falls back to its auto-computed side.
+        Requires authentication.
+      parameters:
+        - name: projectCode
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: bucket
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
   /current-jobs/upload:
     post:
       operationId: uploadCurrentJobs
@@ -3170,6 +3238,47 @@ components:
         - available
         - asOnDate
         - rows
+    InventorySideOverride:
+      type: object
+      description: >
+        A permanently stored side override for a project in an auto-computed
+        Bucket (B, C, or D). Applied client-side on every render so the project
+        always appears on the correct side regardless of the contractor
+        classification in the latest WIP file.
+      properties:
+        id:
+          type: integer
+        projectCode:
+          type: string
+        bucket:
+          type: string
+          enum: [b, c, d]
+        side:
+          type: string
+          enum: [in_house, out_vendor]
+        createdAt:
+          type: string
+      required:
+        - id
+        - projectCode
+        - bucket
+        - side
+        - createdAt
+    InventorySideOverrideInput:
+      type: object
+      properties:
+        projectCode:
+          type: string
+        bucket:
+          type: string
+          enum: [b, c, d]
+        side:
+          type: string
+          enum: [in_house, out_vendor]
+      required:
+        - projectCode
+        - bucket
+        - side
     InventoryManualEntry:
       type: object
       description: >

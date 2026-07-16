@@ -43,6 +43,7 @@ import type {
   DeleteFabricationPriorityParams,
   DeleteInventoryManualAParams,
   DeleteInventoryManualEParams,
+  DeleteInventorySideOverrideParams,
   DeleteManualThicknessParams,
   DeleteRsjThicknessParams,
   DeleteUser200,
@@ -57,6 +58,8 @@ import type {
   InventoryBucketsResponse,
   InventoryManualEntry,
   InventoryManualEntryInput,
+  InventorySideOverride,
+  InventorySideOverrideInput,
   ListImportsParams,
   ListUsers200,
   ManualThickness,
@@ -4153,6 +4156,237 @@ export const useDeleteInventoryManualE = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteInventoryManualEMutationOptions(options));
+    }
+
+export const getListInventorySideOverridesUrl = () => {
+
+
+
+
+  return `/api/inventory-manual/side-overrides`
+}
+
+/**
+ * Returns the full list of stored side overrides (In-House / Out-Vendor) for projects in auto-computed Buckets B, C, and D. Overrides are applied client-side on every render so the project always appears on the correct side regardless of the contractor classification in the latest WIP file. Public (read-only).
+
+ * @summary List permanent side overrides for auto-computed Buckets B/C/D
+ */
+export const listInventorySideOverrides = async ( options?: RequestInit): Promise<InventorySideOverride[]> => {
+
+  return customFetch<InventorySideOverride[]>(getListInventorySideOverridesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListInventorySideOverridesQueryKey = () => {
+    return [
+    `/api/inventory-manual/side-overrides`
+    ] as const;
+    }
+
+
+export const getListInventorySideOverridesQueryOptions = <TData = Awaited<ReturnType<typeof listInventorySideOverrides>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventorySideOverrides>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListInventorySideOverridesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInventorySideOverrides>>> = ({ signal }) => listInventorySideOverrides({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listInventorySideOverrides>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListInventorySideOverridesQueryResult = NonNullable<Awaited<ReturnType<typeof listInventorySideOverrides>>>
+export type ListInventorySideOverridesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List permanent side overrides for auto-computed Buckets B/C/D
+ */
+
+export function useListInventorySideOverrides<TData = Awaited<ReturnType<typeof listInventorySideOverrides>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventorySideOverrides>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListInventorySideOverridesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpsertInventorySideOverrideUrl = () => {
+
+
+
+
+  return `/api/inventory-manual/side-overrides`
+}
+
+/**
+ * Inserts a new (projectCode, bucket) override or replaces the existing one (upsert). Requires authentication.
+
+ * @summary Create or replace a side override for a project in a given bucket
+ */
+export const upsertInventorySideOverride = async (inventorySideOverrideInput: InventorySideOverrideInput, options?: RequestInit): Promise<InventorySideOverride> => {
+
+  return customFetch<InventorySideOverride>(getUpsertInventorySideOverrideUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      inventorySideOverrideInput,)
+  }
+);}
+
+
+
+
+export const getUpsertInventorySideOverrideMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventorySideOverride>>, TError,{data: BodyType<InventorySideOverrideInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof upsertInventorySideOverride>>, TError,{data: BodyType<InventorySideOverrideInput>}, TContext> => {
+
+const mutationKey = ['upsertInventorySideOverride'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertInventorySideOverride>>, {data: BodyType<InventorySideOverrideInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  upsertInventorySideOverride(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpsertInventorySideOverrideMutationResult = NonNullable<Awaited<ReturnType<typeof upsertInventorySideOverride>>>
+    export type UpsertInventorySideOverrideMutationBody = BodyType<InventorySideOverrideInput>
+    export type UpsertInventorySideOverrideMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Create or replace a side override for a project in a given bucket
+ */
+export const useUpsertInventorySideOverride = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventorySideOverride>>, TError,{data: BodyType<InventorySideOverrideInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof upsertInventorySideOverride>>,
+        TError,
+        {data: BodyType<InventorySideOverrideInput>},
+        TContext
+      > => {
+      return useMutation(getUpsertInventorySideOverrideMutationOptions(options));
+    }
+
+export const getDeleteInventorySideOverrideUrl = (params: DeleteInventorySideOverrideParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/inventory-manual/side-overrides?${stringifiedParams}` : `/api/inventory-manual/side-overrides`
+}
+
+/**
+ * Removes the stored side override for a (projectCode, bucket) pair. After deletion the project falls back to its auto-computed side. Requires authentication.
+
+ * @summary Remove a side override for a project in a given bucket
+ */
+export const deleteInventorySideOverride = async (params: DeleteInventorySideOverrideParams, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteInventorySideOverrideUrl(params),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteInventorySideOverrideMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventorySideOverride>>, TError,{params: DeleteInventorySideOverrideParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteInventorySideOverride>>, TError,{params: DeleteInventorySideOverrideParams}, TContext> => {
+
+const mutationKey = ['deleteInventorySideOverride'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteInventorySideOverride>>, {params: DeleteInventorySideOverrideParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  deleteInventorySideOverride(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteInventorySideOverrideMutationResult = NonNullable<Awaited<ReturnType<typeof deleteInventorySideOverride>>>
+
+    export type DeleteInventorySideOverrideMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove a side override for a project in a given bucket
+ */
+export const useDeleteInventorySideOverride = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventorySideOverride>>, TError,{params: DeleteInventorySideOverrideParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteInventorySideOverride>>,
+        TError,
+        {params: DeleteInventorySideOverrideParams},
+        TContext
+      > => {
+      return useMutation(getDeleteInventorySideOverrideMutationOptions(options));
     }
 
 export const getUploadCurrentJobsUrl = () => {

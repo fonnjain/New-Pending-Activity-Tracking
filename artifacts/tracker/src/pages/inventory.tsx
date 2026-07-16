@@ -8,9 +8,14 @@ import {
   useDeleteInventoryManualA,
   useUpsertInventoryManualE,
   useDeleteInventoryManualE,
+  useListInventorySideOverrides,
+  useUpsertInventorySideOverride,
+  useDeleteInventorySideOverride,
   getListInventoryManualAQueryKey,
   getListInventoryManualEQueryKey,
+  getListInventorySideOverridesQueryKey,
   type InventoryManualEntry,
+  type InventorySideOverride,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -39,14 +44,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Boxes, ChevronRight, ChevronDown, Trash2, AlertTriangle, FileSpreadsheet, ArrowRightLeft } from "lucide-react";
+import { Boxes, ChevronRight, ChevronDown, Trash2, AlertTriangle, FileSpreadsheet, ArrowRightLeft, X } from "lucide-react";
 import { exportToXlsxSheets, type XlsxSheet, type XlsxSummaryRow, type XlsxBlockGroup } from "@/lib/export";
 
 function mt(n: number | null | undefined): string {
@@ -86,6 +84,36 @@ interface ProjectGroup {
   rows: InventoryStructureCard[];
   count: number;
   weightMt: number;
+}
+
+// Applies stored side overrides to an auto-computed bucket pair.
+// Any project in the override map for this bucket is moved to the stored
+// side regardless of what the contractor classification produced.
+function applyOverridesToBucket(
+  inHouse: InventoryStructureCard[],
+  outVendor: InventoryStructureCard[],
+  bucket: BucketId,
+  overrides: InventorySideOverride[],
+): { inHouse: InventoryStructureCard[]; outVendor: InventoryStructureCard[] } {
+  const toOutVendor = new Set<string>();
+  const toInHouse = new Set<string>();
+  for (const o of overrides) {
+    if (o.bucket !== bucket) continue;
+    if (o.side === "out_vendor") toOutVendor.add(o.projectCode);
+    else toInHouse.add(o.projectCode);
+  }
+  if (toOutVendor.size === 0 && toInHouse.size === 0) return { inHouse, outVendor };
+  const newInHouse: InventoryStructureCard[] = [];
+  const newOutVendor: InventoryStructureCard[] = [];
+  for (const r of inHouse) {
+    if (toOutVendor.has(r.project)) newOutVendor.push(r);
+    else newInHouse.push(r);
+  }
+  for (const r of outVendor) {
+    if (toInHouse.has(r.project)) newInHouse.push(r);
+    else newOutVendor.push(r);
+  }
+  return { inHouse: newInHouse, outVendor: newOutVendor };
 }
 
 function groupByProject(rows: InventoryStructureCard[]): ProjectGroup[] {
@@ -188,6 +216,9 @@ function AutoBucketSide({
   groupByMfc,
   selectedKeys,
   onToggle,
+  overriddenProjects,
+  onResetOverride,
+  canEdit,
 }: {
   bucket: BucketId;
   side: InventorySide;
@@ -197,6 +228,9 @@ function AutoBucketSide({
   groupByMfc: boolean;
   selectedKeys: Set<string>;
   onToggle: (key: string) => void;
+  overriddenProjects: Set<string>;
+  onResetOverride: (project: string) => void;
+  canEdit: boolean;
 }) {
   const groups = useMemo(() => groupByProject(rows), [rows]);
   const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
@@ -228,6 +262,8 @@ function AutoBucketSide({
               columns={columns}
               getChecked={(project) => selectedKeys.has(makeBucketSelKey(bucket, side, project))}
               onToggle={(project) => onToggle(makeBucketSelKey(bucket, side, project))}
+              getIsOverridden={(project) => overriddenProjects.has(project)}
+              onReset={canEdit ? onResetOverride : undefined}
             />
           ))
         ) : (
@@ -238,6 +274,8 @@ function AutoBucketSide({
               columns={columns}
               checked={selectedKeys.has(makeBucketSelKey(bucket, side, g.project))}
               onToggle={() => onToggle(makeBucketSelKey(bucket, side, g.project))}
+              isOverridden={overriddenProjects.has(g.project)}
+              onReset={canEdit ? () => onResetOverride(g.project) : undefined}
             />
           ))
         )}
@@ -252,11 +290,15 @@ function ProjectRow({
   columns,
   checked,
   onToggle,
+  isOverridden,
+  onReset,
 }: {
   group: ProjectGroup;
   columns: ColumnDef[];
   checked: boolean;
   onToggle: () => void;
+  isOverridden?: boolean;
+  onReset?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const mfcGroups = useMemo(() => groupByMfcBatch(group.rows), [group.rows]);
@@ -289,6 +331,11 @@ function ProjectRow({
             <span className="text-[10px] text-muted-foreground shrink-0">
               {group.count} str
             </span>
+            {isOverridden && (
+              <span className="text-[9px] px-1 py-px rounded border border-blue-400/50 text-blue-600 dark:text-blue-400 font-medium shrink-0">
+                side overridden
+              </span>
+            )}
           </span>
           <span className="flex items-center gap-3 shrink-0">
             {columns.map((col) => (
@@ -299,6 +346,16 @@ function ProjectRow({
             ))}
           </span>
         </button>
+        {isOverridden && onReset && (
+          <button
+            type="button"
+            title="Reset side override"
+            onClick={(e) => { e.stopPropagation(); onReset(); }}
+            className="px-2 py-1 text-muted-foreground hover:text-destructive shrink-0"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
       </div>
       {open && (
         <div className="pl-6 pb-0.5">
@@ -335,12 +392,16 @@ function MfcTopRow({
   columns,
   getChecked,
   onToggle,
+  getIsOverridden,
+  onReset,
 }: {
   mfcBatch: string;
   rows: InventoryStructureCard[];
   columns: ColumnDef[];
   getChecked: (project: string) => boolean;
   onToggle: (project: string) => void;
+  getIsOverridden: (project: string) => boolean;
+  onReset?: (project: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const projectGroups = useMemo(() => groupByProject(rows), [rows]);
@@ -373,38 +434,56 @@ function MfcTopRow({
       </button>
       {open && (
         <div className="pl-6 pb-0.5">
-          {projectGroups.map((g) => (
-            <div
-              key={g.project}
-              className="flex items-center gap-1 border-t first:border-t-0 hover:bg-muted/20"
-            >
-              <label
-                className="flex items-center px-2 py-1 cursor-pointer shrink-0"
-                onClick={(e) => e.stopPropagation()}
+          {projectGroups.map((g) => {
+            const overridden = getIsOverridden(g.project);
+            return (
+              <div
+                key={g.project}
+                className="flex items-center gap-1 border-t first:border-t-0 hover:bg-muted/20"
               >
-                <input
-                  type="checkbox"
-                  className="h-3 w-3 accent-primary"
-                  checked={getChecked(g.project)}
-                  onChange={() => onToggle(g.project)}
-                />
-              </label>
-              <div className="flex-1 flex items-center justify-between gap-2 pr-2 py-1 text-xs min-w-0">
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <span className="font-medium truncate">{g.project}</span>
-                  <span className="text-muted-foreground shrink-0">{g.count} str</span>
-                </span>
-                <span className="flex items-center gap-3 shrink-0">
-                  {columns.map((col) => (
-                    <span key={col.key} className="tabular-nums text-right">
-                      <span className="text-muted-foreground mr-1">{col.label}</span>
-                      {mt(sumColumnOrNull(g.rows, col.get))}
-                    </span>
-                  ))}
-                </span>
+                <label
+                  className="flex items-center px-2 py-1 cursor-pointer shrink-0"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3 accent-primary"
+                    checked={getChecked(g.project)}
+                    onChange={() => onToggle(g.project)}
+                  />
+                </label>
+                <div className="flex-1 flex items-center justify-between gap-2 pr-2 py-1 text-xs min-w-0">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="font-medium truncate">{g.project}</span>
+                    <span className="text-muted-foreground shrink-0">{g.count} str</span>
+                    {overridden && (
+                      <span className="text-[9px] px-1 py-px rounded border border-blue-400/50 text-blue-600 dark:text-blue-400 font-medium shrink-0">
+                        side overridden
+                      </span>
+                    )}
+                  </span>
+                  <span className="flex items-center gap-3 shrink-0">
+                    {columns.map((col) => (
+                      <span key={col.key} className="tabular-nums text-right">
+                        <span className="text-muted-foreground mr-1">{col.label}</span>
+                        {mt(sumColumnOrNull(g.rows, col.get))}
+                      </span>
+                    ))}
+                    {overridden && onReset && (
+                      <button
+                        type="button"
+                        title="Reset side override"
+                        onClick={(e) => { e.stopPropagation(); onReset(g.project); }}
+                        className="text-muted-foreground hover:text-destructive"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -778,12 +857,61 @@ export default function InventoryView() {
     return out.filter((r) => matchesProjectSelection(r.project));
   };
 
-  const bInHouse = applyJobFilter(buckets.b.inHouse);
-  const bOutVendor = applyJobFilter(buckets.b.outVendor);
-  const cInHouse = applyJobFilter(buckets.c.inHouse);
-  const cOutVendor = applyJobFilter(buckets.c.outVendor);
-  const dInHouse = applyJobFilter(buckets.d.inHouse);
-  const dOutVendor = applyJobFilter(buckets.d.outVendor);
+  // Side overrides — loaded once, applied before rendering each auto-computed bucket.
+  const { data: sideOverrides = [] } = useListInventorySideOverrides();
+  const upsertSideOverride = useUpsertInventorySideOverride();
+  const deleteSideOverride = useDeleteInventorySideOverride();
+
+  const bPair = applyOverridesToBucket(
+    applyJobFilter(buckets.b.inHouse),
+    applyJobFilter(buckets.b.outVendor),
+    "b",
+    sideOverrides,
+  );
+  const bInHouse = bPair.inHouse;
+  const bOutVendor = bPair.outVendor;
+
+  const cPair = applyOverridesToBucket(
+    applyJobFilter(buckets.c.inHouse),
+    applyJobFilter(buckets.c.outVendor),
+    "c",
+    sideOverrides,
+  );
+  const cInHouse = cPair.inHouse;
+  const cOutVendor = cPair.outVendor;
+
+  const dPair = applyOverridesToBucket(
+    applyJobFilter(buckets.d.inHouse),
+    applyJobFilter(buckets.d.outVendor),
+    "d",
+    sideOverrides,
+  );
+  const dInHouse = dPair.inHouse;
+  const dOutVendor = dPair.outVendor;
+
+  // Per-bucket sets of projects that have a stored side override (for badge display).
+  const bOverriddenProjects = useMemo(
+    () => new Set(sideOverrides.filter((o) => o.bucket === "b").map((o) => o.projectCode)),
+    [sideOverrides],
+  );
+  const cOverriddenProjects = useMemo(
+    () => new Set(sideOverrides.filter((o) => o.bucket === "c").map((o) => o.projectCode)),
+    [sideOverrides],
+  );
+  const dOverriddenProjects = useMemo(
+    () => new Set(sideOverrides.filter((o) => o.bucket === "d").map((o) => o.projectCode)),
+    [sideOverrides],
+  );
+
+  const resetSideOverride = (projectCode: string, bucket: string) => {
+    deleteSideOverride.mutate(
+      { params: { projectCode, bucket } },
+      {
+        onSuccess: () =>
+          queryClient.invalidateQueries({ queryKey: getListInventorySideOverridesQueryKey() }),
+      },
+    );
+  };
 
   const knownProjects = useMemo(() => {
     const set = new Set<string>();
@@ -791,13 +919,10 @@ export default function InventoryView() {
     return Array.from(set).sort();
   }, [rawRows]);
 
-  // ----- Bucket B/C/D row-selection state for the Move dialog -----
+  // ----- Bucket B/C/D row-selection state for the side-override dialog -----
   const [bucketSelection, setBucketSelection] = useState<Set<string>>(new Set());
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
-  const [moveSide, setMoveSide] = useState<InventorySide>("in_house");
-  const [moveBucket, setMoveBucket] = useState<"e" | "a">("e");
-  const [moveMfcBatch, setMoveMfcBatch] = useState("");
-  const [moveWoQty, setMoveWoQty] = useState<number | "">("");
+  const [moveSide, setMoveSide] = useState<InventorySide>("out_vendor");
 
   const toggleBucketItem = (key: string) =>
     setBucketSelection((prev) => {
@@ -814,41 +939,36 @@ export default function InventoryView() {
     [bucketSelection],
   );
 
-  const uniqueSelectedProjects = useMemo(
-    () => [...new Set(selectedBucketItems.map((i) => i.project))],
-    [selectedBucketItems],
-  );
-
-  const moveBatchOptions = useMemo(() => {
-    const batches = new Set<string>();
-    for (const proj of uniqueSelectedProjects) {
-      for (const b of projectMfcBatches?.get(proj) ?? []) batches.add(b);
+  // Unique (project, bucket) pairs — a project in B and C would appear twice.
+  const uniqueProjectBuckets = useMemo(() => {
+    const seen = new Set<string>();
+    const pairs: Array<{ project: string; bucket: "b" | "c" | "d" }> = [];
+    for (const item of selectedBucketItems) {
+      const key = `${item.bucket}|${item.project}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        pairs.push({ project: item.project, bucket: item.bucket as "b" | "c" | "d" });
+      }
     }
-    return [...batches].sort((a, b) => {
-      if (a === "Z") return 1;
-      if (b === "Z") return -1;
-      return a.localeCompare(b);
-    });
-  }, [uniqueSelectedProjects, projectMfcBatches]);
+    return pairs;
+  }, [selectedBucketItems]);
 
   const openMoveDialog = () => {
+    // Pre-fill target side as the OPPOSITE of the dominant source side.
     const inHouseCount = selectedBucketItems.filter((i) => i.side === "in_house").length;
-    setMoveSide(inHouseCount >= selectedBucketItems.length / 2 ? "in_house" : "out_vendor");
-    setMoveBucket("e");
-    setMoveMfcBatch(moveBatchOptions.length === 1 ? moveBatchOptions[0] : "");
-    setMoveWoQty("");
+    setMoveSide(inHouseCount >= selectedBucketItems.length / 2 ? "out_vendor" : "in_house");
     setMoveDialogOpen(true);
   };
 
   const applyMove = () => {
-    const canApply = moveBucket === "a" ? typeof moveWoQty === "number" : !!moveMfcBatch;
-    if (!canApply) return;
-    for (const proj of uniqueSelectedProjects) {
-      if (moveBucket === "e") {
-        addE(proj, moveSide, moveMfcBatch);
-      } else {
-        addA(proj, moveSide, typeof moveWoQty === "number" ? moveWoQty : null);
-      }
+    for (const { project, bucket } of uniqueProjectBuckets) {
+      upsertSideOverride.mutate(
+        { data: { projectCode: project, bucket, side: moveSide } },
+        {
+          onSuccess: () =>
+            queryClient.invalidateQueries({ queryKey: getListInventorySideOverridesQueryKey() }),
+        },
+      );
     }
     setMoveDialogOpen(false);
     clearBucketSelection();
@@ -1336,28 +1456,28 @@ export default function InventoryView() {
         <span className="text-xs text-muted-foreground">(applies to B, C, D)</span>
       </div>
 
-      {/* Move dialog */}
+      {/* Side-override dialog */}
       <Dialog open={moveDialogOpen} onOpenChange={setMoveDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Move selected projects</DialogTitle>
+            <DialogTitle>Set side for selected projects</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
             {/* Selected summary */}
             <div>
               <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                Selected ({selectedBucketItems.length})
+                Selected ({uniqueProjectBuckets.length})
               </p>
               <div className="border rounded-md divide-y max-h-36 overflow-auto">
-                {selectedBucketItems.map((item) => (
+                {uniqueProjectBuckets.map((item) => (
                   <div
-                    key={`${item.bucket}|${item.side}|${item.project}`}
+                    key={`${item.bucket}|${item.project}`}
                     className="flex items-center justify-between px-2.5 py-1 text-xs"
                   >
                     <span className="font-medium truncate">{item.project}</span>
                     <span className="text-muted-foreground shrink-0 ml-2">
-                      Bucket {BUCKET_SOURCE_LABEL[item.bucket]} · {SIDE_LABELS[item.side]}
+                      Bucket {BUCKET_SOURCE_LABEL[item.bucket as keyof typeof BUCKET_SOURCE_LABEL]}
                     </span>
                   </div>
                 ))}
@@ -1375,55 +1495,11 @@ export default function InventoryView() {
                   { value: "out_vendor", label: "Out-Vendor" },
                 ]}
               />
+              <p className="text-[11px] text-muted-foreground">
+                This override is stored permanently and applied on every page load,
+                regardless of the contractor classification in the WIP file.
+              </p>
             </div>
-
-            {/* Target bucket */}
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground">Target bucket</p>
-              <Select value={moveBucket} onValueChange={(v) => setMoveBucket(v as "e" | "a")}>
-                <SelectTrigger className="h-8">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="e">E — {BUCKET_LABELS.e}</SelectItem>
-                  <SelectItem value="a">A — {BUCKET_LABELS.a}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Bucket-specific extra field */}
-            {moveBucket === "e" && (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">MFC Batch</p>
-                {moveBatchOptions.length > 0 ? (
-                  <SearchableSelect
-                    value={moveMfcBatch || null}
-                    onChange={(v) => setMoveMfcBatch(v ?? "")}
-                    options={moveBatchOptions}
-                    allLabel="Select batch..."
-                  />
-                ) : (
-                  <Input
-                    placeholder="Batch code (e.g. Z)"
-                    value={moveMfcBatch}
-                    onChange={(e) => setMoveMfcBatch(e.target.value)}
-                    className="h-8"
-                  />
-                )}
-              </div>
-            )}
-
-            {moveBucket === "a" && (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">WO Qty (MT)</p>
-                <NumberInput
-                  placeholder="Weight (MT)"
-                  value={moveWoQty}
-                  onValueChange={(raw) => setMoveWoQty(raw === "" ? "" : Number(raw))}
-                  className="h-8 w-36"
-                />
-              </div>
-            )}
           </div>
 
           <DialogFooter className="gap-2">
@@ -1431,15 +1507,11 @@ export default function InventoryView() {
               Cancel
             </Button>
             <Button
-              disabled={
-                (moveBucket === "e" ? !moveMfcBatch : typeof moveWoQty !== "number") ||
-                upsertA.isPending ||
-                upsertE.isPending
-              }
+              disabled={upsertSideOverride.isPending}
               onClick={applyMove}
             >
-              Move {uniqueSelectedProjects.length} project
-              {uniqueSelectedProjects.length === 1 ? "" : "s"}
+              Apply to {uniqueProjectBuckets.length} project
+              {uniqueProjectBuckets.length === 1 ? "" : "s"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1455,8 +1527,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide bucket="b" side="in_house" rows={bInHouse} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} />
-              <AutoBucketSide bucket="b" side="out_vendor" rows={bOutVendor} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} />
+              <AutoBucketSide bucket="b" side="in_house" rows={bInHouse} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={bOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "b")} canEdit={canEdit} />
+              <AutoBucketSide bucket="b" side="out_vendor" rows={bOutVendor} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={bOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "b")} canEdit={canEdit} />
             </div>
           )}
         </CardContent>
@@ -1472,8 +1544,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide bucket="c" side="in_house" rows={cInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} />
-              <AutoBucketSide bucket="c" side="out_vendor" rows={cOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} />
+              <AutoBucketSide bucket="c" side="in_house" rows={cInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={cOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "c")} canEdit={canEdit} />
+              <AutoBucketSide bucket="c" side="out_vendor" rows={cOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={cOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "c")} canEdit={canEdit} />
             </div>
           )}
         </CardContent>
@@ -1489,8 +1561,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide bucket="d" side="in_house" rows={dInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} />
-              <AutoBucketSide bucket="d" side="out_vendor" rows={dOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} />
+              <AutoBucketSide bucket="d" side="in_house" rows={dInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={dOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "d")} canEdit={canEdit} />
+              <AutoBucketSide bucket="d" side="out_vendor" rows={dOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={dOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "d")} canEdit={canEdit} />
             </div>
           )}
         </CardContent>

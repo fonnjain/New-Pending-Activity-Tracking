@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import {
   db,
   importsTable,
@@ -9,11 +9,13 @@ import {
   orderReviewRowsTable,
   inventoryManualATable,
   inventoryManualETable,
+  inventorySideOverrideTable,
 } from "@workspace/db";
 import { requireAuth } from "./auth";
 import {
   UpsertInventoryManualABody,
   UpsertInventoryManualEBody,
+  UpsertInventorySideOverrideBody,
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
@@ -275,6 +277,70 @@ router.delete(
       return;
     }
     await db.delete(inventoryManualETable).where(eq(inventoryManualETable.id, id));
+    res.status(204).end();
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Side overrides for auto-computed Buckets B/C/D.  When the user moves a
+// project from In-House to Out-Vendor (or vice versa) on the Inventory page
+// the choice is stored here so it persists across page loads and WIP
+// re-uploads.  One row per (projectCode, bucket); upsert-replace semantics.
+// ---------------------------------------------------------------------------
+
+router.get("/inventory-manual/side-overrides", async (_req, res): Promise<void> => {
+  const rows = await db
+    .select()
+    .from(inventorySideOverrideTable)
+    .orderBy(inventorySideOverrideTable.createdAt);
+  res.json(rows);
+});
+
+router.put(
+  "/inventory-manual/side-overrides",
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const parsed = UpsertInventorySideOverrideBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const { projectCode, bucket, side } = parsed.data;
+    const code = projectCode.trim();
+    if (!code) {
+      res.status(400).json({ error: "projectCode is required" });
+      return;
+    }
+    const [row] = await db
+      .insert(inventorySideOverrideTable)
+      .values({ projectCode: code, bucket, side })
+      .onConflictDoUpdate({
+        target: [inventorySideOverrideTable.projectCode, inventorySideOverrideTable.bucket],
+        set: { side, createdAt: new Date() },
+      })
+      .returning();
+    res.json(row);
+  },
+);
+
+router.delete(
+  "/inventory-manual/side-overrides",
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const projectCode = String(req.query.projectCode ?? "").trim();
+    const bucket = String(req.query.bucket ?? "").trim();
+    if (!projectCode || !bucket) {
+      res.status(400).json({ error: "projectCode and bucket are required" });
+      return;
+    }
+    await db
+      .delete(inventorySideOverrideTable)
+      .where(
+        and(
+          eq(inventorySideOverrideTable.projectCode, projectCode),
+          eq(inventorySideOverrideTable.bucket, bucket),
+        ),
+      );
     res.status(204).end();
   },
 );

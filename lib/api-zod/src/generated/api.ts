@@ -1992,6 +1992,52 @@ export const DeleteInventoryManualEQueryParams = zod.object({
 
 
 /**
+ * Returns the full list of stored side overrides (In-House / Out-Vendor) for projects in auto-computed Buckets B, C, and D. Overrides are applied client-side on every render so the project always appears on the correct side regardless of the contractor classification in the latest WIP file. Public (read-only).
+
+ * @summary List permanent side overrides for auto-computed Buckets B/C/D
+ */
+export const ListInventorySideOverridesResponseItem = zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "bucket": zod.enum(['b', 'c', 'd']),
+  "side": zod.enum(['in_house', 'out_vendor']),
+  "createdAt": zod.string()
+}).describe('A permanently stored side override for a project in an auto-computed Bucket (B, C, or D). Applied client-side on every render so the project always appears on the correct side regardless of the contractor classification in the latest WIP file.\n')
+export const ListInventorySideOverridesResponse = zod.array(ListInventorySideOverridesResponseItem)
+
+
+/**
+ * Inserts a new (projectCode, bucket) override or replaces the existing one (upsert). Requires authentication.
+
+ * @summary Create or replace a side override for a project in a given bucket
+ */
+export const UpsertInventorySideOverrideBody = zod.object({
+  "projectCode": zod.string(),
+  "bucket": zod.enum(['b', 'c', 'd']),
+  "side": zod.enum(['in_house', 'out_vendor'])
+})
+
+export const UpsertInventorySideOverrideResponse = zod.object({
+  "id": zod.number(),
+  "projectCode": zod.string(),
+  "bucket": zod.enum(['b', 'c', 'd']),
+  "side": zod.enum(['in_house', 'out_vendor']),
+  "createdAt": zod.string()
+}).describe('A permanently stored side override for a project in an auto-computed Bucket (B, C, or D). Applied client-side on every render so the project always appears on the correct side regardless of the contractor classification in the latest WIP file.\n')
+
+
+/**
+ * Removes the stored side override for a (projectCode, bucket) pair. After deletion the project falls back to its auto-computed side. Requires authentication.
+
+ * @summary Remove a side override for a project in a given bucket
+ */
+export const DeleteInventorySideOverrideQueryParams = zod.object({
+  "projectCode": zod.coerce.string(),
+  "bucket": zod.coerce.string()
+})
+
+
+/**
  * Parses the first column of the first sheet as a plain list of project codes, normalizes them with the same rules used for WIP/Order Review project codes, and REPLACES the current list in full (not append). Matched/unmatched are computed against the latest WIP import UNION the latest Order Review import, for display only -- unmatched codes are still stored and still usable by the filter. Requires authentication. Purely additive: never touches WIP/Order Review parsing, hash/dedup identity, Activity, qty, or ageing.
 
  * @summary Upload a "Current Jobs" list (project codes only)

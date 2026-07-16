@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, doublePrecision } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, doublePrecision, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -57,3 +57,37 @@ export type InsertInventoryManualE = z.infer<
   typeof insertInventoryManualESchema
 >;
 export type InventoryManualERow = typeof inventoryManualETable.$inferSelect;
+
+// Permanent side-override for auto-computed Buckets B/C/D.  When a project is
+// moved from In-House to Out-Vendor (or vice versa) on the Inventory page the
+// override is stored here and applied client-side on every render so the
+// project always appears on the correct side regardless of the contractor
+// classification in the WIP file.
+//
+//   projectCode = project label (matches the value coming from Order Review /
+//                 WIP "project" field).
+//   bucket      = 'b' | 'c' | 'd' — which auto-bucket the override applies to.
+//   side        = 'in_house' | 'out_vendor' — the target side.
+//
+// Unique on (projectCode, bucket): upsert-replace semantics.
+export const inventorySideOverrideTable = pgTable(
+  "inventory_side_override",
+  {
+    id: serial("id").primaryKey(),
+    projectCode: text("project_code").notNull(),
+    bucket: text("bucket").notNull(),
+    side: text("side").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [unique("inventory_side_override_project_bucket").on(table.projectCode, table.bucket)],
+);
+
+export const insertInventorySideOverrideSchema = createInsertSchema(
+  inventorySideOverrideTable,
+).omit({ id: true, createdAt: true });
+export type InsertInventorySideOverride = z.infer<
+  typeof insertInventorySideOverrideSchema
+>;
+export type InventorySideOverrideRow = typeof inventorySideOverrideTable.$inferSelect;

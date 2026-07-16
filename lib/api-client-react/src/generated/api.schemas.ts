@@ -1246,6 +1246,58 @@ export interface InventoryBucketsResponse {
   rows: InventoryBucketRow[];
 }
 
+export type InventorySideOverrideBucket = typeof InventorySideOverrideBucket[keyof typeof InventorySideOverrideBucket];
+
+
+export const InventorySideOverrideBucket = {
+  b: 'b',
+  c: 'c',
+  d: 'd',
+} as const;
+
+export type InventorySideOverrideSide = typeof InventorySideOverrideSide[keyof typeof InventorySideOverrideSide];
+
+
+export const InventorySideOverrideSide = {
+  in_house: 'in_house',
+  out_vendor: 'out_vendor',
+} as const;
+
+/**
+ * A permanently stored side override for a project in an auto-computed Bucket (B, C, or D). Applied client-side on every render so the project always appears on the correct side regardless of the contractor classification in the latest WIP file.
+
+ */
+export interface InventorySideOverride {
+  id: number;
+  projectCode: string;
+  bucket: InventorySideOverrideBucket;
+  side: InventorySideOverrideSide;
+  createdAt: string;
+}
+
+export type InventorySideOverrideInputBucket = typeof InventorySideOverrideInputBucket[keyof typeof InventorySideOverrideInputBucket];
+
+
+export const InventorySideOverrideInputBucket = {
+  b: 'b',
+  c: 'c',
+  d: 'd',
+} as const;
+
+export type InventorySideOverrideInputSide = typeof InventorySideOverrideInputSide[keyof typeof InventorySideOverrideInputSide];
+
+
+export const InventorySideOverrideInputSide = {
+  in_house: 'in_house',
+  out_vendor: 'out_vendor',
+} as const;
+
+export interface InventorySideOverrideInput {
+  projectCode: string;
+  bucket: InventorySideOverrideInputBucket;
+  side: InventorySideOverrideInputSide;
+}
+
 export type InventoryManualEntrySide = typeof InventoryManualEntrySide[keyof typeof InventoryManualEntrySide];
 
 
@@ -2211,5 +2263,10 @@ id: number;
 
 export type DeleteInventoryManualEParams = {
 id: number;
+};
+
+export type DeleteInventorySideOverrideParams = {
+projectCode: string;
+bucket: string;
 };
 
