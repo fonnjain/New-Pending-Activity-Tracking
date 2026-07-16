@@ -924,13 +924,24 @@ export default function InventoryView() {
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
   const [moveSide, setMoveSide] = useState<InventorySide>("out_vendor");
 
-  const toggleBucketItem = (key: string) =>
+  // When a checkbox is checked, immediately open the override dialog.
+  // Unchecking does not re-open.  Cancel always clears selection so the user
+  // can pick a fresh project and get the popup again.
+  const toggleBucketItem = (key: string) => {
+    const isAdding = !bucketSelection.has(key);
     setBucketSelection((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
+    if (isAdding) {
+      // Pre-fill target side as opposite of the item's source side.
+      const parsed = parseBucketSelKey(key);
+      setMoveSide(parsed.side === "in_house" ? "out_vendor" : "in_house");
+      setMoveDialogOpen(true);
+    }
+  };
 
   const clearBucketSelection = () => setBucketSelection(new Set());
 
@@ -954,7 +965,6 @@ export default function InventoryView() {
   }, [selectedBucketItems]);
 
   const openMoveDialog = () => {
-    // Pre-fill target side as the OPPOSITE of the dominant source side.
     const inHouseCount = selectedBucketItems.filter((i) => i.side === "in_house").length;
     setMoveSide(inHouseCount >= selectedBucketItems.length / 2 ? "out_vendor" : "in_house");
     setMoveDialogOpen(true);
@@ -1435,7 +1445,7 @@ export default function InventoryView() {
             </Button>
             {canEdit && (
               <Button size="sm" className="h-8 gap-1.5" onClick={openMoveDialog}>
-                <ArrowRightLeft className="h-3.5 w-3.5" /> Move to bucket
+                <ArrowRightLeft className="h-3.5 w-3.5" /> Move Contractor
               </Button>
             )}
           </div>
@@ -1456,8 +1466,8 @@ export default function InventoryView() {
         <span className="text-xs text-muted-foreground">(applies to B, C, D)</span>
       </div>
 
-      {/* Side-override dialog */}
-      <Dialog open={moveDialogOpen} onOpenChange={setMoveDialogOpen}>
+      {/* Side-override dialog — auto-opens on checkbox check; cancel clears selection */}
+      <Dialog open={moveDialogOpen} onOpenChange={(open) => { if (!open) { setMoveDialogOpen(false); clearBucketSelection(); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Set side for selected projects</DialogTitle>
