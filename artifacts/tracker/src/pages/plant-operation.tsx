@@ -341,52 +341,40 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
   const loadLabel = load === "OPERATIONAL" ? "Operational" : "In Hand";
 
   const handleExport = () => {
-    const rows = projects.flatMap((p) =>
-      p.contractors.map((c) => {
-        const base = {
-          project: p.project,
-          contractor: c.name,
-          marks: c.stats.marks,
-          qty: c.stats.qty,
-          weight: c.stats.weight,
-          avgAge: c.stats.avgAge,
-        };
-        // Special Load rows are a single operation + load state, so the
-        // Bending/Welding split would be meaningless — base columns only.
-        if (specialLoad) return base;
-        if (dimension === "special") {
-          const s = { BENDING: 0, WELDING: 0 };
-          for (const r of c.records) {
-            const op = specialOpOf(r);
-            if (op !== "OTHER") s[op] += 1;
-          }
-          return { ...base, bending: s.BENDING, welding: s.WELDING };
-        }
-        const s = { PUNCHING: 0, DRILLING: 0, NOT_SET: 0 };
-        for (const r of c.records) s[holeOpOf(r)] += 1;
-        return { ...base, punching: s.PUNCHING, drilling: s.DRILLING, notSet: s.NOT_SET };
-      }),
-    );
-    const splitColumns: XlsxColumn[] = specialLoad
+    const rows = displayed.map((r) => {
+      const base = {
+        project: r.job || "(Unassigned)",
+        structure: r.structure || "",
+        markId: r.markId,
+        section: r.section || "",
+        activity: r.activity || "",
+        contractor: r.contractor || "Unassigned",
+        thicknessMm: r.thicknessMm ?? null,
+        qty: r.balanceQty,
+        weight: r.balanceWt,
+        ageingDays: r.ageingDays ?? null,
+      };
+      if (specialLoad) return base;
+      if (dimension === "special") return { ...base, operation: specialOpOf(r) };
+      return { ...base, holeOp: HOLE_OP_LABELS[holeOpOf(r)] ?? holeOpOf(r) };
+    });
+    const opCol: XlsxColumn[] = specialLoad
       ? []
       : dimension === "special"
-        ? [
-            { label: "Bending", field: "bending", numeric: true, decimals: 0, total: true },
-            { label: "Welding", field: "welding", numeric: true, decimals: 0, total: true },
-          ]
-        : [
-            { label: "Punching", field: "punching", numeric: true, decimals: 0, total: true },
-            { label: "Drilling", field: "drilling", numeric: true, decimals: 0, total: true },
-            { label: "Not Set", field: "notSet", numeric: true, decimals: 0, total: true },
-          ];
+        ? [{ label: "Operation", field: "operation" }]
+        : [{ label: "Hole Op.", field: "holeOp" }];
     const columns: XlsxColumn[] = [
       { label: "Project", field: "project" },
+      { label: "Structure", field: "structure" },
+      { label: "Mark ID", field: "markId" },
+      { label: "Section", field: "section" },
+      { label: "Activity", field: "activity" },
       { label: "Contractor", field: "contractor" },
-      { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
+      ...opCol,
+      { label: "Thickness (mm)", field: "thicknessMm", numeric: true, decimals: 1 },
       { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
       { label: "Balance Wt (kg)", field: "weight", numeric: true, decimals: 2, total: true },
-      { label: "Avg Ageing (days)", field: "avgAge", numeric: true, decimals: 0 },
-      ...splitColumns,
+      { label: "Ageing (days)", field: "ageingDays", numeric: true, decimals: 0 },
     ];
     exportToXlsx("plant-operation-fabrication.xlsx", columns, rows, { sheetName: "Fabrication" });
   };
@@ -741,11 +729,10 @@ function ContractorGroup({
                 <TableHead>Mark</TableHead>
                 <TableHead>Section</TableHead>
                 <TableHead>Activity</TableHead>
-                {mode === "fab" ? (
+                {mode === "fab" && (
                   <TableHead>{dimension === "special" ? "Operation" : "Hole Op."}</TableHead>
-                ) : (
-                  <TableHead className="text-right">Thick.</TableHead>
                 )}
+                <TableHead className="text-right">Thick.</TableHead>
                 <TableHead className="text-right">Qty</TableHead>
                 <TableHead className="text-right">Wt</TableHead>
                 <TableHead>Date</TableHead>
@@ -759,13 +746,12 @@ function ContractorGroup({
                   <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
                   <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || "-"}</TableCell>
                   <TableCell className="font-medium">{r.activity || "-"}</TableCell>
-                  {mode === "fab" ? (
+                  {mode === "fab" && (
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{opLabel(opOf(r, dimension), dimension)}</TableCell>
-                  ) : (
-                    <TableCell className="text-right tabular-nums whitespace-nowrap" title={r.thicknessSource ?? "unset"}>
-                      {r.thicknessMm != null ? `${r.thicknessMm} mm` : <span className="text-muted-foreground">-</span>}
-                    </TableCell>
                   )}
+                  <TableCell className="text-right tabular-nums whitespace-nowrap" title={r.thicknessSource ?? "unset"}>
+                    {r.thicknessMm != null ? `${r.thicknessMm} mm` : <span className="text-muted-foreground">-</span>}
+                  </TableCell>
                   <TableCell className="text-right">{r.balanceQty}</TableCell>
                   <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.assignDate)}</TableCell>
@@ -777,7 +763,7 @@ function ContractorGroup({
             </TableBody>
             <TableFooter className="sticky bottom-0 z-10 bg-muted">
               <TableRow>
-                <TableCell colSpan={5} className="font-semibold">Total ({stats.marks.toLocaleString()} marks)</TableCell>
+                <TableCell colSpan={mode === "fab" ? 6 : 5} className="font-semibold">Total ({stats.marks.toLocaleString()} marks)</TableCell>
                 <TableCell className="text-right font-bold tabular-nums">{stats.qty.toLocaleString()}</TableCell>
                 <TableCell className="text-right font-bold tabular-nums">{formatWeight(stats.weight)}</TableCell>
                 <TableCell colSpan={2} />
