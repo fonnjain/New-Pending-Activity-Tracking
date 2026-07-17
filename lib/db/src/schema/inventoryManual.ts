@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, doublePrecision, unique, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, doublePrecision, unique, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -93,22 +93,23 @@ export type InsertInventorySideOverride = z.infer<
 export type InventorySideOverrideRow = typeof inventorySideOverrideTable.$inferSelect;
 
 // Backfill colour override for an MFC batch on the Inventory Bucket list page.
-// One row per (mfcBatch, side) pair; upsert-replace semantics. colour is one
-// of the three choices presented in the UI: 'green' | 'white' | 'yellow'.
+// One row per mfcBatch; per-side colours stored in the `colors` jsonb map.
+// e.g. colors = { "in_house": "green", "out_vendor": "yellow" }
 // Used only for Excel export background fill — not applied to the on-screen UI.
-// side: "in_house" | "out_vendor" — colours can differ between the two sides.
-export const inventoryMfcColorTable = pgTable(
-  "inventory_mfc_color",
-  {
-    mfcBatch: text("mfc_batch").notNull(),
-    side: text("side").notNull().default("in_house"),
-    color: text("color").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [primaryKey({ columns: [t.mfcBatch, t.side] })],
-);
+export const inventoryMfcColorTable = pgTable("inventory_mfc_color", {
+  mfcBatch: text("mfc_batch").primaryKey(),
+  // Legacy single-color column kept for old-row backcompat (read-only).
+  // New writes go to `colors`; this column is never updated after migration.
+  color: text("color").notNull().default(""),
+  // Per-side color map: { in_house?: string, out_vendor?: string }
+  colors: jsonb("colors")
+    .$type<Partial<Record<string, string>>>()
+    .notNull()
+    .default({}),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 export const insertInventoryMfcColorSchema = createInsertSchema(
   inventoryMfcColorTable,

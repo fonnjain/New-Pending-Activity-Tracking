@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import {
   db,
   importsTable,
@@ -382,7 +382,27 @@ router.get("/inventory-manual/mfc-colors", async (_req, res): Promise<void> => {
     .select()
     .from(inventoryMfcColorTable)
     .orderBy(inventoryMfcColorTable.mfcBatch);
-  res.json(rows);
+
+  // Expand each row's per-side colors map into flat {mfcBatch,side,color} entries.
+  // Backcompat: old rows have `color` set but empty `colors` — treat as in_house.
+  const result: Array<{
+    mfcBatch: string;
+    side: string;
+    color: string;
+    createdAt: Date;
+  }> = [];
+  for (const row of rows) {
+    const sideColors: Record<string, string> = {
+      ...(row.colors as Record<string, string> | null ?? {}),
+    };
+    if (row.color && !sideColors.in_house) {
+      sideColors.in_house = row.color;
+    }
+    for (const [side, color] of Object.entries(sideColors)) {
+      if (color) result.push({ mfcBatch: row.mfcBatch, side, color, createdAt: row.createdAt });
+    }
+  }
+  res.json(result);
 });
 
 router.put(
@@ -402,13 +422,18 @@ router.put(
     }
     const [row] = await db
       .insert(inventoryMfcColorTable)
-      .values({ mfcBatch: batch, side, color })
+      .values({ mfcBatch: batch, colors: { [side]: color } })
       .onConflictDoUpdate({
-        target: [inventoryMfcColorTable.mfcBatch, inventoryMfcColorTable.side],
-        set: { color, createdAt: new Date() },
+        target: inventoryMfcColorTable.mfcBatch,
+        // Merge new side entry into existing map using PostgreSQL jsonb || operator.
+        // Left side = current DB value; right side = EXCLUDED (the row being inserted).
+        set: {
+          colors: sql`inventory_mfc_color.colors || excluded.colors`,
+          createdAt: new Date(),
+        },
       })
       .returning();
-    res.json(row);
+    res.json({ mfcBatch: row.mfcBatch, side, color, createdAt: row.createdAt });
   },
 );
 
@@ -422,14 +447,19 @@ router.delete(
       res.status(400).json({ error: "mfcBatch and side are required" });
       return;
     }
+    // Remove the side key from the colors jsonb map.
     await db
-      .delete(inventoryMfcColorTable)
-      .where(
-        and(
-          eq(inventoryMfcColorTable.mfcBatch, mfcBatch),
-          eq(inventoryMfcColorTable.side, side),
-        ),
-      );
+      .update(inventoryMfcColorTable)
+      .set({ colors: sql`${inventoryMfcColorTable.colors} - ${side}` })
+      .where(eq(inventoryMfcColorTable.mfcBatch, mfcBatch));
+    // Delete the row entirely if both maps are now empty.
+    await db.delete(inventoryMfcColorTable).where(
+      and(
+        eq(inventoryMfcColorTable.mfcBatch, mfcBatch),
+        sql`${inventoryMfcColorTable.colors} = '{}'::jsonb`,
+        sql`${inventoryMfcColorTable.color} = ''`,
+      ),
+    );
     res.status(204).end();
   },
 );
