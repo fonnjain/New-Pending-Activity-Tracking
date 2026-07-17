@@ -10,12 +10,14 @@ import {
   inventoryManualATable,
   inventoryManualETable,
   inventorySideOverrideTable,
+  inventoryMfcColorTable,
 } from "@workspace/db";
 import { requireAuth } from "./auth";
 import {
   UpsertInventoryManualABody,
   UpsertInventoryManualEBody,
   UpsertInventorySideOverrideBody,
+  UpsertInventoryMfcColorBody,
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
@@ -341,6 +343,61 @@ router.delete(
           eq(inventorySideOverrideTable.bucket, bucket),
         ),
       );
+    res.status(204).end();
+  },
+);
+
+// ---------------------------------------------------------------------------
+// MFC batch backfill colours — GET / PUT / DELETE
+// ---------------------------------------------------------------------------
+
+router.get("/inventory-manual/mfc-colors", async (_req, res): Promise<void> => {
+  const rows = await db
+    .select()
+    .from(inventoryMfcColorTable)
+    .orderBy(inventoryMfcColorTable.mfcBatch);
+  res.json(rows);
+});
+
+router.put(
+  "/inventory-manual/mfc-colors",
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const parsed = UpsertInventoryMfcColorBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const { mfcBatch, color } = parsed.data;
+    const batch = mfcBatch.trim();
+    if (!batch) {
+      res.status(400).json({ error: "mfcBatch is required" });
+      return;
+    }
+    const [row] = await db
+      .insert(inventoryMfcColorTable)
+      .values({ mfcBatch: batch, color })
+      .onConflictDoUpdate({
+        target: inventoryMfcColorTable.mfcBatch,
+        set: { color, createdAt: new Date() },
+      })
+      .returning();
+    res.json(row);
+  },
+);
+
+router.delete(
+  "/inventory-manual/mfc-colors",
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const mfcBatch = String(req.query.mfcBatch ?? "").trim();
+    if (!mfcBatch) {
+      res.status(400).json({ error: "mfcBatch is required" });
+      return;
+    }
+    await db
+      .delete(inventoryMfcColorTable)
+      .where(eq(inventoryMfcColorTable.mfcBatch, mfcBatch));
     res.status(204).end();
   },
 );

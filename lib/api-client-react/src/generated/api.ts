@@ -43,6 +43,7 @@ import type {
   DeleteFabricationPriorityParams,
   DeleteInventoryManualAParams,
   DeleteInventoryManualEParams,
+  DeleteInventoryMfcColorParams,
   DeleteInventorySideOverrideParams,
   DeleteManualThicknessParams,
   DeleteRsjThicknessParams,
@@ -58,6 +59,8 @@ import type {
   InventoryBucketsResponse,
   InventoryManualEntry,
   InventoryManualEntryInput,
+  InventoryMfcColor,
+  InventoryMfcColorInput,
   InventorySideOverride,
   InventorySideOverrideInput,
   ListImportsParams,
@@ -4156,6 +4159,237 @@ export const useDeleteInventoryManualE = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteInventoryManualEMutationOptions(options));
+    }
+
+export const getListInventoryMfcColorsUrl = () => {
+
+
+
+
+  return `/api/inventory-manual/mfc-colors`
+}
+
+/**
+ * Returns all stored MFC batch → colour mappings. The colour is applied as an Excel cell background when the inventory bucket list is exported. Public (read-only).
+
+ * @summary List backfill colour choices for MFC batches
+ */
+export const listInventoryMfcColors = async ( options?: RequestInit): Promise<InventoryMfcColor[]> => {
+
+  return customFetch<InventoryMfcColor[]>(getListInventoryMfcColorsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListInventoryMfcColorsQueryKey = () => {
+    return [
+    `/api/inventory-manual/mfc-colors`
+    ] as const;
+    }
+
+
+export const getListInventoryMfcColorsQueryOptions = <TData = Awaited<ReturnType<typeof listInventoryMfcColors>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventoryMfcColors>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListInventoryMfcColorsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInventoryMfcColors>>> = ({ signal }) => listInventoryMfcColors({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listInventoryMfcColors>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListInventoryMfcColorsQueryResult = NonNullable<Awaited<ReturnType<typeof listInventoryMfcColors>>>
+export type ListInventoryMfcColorsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List backfill colour choices for MFC batches
+ */
+
+export function useListInventoryMfcColors<TData = Awaited<ReturnType<typeof listInventoryMfcColors>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventoryMfcColors>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListInventoryMfcColorsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpsertInventoryMfcColorUrl = () => {
+
+
+
+
+  return `/api/inventory-manual/mfc-colors`
+}
+
+/**
+ * Inserts or replaces the colour assigned to an MFC batch. Requires authentication.
+
+ * @summary Set or replace the backfill colour for an MFC batch
+ */
+export const upsertInventoryMfcColor = async (inventoryMfcColorInput: InventoryMfcColorInput, options?: RequestInit): Promise<InventoryMfcColor> => {
+
+  return customFetch<InventoryMfcColor>(getUpsertInventoryMfcColorUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      inventoryMfcColorInput,)
+  }
+);}
+
+
+
+
+export const getUpsertInventoryMfcColorMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryMfcColor>>, TError,{data: BodyType<InventoryMfcColorInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryMfcColor>>, TError,{data: BodyType<InventoryMfcColorInput>}, TContext> => {
+
+const mutationKey = ['upsertInventoryMfcColor'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertInventoryMfcColor>>, {data: BodyType<InventoryMfcColorInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  upsertInventoryMfcColor(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpsertInventoryMfcColorMutationResult = NonNullable<Awaited<ReturnType<typeof upsertInventoryMfcColor>>>
+    export type UpsertInventoryMfcColorMutationBody = BodyType<InventoryMfcColorInput>
+    export type UpsertInventoryMfcColorMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Set or replace the backfill colour for an MFC batch
+ */
+export const useUpsertInventoryMfcColor = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryMfcColor>>, TError,{data: BodyType<InventoryMfcColorInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof upsertInventoryMfcColor>>,
+        TError,
+        {data: BodyType<InventoryMfcColorInput>},
+        TContext
+      > => {
+      return useMutation(getUpsertInventoryMfcColorMutationOptions(options));
+    }
+
+export const getDeleteInventoryMfcColorUrl = (params: DeleteInventoryMfcColorParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/inventory-manual/mfc-colors?${stringifiedParams}` : `/api/inventory-manual/mfc-colors`
+}
+
+/**
+ * Removes the stored colour for the given MFC batch. After deletion the batch exports with no background fill. Requires authentication.
+
+ * @summary Remove the colour assignment for an MFC batch
+ */
+export const deleteInventoryMfcColor = async (params: DeleteInventoryMfcColorParams, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteInventoryMfcColorUrl(params),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteInventoryMfcColorMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryMfcColor>>, TError,{params: DeleteInventoryMfcColorParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryMfcColor>>, TError,{params: DeleteInventoryMfcColorParams}, TContext> => {
+
+const mutationKey = ['deleteInventoryMfcColor'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteInventoryMfcColor>>, {params: DeleteInventoryMfcColorParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  deleteInventoryMfcColor(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteInventoryMfcColorMutationResult = NonNullable<Awaited<ReturnType<typeof deleteInventoryMfcColor>>>
+
+    export type DeleteInventoryMfcColorMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove the colour assignment for an MFC batch
+ */
+export const useDeleteInventoryMfcColor = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryMfcColor>>, TError,{params: DeleteInventoryMfcColorParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteInventoryMfcColor>>,
+        TError,
+        {params: DeleteInventoryMfcColorParams},
+        TContext
+      > => {
+      return useMutation(getDeleteInventoryMfcColorMutationOptions(options));
     }
 
 export const getListInventorySideOverridesUrl = () => {

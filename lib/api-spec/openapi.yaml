@@ -1403,6 +1403,66 @@ paths:
       responses:
         "204":
           description: Deleted
+  /inventory-manual/mfc-colors:
+    get:
+      operationId: listInventoryMfcColors
+      tags: [inventory]
+      summary: List backfill colour choices for MFC batches
+      description: >
+        Returns all stored MFC batch → colour mappings. The colour is applied
+        as an Excel cell background when the inventory bucket list is exported.
+        Public (read-only).
+      responses:
+        "200":
+          description: MFC colour entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InventoryMfcColor"
+    put:
+      operationId: upsertInventoryMfcColor
+      tags: [inventory]
+      summary: Set or replace the backfill colour for an MFC batch
+      description: >
+        Inserts or replaces the colour assigned to an MFC batch. Requires
+        authentication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryMfcColorInput"
+      responses:
+        "200":
+          description: Saved entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryMfcColor"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteInventoryMfcColor
+      tags: [inventory]
+      summary: Remove the colour assignment for an MFC batch
+      description: >
+        Removes the stored colour for the given MFC batch. After deletion the
+        batch exports with no background fill. Requires authentication.
+      parameters:
+        - name: mfcBatch
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
   /inventory-manual/side-overrides:
     get:
       operationId: listInventorySideOverrides
@@ -3238,6 +3298,34 @@ components:
         - available
         - asOnDate
         - rows
+    InventoryMfcColor:
+      type: object
+      description: >
+        A stored backfill colour for an MFC batch. Applied as Excel cell
+        background when the Inventory bucket list is exported to .xlsx.
+      properties:
+        mfcBatch:
+          type: string
+        color:
+          type: string
+          enum: [green, white, yellow]
+        createdAt:
+          type: string
+      required:
+        - mfcBatch
+        - color
+        - createdAt
+    InventoryMfcColorInput:
+      type: object
+      properties:
+        mfcBatch:
+          type: string
+        color:
+          type: string
+          enum: [green, white, yellow]
+      required:
+        - mfcBatch
+        - color
     InventorySideOverride:
       type: object
       description: >

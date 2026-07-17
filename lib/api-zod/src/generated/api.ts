@@ -1992,6 +1992,46 @@ export const DeleteInventoryManualEQueryParams = zod.object({
 
 
 /**
+ * Returns all stored MFC batch → colour mappings. The colour is applied as an Excel cell background when the inventory bucket list is exported. Public (read-only).
+
+ * @summary List backfill colour choices for MFC batches
+ */
+export const ListInventoryMfcColorsResponseItem = zod.object({
+  "mfcBatch": zod.string(),
+  "color": zod.enum(['green', 'white', 'yellow']),
+  "createdAt": zod.string()
+}).describe('A stored backfill colour for an MFC batch. Applied as Excel cell background when the Inventory bucket list is exported to .xlsx.\n')
+export const ListInventoryMfcColorsResponse = zod.array(ListInventoryMfcColorsResponseItem)
+
+
+/**
+ * Inserts or replaces the colour assigned to an MFC batch. Requires authentication.
+
+ * @summary Set or replace the backfill colour for an MFC batch
+ */
+export const UpsertInventoryMfcColorBody = zod.object({
+  "mfcBatch": zod.string(),
+  "color": zod.enum(['green', 'white', 'yellow'])
+})
+
+export const UpsertInventoryMfcColorResponse = zod.object({
+  "mfcBatch": zod.string(),
+  "color": zod.enum(['green', 'white', 'yellow']),
+  "createdAt": zod.string()
+}).describe('A stored backfill colour for an MFC batch. Applied as Excel cell background when the Inventory bucket list is exported to .xlsx.\n')
+
+
+/**
+ * Removes the stored colour for the given MFC batch. After deletion the batch exports with no background fill. Requires authentication.
+
+ * @summary Remove the colour assignment for an MFC batch
+ */
+export const DeleteInventoryMfcColorQueryParams = zod.object({
+  "mfcBatch": zod.coerce.string()
+})
+
+
+/**
  * Returns the full list of stored side overrides (In-House / Out-Vendor) for projects in auto-computed Buckets B, C, and D. Overrides are applied client-side on every render so the project always appears on the correct side regardless of the contractor classification in the latest WIP file. Public (read-only).
 
  * @summary List permanent side overrides for auto-computed Buckets B/C/D

@@ -91,3 +91,23 @@ export type InsertInventorySideOverride = z.infer<
   typeof insertInventorySideOverrideSchema
 >;
 export type InventorySideOverrideRow = typeof inventorySideOverrideTable.$inferSelect;
+
+// Backfill colour override for an MFC batch on the Inventory Bucket list page.
+// One row per mfcBatch; upsert-replace semantics.  colour is one of the three
+// choices presented in the UI: 'green' | 'white' | 'yellow'.
+// Used only for Excel export background fill — not applied to the on-screen UI.
+export const inventoryMfcColorTable = pgTable("inventory_mfc_color", {
+  mfcBatch: text("mfc_batch").primaryKey(),
+  color: text("color").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const insertInventoryMfcColorSchema = createInsertSchema(
+  inventoryMfcColorTable,
+);
+export type InsertInventoryMfcColor = z.infer<
+  typeof insertInventoryMfcColorSchema
+>;
+export type InventoryMfcColorRow = typeof inventoryMfcColorTable.$inferSelect;

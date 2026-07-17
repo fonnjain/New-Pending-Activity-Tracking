@@ -11,9 +11,13 @@ import {
   useListInventorySideOverrides,
   useUpsertInventorySideOverride,
   useDeleteInventorySideOverride,
+  useListInventoryMfcColors,
+  useUpsertInventoryMfcColor,
+  useDeleteInventoryMfcColor,
   getListInventoryManualAQueryKey,
   getListInventoryManualEQueryKey,
   getListInventorySideOverridesQueryKey,
+  getListInventoryMfcColorsQueryKey,
   type InventoryManualEntry,
   type InventorySideOverride,
 } from "@workspace/api-client-react";
@@ -51,6 +55,20 @@ function mt(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "-";
   return n.toFixed(3);
 }
+
+type MfcColorName = "green" | "white" | "yellow";
+
+const MFC_COLOR_CSS: Record<MfcColorName, string> = {
+  green:  "#92D050",
+  white:  "#FFFFFF",
+  yellow: "#FFFF00",
+};
+
+const MFC_COLOR_ARGB: Record<MfcColorName, string> = {
+  green:  "FF92D050",
+  white:  "FFFFFFFF",
+  yellow: "FFFFFF00",
+};
 
 const SIDE_LABELS: Record<InventorySide, string> = {
   in_house: "In-House",
@@ -219,6 +237,9 @@ function AutoBucketSide({
   overriddenProjects,
   onResetOverride,
   canEdit,
+  mfcColorMap,
+  onSetMfcColor,
+  onClearMfcColor,
 }: {
   bucket: BucketId;
   side: InventorySide;
@@ -231,6 +252,9 @@ function AutoBucketSide({
   overriddenProjects: Set<string>;
   onResetOverride: (project: string) => void;
   canEdit: boolean;
+  mfcColorMap: Map<string, string>;
+  onSetMfcColor: (mfc: string, color: string) => void;
+  onClearMfcColor: (mfc: string) => void;
 }) {
   const groups = useMemo(() => groupByProject(rows), [rows]);
   const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
@@ -264,6 +288,10 @@ function AutoBucketSide({
               onToggle={(project) => onToggle(makeBucketSelKey(bucket, side, project))}
               getIsOverridden={(project) => overriddenProjects.has(project)}
               onReset={canEdit ? onResetOverride : undefined}
+              currentColor={mfcColorMap.get(mfcBatch)}
+              canEdit={canEdit}
+              onSetColor={(color) => onSetMfcColor(mfcBatch, color)}
+              onClearColor={() => onClearMfcColor(mfcBatch)}
             />
           ))
         ) : (
@@ -386,6 +414,8 @@ function ProjectRow({
   );
 }
 
+const MFC_COLOR_NAMES: MfcColorName[] = ["green", "white", "yellow"];
+
 function MfcTopRow({
   mfcBatch,
   rows,
@@ -394,6 +424,10 @@ function MfcTopRow({
   onToggle,
   getIsOverridden,
   onReset,
+  currentColor,
+  canEdit,
+  onSetColor,
+  onClearColor,
 }: {
   mfcBatch: string;
   rows: InventoryStructureCard[];
@@ -402,6 +436,10 @@ function MfcTopRow({
   onToggle: (project: string) => void;
   getIsOverridden: (project: string) => boolean;
   onReset?: (project: string) => void;
+  currentColor?: string;
+  canEdit?: boolean;
+  onSetColor?: (color: string) => void;
+  onClearColor?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const projectGroups = useMemo(() => groupByProject(rows), [rows]);
@@ -418,12 +456,54 @@ function MfcTopRow({
           ) : (
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           )}
+          {currentColor && currentColor in MFC_COLOR_CSS && (
+            <span
+              style={{
+                background: MFC_COLOR_CSS[currentColor as MfcColorName],
+                border: currentColor === "white" ? "1px solid #9CA3AF" : "none",
+              }}
+              className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+              title={`Backfill: ${currentColor}`}
+            />
+          )}
           <span className="font-medium shrink-0">MFC {mfcBatch}</span>
           <span className="text-[10px] text-muted-foreground shrink-0">
             {projectGroups.length} proj · {rows.length} str
           </span>
         </span>
         <span className="flex items-center gap-3 shrink-0">
+          {canEdit && (
+            <span
+              className="flex items-center gap-0.5"
+              onClick={(e) => e.stopPropagation()}
+              title="Set backfill colour"
+            >
+              {MFC_COLOR_NAMES.map((c) => {
+                const active = currentColor === c;
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    title={c.charAt(0).toUpperCase() + c.slice(1)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (active) onClearColor?.();
+                      else onSetColor?.(c);
+                    }}
+                    style={{
+                      background: MFC_COLOR_CSS[c],
+                      border: active
+                        ? "2px solid #1F2937"
+                        : c === "white"
+                        ? "1px solid #9CA3AF"
+                        : "1px solid transparent",
+                    }}
+                    className="w-4 h-4 rounded-full"
+                  />
+                );
+              })}
+            </span>
+          )}
           {columns.map((col) => (
             <span key={col.key} className="text-[11px] tabular-nums text-right">
               <span className="text-muted-foreground mr-1">{col.label}</span>
@@ -862,6 +942,27 @@ export default function InventoryView() {
   const upsertSideOverride = useUpsertInventorySideOverride();
   const deleteSideOverride = useDeleteInventorySideOverride();
 
+  // MFC backfill colours — loaded once, used by the color picker + export.
+  const { data: mfcColors = [] } = useListInventoryMfcColors();
+  const upsertMfcColor = useUpsertInventoryMfcColor();
+  const deleteMfcColor = useDeleteInventoryMfcColor();
+  const mfcColorMap = useMemo(
+    () => new Map(mfcColors.map((c) => [c.mfcBatch, c.color])),
+    [mfcColors],
+  );
+  const setMfcColor = (mfcBatch: string, color: string) => {
+    upsertMfcColor.mutate(
+      { data: { mfcBatch, color: color as MfcColorName } },
+      { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListInventoryMfcColorsQueryKey() }) },
+    );
+  };
+  const clearMfcColor = (mfcBatch: string) => {
+    deleteMfcColor.mutate(
+      { params: { mfcBatch } },
+      { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListInventoryMfcColorsQueryKey() }) },
+    );
+  };
+
   const bPair = applyOverridesToBucket(
     applyJobFilter(buckets.b.inHouse),
     applyJobFilter(buckets.b.outVendor),
@@ -1069,6 +1170,7 @@ export default function InventoryView() {
     rows: InventoryStructureCard[],
     columns: ColumnDef[],
     sortMfcFirst: boolean,
+    mfcColorMap?: Map<string, string>,
   ): Record<string, string | number | null>[] => {
     const map = new Map<string, Record<string, string | number | null>>();
     for (const r of rows) {
@@ -1082,6 +1184,12 @@ export default function InventoryView() {
           structureCount: 1,
         };
         for (const col of columns) row[col.key] = col.get(r) ?? 0;
+        if (mfcColorMap) {
+          const colorName = mfcColorMap.get(r.mfcBatch) as MfcColorName | undefined;
+          if (colorName && colorName in MFC_COLOR_ARGB) {
+            row._bgColor = MFC_COLOR_ARGB[colorName];
+          }
+        }
         map.set(key, row);
       } else {
         (existing.structureCount as number) += 1;
@@ -1136,6 +1244,7 @@ export default function InventoryView() {
     columns: ColumnDef[],
     clampRelease: boolean,
     mfcFirst: boolean,
+    mfcColorMap?: Map<string, string>,
   ): XlsxSheet => {
     // Column order mirrors the active grouping:
     // Project-grouped → Side, Project, MFC Batch, data…, Structures
@@ -1166,11 +1275,11 @@ export default function InventoryView() {
       columns: [...baseColumns, ...dataColumns],
       sections: [
         {
-          rows: projectMfcRows("in_house", inHouse, columns, mfcFirst),
+          rows: projectMfcRows("in_house", inHouse, columns, mfcFirst, mfcColorMap),
           summaryRows: summaryToRows("In-House", computeBucketSummary(inHouse, clampRelease)),
         },
         {
-          rows: projectMfcRows("out_vendor", outVendor, columns, mfcFirst),
+          rows: projectMfcRows("out_vendor", outVendor, columns, mfcFirst, mfcColorMap),
           summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(outVendor, clampRelease)),
         },
       ],
@@ -1209,9 +1318,9 @@ export default function InventoryView() {
         ],
         rows: manualBucketRows(filteredManualA, false),
       },
-      autoBucketSheet("B - Raw Material Incomplete", bInHouse, bOutVendor, BUCKET_B_COLUMNS, false, groupByMfc),
-      autoBucketSheet("C - RM Complete", cInHouse, cOutVendor, BUCKET_CD_COLUMNS, true, groupByMfc),
-      autoBucketSheet("D - Dispatch Clearance", dInHouse, dOutVendor, BUCKET_CD_COLUMNS, true, groupByMfc),
+      autoBucketSheet("B - Raw Material Incomplete", bInHouse, bOutVendor, BUCKET_B_COLUMNS, false, groupByMfc, mfcColorMap),
+      autoBucketSheet("C - RM Complete", cInHouse, cOutVendor, BUCKET_CD_COLUMNS, true, groupByMfc, mfcColorMap),
+      autoBucketSheet("D - Dispatch Clearance", dInHouse, dOutVendor, BUCKET_CD_COLUMNS, true, groupByMfc, mfcColorMap),
       {
         name: "E - Ready Not Dispatched",
         columns: [
@@ -1280,19 +1389,19 @@ export default function InventoryView() {
         {
           label: "B - Raw Material Incomplete",
           columns: blockCols(BUCKET_B_COLUMNS),
-          rows: projectMfcRows("in_house", bInHouse, BUCKET_B_COLUMNS, groupByMfc),
+          rows: projectMfcRows("in_house", bInHouse, BUCKET_B_COLUMNS, groupByMfc, mfcColorMap),
           summaryRows: summaryToRows("In-House", computeBucketSummary(bInHouse, false)),
         },
         {
           label: "C - RM Complete",
           columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectMfcRows("in_house", cInHouse, BUCKET_CD_COLUMNS, groupByMfc),
+          rows: projectMfcRows("in_house", cInHouse, BUCKET_CD_COLUMNS, groupByMfc, mfcColorMap),
           summaryRows: summaryToRows("In-House", computeBucketSummary(cInHouse, true)),
         },
         {
           label: "D - Dispatch Clearance",
           columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectMfcRows("in_house", dInHouse, BUCKET_CD_COLUMNS, groupByMfc),
+          rows: projectMfcRows("in_house", dInHouse, BUCKET_CD_COLUMNS, groupByMfc, mfcColorMap),
           summaryRows: summaryToRows("In-House", computeBucketSummary(dInHouse, true)),
         },
         { label: "E - Ready Not Dispatched", columns: eCols, rows: eRowsIH },
@@ -1302,19 +1411,19 @@ export default function InventoryView() {
         {
           label: "B - Raw Material Incomplete",
           columns: blockCols(BUCKET_B_COLUMNS),
-          rows: projectMfcRows("out_vendor", bOutVendor, BUCKET_B_COLUMNS, groupByMfc),
+          rows: projectMfcRows("out_vendor", bOutVendor, BUCKET_B_COLUMNS, groupByMfc, mfcColorMap),
           summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(bOutVendor, false)),
         },
         {
           label: "C - RM Complete",
           columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectMfcRows("out_vendor", cOutVendor, BUCKET_CD_COLUMNS, groupByMfc),
+          rows: projectMfcRows("out_vendor", cOutVendor, BUCKET_CD_COLUMNS, groupByMfc, mfcColorMap),
           summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(cOutVendor, true)),
         },
         {
           label: "D - Dispatch Clearance",
           columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectMfcRows("out_vendor", dOutVendor, BUCKET_CD_COLUMNS, groupByMfc),
+          rows: projectMfcRows("out_vendor", dOutVendor, BUCKET_CD_COLUMNS, groupByMfc, mfcColorMap),
           summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(dOutVendor, true)),
         },
         { label: "E - Ready Not Dispatched", columns: eCols, rows: eRowsOV },
@@ -1537,8 +1646,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide bucket="b" side="in_house" rows={bInHouse} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={bOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "b")} canEdit={canEdit} />
-              <AutoBucketSide bucket="b" side="out_vendor" rows={bOutVendor} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={bOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "b")} canEdit={canEdit} />
+              <AutoBucketSide bucket="b" side="in_house" rows={bInHouse} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={bOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "b")} canEdit={canEdit} mfcColorMap={mfcColorMap} onSetMfcColor={setMfcColor} onClearMfcColor={clearMfcColor} />
+              <AutoBucketSide bucket="b" side="out_vendor" rows={bOutVendor} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={bOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "b")} canEdit={canEdit} mfcColorMap={mfcColorMap} onSetMfcColor={setMfcColor} onClearMfcColor={clearMfcColor} />
             </div>
           )}
         </CardContent>
@@ -1554,8 +1663,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide bucket="c" side="in_house" rows={cInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={cOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "c")} canEdit={canEdit} />
-              <AutoBucketSide bucket="c" side="out_vendor" rows={cOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={cOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "c")} canEdit={canEdit} />
+              <AutoBucketSide bucket="c" side="in_house" rows={cInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={cOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "c")} canEdit={canEdit} mfcColorMap={mfcColorMap} onSetMfcColor={setMfcColor} onClearMfcColor={clearMfcColor} />
+              <AutoBucketSide bucket="c" side="out_vendor" rows={cOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={cOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "c")} canEdit={canEdit} mfcColorMap={mfcColorMap} onSetMfcColor={setMfcColor} onClearMfcColor={clearMfcColor} />
             </div>
           )}
         </CardContent>
@@ -1571,8 +1680,8 @@ export default function InventoryView() {
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide bucket="d" side="in_house" rows={dInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={dOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "d")} canEdit={canEdit} />
-              <AutoBucketSide bucket="d" side="out_vendor" rows={dOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={dOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "d")} canEdit={canEdit} />
+              <AutoBucketSide bucket="d" side="in_house" rows={dInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={dOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "d")} canEdit={canEdit} mfcColorMap={mfcColorMap} onSetMfcColor={setMfcColor} onClearMfcColor={clearMfcColor} />
+              <AutoBucketSide bucket="d" side="out_vendor" rows={dOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={dOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "d")} canEdit={canEdit} mfcColorMap={mfcColorMap} onSetMfcColor={setMfcColor} onClearMfcColor={clearMfcColor} />
             </div>
           )}
         </CardContent>

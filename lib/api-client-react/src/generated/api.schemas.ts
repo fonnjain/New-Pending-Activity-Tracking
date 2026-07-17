@@ -1246,6 +1246,39 @@ export interface InventoryBucketsResponse {
   rows: InventoryBucketRow[];
 }
 
+export type InventoryMfcColorColor = typeof InventoryMfcColorColor[keyof typeof InventoryMfcColorColor];
+
+
+export const InventoryMfcColorColor = {
+  green: 'green',
+  white: 'white',
+  yellow: 'yellow',
+} as const;
+
+/**
+ * A stored backfill colour for an MFC batch. Applied as Excel cell background when the Inventory bucket list is exported to .xlsx.
+
+ */
+export interface InventoryMfcColor {
+  mfcBatch: string;
+  color: InventoryMfcColorColor;
+  createdAt: string;
+}
+
+export type InventoryMfcColorInputColor = typeof InventoryMfcColorInputColor[keyof typeof InventoryMfcColorInputColor];
+
+
+export const InventoryMfcColorInputColor = {
+  green: 'green',
+  white: 'white',
+  yellow: 'yellow',
+} as const;
+
+export interface InventoryMfcColorInput {
+  mfcBatch: string;
+  color: InventoryMfcColorInputColor;
+}
+
 export type InventorySideOverrideBucket = typeof InventorySideOverrideBucket[keyof typeof InventorySideOverrideBucket];
 
 
@@ -2263,6 +2296,10 @@ id: number;
 
 export type DeleteInventoryManualEParams = {
 id: number;
+};
+
+export type DeleteInventoryMfcColorParams = {
+mfcBatch: string;
 };
 
 export type DeleteInventorySideOverrideParams = {

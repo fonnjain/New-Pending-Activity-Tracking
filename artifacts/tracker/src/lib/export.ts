@@ -180,6 +180,9 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
   const summaryRowLevel = new Map<number, "subtotal" | "total">();
 
   // Write each section: data rows then that section's summary rows.
+  // Track which Excel row numbers have a custom background color (MFC backfill).
+  const rowBgColor = new Map<number, string>();
+
   for (const section of sections) {
     for (const r of section.rows) {
       const rowObj: Record<string, any> = {};
@@ -187,7 +190,8 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
         const v = r[c.field];
         rowObj[c.field] = c.numeric ? toNum(v) : v == null ? "" : v;
       }
-      ws.addRow(rowObj);
+      const excelRow = ws.addRow(rowObj);
+      if (r._bgColor) rowBgColor.set(excelRow.number as number, r._bgColor as string);
     }
     for (const s of section.summaryRows ?? []) {
       const obj: Record<string, any> = {};
@@ -241,13 +245,20 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
     const row = ws.getRow(r);
     const level = summaryRowLevel.get(r);
     const side = level === "total" ? heavy : level === "subtotal" ? medDark : thin;
+    const bgArgb = rowBgColor.get(r);
     for (let c = 1; c <= columns.length; c++) {
-      row.getCell(c).border = {
+      const cell = row.getCell(c);
+      cell.border = {
         top:    r === totalsRowNum ? totalsTop : (r === 1 ? thin : side),
         bottom: r === 1 ? headerBottom : side,
         left:   side,
         right:  side,
       };
+      // MFC backfill color — skip header (r===1) and summary rows so their
+      // own fill (dark header band or light summary fill) takes precedence.
+      if (bgArgb && r !== 1 && !summaryRowLevel.has(r)) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgArgb } };
+      }
     }
   }
 
