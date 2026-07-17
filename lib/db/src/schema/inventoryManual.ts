@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, doublePrecision, unique } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, doublePrecision, unique, primaryKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -93,16 +93,22 @@ export type InsertInventorySideOverride = z.infer<
 export type InventorySideOverrideRow = typeof inventorySideOverrideTable.$inferSelect;
 
 // Backfill colour override for an MFC batch on the Inventory Bucket list page.
-// One row per mfcBatch; upsert-replace semantics.  colour is one of the three
-// choices presented in the UI: 'green' | 'white' | 'yellow'.
+// One row per (mfcBatch, side) pair; upsert-replace semantics. colour is one
+// of the three choices presented in the UI: 'green' | 'white' | 'yellow'.
 // Used only for Excel export background fill — not applied to the on-screen UI.
-export const inventoryMfcColorTable = pgTable("inventory_mfc_color", {
-  mfcBatch: text("mfc_batch").primaryKey(),
-  color: text("color").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+// side: "in_house" | "out_vendor" — colours can differ between the two sides.
+export const inventoryMfcColorTable = pgTable(
+  "inventory_mfc_color",
+  {
+    mfcBatch: text("mfc_batch").notNull(),
+    side: text("side").notNull().default("in_house"),
+    color: text("color").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.mfcBatch, t.side] })],
+);
 
 export const insertInventoryMfcColorSchema = createInsertSchema(
   inventoryMfcColorTable,

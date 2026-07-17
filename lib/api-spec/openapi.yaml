@@ -1450,16 +1450,23 @@ paths:
     delete:
       operationId: deleteInventoryMfcColor
       tags: [inventory]
-      summary: Remove the colour assignment for an MFC batch
+      summary: Remove the colour assignment for an MFC batch on a specific side
       description: >
-        Removes the stored colour for the given MFC batch. After deletion the
-        batch exports with no background fill. Requires authentication.
+        Removes the stored colour for the given MFC batch and side. After
+        deletion the batch exports with no background fill for that side.
+        Requires authentication.
       parameters:
         - name: mfcBatch
           in: query
           required: true
           schema:
             type: string
+        - name: side
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [in_house, out_vendor]
       responses:
         "204":
           description: Deleted
@@ -3311,11 +3318,16 @@ components:
     InventoryMfcColor:
       type: object
       description: >
-        A stored backfill colour for an MFC batch. Applied as Excel cell
-        background when the Inventory bucket list is exported to .xlsx.
+        A stored backfill colour for an MFC batch on a specific side. Applied
+        as an Excel cell background when the inventory bucket list is exported
+        to .xlsx. In-House and Out-Vendor sides can have different colours for
+        the same batch.
       properties:
         mfcBatch:
           type: string
+        side:
+          type: string
+          enum: [in_house, out_vendor]
         color:
           type: string
           enum: [green, white, yellow]
@@ -3323,6 +3335,7 @@ components:
           type: string
       required:
         - mfcBatch
+        - side
         - color
         - createdAt
     InventoryMfcColorInput:
@@ -3330,11 +3343,15 @@ components:
       properties:
         mfcBatch:
           type: string
+        side:
+          type: string
+          enum: [in_house, out_vendor]
         color:
           type: string
           enum: [green, white, yellow]
       required:
         - mfcBatch
+        - side
         - color
     InventorySideOverride:
       type: object

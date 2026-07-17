@@ -6,13 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { InventoryMfcColorColor } from './inventoryMfcColorColor';
+import type { InventoryMfcColorSide } from './inventoryMfcColorSide';
 
 /**
- * A stored backfill colour for an MFC batch. Applied as Excel cell background when the Inventory bucket list is exported to .xlsx.
+ * A stored backfill colour for an MFC batch on a specific side. Applied as an Excel cell background when the inventory bucket list is exported to .xlsx. In-House and Out-Vendor sides can have different colours for the same batch.
 
  */
 export interface InventoryMfcColor {
   mfcBatch: string;
+  side: InventoryMfcColorSide;
   color: InventoryMfcColorColor;
   createdAt: string;
 }

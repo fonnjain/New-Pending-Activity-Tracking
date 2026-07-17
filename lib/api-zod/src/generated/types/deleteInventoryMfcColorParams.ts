@@ -5,7 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DeleteInventoryMfcColorSide } from './deleteInventoryMfcColorSide';
 
 export type DeleteInventoryMfcColorParams = {
 mfcBatch: string;
+side: DeleteInventoryMfcColorSide;
 };

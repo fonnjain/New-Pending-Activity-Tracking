@@ -1255,6 +1255,14 @@ export interface InventoryBucketsResponse {
   rows: InventoryBucketRow[];
 }
 
+export type InventoryMfcColorSide = typeof InventoryMfcColorSide[keyof typeof InventoryMfcColorSide];
+
+
+export const InventoryMfcColorSide = {
+  in_house: 'in_house',
+  out_vendor: 'out_vendor',
+} as const;
+
 export type InventoryMfcColorColor = typeof InventoryMfcColorColor[keyof typeof InventoryMfcColorColor];
 
 
@@ -1265,14 +1273,23 @@ export const InventoryMfcColorColor = {
 } as const;
 
 /**
- * A stored backfill colour for an MFC batch. Applied as Excel cell background when the Inventory bucket list is exported to .xlsx.
+ * A stored backfill colour for an MFC batch on a specific side. Applied as an Excel cell background when the inventory bucket list is exported to .xlsx. In-House and Out-Vendor sides can have different colours for the same batch.
 
  */
 export interface InventoryMfcColor {
   mfcBatch: string;
+  side: InventoryMfcColorSide;
   color: InventoryMfcColorColor;
   createdAt: string;
 }
+
+export type InventoryMfcColorInputSide = typeof InventoryMfcColorInputSide[keyof typeof InventoryMfcColorInputSide];
+
+
+export const InventoryMfcColorInputSide = {
+  in_house: 'in_house',
+  out_vendor: 'out_vendor',
+} as const;
 
 export type InventoryMfcColorInputColor = typeof InventoryMfcColorInputColor[keyof typeof InventoryMfcColorInputColor];
 
@@ -1285,6 +1302,7 @@ export const InventoryMfcColorInputColor = {
 
 export interface InventoryMfcColorInput {
   mfcBatch: string;
+  side: InventoryMfcColorInputSide;
   color: InventoryMfcColorInputColor;
 }
 
@@ -2309,7 +2327,16 @@ id: number;
 
 export type DeleteInventoryMfcColorParams = {
 mfcBatch: string;
+side: DeleteInventoryMfcColorSide;
 };
+
+export type DeleteInventoryMfcColorSide = typeof DeleteInventoryMfcColorSide[keyof typeof DeleteInventoryMfcColorSide];
+
+
+export const DeleteInventoryMfcColorSide = {
+  in_house: 'in_house',
+  out_vendor: 'out_vendor',
+} as const;
 
 export type DeleteInventorySideOverrideParams = {
 projectCode: string;

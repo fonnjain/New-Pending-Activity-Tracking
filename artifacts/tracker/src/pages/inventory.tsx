@@ -253,8 +253,8 @@ function AutoBucketSide({
   onResetOverride: (project: string) => void;
   canEdit: boolean;
   mfcColorMap: Map<string, string>;
-  onSetMfcColor: (mfc: string, color: string) => void;
-  onClearMfcColor: (mfc: string) => void;
+  onSetMfcColor: (mfc: string, side: InventorySide, color: string) => void;
+  onClearMfcColor: (mfc: string, side: InventorySide) => void;
 }) {
   const groups = useMemo(() => groupByProject(rows), [rows]);
   const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
@@ -288,10 +288,10 @@ function AutoBucketSide({
               onToggle={(project) => onToggle(makeBucketSelKey(bucket, side, project))}
               getIsOverridden={(project) => overriddenProjects.has(project)}
               onReset={canEdit ? onResetOverride : undefined}
-              currentColor={mfcColorMap.get(mfcBatch)}
+              currentColor={mfcColorMap.get(`${mfcBatch}|${side}`)}
               canEdit={canEdit}
-              onSetColor={(color) => onSetMfcColor(mfcBatch, color)}
-              onClearColor={() => onClearMfcColor(mfcBatch)}
+              onSetColor={(color) => onSetMfcColor(mfcBatch, side, color)}
+              onClearColor={() => onClearMfcColor(mfcBatch, side)}
             />
           ))
         ) : (
@@ -947,18 +947,18 @@ export default function InventoryView() {
   const upsertMfcColor = useUpsertInventoryMfcColor();
   const deleteMfcColor = useDeleteInventoryMfcColor();
   const mfcColorMap = useMemo(
-    () => new Map(mfcColors.map((c) => [c.mfcBatch, c.color])),
+    () => new Map(mfcColors.map((c) => [`${c.mfcBatch}|${c.side}`, c.color])),
     [mfcColors],
   );
-  const setMfcColor = (mfcBatch: string, color: string) => {
+  const setMfcColor = (mfcBatch: string, side: InventorySide, color: string) => {
     upsertMfcColor.mutate(
-      { data: { mfcBatch, color: color as MfcColorName } },
+      { data: { mfcBatch, side, color: color as MfcColorName } },
       { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListInventoryMfcColorsQueryKey() }) },
     );
   };
-  const clearMfcColor = (mfcBatch: string) => {
+  const clearMfcColor = (mfcBatch: string, side: InventorySide) => {
     deleteMfcColor.mutate(
-      { params: { mfcBatch } },
+      { params: { mfcBatch, side } },
       { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListInventoryMfcColorsQueryKey() }) },
     );
   };
@@ -1185,7 +1185,7 @@ export default function InventoryView() {
         };
         for (const col of columns) row[col.key] = col.get(r) ?? 0;
         if (mfcColorMap) {
-          const colorName = mfcColorMap.get(r.mfcBatch) as MfcColorName | undefined;
+          const colorName = mfcColorMap.get(`${r.mfcBatch}|${side}`) as MfcColorName | undefined;
           if (colorName && colorName in MFC_COLOR_ARGB) {
             row._bgColor = MFC_COLOR_ARGB[colorName];
           }

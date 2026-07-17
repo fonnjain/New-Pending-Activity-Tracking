@@ -4329,9 +4329,9 @@ export const getDeleteInventoryMfcColorUrl = (params: DeleteInventoryMfcColorPar
 }
 
 /**
- * Removes the stored colour for the given MFC batch. After deletion the batch exports with no background fill. Requires authentication.
+ * Removes the stored colour for the given MFC batch and side. After deletion the batch exports with no background fill for that side. Requires authentication.
 
- * @summary Remove the colour assignment for an MFC batch
+ * @summary Remove the colour assignment for an MFC batch on a specific side
  */
 export const deleteInventoryMfcColor = async (params: DeleteInventoryMfcColorParams, options?: RequestInit): Promise<void> => {
 
@@ -4379,7 +4379,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteInventoryMfcColorMutationError = ErrorType<unknown>
 
     /**
- * @summary Remove the colour assignment for an MFC batch
+ * @summary Remove the colour assignment for an MFC batch on a specific side
  */
 export const useDeleteInventoryMfcColor = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryMfcColor>>, TError,{params: DeleteInventoryMfcColorParams}, TContext>, request?: SecondParameter<typeof customFetch>}

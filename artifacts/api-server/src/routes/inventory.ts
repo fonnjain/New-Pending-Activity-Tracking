@@ -394,7 +394,7 @@ router.put(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const { mfcBatch, color } = parsed.data;
+    const { mfcBatch, side, color } = parsed.data;
     const batch = mfcBatch.trim();
     if (!batch) {
       res.status(400).json({ error: "mfcBatch is required" });
@@ -402,9 +402,9 @@ router.put(
     }
     const [row] = await db
       .insert(inventoryMfcColorTable)
-      .values({ mfcBatch: batch, color })
+      .values({ mfcBatch: batch, side, color })
       .onConflictDoUpdate({
-        target: inventoryMfcColorTable.mfcBatch,
+        target: [inventoryMfcColorTable.mfcBatch, inventoryMfcColorTable.side],
         set: { color, createdAt: new Date() },
       })
       .returning();
@@ -417,13 +417,19 @@ router.delete(
   requireAuth,
   async (req, res): Promise<void> => {
     const mfcBatch = String(req.query.mfcBatch ?? "").trim();
-    if (!mfcBatch) {
-      res.status(400).json({ error: "mfcBatch is required" });
+    const side = String(req.query.side ?? "").trim();
+    if (!mfcBatch || !side) {
+      res.status(400).json({ error: "mfcBatch and side are required" });
       return;
     }
     await db
       .delete(inventoryMfcColorTable)
-      .where(eq(inventoryMfcColorTable.mfcBatch, mfcBatch));
+      .where(
+        and(
+          eq(inventoryMfcColorTable.mfcBatch, mfcBatch),
+          eq(inventoryMfcColorTable.side, side),
+        ),
+      );
     res.status(204).end();
   },
 );

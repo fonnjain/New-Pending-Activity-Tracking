@@ -1999,9 +1999,10 @@ export const DeleteInventoryManualEQueryParams = zod.object({
  */
 export const ListInventoryMfcColorsResponseItem = zod.object({
   "mfcBatch": zod.string(),
+  "side": zod.enum(['in_house', 'out_vendor']),
   "color": zod.enum(['green', 'white', 'yellow']),
   "createdAt": zod.string()
-}).describe('A stored backfill colour for an MFC batch. Applied as Excel cell background when the Inventory bucket list is exported to .xlsx.\n')
+}).describe('A stored backfill colour for an MFC batch on a specific side. Applied as an Excel cell background when the inventory bucket list is exported to .xlsx. In-House and Out-Vendor sides can have different colours for the same batch.\n')
 export const ListInventoryMfcColorsResponse = zod.array(ListInventoryMfcColorsResponseItem)
 
 
@@ -2012,23 +2013,26 @@ export const ListInventoryMfcColorsResponse = zod.array(ListInventoryMfcColorsRe
  */
 export const UpsertInventoryMfcColorBody = zod.object({
   "mfcBatch": zod.string(),
+  "side": zod.enum(['in_house', 'out_vendor']),
   "color": zod.enum(['green', 'white', 'yellow'])
 })
 
 export const UpsertInventoryMfcColorResponse = zod.object({
   "mfcBatch": zod.string(),
+  "side": zod.enum(['in_house', 'out_vendor']),
   "color": zod.enum(['green', 'white', 'yellow']),
   "createdAt": zod.string()
-}).describe('A stored backfill colour for an MFC batch. Applied as Excel cell background when the Inventory bucket list is exported to .xlsx.\n')
+}).describe('A stored backfill colour for an MFC batch on a specific side. Applied as an Excel cell background when the inventory bucket list is exported to .xlsx. In-House and Out-Vendor sides can have different colours for the same batch.\n')
 
 
 /**
- * Removes the stored colour for the given MFC batch. After deletion the batch exports with no background fill. Requires authentication.
+ * Removes the stored colour for the given MFC batch and side. After deletion the batch exports with no background fill for that side. Requires authentication.
 
- * @summary Remove the colour assignment for an MFC batch
+ * @summary Remove the colour assignment for an MFC batch on a specific side
  */
 export const DeleteInventoryMfcColorQueryParams = zod.object({
-  "mfcBatch": zod.coerce.string()
+  "mfcBatch": zod.coerce.string(),
+  "side": zod.enum(['in_house', 'out_vendor'])
 })
 
 

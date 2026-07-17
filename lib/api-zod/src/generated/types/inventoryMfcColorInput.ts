@@ -6,8 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { InventoryMfcColorInputColor } from './inventoryMfcColorInputColor';
+import type { InventoryMfcColorInputSide } from './inventoryMfcColorInputSide';
 
 export interface InventoryMfcColorInput {
   mfcBatch: string;
+  side: InventoryMfcColorInputSide;
   color: InventoryMfcColorInputColor;
 }
