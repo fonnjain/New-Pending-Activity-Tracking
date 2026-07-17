@@ -338,6 +338,15 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
   // which only narrows the marks table below.
   const total = useMemo(() => rollup(scope), [scope]);
 
+  const thicknessBreakdown = useMemo(() => {
+    let set = 0, notSet = 0, setWt = 0, notSetWt = 0;
+    for (const r of scope) {
+      if (r.thicknessMm != null) { set++; setWt += r.balanceWt; }
+      else { notSet++; notSetWt += r.balanceWt; }
+    }
+    return { set, notSet, setWt, notSetWt };
+  }, [scope]);
+
   const loadLabel = load === "OPERATIONAL" ? "Operational" : "In Hand";
 
   const handleExport = () => {
@@ -468,6 +477,21 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
           </>
         )}
       </div>
+
+      {!specialLoad && dimension === "hole" && (
+        <div className="grid grid-cols-2 gap-3">
+          <SummaryTile
+            title="Thickness Set"
+            value={formatWeight(thicknessBreakdown.setWt)}
+            sub={`${thicknessBreakdown.set.toLocaleString()} marks`}
+          />
+          <SummaryTile
+            title="Thickness Not Set"
+            value={formatWeight(thicknessBreakdown.notSetWt)}
+            sub={`${thicknessBreakdown.notSet.toLocaleString()} marks`}
+          />
+        </div>
+      )}
 
       <div className="flex justify-end">
         <Button variant="outline" size="sm" className="gap-2" onClick={handleExport} disabled={projects.length === 0}>
