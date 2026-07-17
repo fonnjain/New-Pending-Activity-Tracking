@@ -79,6 +79,7 @@ export * from './import';
 export * from './importSummary';
 export * from './importUpload';
 export * from './inventoryBucketRow';
+export * from './inventoryBucketRowWipWeightByContractor';
 export * from './inventoryBucketsResponse';
 export * from './inventoryManualEntry';
 export * from './inventoryManualEntryInput';

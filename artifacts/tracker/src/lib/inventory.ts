@@ -48,8 +48,7 @@ export interface StructureSides {
 }
 
 // A structure can be touched by more than one contractor across its marks; if
-// those contractors resolve to both sides, the structure is shown on BOTH
-// sides, each badged "(mixed)" — never picked by precedence.
+// those contractors resolve to both sides, the structure is "mixed".
 export function classifyStructureSides(
   contractors: string[],
   map: Map<string, ContractorCategoryInfo>,
@@ -61,6 +60,29 @@ export function classifyStructureSides(
   }
   if (sides.size === 0) sides.add("in_house");
   return { sides, mixed: sides.size > 1 };
+}
+
+// Compute the in-house weight ratio r_in from the per-contractor balance
+// weights sent by the server (wipWeightByContractor). Uses resolveContractorSide
+// to classify each contractor key, then sums their weights:
+//   r_in = inWt / (inWt + outWt)
+// Defaults to 1.0 (fully in-house) when there are no marks with weight > 0.
+// Blank contractor (empty-string key) defaults to in-house per spec.
+function computeSideRatio(
+  wipWeightByContractor: Record<string, number>,
+  map: Map<string, ContractorCategoryInfo>,
+): number {
+  let inWt = 0;
+  let outWt = 0;
+  for (const [contractor, wt] of Object.entries(wipWeightByContractor)) {
+    if (wt <= 0) continue;
+    const side = resolveContractorSide(contractor, map);
+    if (side === "in_house") inWt += wt;
+    else outWt += wt;
+  }
+  const total = inWt + outWt;
+  if (total <= 0) return 1.0;
+  return inWt / total;
 }
 
 export interface InventoryStructureCard {
@@ -143,64 +165,39 @@ export interface InventoryBuckets {
   eRemovedFromDCount: number;
 }
 
-function toCard(
-  row: InventoryBucketRow,
-  map: Map<string, ContractorCategoryInfo>,
-): { card: InventoryStructureCard; sides: StructureSides } {
-  const sides = classifyStructureSides(row.contractors, map);
-  return {
-    card: {
-      project: row.project,
-      structure: row.structure,
-      subType: row.subType,
-      weightMt: row.weightMt,
-      woOrderQtyMt: row.woOrderQtyMt,
-      fileBalReleaseMt: row.fileBalReleaseMt,
-      inspectionMt: row.inspectionMt,
-      galvMt: row.galvMt,
-      balFabMt: row.balFabMt,
-      balGalvMt: row.balGalvMt,
-      contractors: row.contractors,
-      notInLatest: row.notInLatest,
-      mixed: sides.mixed,
-      mfcBatch: row.mfcBatch,
-    },
-    sides,
-  };
-}
-
-// Split a bucket's rows into in-house/out-vendor sides, duplicating a mixed
-// structure onto BOTH sides (never picked by precedence).
-export function splitBySide(
-  rows: { card: InventoryStructureCard; sides: StructureSides }[],
-): { inHouse: InventoryStructureCard[]; outVendor: InventoryStructureCard[] } {
-  const inHouse: InventoryStructureCard[] = [];
-  const outVendor: InventoryStructureCard[] = [];
-  for (const { card, sides } of rows) {
-    if (sides.sides.has("in_house")) inHouse.push(card);
-    if (sides.sides.has("out_vendor")) outVendor.push(card);
-  }
-  return { inHouse, outVendor };
-}
-
-// Compute Buckets B/C/D from the raw joined rows. Membership tests apply
-// independently per bucket (a row can land in both B/C is impossible since
-// they partition on sign, but D is independent of B/C so overlap with either
-// is expected and allowed). Null-driving-field rows are excluded from that
-// bucket and counted so the page can flag them. Rows with hasWipMarks=false
-// are excluded entirely (production complete; dropped out of the WIP file).
+// Compute Buckets B/C/D using the hybrid in-house / out-vendor split.
+//
+// SPLIT RULE (per spec):
+//   1. For each structure, compute r_in = inWt / (inWt + outWt) from its WIP
+//      marks' Balance Wt, where inWt/outWt are summed by side classification.
+//      Default r_in = 1.0 when no marks have positive weight.
+//   2. Release Balance (Col S): 100% in-house. out-vendor gets 0 (not null
+//      when raw is non-null, so the column is numeric not "-").
+//   3. Fab (Col T), Galva (Col U), Yard (Col N): split by r_in.
+//        in-house  = value * r_in
+//        out-vendor = value * (1 − r_in)
+//
+// Each structure produces:
+//   - always an in-house card (carries Release Balance + r_in fraction)
+//   - an out-vendor card only when r_out > 0 (carries 0 Release Balance +
+//     r_out fraction of Fab/Galva/Yard)
+//
+// This guarantees In-House + Out-Vendor == raw Order-Review value for every
+// column, so the two side totals never overlap.
 //
 // eExcludeKeys: `${project}\u0001${mfcBatch}` keys from active Bucket E entries.
-// When a row matches a key: it is REMOVED from C and D (NOT from B — B = Raw
-// Material Incomplete and must always stay visible regardless of E entries).
+// When a row matches a key: it is REMOVED from C and D (NOT from B).
 export function computeAutoBuckets(
   rows: InventoryBucketRow[],
   map: Map<string, ContractorCategoryInfo>,
   eExcludeKeys?: Set<string>,
 ): InventoryBuckets {
-  const b: { card: InventoryStructureCard; sides: StructureSides }[] = [];
-  const c: { card: InventoryStructureCard; sides: StructureSides }[] = [];
-  const d: { card: InventoryStructureCard; sides: StructureSides }[] = [];
+  const bInHouse: InventoryStructureCard[] = [];
+  const bOutVendor: InventoryStructureCard[] = [];
+  const cInHouse: InventoryStructureCard[] = [];
+  const cOutVendor: InventoryStructureCard[] = [];
+  const dInHouse: InventoryStructureCard[] = [];
+  const dOutVendor: InventoryStructureCard[] = [];
   let excludedNullReleaseCount = 0;
   let excludedNullInspectionCount = 0;
   let excludedCompletedCount = 0;
@@ -217,38 +214,79 @@ export function computeAutoBuckets(
     const eKey = `${row.project}\u0001${row.mfcBatch}`;
     const suppressedByE = eExcludeKeys?.has(eKey) ?? false;
 
-    const built = toCard(row, map);
+    // Compute the in-house weight ratio from this structure's WIP marks.
+    const r_in = computeSideRatio(row.wipWeightByContractor, map);
+    const r_out = 1 - r_in;
+    const mixed = r_in > 0 && r_out > 0;
 
-    // B is NEVER suppressed by E.
+    // Fields that are the same for both sides (not subject to the split).
+    const base = {
+      project: row.project,
+      structure: row.structure,
+      subType: row.subType,
+      weightMt: row.weightMt,
+      woOrderQtyMt: row.woOrderQtyMt,
+      inspectionMt: row.inspectionMt,
+      contractors: row.contractors,
+      notInLatest: row.notInLatest,
+      mixed,
+      mfcBatch: row.mfcBatch,
+    };
+
+    // In-house card: Release Balance always goes fully to in-house; Fab/Galva/
+    // Yard are scaled by r_in. Null raw values stay null (never coerced to 0).
+    const inCard: InventoryStructureCard = {
+      ...base,
+      fileBalReleaseMt: row.fileBalReleaseMt,
+      balFabMt: row.balFabMt != null ? row.balFabMt * r_in : null,
+      balGalvMt: row.balGalvMt != null ? row.balGalvMt * r_in : null,
+      galvMt: row.galvMt != null ? row.galvMt * r_in : null,
+    };
+
+    // Out-vendor card: Release Balance is always 0 per spec (shown as 0 not
+    // null when raw is non-null, so the column stays numeric). Fab/Galva/Yard
+    // carry the remaining (1 − r_in) fraction. Only created when r_out > 0.
+    const outCard: InventoryStructureCard | null = r_out > 0 ? {
+      ...base,
+      fileBalReleaseMt: row.fileBalReleaseMt != null ? 0 : null,
+      balFabMt: row.balFabMt != null ? row.balFabMt * r_out : null,
+      balGalvMt: row.balGalvMt != null ? row.balGalvMt * r_out : null,
+      galvMt: row.galvMt != null ? row.galvMt * r_out : null,
+    } : null;
+
+    // Bucket B: Release Balance > 0 (never suppressed by E).
     if (row.fileBalReleaseMt == null) {
       excludedNullReleaseCount++;
     } else if (row.fileBalReleaseMt > 0) {
-      b.push(built);
+      bInHouse.push(inCard);
+      if (outCard) bOutVendor.push(outCard);
     } else {
       // fileBalReleaseMt <= 0 → eligible for C
       if (suppressedByE) {
         eRemovedFromCCount++;
       } else {
-        c.push(built);
+        cInHouse.push(inCard);
+        if (outCard) cOutVendor.push(outCard);
       }
     }
 
-    // D is independent of B/C membership — check inspectionMt separately.
+    // Bucket D is independent of B/C membership — check inspectionMt separately.
     if (row.inspectionMt == null) {
       excludedNullInspectionCount++;
     } else if (row.inspectionMt > 0) {
       if (suppressedByE) {
         eRemovedFromDCount++;
       } else {
-        d.push(built);
+        dInHouse.push(inCard);
+        if (outCard) dOutVendor.push(outCard);
       }
     }
   }
 
   return {
-    b: splitBySide(b),
-    c: splitBySide(c),
-    d: splitBySide(d),
+    b: { inHouse: bInHouse, outVendor: bOutVendor },
+    c: { inHouse: cInHouse, outVendor: cOutVendor },
+    d: { inHouse: dInHouse, outVendor: dOutVendor },
     excludedNullReleaseCount,
     excludedNullInspectionCount,
     excludedCompletedCount,

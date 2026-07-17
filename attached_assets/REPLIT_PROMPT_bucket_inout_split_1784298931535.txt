@@ -1,0 +1,111 @@
+TASK: Fix the double-counting in the Bucket List In-House / Out-Vendor split. A structure whose
+WIP marks span BOTH sides currently has its FULL Order-Review weight placed on BOTH sides, so
+the two side-totals overlap and cannot be summed. Replace this with a hybrid split that
+reconciles exactly.
+
+=====================================================================
+THE BUG
+=====================================================================
+- Side (in-house / out-vendor) is a WIP property, per MARK (from the mark's Contractor).
+- Bucket weights (Release Balance, Fabrication, Galvanising, Yard) are Order-Review properties,
+  per STRUCTURE. Order Review has NO concept of in-house / out-vendor.
+- 468 of 729 structures (64%) have marks on BOTH sides. Today the app puts each structure's
+  full Order-Review weight on BOTH sides -> the same weight is counted twice.
+  Symptom: identical numbers appear under In-House and Out-Vendor for the same project (e.g.
+  926 shows Rel.Bal 7.587 / Fab+Galva 27.560 / Yard 3.064 on BOTH sides), and the In-House
+  total (~8,692 MT) and Out-Vendor total (~7,961 MT) overlap so they must not be added.
+
+=====================================================================
+COLUMN SOURCES (Order Review, per structure, BOM-summed)
+=====================================================================
+  Release Balance = Col S (Balance Release)
+  Fabrication     = Col T (Balance Fabrication)
+  Galvanising     = Col U (Balance Galvanising)
+  Yard            = Col N (Progress Galvanising)
+(Join Order Review Col C "Tower Type" == WIP Col J "Alias". NEVER join on WIP Col H.)
+
+=====================================================================
+WHY A HYBRID SPLIT (verified research)
+=====================================================================
+- RELEASE BALANCE has no side: the marks that carry it are "Job Card Not Started + Initial",
+  and 100% of them have a BLANK contractor (2,080.763 MT, all blank). Steel that has not been
+  released has not been allocated to any fabricator yet — it physically sits in-house.
+  DECISION: put ALL Release Balance on the IN-HOUSE side. Do not ratio it.
+- FAB / GALVA / YARD cannot be reproduced from WIP (WIP's per-mark balance does not decompose
+  into these Order-Review stage buckets; Yard/Progress is cumulative-done and exceeds total WIP
+  balance). So keep the Order-Review value and SPLIT it by a WIP-derived side ratio.
+- The ratio must come from ALL of a structure's WIP marks (total balance weight per side), NOT
+  from stage-specific marks. Stage subsets are tiny and unstable (117 structures have <=2
+  galvanising marks -> a stage ratio would be 100/0 or 50/50 noise). The all-marks ratio is
+  always defined (every bucket structure has WIP marks — completed ones are already excluded)
+  and is a stabler estimate of the structure's in/out work distribution.
+
+=====================================================================
+THE SPLIT RULE
+=====================================================================
+For each bucket structure (after excluding completed / no-WIP structures):
+
+  1) Compute the structure's IN-HOUSE ratio from its WIP marks:
+        inWt  = sum of WIP Balance Wt (Col Q) of the structure's marks whose Contractor is
+                IN-HOUSE
+        outWt = sum of WIP Balance Wt of its marks whose Contractor is OUT-VENDOR
+        r_in  = inWt / (inWt + outWt)      [if inWt+outWt == 0, treat r_in = 1.0]
+     Side classification of a mark's Contractor (existing rule — keep as-is):
+        IN-HOUSE  = CNC*, UNIT-I, UNIT-II, DUMMY CONTRACTOR, NO CONTRACTOR, blank
+        OUT-VENDOR = named external vendors, incl. DASHMESH ENTERPRISES GP-2, OUT FAB,
+                     S.R.BROTHERS
+     (A structure all on one side -> r_in is 1.0 or 0.0 -> whole weight to that side, as
+      already decided.)
+
+  2) Release Balance (Col S): 100% to IN-HOUSE. out = 0.
+
+  3) Fabrication (Col T), Galvanising (Col U), Yard (Col N): split by r_in.
+        in  = value * r_in
+        out = value * (1 - r_in)
+
+The In-House column and Out-Vendor column now PARTITION each structure's weight (no overlap),
+so the two sides can be summed to the bucket total.
+
+=====================================================================
+APPLIES TO
+=====================================================================
+- Buckets B, C, D (the ones showing Rel Bal / Fab / Galva / Yard). Bucket A is manual — unchanged.
+- Both grouping modes (Project-grouped and MFC-grouped) use the same per-structure split, then
+  aggregate.
+- The Excel export must reflect the split values (not the doubled ones).
+- The clamp rules (max(0,...) for C/D display) apply AFTER the split, per side.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change bucket membership rules, the completed-structure exclusion, the MFC grouping,
+  or the summaries — only how each structure's weight is attributed to the two sides.
+- Do NOT ratio Release Balance; it is always 100% in-house.
+- Do NOT use stage-specific marks for the ratio; use ALL the structure's WIP marks.
+- Do NOT join on WIP Col H; join on WIP Col J (Alias).
+- Do NOT forward-fill the project code.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK (verified values, 17-Jul files, Bucket B, 206 structures after exclusion)
+=====================================================================
+After the split, Bucket B side-totals must be (MT):
+    Release Balance:  In-House 2436.657   Out-Vendor 0.000
+    Fabrication:      In-House 2071.093   Out-Vendor  869.556   (sum 2940.649)
+    Galvanising:      In-House  619.883   Out-Vendor  290.745   (sum  910.628)
+    Yard:             In-House 1372.166   Out-Vendor 2003.347   (sum 3375.513)
+
+RECONCILIATION (must hold for EVERY column, every bucket, and per structure):
+    In-House value + Out-Vendor value == the raw Order-Review value for that column.
+    (Bucket B raw: Fab 2940.649, Galv 910.628, Yard 3375.513 — matches the sums above.)
+    Release Balance: In-House == raw Col S total, Out-Vendor == 0.
+
+Also verify:
+- No structure's weight appears twice: summing In-House + Out-Vendor across all structures
+  equals the single-sided (undivided) Order-Review bucket total, to the gram.
+- Project 926 no longer shows identical numbers on both sides; each side is a fraction that
+  adds back to the whole.
+- A structure with all-in-house marks shows its full Fab/Galva/Yard on In-House, 0 on Out; an
+  all-out-vendor structure shows the reverse (except Release Balance, always In-House).
+Report: the Bucket B side-totals above, and confirmation that In+Out reconciles to the raw
+Order-Review totals for Fab, Galva and Yard.

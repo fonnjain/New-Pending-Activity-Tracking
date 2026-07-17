@@ -68,6 +68,11 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
   // resolve the representative MFC Batch when a structure has marks in more
   // than one real batch (only one structure in the current files).
   const mfcBatchWt = new Map<string, Map<string, number>>();
+  // contractor -> cumulative balance weight per (project, structure), for
+  // Structure marks only. Used client-side to compute the in-house / out-
+  // vendor weight-split ratio without double-counting mixed structures.
+  // Blank / null contractor uses the empty-string key (treated as in-house).
+  const contractorWeightsByKey = new Map<string, Map<string, number>>();
 
   if (newestWip) {
     const marks = await db
@@ -112,6 +117,15 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
           }
           bmap.set(batch, (bmap.get(batch) ?? 0) + (m.balanceWt ?? 0));
         }
+        // Accumulate balance weight per contractor for in-house/out-vendor
+        // ratio computation. Blank/null contractor = "" (resolves to in-house).
+        const c = m.contractor ?? "";
+        let cwmap = contractorWeightsByKey.get(key);
+        if (!cwmap) {
+          cwmap = new Map();
+          contractorWeightsByKey.set(key, cwmap);
+        }
+        cwmap.set(c, (cwmap.get(c) ?? 0) + (m.balanceWt ?? 0));
       }
     }
   }
@@ -137,6 +151,17 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
       }
     }
 
+    // Per-contractor balance weight for the hybrid in-house/out-vendor split.
+    // Empty string key = blank contractor (in-house). Sent raw so the client
+    // can apply its own resolveContractorSide classification consistently.
+    const cwmap = contractorWeightsByKey.get(key);
+    const wipWeightByContractor: Record<string, number> = {};
+    if (cwmap) {
+      for (const [c, wt] of cwmap) {
+        wipWeightByContractor[c] = wt;
+      }
+    }
+
     return {
       project: r.project,
       structure: r.structure,
@@ -157,6 +182,7 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
       notInLatest: false,
       hasWipMarks,
       mfcBatch,
+      wipWeightByContractor,
     };
   });
 

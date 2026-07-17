@@ -1209,6 +1209,12 @@ export interface FabricationPriorityInput {
 }
 
 /**
+ * Sum of WIP Balance Wt (kg) per contractor across all Structure-order-nature WIP marks for this (project, structure). Empty-string key represents a blank contractor (treated as in-house). Used client-side to compute the in-house / out-vendor weight-split ratio so mixed structures are never double-counted.
+
+ */
+export type InventoryBucketRowWipWeightByContractor = {[key: string]: number};
+
+/**
  * One (project, structure) row from the latest Order Review snapshot, joined to the distinct contractors touching that structure in the newest WIP import. Raw only — the client derives B/C/D membership and in-house/out-vendor sides from these fields.
 
  */
@@ -1238,6 +1244,9 @@ export interface InventoryBucketRow {
   /** MFC Batch letter (A/B/C/D) resolved from the structure's WIP marks (the batch with the greatest cumulative Balance Weight wins when multiple real batches appear on one structure). "Z" when all marks have blank/no batch, meaning the structure is live but not yet assigned to a batch.
    */
   mfcBatch: string;
+  /** Sum of WIP Balance Wt (kg) per contractor across all Structure-order-nature WIP marks for this (project, structure). Empty-string key represents a blank contractor (treated as in-house). Used client-side to compute the in-house / out-vendor weight-split ratio so mixed structures are never double-counted.
+   */
+  wipWeightByContractor: InventoryBucketRowWipWeightByContractor;
 }
 
 export interface InventoryBucketsResponse {

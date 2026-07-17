@@ -3267,6 +3267,15 @@ components:
             multiple real batches appear on one structure). "Z" when all marks
             have blank/no batch, meaning the structure is live but not yet
             assigned to a batch.
+        wipWeightByContractor:
+          type: object
+          additionalProperties:
+            type: number
+          description: >
+            Sum of WIP Balance Wt (kg) per contractor across all Structure-order-nature
+            WIP marks for this (project, structure). Empty-string key represents a blank
+            contractor (treated as in-house). Used client-side to compute the in-house /
+            out-vendor weight-split ratio so mixed structures are never double-counted.
       required:
         - project
         - structure
@@ -3282,6 +3291,7 @@ components:
         - notInLatest
         - hasWipMarks
         - mfcBatch
+        - wipWeightByContractor
     InventoryBucketsResponse:
       type: object
       properties:
