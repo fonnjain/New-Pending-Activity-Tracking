@@ -60,3 +60,9 @@ id = "Zh7GSC8tsVIbogAVLuhH8"
 uri = "file://docs/inventory-bucket-logic.docx"
 type = "word_document"
 title = "Inventory Bucket Board — Logic Reference"
+
+[[outputs]]
+id = "GgdXolA5IRU_7FdwDgBtZ"
+uri = "file://Thickness_Calculation_Logic.docx"
+type = "word_document"
+title = "Thickness Calculation Logic — Reference Document"
