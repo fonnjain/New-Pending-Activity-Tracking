@@ -716,7 +716,7 @@ function priKey(section: string, column: string, project: string): string {
 const toTonnes = (kg: number): number => Math.round((kg / 1000) * 1000) / 1000;
 const fmtTonnes = (kg: number): string => toTonnes(kg).toFixed(3);
 
-type FabRow = { project: string; weightKg: number };
+type FabRow = { project: string; weightKg: number; avgThicknessMm: number | null };
 type FabColumnData = { rows: FabRow[]; totalKg: number };
 
 function FabricationLoadReport() {
@@ -752,6 +752,7 @@ function FabricationLoadReport() {
   );
 
   // Sum Balance Wt (kg) per project for every (section, column) cell.
+  // Also accumulates a weight-averaged thickness (mm) per project per cell.
   const data = useMemo(() => {
     const out = new Map<string, FabColumnData>();
     for (const s of FAB_LOAD_SECTIONS) {
@@ -759,7 +760,8 @@ function FabricationLoadReport() {
         out.set(`${s.value}|${c.value}`, { rows: [], totalKg: 0 });
       }
     }
-    const acc = new Map<string, Map<string, number>>(); // cell -> project -> kg
+    // cell -> project -> { kg, thickWtSum, thickWtKg }
+    const acc = new Map<string, Map<string, { kg: number; thickWtSum: number; thickWtKg: number }>>();
     for (const r of tltRecords) {
       const project = (r.job || "").trim();
       if (!project || project === "(Unassigned)") continue;
@@ -770,21 +772,25 @@ function FabricationLoadReport() {
           if (!fabLoadMatch(s.value, c.value, r)) continue;
           const cell = `${s.value}|${c.value}`;
           let pm = acc.get(cell);
-          if (!pm) {
-            pm = new Map();
-            acc.set(cell, pm);
-          }
-          pm.set(project, (pm.get(project) ?? 0) + wt);
+          if (!pm) { pm = new Map(); acc.set(cell, pm); }
+          const prev = pm.get(project) ?? { kg: 0, thickWtSum: 0, thickWtKg: 0 };
+          const thick = r.thicknessMm;
+          pm.set(project, {
+            kg: prev.kg + wt,
+            thickWtSum: thick != null ? prev.thickWtSum + wt * thick : prev.thickWtSum,
+            thickWtKg: thick != null ? prev.thickWtKg + wt : prev.thickWtKg,
+          });
         }
       }
     }
     for (const [cell, pm] of acc) {
       let totalKg = 0;
       const rows: FabRow[] = [];
-      for (const [project, weightKg] of pm) {
-        if (weightKg <= 0) continue;
-        rows.push({ project, weightKg });
-        totalKg += weightKg;
+      for (const [project, { kg, thickWtSum, thickWtKg }] of pm) {
+        if (kg <= 0) continue;
+        const avgThicknessMm = thickWtKg > 0 ? thickWtSum / thickWtKg : null;
+        rows.push({ project, weightKg: kg, avgThicknessMm });
+        totalKg += kg;
       }
       out.set(cell, { rows, totalKg });
     }
@@ -857,15 +863,16 @@ function FabricationLoadReport() {
       const { blocks } = buildSectionGrid(s.value);
       const gridBlocks: XlsxGridBlock[] = blocks.map(({ c, cell, rows: rs }) => ({
         title: c.label,
-        headers: ["Project", "Wt (t)", "Priority"],
-        numeric: [false, true, false],
-        decimals: 3,
+        headers: ["Project", "Avg Thick. (mm)", "Wt (t)", "Priority"],
+        numeric: [false, true, true, false],
+        decimals: 2,
         rows: rs.map((r) => [
           r.project,
+          r.avgThicknessMm != null ? Math.round(r.avgThicknessMm * 100) / 100 : "",
           toTonnes(r.weightKg),
           priorityMap.get(priKey(s.value, c.value, r.project)) ?? "",
         ]),
-        totals: ["G. Total", toTonnes(cell.totalKg), ""],
+        totals: ["G. Total", "", toTonnes(cell.totalKg), ""],
       }));
       return { name: s.label, blocks: gridBlocks };
     });
@@ -953,6 +960,9 @@ function FabricationLoadReport() {
                                 Project
                               </TableCell>
                               <TableCell className="px-1.5 py-1.5 text-right font-medium">
+                                Thick. (mm)
+                              </TableCell>
+                              <TableCell className="px-1.5 py-1.5 text-right font-medium">
                                 Weight
                               </TableCell>
                               <TableCell className="px-1.5 py-1.5 font-medium">
@@ -967,6 +977,9 @@ function FabricationLoadReport() {
                                 <TableRow key={r.project}>
                                   <TableCell className="font-medium py-1.5 px-1.5 text-xs">
                                     {r.project}
+                                  </TableCell>
+                                  <TableCell className="text-right tabular-nums py-1.5 px-1.5 text-xs text-muted-foreground">
+                                    {r.avgThicknessMm != null ? `${(Math.round(r.avgThicknessMm * 10) / 10).toFixed(1)}` : "-"}
                                   </TableCell>
                                   <TableCell className="text-right tabular-nums py-1.5 px-1.5 text-xs">
                                     {fmtTonnes(r.weightKg)}
@@ -1007,6 +1020,7 @@ function FabricationLoadReport() {
                             })}
                             <TableRow className="border-t-2 font-semibold">
                               <TableCell className="py-1.5 px-1.5 text-xs">G. Total</TableCell>
+                              <TableCell className="py-1.5 px-1.5" />
                               <TableCell className="text-right tabular-nums py-1.5 px-1.5 text-xs">
                                 {fmtTonnes(cell.totalKg)}
                               </TableCell>
