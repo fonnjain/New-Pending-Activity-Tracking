@@ -445,10 +445,13 @@ function MfcTopRow({
   const projectGroups = useMemo(() => groupByProject(rows), [rows]);
   return (
     <div>
-      <button
-        type="button"
+      {/* Use div+role instead of button to allow nested interactive color-picker buttons (nested <button> is invalid HTML). */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-muted/30 gap-2"
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); } }}
+        className="w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-muted/30 gap-2 cursor-pointer select-none"
       >
         <span className="flex items-center gap-1.5 min-w-0">
           {open ? (
@@ -511,7 +514,7 @@ function MfcTopRow({
             </span>
           ))}
         </span>
-      </button>
+      </div>
       {open && (
         <div className="pl-6 pb-0.5">
           {projectGroups.map((g) => {
