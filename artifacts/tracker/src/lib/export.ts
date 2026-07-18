@@ -407,6 +407,7 @@ function writeCombinedBlockSheet(
         const { start } = blockLayout[gi];
         const r = g.rows[i];
         if (!r) continue;
+        const bgArgb = r._bgColor as string | undefined;
         for (let ci = 0; ci < g.columns.length; ci++) {
           const c = g.columns[ci];
           const cell = row.getCell(start + ci);
@@ -419,6 +420,9 @@ function writeCombinedBlockSheet(
             cell.value = v == null ? "" : v;
           }
           cell.border = { top: thin, bottom: thin, left: thin, right: thin };
+          if (bgArgb) {
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgArgb } };
+          }
         }
       }
     }
