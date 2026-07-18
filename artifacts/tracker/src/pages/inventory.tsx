@@ -104,9 +104,47 @@ interface ProjectGroup {
   weightMt: number;
 }
 
+// Unique key for a physical structure within a bucket (project + structure + subType + mfcBatch).
+// Used to match the in-house card (carries release balance + r_in fraction) with its
+// out-vendor counterpart (carries 0 release + r_out fraction) so they can be merged.
+function structureCardKey(r: InventoryStructureCard): string {
+  return `${r.project}\u0001${r.structure ?? ""}\u0001${r.subType ?? ""}\u0001${r.mfcBatch}`;
+}
+
+function addNullable(a: number | null, b: number | null): number | null {
+  if (a == null && b == null) return null;
+  return (a ?? 0) + (b ?? 0);
+}
+
+// Merge a pair of cards for the same physical structure into a single card with
+// full undivided values.  Release Balance always comes from the in-house card
+// (spec rule: release balance is 100% in-house; out-vendor card has 0).
+// Fab/Galva/Yard are summed so their total equals the raw undivided figure.
+function mergeStructureCards(
+  inCard: InventoryStructureCard,
+  outCard: InventoryStructureCard | undefined,
+): InventoryStructureCard {
+  if (!outCard) return { ...inCard, mixed: false };
+  return {
+    ...inCard,
+    // fileBalReleaseMt: from inCard (spec: release balance fully on in-house card)
+    balFabMt: addNullable(inCard.balFabMt, outCard.balFabMt),
+    balGalvMt: addNullable(inCard.balGalvMt, outCard.balGalvMt),
+    galvMt: addNullable(inCard.galvMt, outCard.galvMt),
+    mixed: false,
+  };
+}
+
 // Applies stored side overrides to an auto-computed bucket pair.
-// Any project in the override map for this bucket is moved to the stored
-// side regardless of what the contractor classification produced.
+// Any project in the override map for this bucket is moved to the stored side
+// regardless of what the contractor classification produced.
+//
+// Each physical structure can have TWO cards: an in-house card (release balance +
+// r_in fraction of Fab/Galva/Yard) and an out-vendor card (0 release + r_out
+// fraction).  Without merging, both cards would land on the target side when a
+// project is overridden, causing the same structure to appear twice with split
+// values and an inflated structure count.  This function merges the pair into a
+// single card with the full undivided values before placing it on the target side.
 function applyOverridesToBucket(
   inHouse: InventoryStructureCard[],
   outVendor: InventoryStructureCard[],
@@ -121,16 +159,48 @@ function applyOverridesToBucket(
     else toInHouse.add(o.projectCode);
   }
   if (toOutVendor.size === 0 && toInHouse.size === 0) return { inHouse, outVendor };
-  const newInHouse: InventoryStructureCard[] = [];
-  const newOutVendor: InventoryStructureCard[] = [];
+
+  // Index in-house and out-vendor cards for overridden projects so counterpart
+  // pairs can be found and merged.
+  const inCards = new Map<string, InventoryStructureCard>();
+  const outCards = new Map<string, InventoryStructureCard>();
   for (const r of inHouse) {
-    if (toOutVendor.has(r.project)) newOutVendor.push(r);
-    else newInHouse.push(r);
+    if (toOutVendor.has(r.project) || toInHouse.has(r.project)) {
+      inCards.set(structureCardKey(r), r);
+    }
   }
   for (const r of outVendor) {
-    if (toInHouse.has(r.project)) newInHouse.push(r);
-    else newOutVendor.push(r);
+    if (toOutVendor.has(r.project) || toInHouse.has(r.project)) {
+      outCards.set(structureCardKey(r), r);
+    }
   }
+
+  const newInHouse: InventoryStructureCard[] = [];
+  const newOutVendor: InventoryStructureCard[] = [];
+
+  // Non-overridden projects: keep on their current side unchanged.
+  for (const r of inHouse) {
+    if (!toOutVendor.has(r.project) && !toInHouse.has(r.project)) newInHouse.push(r);
+  }
+  for (const r of outVendor) {
+    if (!toOutVendor.has(r.project) && !toInHouse.has(r.project)) newOutVendor.push(r);
+  }
+
+  // Overridden projects: merge inCard + outCard → single merged card on target side.
+  // Drive from inCards (computeAutoBuckets always creates an inCard for every structure).
+  for (const [key, inCard] of inCards) {
+    const merged = mergeStructureCards(inCard, outCards.get(key));
+    if (toOutVendor.has(inCard.project)) newOutVendor.push(merged);
+    else newInHouse.push(merged);
+  }
+  // Defensive: handle outCard-only rows (shouldn't occur per computeAutoBuckets invariant).
+  for (const [key, outCard] of outCards) {
+    if (!inCards.has(key)) {
+      if (toOutVendor.has(outCard.project)) newOutVendor.push(outCard);
+      else newInHouse.push(outCard);
+    }
+  }
+
   return { inHouse: newInHouse, outVendor: newOutVendor };
 }
 
