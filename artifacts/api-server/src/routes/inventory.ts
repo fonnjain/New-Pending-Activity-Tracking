@@ -422,7 +422,7 @@ router.put(
     }
     const [row] = await db
       .insert(inventoryMfcColorTable)
-      .values({ mfcBatch: batch, colors: { [side]: color } })
+      .values({ mfcBatch: batch, color: "", colors: { [side]: color } })
       .onConflictDoUpdate({
         target: inventoryMfcColorTable.mfcBatch,
         // Merge new side entry into existing map using PostgreSQL jsonb || operator.
