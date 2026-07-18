@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useTracker, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
 import {
   useGetAuthStatus,
@@ -49,6 +49,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Boxes, ChevronRight, ChevronDown, Trash2, AlertTriangle, FileSpreadsheet, ArrowRightLeft, X } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { exportToXlsxSheets, type XlsxSheet, type XlsxSummaryRow, type XlsxBlockGroup } from "@/lib/export";
 
 function mt(n: number | null | undefined): string {
@@ -515,15 +516,21 @@ function MfcTopRow({
   const projectGroups = useMemo(() => groupByProject(rows), [rows]);
   return (
     <div>
-      {/* Use div+role instead of button to allow nested interactive color-picker buttons (nested <button> is invalid HTML). */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setOpen((v) => !v)}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); } }}
-        className="w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-muted/30 gap-2 cursor-pointer select-none"
-      >
-        <span className="flex items-center gap-1.5 min-w-0">
+      {/*
+        Row layout: toggle trigger (left) + color-picker + column values (right).
+        The color-picker and column values are intentionally OUTSIDE the toggle
+        trigger div so their click events never compete with the collapse handler.
+        No stopPropagation needed.
+      */}
+      <div className="w-full flex items-center justify-between hover:bg-muted/30 text-sm">
+        {/* Toggle trigger — only the left label area */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setOpen((v) => !v)}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); } }}
+          className="flex items-center gap-1.5 min-w-0 px-3 py-1.5 cursor-pointer select-none flex-1"
+        >
           {open ? (
             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           ) : (
@@ -543,14 +550,11 @@ function MfcTopRow({
           <span className="text-[10px] text-muted-foreground shrink-0">
             {projectGroups.length} proj · {rows.length} str
           </span>
-        </span>
-        <span className="flex items-center gap-3 shrink-0">
+        </div>
+        {/* Right side: color picker + column values — outside the toggle trigger */}
+        <span className="flex items-center gap-3 shrink-0 px-3 py-1.5">
           {canEdit && (
-            <span
-              className="flex items-center gap-0.5"
-              onClick={(e) => e.stopPropagation()}
-              title="Set backfill colour"
-            >
+            <span className="flex items-center gap-0.5" title="Set backfill colour">
               {MFC_COLOR_NAMES.map((c) => {
                 const active = currentColor === c;
                 return (
@@ -558,8 +562,7 @@ function MfcTopRow({
                     key={c}
                     type="button"
                     title={c.charAt(0).toUpperCase() + c.slice(1)}
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    onClick={() => {
                       if (active) onClearColor?.();
                       else onSetColor?.(c);
                     }}
@@ -571,7 +574,7 @@ function MfcTopRow({
                         ? "1px solid #9CA3AF"
                         : "1px solid transparent",
                     }}
-                    className="w-4 h-4 rounded-full"
+                    className="w-5 h-5 rounded-full cursor-pointer"
                   />
                 );
               })}
@@ -964,6 +967,7 @@ export default function InventoryView() {
   const { available, asOnDate, isLoading, rawRows, buckets, manualA, manualE, projectMfcBatches } = useInventoryData();
   const { data: authStatus } = useGetAuthStatus();
   const canEdit = !!authStatus?.authenticated;
+  const { toast } = useToast();
 
   /** Controls grouping mode for Buckets B, C, D (not A or E). */
   const [groupByMfc, setGroupByMfc] = useState(false);
@@ -1023,18 +1027,40 @@ export default function InventoryView() {
     () => new Map(mfcColors.map((c) => [`${c.mfcBatch}|${c.side}`, c.color])),
     [mfcColors],
   );
-  const setMfcColor = (mfcBatch: string, side: InventorySide, color: string) => {
+  const invalidateMfcColors = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: getListInventoryMfcColorsQueryKey() }),
+    [queryClient],
+  );
+  const setMfcColor = useCallback((mfcBatch: string, side: InventorySide, color: string) => {
     upsertMfcColor.mutate(
       { data: { mfcBatch, side, color: color as MfcColorName } },
-      { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListInventoryMfcColorsQueryKey() }) },
+      {
+        onSuccess: () => { invalidateMfcColors(); },
+        onError: (err) => {
+          toast({
+            variant: "destructive",
+            title: "Failed to save colour",
+            description: err?.message ?? "Unknown error",
+          });
+        },
+      },
     );
-  };
-  const clearMfcColor = (mfcBatch: string, side: InventorySide) => {
+  }, [upsertMfcColor, invalidateMfcColors, toast]);
+  const clearMfcColor = useCallback((mfcBatch: string, side: InventorySide) => {
     deleteMfcColor.mutate(
       { params: { mfcBatch, side } },
-      { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListInventoryMfcColorsQueryKey() }) },
+      {
+        onSuccess: () => { invalidateMfcColors(); },
+        onError: (err) => {
+          toast({
+            variant: "destructive",
+            title: "Failed to clear colour",
+            description: err?.message ?? "Unknown error",
+          });
+        },
+      },
     );
-  };
+  }, [deleteMfcColor, invalidateMfcColors, toast]);
 
   const bPair = applyOverridesToBucket(
     applyJobFilter(buckets.b.inHouse),
@@ -1258,7 +1284,9 @@ export default function InventoryView() {
         };
         for (const col of columns) row[col.key] = col.get(r) ?? 0;
         if (mfcColorMap) {
-          const colorName = mfcColorMap.get(`${r.mfcBatch}|${side}`) as MfcColorName | undefined;
+          // Use the same "?? Z" fallback as groupByMfcBatch so null-batch rows
+          // match the color stored under the "Z" key.
+          const colorName = mfcColorMap.get(`${r.mfcBatch ?? "Z"}|${side}`) as MfcColorName | undefined;
           if (colorName && colorName in MFC_COLOR_ARGB) {
             row._bgColor = MFC_COLOR_ARGB[colorName];
           }
