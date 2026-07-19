@@ -339,12 +339,11 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
   const total = useMemo(() => rollup(scope), [scope]);
 
   const thicknessBreakdown = useMemo(() => {
-    let set = 0, notSet = 0, setWt = 0, notSetWt = 0;
+    let set = 0, totalMm = 0;
     for (const r of scope) {
-      if (r.thicknessMm != null) { set++; setWt += r.balanceWt; }
-      else { notSet++; notSetWt += r.balanceWt; }
+      if (r.thicknessMm != null) { set++; totalMm += r.thicknessMm; }
     }
-    return { set, notSet, setWt, notSetWt };
+    return { set, totalMm };
   }, [scope]);
 
   const loadLabel = load === "OPERATIONAL" ? "Operational" : "In Hand";
@@ -479,16 +478,11 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
       </div>
 
       {!specialLoad && dimension === "hole" && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3">
           <SummaryTile
-            title="Thickness Set"
-            value={formatWeight(thicknessBreakdown.setWt)}
-            sub={`${thicknessBreakdown.set.toLocaleString()} marks`}
-          />
-          <SummaryTile
-            title="Thickness Not Set"
-            value={formatWeight(thicknessBreakdown.notSetWt)}
-            sub={`${thicknessBreakdown.notSet.toLocaleString()} marks`}
+            title="Total Thickness (set)"
+            value={`${thicknessBreakdown.totalMm.toLocaleString()} mm`}
+            sub={`${thicknessBreakdown.set.toLocaleString()} marks with thickness set`}
           />
         </div>
       )}
@@ -524,19 +518,14 @@ function GalvanizationTab({ records }: { records: any[] }) {
 
   const thickness = useMemo(() => {
     let set = 0;
-    let notSet = 0;
-    let setWt = 0;
-    let notSetWt = 0;
+    let totalMm = 0;
     for (const r of scope) {
       if (r.thicknessMm != null) {
         set += 1;
-        setWt += r.balanceWt;
-      } else {
-        notSet += 1;
-        notSetWt += r.balanceWt;
+        totalMm += r.thicknessMm;
       }
     }
-    return { set, notSet, setWt, notSetWt };
+    return { set, totalMm };
   }, [scope]);
 
   const projects = useMemo(() => groupProjectContractor(scope), [scope]);
@@ -544,11 +533,9 @@ function GalvanizationTab({ records }: { records: any[] }) {
   const handleExport = () => {
     const rows = projects.flatMap((p) =>
       p.contractors.map((c) => {
-        let tset = 0;
-        let tnot = 0;
+        let totalThicknessMm = 0;
         for (const r of c.records) {
-          if (r.thicknessMm != null) tset += 1;
-          else tnot += 1;
+          if (r.thicknessMm != null) totalThicknessMm += r.thicknessMm;
         }
         return {
           project: p.project,
@@ -557,8 +544,7 @@ function GalvanizationTab({ records }: { records: any[] }) {
           qty: c.stats.qty,
           weight: c.stats.weight,
           avgAge: c.stats.avgAge,
-          thicknessSet: tset,
-          thicknessNotSet: tnot,
+          totalThicknessMm,
         };
       }),
     );
@@ -569,19 +555,17 @@ function GalvanizationTab({ records }: { records: any[] }) {
       { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
       { label: "Balance Wt (kg)", field: "weight", numeric: true, decimals: 2, total: true },
       { label: "Avg Ageing (days)", field: "avgAge", numeric: true, decimals: 0 },
-      { label: "Thickness Set", field: "thicknessSet", numeric: true, decimals: 0, total: true },
-      { label: "Thickness Not Set", field: "thicknessNotSet", numeric: true, decimals: 0, total: true },
+      { label: "Total Thickness (mm)", field: "totalThicknessMm", numeric: true, decimals: 0, total: true },
     ];
     exportToXlsx("plant-operation-galvanization.xlsx", columns, rows, { sheetName: "Galvanization" });
   };
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <SummaryTile title="Galvanizing" value={formatWeight(total.weight)} sub={`${total.marks.toLocaleString()} marks`} />
         <SummaryTile title="Balance Qty" value={total.qty.toLocaleString()} />
-        <SummaryTile title="Thickness Set" value={formatWeight(thickness.setWt)} sub={`${thickness.set.toLocaleString()} marks`} />
-        <SummaryTile title="Thickness Not Set" value={formatWeight(thickness.notSetWt)} sub={`${thickness.notSet.toLocaleString()} marks`} />
+        <SummaryTile title="Total Thickness (set)" value={`${thickness.totalMm.toLocaleString()} mm`} sub={`${thickness.set.toLocaleString()} marks with thickness set`} />
       </div>
 
       <div className="flex items-center justify-end">
