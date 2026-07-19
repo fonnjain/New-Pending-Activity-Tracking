@@ -18,7 +18,6 @@ import {
   useInventoryData,
   BUCKET_LABELS,
   releaseBalanceDisplay,
-  fabPlusGalva,
   sumColumnOrNull,
   aggregateProjectColumns,
   computeBucketSummary,
@@ -130,7 +129,8 @@ const BUCKET_B_COLUMNS: ColumnDef[] = [
     label: "Rel. Bal.",
     get: (r) => releaseBalanceDisplay(r.fileBalReleaseMt, false),
   },
-  { key: "fabGalva", label: "Fab+Galva", get: (r) => fabPlusGalva(r.balFabMt, r.balGalvMt) },
+  { key: "fab", label: "Fab", get: (r) => r.balFabMt },
+  { key: "galva", label: "Galva", get: (r) => r.balGalvMt },
   YARD_COLUMN,
 ];
 
