@@ -72,6 +72,7 @@ import {
 import {
   exportToXlsxSheets,
   exportToXlsxBlockGrid,
+  type XlsxSheet,
   type XlsxColumn,
   type XlsxSection,
   type XlsxSummaryRow,
@@ -88,7 +89,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 type SortKey = "activity" | "ageing" | "contractor";
 
-type ReportType = "jobwise" | "fabload" | "plantop" | "contractorperf" | "fabcompletion" | "ai";
+type ReportType = "jobwise" | "fabload" | "plantop" | "contractorperf" | "fabcompletion" | "dailymov" | "ai";
 
 const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
   {
@@ -120,6 +121,12 @@ const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
     name: "Fabrication Report – Project Completion - TLT",
     description:
       "TLT-only completion breakdown by Project and BOM Label: Release Balance, Assignment Balance, Cutting, and Quality Check weights in MT.",
+  },
+  {
+    id: "dailymov",
+    name: "Daily Production Movement (Activity Wise)",
+    description:
+      "Balance weight moved per activity per day, with per-activity contractor drill-down. Dates driven by the global date filter.",
   },
   {
     id: "ai",
@@ -2399,6 +2406,232 @@ function FabCompletionReport() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Daily Production Movement Report (Activity Wise)
+// ---------------------------------------------------------------------------
+
+function fmtMoveDateRpt(iso: string): string {
+  const parts = iso.split("-");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${parseInt(parts[2])} ${months[parseInt(parts[1]) - 1]}`;
+}
+
+function DailyProductionMovementReport() {
+  const { selectedImportId, filters } = useTracker();
+  const { data: allRecords, isLoading } = useGetImportRecords(selectedImportId as number, {
+    query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) },
+  });
+  const records = useFilteredRecords(allRecords);
+
+  const { moveWindow, isDateFiltered } = useMemo(() => {
+    const win = filters.dateRange ? dateRangeWindow(filters.dateRange) : null;
+    if (win) {
+      return {
+        moveWindow: { start: win.start.toISOString().slice(0, 10), end: win.end.toISOString().slice(0, 10) },
+        isDateFiltered: true,
+      };
+    }
+    const todayStr = new Date().toISOString().slice(0, 10);
+    return { moveWindow: { start: todayStr, end: todayStr }, isDateFiltered: false };
+  }, [filters.dateRange]);
+
+  const moveDates = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const seen = new Set<string>();
+    for (const r of records) {
+      const lpd = r.lastProductionDate as string | null;
+      if (!lpd) continue;
+      if (isDateFiltered) {
+        if (lpd < moveWindow.start || lpd > moveWindow.end) continue;
+      } else {
+        if (lpd > todayStr) continue;
+      }
+      seen.add(lpd);
+    }
+    return [...seen].sort().slice(-7);
+  }, [records, moveWindow, isDateFiltered]);
+
+  const { activities, sortedActivities } = useMemo(() => {
+    const activities = new Map<string, any[]>();
+    for (const r of records) {
+      if ((r as any).isInitialCutting) continue;
+      const act = r.activity || "Unassigned";
+      if (!activities.has(act)) activities.set(act, []);
+      activities.get(act)!.push(r);
+    }
+    return { activities, sortedActivities: Array.from(activities.keys()).sort(compareActivity) };
+  }, [records]);
+
+  const summaryRows = useMemo(
+    () => sortedActivities.map((act) => {
+      const recs = activities.get(act) ?? [];
+      const perDate = moveDates.map((d) =>
+        recs.reduce((s: number, r: any) => (r.lastProductionDate === d ? s + (r.balanceWt ?? 0) : s), 0),
+      );
+      return { act, perDate, total: perDate.reduce((s, v) => s + v, 0) };
+    }),
+    [sortedActivities, activities, moveDates],
+  );
+
+  const colTotals = useMemo(
+    () => moveDates.map((_, di) => summaryRows.reduce((s, row) => s + row.perDate[di], 0)),
+    [summaryRows, moveDates],
+  );
+  const grandTotal = colTotals.reduce((s, v) => s + v, 0);
+
+  const handleExport = () => {
+    const dateCols: XlsxColumn[] = moveDates.map((d, i) => ({
+      label: fmtMoveDateRpt(d),
+      field: `d${i}`,
+      numeric: true,
+      decimals: 3,
+      total: true,
+    }));
+
+    // Summary sheet
+    const summarySheet: XlsxSheet = {
+      name: "Summary",
+      columns: [
+        { label: "Activity", field: "activity" },
+        ...dateCols,
+        { label: "Total (MT)", field: "total", numeric: true, decimals: 3, total: true },
+      ],
+      rows: summaryRows.map((row) => {
+        const obj: Record<string, any> = { activity: row.act, total: row.total };
+        row.perDate.forEach((v, i) => { obj[`d${i}`] = v > 0 ? v : null; });
+        return obj;
+      }),
+    };
+
+    // Per-activity sheets: Contractor × date drill-down
+    const actSheets: XlsxSheet[] = sortedActivities.flatMap((act) => {
+      const recs = activities.get(act) ?? [];
+      const conMap = new Map<string, number[]>();
+      for (const r of recs as any[]) {
+        const lpd = r.lastProductionDate as string | null;
+        if (!lpd) continue;
+        const di = moveDates.indexOf(lpd);
+        if (di === -1) continue;
+        const con = r.contractor || "(No Contractor)";
+        if (!conMap.has(con)) conMap.set(con, moveDates.map(() => 0));
+        conMap.get(con)![di] += r.balanceWt ?? 0;
+      }
+      if (conMap.size === 0) return [];
+      const sorted = [...conMap.keys()].sort(
+        (a, b) =>
+          (conMap.get(b)!.reduce((s, v) => s + v, 0)) -
+          (conMap.get(a)!.reduce((s, v) => s + v, 0)),
+      );
+      return [{
+        name: act,
+        columns: [
+          { label: "Contractor", field: "contractor" },
+          ...dateCols,
+          { label: "Total (MT)", field: "total", numeric: true, decimals: 3, total: true },
+        ],
+        rows: sorted.map((con) => {
+          const perDate = conMap.get(con)!;
+          const obj: Record<string, any> = { contractor: con, total: perDate.reduce((s, v) => s + v, 0) };
+          perDate.forEach((v, i) => { obj[`d${i}`] = v > 0 ? v : null; });
+          return obj;
+        }),
+      }];
+    });
+
+    void exportToXlsxSheets(
+      `Daily_Production_Movement_Activity_Wise_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      [summarySheet, ...actSheets],
+    );
+  };
+
+  if (!selectedImportId) {
+    return <div className="text-center p-8 text-muted-foreground">No import selected.</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <CardTitle className="text-base font-semibold">Daily Production Movement — Activity Wise</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                {isDateFiltered
+                  ? `Filtered period: ${moveWindow.start} to ${moveWindow.end} — showing dates with production in this range`
+                  : `Last ${moveDates.length} production days in the data`}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-2 shrink-0"
+              onClick={handleExport}
+              disabled={moveDates.length === 0 || sortedActivities.length === 0}
+            >
+              <FileSpreadsheet className="h-4 w-4" /> Download Excel
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-8 text-center text-muted-foreground text-sm">Loading...</div>
+          ) : moveDates.length === 0 ? (
+            <div className="p-8 text-center text-muted-foreground text-sm">
+              No production dates found. Apply a date filter to see movement data.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left px-4 py-2.5 font-semibold min-w-[90px]">Activity</th>
+                    {moveDates.map((d) => (
+                      <th key={d} className="text-right px-4 py-2.5 font-semibold text-primary/80 whitespace-nowrap min-w-[80px]">
+                        {fmtMoveDateRpt(d)}
+                      </th>
+                    ))}
+                    <th className="text-right px-4 py-2.5 font-semibold min-w-[80px]">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {summaryRows.map(({ act, perDate, total }) => (
+                    <tr key={act} className={total > 0 ? "hover:bg-muted/30" : "opacity-40"}>
+                      <td className="px-4 py-2 font-bold font-mono">{act}</td>
+                      {perDate.map((wt, i) => (
+                        <td key={moveDates[i]} className="px-4 py-2 text-right tabular-nums whitespace-nowrap">
+                          {wt > 0
+                            ? <span className="text-primary font-semibold">{formatWeight(wt)}</span>
+                            : <span className="text-muted-foreground text-xs">-</span>}
+                        </td>
+                      ))}
+                      <td className="px-4 py-2 text-right tabular-nums font-semibold whitespace-nowrap">
+                        {total > 0 ? formatWeight(total) : <span className="text-muted-foreground text-xs">-</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 bg-muted/30 font-bold">
+                    <td className="px-4 py-2.5">Total</td>
+                    {colTotals.map((wt, i) => (
+                      <td key={moveDates[i]} className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">
+                        {wt > 0 ? formatWeight(wt) : "-"}
+                      </td>
+                    ))}
+                    <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">
+                      {grandTotal > 0 ? formatWeight(grandTotal) : "-"}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function ReportsView() {
   const [reportType, setReportType] = useState<ReportType>("jobwise");
   return (
@@ -2447,6 +2680,8 @@ export default function ReportsView() {
         <ContractorPerformanceReport />
       ) : reportType === "fabcompletion" ? (
         <FabCompletionReport />
+      ) : reportType === "dailymov" ? (
+        <DailyProductionMovementReport />
       ) : (
         <AiTurnaroundReport />
       )}
