@@ -327,6 +327,7 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
   const [load, setLoad] = useState<LoadState>("ALL");
   const [section, setSection] = useState<SectionFilter>("ALL");
   const [sectionFilter, setSectionFilter] = useState<string | null>(null);
+  const [sectionTextFilter, setSectionTextFilter] = useState<string>("");
 
   // The operation group control lives beside the tab bar (lifted to the parent).
   // Reset the local sub-filters whenever the group changes, matching the prior
@@ -336,6 +337,7 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
     setLoad("ALL");
     setSection("ALL");
     setSectionFilter(null);
+    setSectionTextFilter("");
   }, [group]);
 
   const groupSet = group === "ALL" ? null : bundleActivitySet(group);
@@ -409,17 +411,32 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
     return opFilter === "ALL" ? scope : scope.filter((r) => opOf(r, dimension) === opFilter);
   }, [scope, opFilter, dimension, specialLoad]);
 
+  const sectionTextOptions = useMemo(() => {
+    const vals = new Set<string>();
+    for (const r of displayed) {
+      if (r.section && r.section.trim()) vals.add(r.section.trim());
+    }
+    return Array.from(vals).sort();
+  }, [displayed]);
+
+  const filteredDisplayed = useMemo(
+    () => sectionTextFilter
+      ? displayed.filter((r) => r.section === sectionTextFilter)
+      : displayed,
+    [displayed, sectionTextFilter],
+  );
+
   const contractorProjects = useMemo(
-    () => (!isSpecial && !isStandard) ? groupProjectContractor(displayed) : [],
-    [displayed, isSpecial, isStandard],
+    () => (!isSpecial && !isStandard) ? groupProjectContractor(filteredDisplayed) : [],
+    [filteredDisplayed, isSpecial, isStandard],
   );
   const specialOpGroups = useMemo(
-    () => isSpecial ? groupSpecialOpStructure(displayed) : [],
-    [displayed, isSpecial],
+    () => isSpecial ? groupSpecialOpStructure(filteredDisplayed) : [],
+    [filteredDisplayed, isSpecial],
   );
   const projectSectionGroups = useMemo(
-    () => isStandard ? groupProjectSectionOpStructure(displayed) : [],
-    [displayed, isStandard],
+    () => isStandard ? groupProjectSectionOpStructure(filteredDisplayed) : [],
+    [filteredDisplayed, isStandard],
   );
   const sectionChips = useMemo(() => {
     if (!isStandard) return [];
@@ -529,6 +546,21 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
                 { value: "PLATE", label: "Plate" },
               ]}
             />
+          </div>
+        )}
+        {sectionTextOptions.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-muted-foreground uppercase">Profile</span>
+            <select
+              value={sectionTextFilter}
+              onChange={(e) => setSectionTextFilter(e.target.value)}
+              className="text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              <option value="">All Profiles</option>
+              {sectionTextOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
           </div>
         )}
         <div className="flex items-center gap-2 ml-auto">
