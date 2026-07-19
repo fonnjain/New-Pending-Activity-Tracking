@@ -912,9 +912,10 @@ interface StructureNode {
   structure: string;
   records: any[];
   stats: Rollup;
+  totalThicknessMm: number;
 }
 
-function StructureGroup({ structure, records, stats }: StructureNode) {
+function StructureGroup({ structure, records, stats, totalThicknessMm }: StructureNode) {
   const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -925,8 +926,9 @@ function StructureGroup({ structure, records, stats }: StructureNode) {
             <div className="font-medium text-sm truncate">{structure}</div>
           </div>
           <div className="flex items-center gap-4 text-right shrink-0">
+            <span className="font-bold text-primary text-sm">{totalThicknessMm.toLocaleString()} mm</span>
             <div className="text-xs text-muted-foreground">
-              {stats.marks} marks • <span className="font-bold text-foreground">{formatWeight(stats.weight)}</span>
+              {stats.marks} marks • <span className="font-semibold text-foreground">{formatWeight(stats.weight)}</span>
             </div>
             <div className={`font-bold text-sm w-12 ${getAgeingColor(stats.avgAge)}`}>
               {stats.avgAge !== null ? `${stats.avgAge}d` : "-"}
@@ -970,7 +972,10 @@ function groupSpecialOpStructure(records: any[]): SpecialOpTopNode[] {
       structMap.get(s)!.push(r);
     }
     const structures = Array.from(structMap.entries())
-      .map(([structure, srecs]) => ({ structure, records: srecs, stats: rollup(srecs) }))
+      .map(([structure, srecs]) => {
+        let t = 0; for (const r of srecs) if (r.thicknessMm != null) t += r.thicknessMm;
+        return { structure, records: srecs, stats: rollup(srecs), totalThicknessMm: t };
+      })
       .sort((a, b) => a.structure.localeCompare(b.structure));
     let totalThicknessMm = 0;
     for (const r of recs) if (r.thicknessMm != null) totalThicknessMm += r.thicknessMm;
@@ -990,9 +995,9 @@ function SpecialOpCard({ op, stats, totalThicknessMm, structures }: SpecialOpTop
                 {SPECIAL_OP_LABELS[op] ?? op}
               </div>
               <div className="min-w-0">
-                <div className="font-bold text-lg">{formatWeight(stats.weight)}</div>
+                <div className="font-extrabold text-xl text-primary">{totalThicknessMm.toLocaleString()} mm</div>
                 <div className="text-xs text-muted-foreground">
-                  {stats.marks.toLocaleString()} marks • {totalThicknessMm.toLocaleString()} mm thickness
+                  {stats.marks.toLocaleString()} marks • {formatWeight(stats.weight)}
                 </div>
               </div>
             </div>
@@ -1027,6 +1032,7 @@ interface HoleOpStructNode {
   op: string;
   records: any[];
   stats: Rollup;
+  totalThicknessMm: number;
   structures: StructureNode[];
 }
 
@@ -1034,6 +1040,7 @@ interface SectionTopNode {
   section: string;
   records: any[];
   stats: Rollup;
+  totalThicknessMm: number;
   ops: HoleOpStructNode[];
 }
 
@@ -1063,17 +1070,22 @@ function groupSectionOpStructure(records: any[]): SectionTopNode[] {
         structMap.get(s)!.push(r);
       }
       const structures = Array.from(structMap.entries())
-        .map(([structure, urecs]) => ({ structure, records: urecs, stats: rollup(urecs) }))
+        .map(([structure, urecs]) => {
+          let t = 0; for (const r of urecs) if (r.thicknessMm != null) t += r.thicknessMm;
+          return { structure, records: urecs, stats: rollup(urecs), totalThicknessMm: t };
+        })
         .sort((a, b) => a.structure.localeCompare(b.structure));
-      return { op, records: orecs, stats: rollup(orecs), structures };
+      let opThickness = 0; for (const r of orecs) if (r.thicknessMm != null) opThickness += r.thicknessMm;
+      return { op, records: orecs, stats: rollup(orecs), totalThicknessMm: opThickness, structures };
     });
-    return { section: sec, records: srecs, stats: rollup(srecs), ops };
+    let secThickness = 0; for (const r of srecs) if (r.thicknessMm != null) secThickness += r.thicknessMm;
+    return { section: sec, records: srecs, stats: rollup(srecs), totalThicknessMm: secThickness, ops };
   });
 }
 
 const SECTION_LABELS: Record<string, string> = { ANGLE: "Angle", PLATE: "Plate", OTHER: "Other" };
 
-function HoleOpStructGroup({ op, stats, structures }: HoleOpStructNode) {
+function HoleOpStructGroup({ op, stats, totalThicknessMm, structures }: HoleOpStructNode) {
   const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -1084,8 +1096,9 @@ function HoleOpStructGroup({ op, stats, structures }: HoleOpStructNode) {
             <div className="font-semibold text-sm">{HOLE_OP_LABELS[op] ?? op}</div>
           </div>
           <div className="flex items-center gap-4 text-right shrink-0">
+            <span className="font-bold text-primary text-sm">{totalThicknessMm.toLocaleString()} mm</span>
             <div className="text-xs text-muted-foreground">
-              {stats.marks} marks • <span className="font-bold text-foreground">{formatWeight(stats.weight)}</span>
+              {stats.marks} marks • <span className="font-semibold text-foreground">{formatWeight(stats.weight)}</span>
             </div>
             <div className={`font-bold text-sm w-12 ${getAgeingColor(stats.avgAge)}`}>
               {stats.avgAge !== null ? `${stats.avgAge}d` : "-"}
@@ -1104,7 +1117,7 @@ function HoleOpStructGroup({ op, stats, structures }: HoleOpStructNode) {
   );
 }
 
-function SectionCard({ section, stats, ops }: SectionTopNode) {
+function SectionCard({ section, stats, totalThicknessMm, ops }: SectionTopNode) {
   const [open, setOpen] = useState(false);
   return (
     <Card className="overflow-hidden">
@@ -1116,9 +1129,9 @@ function SectionCard({ section, stats, ops }: SectionTopNode) {
                 {SECTION_LABELS[section] ?? section}
               </div>
               <div className="min-w-0">
-                <div className="font-bold text-lg">{formatWeight(stats.weight)}</div>
+                <div className="font-extrabold text-xl text-primary">{totalThicknessMm.toLocaleString()} mm</div>
                 <div className="text-xs text-muted-foreground">
-                  {stats.marks.toLocaleString()} marks • {stats.qty.toLocaleString()} pcs
+                  {stats.marks.toLocaleString()} marks • {formatWeight(stats.weight)}
                 </div>
               </div>
             </div>
