@@ -548,21 +548,20 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
             />
           </div>
         )}
-        {sectionTextOptions.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-muted-foreground uppercase">Profile</span>
-            <select
-              value={sectionTextFilter}
-              onChange={(e) => setSectionTextFilter(e.target.value)}
-              className="text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
-            >
-              <option value="">All Profiles</option>
-              {sectionTextOptions.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground uppercase">Profile</span>
+          <select
+            value={sectionTextFilter}
+            onChange={(e) => setSectionTextFilter(e.target.value)}
+            disabled={sectionTextOptions.length === 0}
+            className="text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <option value="">All Profiles</option>
+            {sectionTextOptions.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
         <div className="flex items-center gap-2 ml-auto">
           <Segmented
             value={opFilter}
@@ -1203,11 +1202,12 @@ function InlineMarksList({ records }: { records: any[] }) {
   return (
     <div className="divide-y bg-muted/10">
       {records.map((r, i) => (
-        <div key={i} className="flex items-center justify-between py-1.5 px-4 pl-20 text-xs">
-          <span className="font-medium text-foreground min-w-0 truncate">{r.markId || r.markTail || "-"}</span>
+        <div key={i} className="flex items-center justify-between py-1.5 px-4 pl-20 text-xs gap-2">
+          <span className="text-muted-foreground min-w-0 truncate flex-1">{r.section || "-"}</span>
           <div className="flex items-center gap-3 text-right shrink-0">
-            <span className="font-bold text-primary">{r.thicknessMm != null ? `${r.thicknessMm} mm` : "-"}</span>
-            <span className="text-muted-foreground">{(r.qty ?? 0).toLocaleString()} pcs • {formatWeight(r.balanceWt)}</span>
+            <span className="font-bold text-primary whitespace-nowrap">{r.thicknessMm != null ? `${r.thicknessMm} mm` : "-"}</span>
+            <span className="text-muted-foreground max-w-[120px] truncate text-right" title={r.contractor || ""}>{r.contractor || "-"}</span>
+            <span className="text-muted-foreground whitespace-nowrap">{(r.qty ?? 0).toLocaleString()} pcs • {formatWeight(r.balanceWt)}</span>
             <span className={`font-bold w-10 text-right ${getAgeingColor(r.ageingDays)}`}>
               {r.ageingDays != null ? `${r.ageingDays}d` : "-"}
             </span>
