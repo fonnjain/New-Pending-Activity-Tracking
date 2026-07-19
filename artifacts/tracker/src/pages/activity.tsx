@@ -15,6 +15,12 @@ import { useSettings } from "@/lib/settings";
 
 const ROW_CAP = 300;
 
+function fmtMoveDate(iso: string): string {
+  const parts = iso.split("-");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${parseInt(parts[2])} ${months[parseInt(parts[1]) - 1]}`;
+}
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
@@ -231,17 +237,25 @@ function ActPerfProjectGroup({
 // ---------------------------------------------------------------------------
 
 function ActivityDrillRow({
-  act, records, idealDays, moveWindow, isDateFiltered, totalWt,
+  act, records, idealDays, moveWindow, totalWt, moveDates = [],
 }: {
   act: string;
   records: any[];
   idealDays: number | null;
   moveWindow: { start: string; end: string };
-  isDateFiltered: boolean;
   totalWt: number;
+  moveDates?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const stats = useMemo(() => actPerfRollup(records, moveWindow), [records, moveWindow]);
+
+  // Weight moved on each date column
+  const perDateWt = useMemo(
+    () => moveDates.map((d) =>
+      records.reduce((s, r) => (r.lastProductionDate === d ? s + (r.balanceWt ?? 0) : s), 0),
+    ),
+    [records, moveDates],
+  );
 
   const projectMap = useMemo(() => {
     const pm = new Map<string, Map<string, Map<string, any[]>>>();
@@ -271,7 +285,7 @@ function ActivityDrillRow({
   );
 
   const sharePct = totalWt > 0 ? (stats.weightMt / totalWt) * 100 : 0;
-  const movedLabel = isDateFiltered ? "Moved (period)" : "Moved (3d)";
+  const drillColSpan = 6 + moveDates.length + 1; // Activity+Marks+Qty+Wt+Share+Avg + dates + Projects
 
   return (
     <>
@@ -297,16 +311,20 @@ function ActivityDrillRow({
         <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(stats.avgAge)}`}>
           {stats.avgAge != null ? `${stats.avgAge}d` : "-"}
         </TableCell>
-        <TableCell className="text-right tabular-nums text-muted-foreground">
-          {stats.movedCount > 0 ? <span className="text-primary font-semibold">{stats.movedCount}</span> : "-"}
-        </TableCell>
+        {perDateWt.map((wt, i) => (
+          <TableCell key={moveDates[i]} className="text-right tabular-nums whitespace-nowrap">
+            {wt > 0
+              ? <span className="text-primary font-semibold text-sm">{formatWeight(wt)}</span>
+              : <span className="text-muted-foreground text-xs">-</span>}
+          </TableCell>
+        ))}
         <TableCell className="text-right text-muted-foreground text-xs">
           {sortedProjects.length}
         </TableCell>
       </TableRow>
       {open && (
         <TableRow>
-          <TableCell colSpan={8} className="p-0 bg-muted/10">
+          <TableCell colSpan={drillColSpan} className="p-0 bg-muted/10">
             <div className="border-y divide-y">
               {sortedProjects.map((p) => (
                 <ActPerfProjectGroup key={p} project={p} mfcMap={projectMap.get(p)!} moveWindow={moveWindow} />
@@ -328,11 +346,13 @@ function ActivityPerformanceTable({
   sortedActivities,
   moveWindow,
   isDateFiltered,
+  moveDates = [],
 }: {
   activities: Map<string, any[]>;
   sortedActivities: string[];
   moveWindow: { start: string; end: string };
   isDateFiltered: boolean;
+  moveDates?: string[];
 }) {
   const { settings } = useSettings();
 
@@ -360,7 +380,18 @@ function ActivityPerformanceTable({
     [activities, sortedActivities],
   );
 
-  const movedLabel = isDateFiltered ? "Moved (period)" : "Moved (3d)";
+  // Per-date totals across all activities for the footer row
+  const perDateTotals = useMemo(
+    () => moveDates.map((d) =>
+      sortedActivities.reduce(
+        (s, a) => s + (activities.get(a) ?? []).reduce((x, r) => (r.lastProductionDate === d ? x + (r.balanceWt ?? 0) : x), 0),
+        0,
+      ),
+    ),
+    [moveDates, sortedActivities, activities],
+  );
+
+  const dateLabel = isDateFiltered ? "Moved (filtered)" : "Moved (recent)";
 
   if (sortedActivities.length === 0) return null;
 
@@ -368,7 +399,12 @@ function ActivityPerformanceTable({
     <Card>
       <div className="px-4 pt-4 pb-1">
         <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Activity Performance</h3>
-        <p className="text-xs text-muted-foreground mt-0.5">Click any row to drill into Project &rarr; MFC Batch &rarr; Contractor &rarr; Marks</p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Click any row to drill into Project &rarr; MFC Batch &rarr; Contractor &rarr; Marks.
+          {moveDates.length > 0 && (
+            <> Date columns show balance weight of marks with production recorded on each date ({dateLabel}).</>
+          )}
+        </p>
       </div>
       <div className="overflow-x-auto">
         <Table>
@@ -380,7 +416,11 @@ function ActivityPerformanceTable({
               <TableHead className="text-right">Balance Wt</TableHead>
               <TableHead className="text-right">Share</TableHead>
               <TableHead className="text-right">Avg Age</TableHead>
-              <TableHead className="text-right">{movedLabel}</TableHead>
+              {moveDates.map((d) => (
+                <TableHead key={d} className="text-right whitespace-nowrap font-semibold text-primary/80">
+                  {fmtMoveDate(d)}
+                </TableHead>
+              ))}
               <TableHead className="text-right">Projects</TableHead>
             </TableRow>
           </TableHeader>
@@ -392,8 +432,8 @@ function ActivityPerformanceTable({
                 records={activities.get(act)!}
                 idealDays={idealDaysMap.get(act.toUpperCase()) ?? null}
                 moveWindow={moveWindow}
-                isDateFiltered={isDateFiltered}
                 totalWt={totalWt}
+                moveDates={moveDates}
               />
             ))}
           </TableBody>
@@ -405,7 +445,11 @@ function ActivityPerformanceTable({
               <TableCell className="text-right font-bold tabular-nums">{formatWeight(totalWt)}</TableCell>
               <TableCell className="text-right text-muted-foreground">100%</TableCell>
               <TableCell />
-              <TableCell />
+              {perDateTotals.map((wt, i) => (
+                <TableCell key={moveDates[i]} className="text-right font-bold tabular-nums whitespace-nowrap">
+                  {wt > 0 ? formatWeight(wt) : "-"}
+                </TableCell>
+              ))}
               <TableCell />
             </TableRow>
           </TableFooter>
@@ -481,6 +525,22 @@ function ActivityContent() {
 
     return { activities, sortedActivities, totalWt, totalMarks: records.length, avgAge, notAgedCount, notAgedWt, agedCount: aged.length };
   }, [records]);
+
+  // Top-3 most active dates within the moveWindow (by mark count), shown chronologically.
+  const moveDates = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of records) {
+      const lpd = r.lastProductionDate as string | null;
+      if (lpd && lpd >= moveWindow.start && lpd <= moveWindow.end) {
+        counts.set(lpd, (counts.get(lpd) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([d]) => d)
+      .sort(); // chronological order (oldest → newest)
+  }, [records, moveWindow]);
 
   const handleExport = () => {
     const avg = (recs: any[]) => {
@@ -587,6 +647,7 @@ function ActivityContent() {
           sortedActivities={sortedActivities}
           moveWindow={moveWindow}
           isDateFiltered={isDateFiltered}
+          moveDates={moveDates}
         />
       )}
     </div>
