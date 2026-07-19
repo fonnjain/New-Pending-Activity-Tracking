@@ -237,25 +237,16 @@ function ActPerfProjectGroup({
 // ---------------------------------------------------------------------------
 
 function ActivityDrillRow({
-  act, records, idealDays, moveWindow, totalWt, moveDates = [],
+  act, records, idealDays, moveWindow, totalWt,
 }: {
   act: string;
   records: any[];
   idealDays: number | null;
   moveWindow: { start: string; end: string };
   totalWt: number;
-  moveDates?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const stats = useMemo(() => actPerfRollup(records, moveWindow), [records, moveWindow]);
-
-  // Weight moved on each date column
-  const perDateWt = useMemo(
-    () => moveDates.map((d) =>
-      records.reduce((s, r) => (r.lastProductionDate === d ? s + (r.balanceWt ?? 0) : s), 0),
-    ),
-    [records, moveDates],
-  );
 
   const projectMap = useMemo(() => {
     const pm = new Map<string, Map<string, Map<string, any[]>>>();
@@ -285,7 +276,6 @@ function ActivityDrillRow({
   );
 
   const sharePct = totalWt > 0 ? (stats.weightMt / totalWt) * 100 : 0;
-  const drillColSpan = 6 + moveDates.length + 1; // Activity+Marks+Qty+Wt+Share+Avg + dates + Projects
 
   return (
     <>
@@ -311,20 +301,13 @@ function ActivityDrillRow({
         <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(stats.avgAge)}`}>
           {stats.avgAge != null ? `${stats.avgAge}d` : "-"}
         </TableCell>
-        {perDateWt.map((wt, i) => (
-          <TableCell key={moveDates[i]} className="text-right tabular-nums whitespace-nowrap">
-            {wt > 0
-              ? <span className="text-primary font-semibold text-sm">{formatWeight(wt)}</span>
-              : <span className="text-muted-foreground text-xs">-</span>}
-          </TableCell>
-        ))}
         <TableCell className="text-right text-muted-foreground text-xs">
           {sortedProjects.length}
         </TableCell>
       </TableRow>
       {open && (
         <TableRow>
-          <TableCell colSpan={drillColSpan} className="p-0 bg-muted/10">
+          <TableCell colSpan={8} className="p-0 bg-muted/10">
             <div className="border-y divide-y">
               {sortedProjects.map((p) => (
                 <ActPerfProjectGroup key={p} project={p} mfcMap={projectMap.get(p)!} moveWindow={moveWindow} />
@@ -345,14 +328,10 @@ function ActivityPerformanceTable({
   activities,
   sortedActivities,
   moveWindow,
-  isDateFiltered,
-  moveDates = [],
 }: {
   activities: Map<string, any[]>;
   sortedActivities: string[];
   moveWindow: { start: string; end: string };
-  isDateFiltered: boolean;
-  moveDates?: string[];
 }) {
   const { settings } = useSettings();
 
@@ -380,31 +359,13 @@ function ActivityPerformanceTable({
     [activities, sortedActivities],
   );
 
-  // Per-date totals across all activities for the footer row
-  const perDateTotals = useMemo(
-    () => moveDates.map((d) =>
-      sortedActivities.reduce(
-        (s, a) => s + (activities.get(a) ?? []).reduce((x, r) => (r.lastProductionDate === d ? x + (r.balanceWt ?? 0) : x), 0),
-        0,
-      ),
-    ),
-    [moveDates, sortedActivities, activities],
-  );
-
-  const dateLabel = isDateFiltered ? "Moved (filtered)" : "Moved (recent)";
-
   if (sortedActivities.length === 0) return null;
 
   return (
     <Card>
       <div className="px-4 pt-4 pb-1">
         <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Activity Performance</h3>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Click any row to drill into Project &rarr; MFC Batch &rarr; Contractor &rarr; Marks.
-          {moveDates.length > 0 && (
-            <> Date columns show balance weight of marks with production recorded on each date ({dateLabel}).</>
-          )}
-        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">Click any row to drill into Project &rarr; MFC Batch &rarr; Contractor &rarr; Marks</p>
       </div>
       <div className="overflow-x-auto">
         <Table>
@@ -416,11 +377,6 @@ function ActivityPerformanceTable({
               <TableHead className="text-right">Balance Wt</TableHead>
               <TableHead className="text-right">Share</TableHead>
               <TableHead className="text-right">Avg Age</TableHead>
-              {moveDates.map((d) => (
-                <TableHead key={d} className="text-right whitespace-nowrap font-semibold text-primary/80">
-                  {fmtMoveDate(d)}
-                </TableHead>
-              ))}
               <TableHead className="text-right">Projects</TableHead>
             </TableRow>
           </TableHeader>
@@ -433,7 +389,6 @@ function ActivityPerformanceTable({
                 idealDays={idealDaysMap.get(act.toUpperCase()) ?? null}
                 moveWindow={moveWindow}
                 totalWt={totalWt}
-                moveDates={moveDates}
               />
             ))}
           </TableBody>
@@ -445,12 +400,109 @@ function ActivityPerformanceTable({
               <TableCell className="text-right font-bold tabular-nums">{formatWeight(totalWt)}</TableCell>
               <TableCell className="text-right text-muted-foreground">100%</TableCell>
               <TableCell />
-              {perDateTotals.map((wt, i) => (
+              <TableCell />
+            </TableRow>
+          </TableFooter>
+        </Table>
+      </div>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Daily Movement Table — Activity × last-7-dates weight matrix
+// ---------------------------------------------------------------------------
+
+function ActivityDailyMovementTable({
+  activities,
+  sortedActivities,
+  moveDates,
+}: {
+  activities: Map<string, any[]>;
+  sortedActivities: string[];
+  moveDates: string[];
+}) {
+  // Per-activity, per-date: sum of balanceWt for marks whose lastProductionDate === date
+  const matrix = useMemo(() => {
+    const result = new Map<string, number[]>();
+    for (const act of sortedActivities) {
+      const recs = activities.get(act) ?? [];
+      result.set(act, moveDates.map((d) =>
+        recs.reduce((s, r) => (r.lastProductionDate === d ? s + (r.balanceWt ?? 0) : s), 0),
+      ));
+    }
+    return result;
+  }, [activities, sortedActivities, moveDates]);
+
+  // Column totals
+  const colTotals = useMemo(
+    () => moveDates.map((d) =>
+      sortedActivities.reduce(
+        (s, a) => s + (activities.get(a) ?? []).reduce((x, r) => (r.lastProductionDate === d ? x + (r.balanceWt ?? 0) : x), 0),
+        0,
+      ),
+    ),
+    [moveDates, sortedActivities, activities],
+  );
+
+  const grandTotal = colTotals.reduce((s, v) => s + v, 0);
+
+  if (sortedActivities.length === 0 || moveDates.length === 0) return null;
+
+  return (
+    <Card>
+      <div className="px-4 pt-4 pb-1">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Daily Production Movement</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Balance weight (MT) of marks with production recorded on each date — last {moveDates.length} production days
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="min-w-[80px]">Activity</TableHead>
+              {moveDates.map((d) => (
+                <TableHead key={d} className="text-right whitespace-nowrap font-semibold text-primary/80 min-w-[80px]">
+                  {fmtMoveDate(d)}
+                </TableHead>
+              ))}
+              <TableHead className="text-right font-semibold min-w-[80px]">Total</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sortedActivities.map((act) => {
+              const row = matrix.get(act) ?? [];
+              const rowTotal = row.reduce((s, v) => s + v, 0);
+              const hasAny = rowTotal > 0;
+              return (
+                <TableRow key={act} className={hasAny ? "" : "opacity-40"}>
+                  <TableCell className="font-bold text-sm font-mono">{act}</TableCell>
+                  {row.map((wt, i) => (
+                    <TableCell key={moveDates[i]} className="text-right tabular-nums whitespace-nowrap">
+                      {wt > 0
+                        ? <span className="text-primary font-semibold">{formatWeight(wt)}</span>
+                        : <span className="text-muted-foreground text-xs">-</span>}
+                    </TableCell>
+                  ))}
+                  <TableCell className="text-right tabular-nums font-semibold whitespace-nowrap">
+                    {rowTotal > 0 ? formatWeight(rowTotal) : <span className="text-muted-foreground text-xs">-</span>}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+          <TableFooter>
+            <TableRow>
+              <TableCell className="font-semibold">Total</TableCell>
+              {colTotals.map((wt, i) => (
                 <TableCell key={moveDates[i]} className="text-right font-bold tabular-nums whitespace-nowrap">
                   {wt > 0 ? formatWeight(wt) : "-"}
                 </TableCell>
               ))}
-              <TableCell />
+              <TableCell className="text-right font-bold tabular-nums whitespace-nowrap">
+                {grandTotal > 0 ? formatWeight(grandTotal) : "-"}
+              </TableCell>
             </TableRow>
           </TableFooter>
         </Table>
@@ -526,9 +578,9 @@ function ActivityContent() {
     return { activities, sortedActivities, totalWt, totalMarks: records.length, avgAge, notAgedCount, notAgedWt, agedCount: aged.length };
   }, [records]);
 
-  // 3 most recent production dates in the data, shown chronologically (oldest → newest).
+  // Last 7 production dates in the data, shown chronologically (oldest → newest).
   // When a date filter is active: restrict to dates within the filter window.
-  // When no filter: all dates ≤ today, pick the 3 most recent.
+  // When no filter: all dates ≤ today, pick the 7 most recent.
   const moveDates = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
     const seen = new Set<string>();
@@ -544,7 +596,7 @@ function ActivityContent() {
     }
     return [...seen]
       .sort()           // ascending
-      .slice(-3);       // take the 3 most recent, already in chronological order
+      .slice(-7);       // take the 7 most recent, already in chronological order
   }, [records, moveWindow, isDateFiltered]);
 
   const handleExport = () => {
@@ -647,13 +699,18 @@ function ActivityContent() {
       ) : sortedActivities.length === 0 ? (
         <div className="text-center p-8 text-muted-foreground">No activities found matching filters.</div>
       ) : (
-        <ActivityPerformanceTable
-          activities={activities}
-          sortedActivities={sortedActivities}
-          moveWindow={moveWindow}
-          isDateFiltered={isDateFiltered}
-          moveDates={moveDates}
-        />
+        <>
+          <ActivityPerformanceTable
+            activities={activities}
+            sortedActivities={sortedActivities}
+            moveWindow={moveWindow}
+          />
+          <ActivityDailyMovementTable
+            activities={activities}
+            sortedActivities={sortedActivities}
+            moveDates={moveDates}
+          />
+        </>
       )}
     </div>
   );
