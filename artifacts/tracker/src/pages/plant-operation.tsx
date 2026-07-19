@@ -336,12 +336,12 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
     () => (!isSpecial && !isStandard) ? groupProjectContractor(displayed) : [],
     [displayed, isSpecial, isStandard],
   );
-  const specialProjects = useMemo(
-    () => isSpecial ? groupProjectSpecialOp(displayed) : [],
+  const specialOpGroups = useMemo(
+    () => isSpecial ? groupSpecialOpStructure(displayed) : [],
     [displayed, isSpecial],
   );
-  const standardProjects = useMemo(
-    () => isStandard ? groupProjectSectionOp(displayed) : [],
+  const sectionGroups = useMemo(
+    () => isStandard ? groupSectionOpStructure(displayed) : [],
     [displayed, isStandard],
   );
   // Summary tile shows the total of ALL relevant activities in the scope (the full
@@ -506,9 +506,9 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
       </div>
 
       {isSpecial
-        ? specialProjects.map((p) => <ProjectGroupSpecialOps key={p.project} project={p} />)
+        ? specialOpGroups.map((g) => <SpecialOpCard key={g.op} {...g} />)
         : isStandard
-          ? standardProjects.map((p) => <ProjectGroupStandardOps key={p.project} project={p} />)
+          ? sectionGroups.map((g) => <SectionCard key={g.section} {...g} />)
           : contractorProjects.map((p) => (
               <ProjectGroup key={p.project} project={p} mode="fab" dimension={dimension} load={load} loadLabel={loadLabel} />
             ))}
@@ -905,67 +905,24 @@ function MarksTable({ records, stats }: { records: any[]; stats: Rollup }) {
 }
 
 // ---------------------------------------------------------------------------
-// Special Ops: Project -> SpecialOp (Bending / Welding) -> Marks
+// Shared: Structure-level collapsible group (used by both Special and Standard Ops)
 // ---------------------------------------------------------------------------
 
-interface SpecialOpNode {
-  op: "BENDING" | "WELDING" | "OTHER";
+interface StructureNode {
+  structure: string;
   records: any[];
   stats: Rollup;
 }
 
-interface ProjectSpecialNode {
-  project: string;
-  records: any[];
-  stats: Rollup;
-  ops: SpecialOpNode[];
-}
-
-function groupProjectSpecialOp(records: any[]): ProjectSpecialNode[] {
-  const projMap = new Map<string, any[]>();
-  for (const r of records) {
-    const j = r.job || "(Unassigned)";
-    if (!projMap.has(j)) projMap.set(j, []);
-    projMap.get(j)!.push(r);
-  }
-  const OP_ORDER: ("BENDING" | "WELDING" | "OTHER")[] = ["BENDING", "WELDING", "OTHER"];
-  return Array.from(projMap.entries())
-    .map(([project, recs]) => {
-      const opMap = new Map<string, any[]>();
-      for (const r of recs) {
-        const op = specialOpOf(r);
-        if (!opMap.has(op)) opMap.set(op, []);
-        opMap.get(op)!.push(r);
-      }
-      const ops = OP_ORDER.filter((op) => opMap.has(op)).map((op) => ({
-        op,
-        records: opMap.get(op)!,
-        stats: rollup(opMap.get(op)!),
-      }));
-      return { project, records: recs, stats: rollup(recs), ops };
-    })
-    .sort((a, b) => b.stats.weight - a.stats.weight);
-}
-
-function SpecialOpGroup({ op, records, stats }: SpecialOpNode) {
+function StructureGroup({ structure, records, stats }: StructureNode) {
   const [open, setOpen] = useState(false);
-
-  const totalThicknessMm = useMemo(() => {
-    let t = 0;
-    for (const r of records) if (r.thicknessMm != null) t += r.thicknessMm;
-    return t;
-  }, [records]);
-
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="w-full">
-        <div className="flex items-center justify-between py-3 px-4 pl-6 hover:bg-muted/30 transition-colors">
+        <div className="flex items-center justify-between py-2 px-4 pl-10 hover:bg-muted/30 transition-colors">
           <div className="flex items-center gap-3 text-left min-w-0">
-            <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
-            <div className="min-w-0">
-              <div className="font-semibold text-sm">{SPECIAL_OP_LABELS[op] ?? op}</div>
-              <div className="text-[11px] text-muted-foreground">{totalThicknessMm.toLocaleString()} mm total thickness</div>
-            </div>
+            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
+            <div className="font-medium text-sm truncate">{structure}</div>
           </div>
           <div className="flex items-center gap-4 text-right shrink-0">
             <div className="text-xs text-muted-foreground">
@@ -984,7 +941,44 @@ function SpecialOpGroup({ op, records, stats }: SpecialOpNode) {
   );
 }
 
-function ProjectGroupSpecialOps({ project }: { project: ProjectSpecialNode }) {
+// ---------------------------------------------------------------------------
+// Special Ops: SpecialOp (Bending / Welding) -> Structure -> Marks
+// ---------------------------------------------------------------------------
+
+interface SpecialOpTopNode {
+  op: "BENDING" | "WELDING" | "OTHER";
+  records: any[];
+  stats: Rollup;
+  totalThicknessMm: number;
+  structures: StructureNode[];
+}
+
+function groupSpecialOpStructure(records: any[]): SpecialOpTopNode[] {
+  const OP_ORDER: ("BENDING" | "WELDING" | "OTHER")[] = ["BENDING", "WELDING", "OTHER"];
+  const opMap = new Map<string, any[]>();
+  for (const r of records) {
+    const op = specialOpOf(r);
+    if (!opMap.has(op)) opMap.set(op, []);
+    opMap.get(op)!.push(r);
+  }
+  return OP_ORDER.filter((op) => opMap.has(op)).map((op) => {
+    const recs = opMap.get(op)!;
+    const structMap = new Map<string, any[]>();
+    for (const r of recs) {
+      const s = r.structure || "(No structure)";
+      if (!structMap.has(s)) structMap.set(s, []);
+      structMap.get(s)!.push(r);
+    }
+    const structures = Array.from(structMap.entries())
+      .map(([structure, srecs]) => ({ structure, records: srecs, stats: rollup(srecs) }))
+      .sort((a, b) => a.structure.localeCompare(b.structure));
+    let totalThicknessMm = 0;
+    for (const r of recs) if (r.thicknessMm != null) totalThicknessMm += r.thicknessMm;
+    return { op, records: recs, stats: rollup(recs), totalThicknessMm, structures };
+  });
+}
+
+function SpecialOpCard({ op, stats, totalThicknessMm, structures }: SpecialOpTopNode) {
   const [open, setOpen] = useState(false);
   return (
     <Card className="overflow-hidden">
@@ -993,20 +987,20 @@ function ProjectGroupSpecialOps({ project }: { project: ProjectSpecialNode }) {
           <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
             <div className="flex items-center gap-4 text-left min-w-0">
               <div className="bg-secondary text-secondary-foreground font-bold px-3 h-12 flex items-center justify-center rounded-md text-sm shrink-0">
-                {project.project}
+                {SPECIAL_OP_LABELS[op] ?? op}
               </div>
               <div className="min-w-0">
-                <div className="font-bold text-lg">{formatWeight(project.stats.weight)}</div>
+                <div className="font-bold text-lg">{formatWeight(stats.weight)}</div>
                 <div className="text-xs text-muted-foreground">
-                  {project.stats.marks.toLocaleString()} marks • {project.stats.qty.toLocaleString()} pcs
+                  {stats.marks.toLocaleString()} marks • {totalThicknessMm.toLocaleString()} mm thickness
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-4 text-right">
               <div className="hidden sm:block">
                 <div className="text-xs uppercase text-muted-foreground font-semibold">Avg Age</div>
-                <div className={`font-bold text-lg ${getAgeingColor(project.stats.avgAge)}`}>
-                  {project.stats.avgAge !== null ? `${project.stats.avgAge}d` : "-"}
+                <div className={`font-bold text-lg ${getAgeingColor(stats.avgAge)}`}>
+                  {stats.avgAge !== null ? `${stats.avgAge}d` : "-"}
                 </div>
               </div>
               <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
@@ -1015,8 +1009,8 @@ function ProjectGroupSpecialOps({ project }: { project: ProjectSpecialNode }) {
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="border-t bg-card divide-y">
-            {project.ops.map((o) => (
-              <SpecialOpGroup key={o.op} {...o} />
+            {structures.map((s) => (
+              <StructureGroup key={s.structure} {...s} />
             ))}
           </div>
         </CollapsibleContent>
@@ -1026,96 +1020,60 @@ function ProjectGroupSpecialOps({ project }: { project: ProjectSpecialNode }) {
 }
 
 // ---------------------------------------------------------------------------
-// Standard Ops: Project -> Section (Angle / Plate) -> HoleOp -> Marks
+// Standard Ops: Section (Angle / Plate) -> HoleOp -> Structure -> Marks
 // ---------------------------------------------------------------------------
 
-interface HoleOpNode {
+interface HoleOpStructNode {
   op: string;
   records: any[];
   stats: Rollup;
+  structures: StructureNode[];
 }
 
-interface SectionNode {
+interface SectionTopNode {
   section: string;
   records: any[];
   stats: Rollup;
-  ops: HoleOpNode[];
+  ops: HoleOpStructNode[];
 }
 
-interface ProjectStandardNode {
-  project: string;
-  records: any[];
-  stats: Rollup;
-  sections: SectionNode[];
-}
-
-function groupProjectSectionOp(records: any[]): ProjectStandardNode[] {
-  const projMap = new Map<string, any[]>();
-  for (const r of records) {
-    const j = r.job || "(Unassigned)";
-    if (!projMap.has(j)) projMap.set(j, []);
-    projMap.get(j)!.push(r);
-  }
+function groupSectionOpStructure(records: any[]): SectionTopNode[] {
   const SEC_ORDER = ["ANGLE", "PLATE", "OTHER"];
   const HOP_ORDER = ["PUNCHING", "DRILLING", "NOT_SET"];
-  return Array.from(projMap.entries())
-    .map(([project, recs]) => {
-      const secMap = new Map<string, any[]>();
-      for (const r of recs) {
-        const sec = r.sectionType === "ANGLE" ? "ANGLE" : r.sectionType === "PLATE" ? "PLATE" : "OTHER";
-        if (!secMap.has(sec)) secMap.set(sec, []);
-        secMap.get(sec)!.push(r);
+  const secMap = new Map<string, any[]>();
+  for (const r of records) {
+    const sec = r.sectionType === "ANGLE" ? "ANGLE" : r.sectionType === "PLATE" ? "PLATE" : "OTHER";
+    if (!secMap.has(sec)) secMap.set(sec, []);
+    secMap.get(sec)!.push(r);
+  }
+  return SEC_ORDER.filter((s) => secMap.has(s)).map((sec) => {
+    const srecs = secMap.get(sec)!;
+    const opMap = new Map<string, any[]>();
+    for (const r of srecs) {
+      const op = holeOpOf(r);
+      if (!opMap.has(op)) opMap.set(op, []);
+      opMap.get(op)!.push(r);
+    }
+    const ops = HOP_ORDER.filter((op) => opMap.has(op)).map((op) => {
+      const orecs = opMap.get(op)!;
+      const structMap = new Map<string, any[]>();
+      for (const r of orecs) {
+        const s = r.structure || "(No structure)";
+        if (!structMap.has(s)) structMap.set(s, []);
+        structMap.get(s)!.push(r);
       }
-      const sections = SEC_ORDER.filter((s) => secMap.has(s)).map((sec) => {
-        const srecs = secMap.get(sec)!;
-        const opMap = new Map<string, any[]>();
-        for (const r of srecs) {
-          const op = holeOpOf(r);
-          if (!opMap.has(op)) opMap.set(op, []);
-          opMap.get(op)!.push(r);
-        }
-        const ops = HOP_ORDER.filter((op) => opMap.has(op)).map((op) => ({
-          op,
-          records: opMap.get(op)!,
-          stats: rollup(opMap.get(op)!),
-        }));
-        return { section: sec, records: srecs, stats: rollup(srecs), ops };
-      });
-      return { project, records: recs, stats: rollup(recs), sections };
-    })
-    .sort((a, b) => b.stats.weight - a.stats.weight);
+      const structures = Array.from(structMap.entries())
+        .map(([structure, urecs]) => ({ structure, records: urecs, stats: rollup(urecs) }))
+        .sort((a, b) => a.structure.localeCompare(b.structure));
+      return { op, records: orecs, stats: rollup(orecs), structures };
+    });
+    return { section: sec, records: srecs, stats: rollup(srecs), ops };
+  });
 }
 
 const SECTION_LABELS: Record<string, string> = { ANGLE: "Angle", PLATE: "Plate", OTHER: "Other" };
 
-function HoleOpGroup({ op, records, stats }: HoleOpNode) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="w-full">
-        <div className="flex items-center justify-between py-2 px-4 pl-10 hover:bg-muted/30 transition-colors">
-          <div className="flex items-center gap-3 text-left min-w-0">
-            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
-            <div className="font-medium text-sm">{HOLE_OP_LABELS[op] ?? op}</div>
-          </div>
-          <div className="flex items-center gap-4 text-right shrink-0">
-            <div className="text-xs text-muted-foreground">
-              {stats.marks} marks • <span className="font-bold text-foreground">{formatWeight(stats.weight)}</span>
-            </div>
-            <div className={`font-bold text-sm w-12 ${getAgeingColor(stats.avgAge)}`}>
-              {stats.avgAge !== null ? `${stats.avgAge}d` : "-"}
-            </div>
-          </div>
-        </div>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <MarksTable records={records} stats={stats} />
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-function SectionGroup({ section, records, stats, ops }: SectionNode) {
+function HoleOpStructGroup({ op, stats, structures }: HoleOpStructNode) {
   const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -1123,7 +1081,7 @@ function SectionGroup({ section, records, stats, ops }: SectionNode) {
         <div className="flex items-center justify-between py-3 px-4 pl-6 hover:bg-muted/30 transition-colors">
           <div className="flex items-center gap-3 text-left min-w-0">
             <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
-            <div className="font-semibold text-sm">{SECTION_LABELS[section] ?? section}</div>
+            <div className="font-semibold text-sm">{HOLE_OP_LABELS[op] ?? op}</div>
           </div>
           <div className="flex items-center gap-4 text-right shrink-0">
             <div className="text-xs text-muted-foreground">
@@ -1137,8 +1095,8 @@ function SectionGroup({ section, records, stats, ops }: SectionNode) {
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="border-t divide-y">
-          {ops.map((o) => (
-            <HoleOpGroup key={o.op} {...o} />
+          {structures.map((s) => (
+            <StructureGroup key={s.structure} {...s} />
           ))}
         </div>
       </CollapsibleContent>
@@ -1146,7 +1104,7 @@ function SectionGroup({ section, records, stats, ops }: SectionNode) {
   );
 }
 
-function ProjectGroupStandardOps({ project }: { project: ProjectStandardNode }) {
+function SectionCard({ section, stats, ops }: SectionTopNode) {
   const [open, setOpen] = useState(false);
   return (
     <Card className="overflow-hidden">
@@ -1155,20 +1113,20 @@ function ProjectGroupStandardOps({ project }: { project: ProjectStandardNode }) 
           <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
             <div className="flex items-center gap-4 text-left min-w-0">
               <div className="bg-secondary text-secondary-foreground font-bold px-3 h-12 flex items-center justify-center rounded-md text-sm shrink-0">
-                {project.project}
+                {SECTION_LABELS[section] ?? section}
               </div>
               <div className="min-w-0">
-                <div className="font-bold text-lg">{formatWeight(project.stats.weight)}</div>
+                <div className="font-bold text-lg">{formatWeight(stats.weight)}</div>
                 <div className="text-xs text-muted-foreground">
-                  {project.stats.marks.toLocaleString()} marks • {project.stats.qty.toLocaleString()} pcs
+                  {stats.marks.toLocaleString()} marks • {stats.qty.toLocaleString()} pcs
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-4 text-right">
               <div className="hidden sm:block">
                 <div className="text-xs uppercase text-muted-foreground font-semibold">Avg Age</div>
-                <div className={`font-bold text-lg ${getAgeingColor(project.stats.avgAge)}`}>
-                  {project.stats.avgAge !== null ? `${project.stats.avgAge}d` : "-"}
+                <div className={`font-bold text-lg ${getAgeingColor(stats.avgAge)}`}>
+                  {stats.avgAge !== null ? `${stats.avgAge}d` : "-"}
                 </div>
               </div>
               <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
@@ -1177,8 +1135,8 @@ function ProjectGroupStandardOps({ project }: { project: ProjectStandardNode }) 
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="border-t bg-card divide-y">
-            {project.sections.map((s) => (
-              <SectionGroup key={s.section} {...s} />
+            {ops.map((o) => (
+              <HoleOpStructGroup key={o.op} {...o} />
             ))}
           </div>
         </CollapsibleContent>
