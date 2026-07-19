@@ -220,6 +220,81 @@ function ComingSoon() {
   );
 }
 
+interface HoleOpStructNode {
+  op: string;
+  records: any[];
+  stats: Rollup;
+  totalThicknessMm: number;
+  structures: StructureNode[];
+}
+
+interface SectionTopNode {
+  section: string;
+  records: any[];
+  stats: Rollup;
+  totalThicknessMm: number;
+  ops: HoleOpStructNode[];
+}
+
+interface ProjectSectionNode {
+  project: string;
+  records: any[];
+  stats: Rollup;
+  totalThicknessMm: number;
+  sections: SectionTopNode[];
+}
+
+function groupProjectSectionOpStructure(records: any[]): ProjectSectionNode[] {
+  const SEC_ORDER = ["ANGLE", "PLATE", "OTHER"];
+  const HOP_ORDER = ["PUNCHING", "DRILLING", "NOT_SET"];
+  const projMap = new Map<string, any[]>();
+  for (const r of records) {
+    const j = r.job || "(Unassigned)";
+    if (!projMap.has(j)) projMap.set(j, []);
+    projMap.get(j)!.push(r);
+  }
+  return Array.from(projMap.entries())
+    .map(([project, precs]) => {
+      const secMap = new Map<string, any[]>();
+      for (const r of precs) {
+        const sec = r.sectionType === "ANGLE" ? "ANGLE" : r.sectionType === "PLATE" ? "PLATE" : "OTHER";
+        if (!secMap.has(sec)) secMap.set(sec, []);
+        secMap.get(sec)!.push(r);
+      }
+      const sections = SEC_ORDER.filter((s) => secMap.has(s)).map((sec) => {
+        const srecs = secMap.get(sec)!;
+        const opMap = new Map<string, any[]>();
+        for (const r of srecs) {
+          const op = holeOpOf(r);
+          if (!opMap.has(op)) opMap.set(op, []);
+          opMap.get(op)!.push(r);
+        }
+        const ops = HOP_ORDER.filter((op) => opMap.has(op)).map((op) => {
+          const orecs = opMap.get(op)!;
+          const structMap = new Map<string, any[]>();
+          for (const r of orecs) {
+            const s = r.structure || "(No structure)";
+            if (!structMap.has(s)) structMap.set(s, []);
+            structMap.get(s)!.push(r);
+          }
+          const structures = Array.from(structMap.entries())
+            .map(([structure, urecs]) => {
+              let t = 0; for (const r of urecs) if (r.thicknessMm != null) t += r.thicknessMm;
+              return { structure, records: urecs, stats: rollup(urecs), totalThicknessMm: t };
+            })
+            .sort((a, b) => a.structure.localeCompare(b.structure));
+          let opT = 0; for (const r of orecs) if (r.thicknessMm != null) opT += r.thicknessMm;
+          return { op, records: orecs, stats: rollup(orecs), totalThicknessMm: opT, structures };
+        });
+        let secT = 0; for (const r of srecs) if (r.thicknessMm != null) secT += r.thicknessMm;
+        return { section: sec, records: srecs, stats: rollup(srecs), totalThicknessMm: secT, ops };
+      });
+      let projT = 0; for (const r of precs) if (r.thicknessMm != null) projT += r.thicknessMm;
+      return { project, records: precs, stats: rollup(precs), totalThicknessMm: projT, sections };
+    })
+    .sort((a, b) => b.stats.weight - a.stats.weight);
+}
+
 function SummaryTile({ title, value, sub }: { title: string; value: string; sub?: string }) {
   return (
     <Card className="shadow-sm">
@@ -342,17 +417,32 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
     () => isSpecial ? groupSpecialOpStructure(displayed) : [],
     [displayed, isSpecial],
   );
-  const sectionGroups = useMemo(
-    () => isStandard ? groupSectionOpStructure(displayed) : [],
+  const projectSectionGroups = useMemo(
+    () => isStandard ? groupProjectSectionOpStructure(displayed) : [],
     [displayed, isStandard],
   );
+  const sectionChips = useMemo(() => {
+    if (!isStandard) return [];
+    const SEC_ORDER = ["ANGLE", "PLATE", "OTHER"];
+    const agg = new Map<string, number>();
+    for (const p of projectSectionGroups) {
+      for (const s of p.sections) {
+        agg.set(s.section, (agg.get(s.section) ?? 0) + s.totalThicknessMm);
+      }
+    }
+    return SEC_ORDER.filter(s => agg.has(s)).map(s => ({ section: s, totalThicknessMm: agg.get(s)! }));
+  }, [projectSectionGroups, isStandard]);
   const filteredSpecialGroups = useMemo(
     () => sectionFilter ? specialOpGroups.filter(g => g.op === sectionFilter) : specialOpGroups,
     [specialOpGroups, sectionFilter],
   );
-  const filteredSectionGroups = useMemo(
-    () => sectionFilter ? sectionGroups.filter(g => g.section === sectionFilter) : sectionGroups,
-    [sectionGroups, sectionFilter],
+  const filteredProjectSectionGroups = useMemo(
+    () => sectionFilter
+      ? projectSectionGroups
+          .map(p => ({ ...p, sections: p.sections.filter(s => s.section === sectionFilter) }))
+          .filter(p => p.sections.length > 0)
+      : projectSectionGroups,
+    [projectSectionGroups, sectionFilter],
   );
   // Summary tile shows the total of ALL relevant activities in the scope (the full
   // operation breakdown), independent of the local operation sub-filter (opFilter)
@@ -520,7 +610,7 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
                     <span className="ml-1.5 font-normal opacity-70">{g.totalThicknessMm.toLocaleString()} mm</span>
                   </button>
                 ))
-              : sectionGroups.map((g) => (
+              : sectionChips.map((g) => (
                   <button
                     key={g.section}
                     onClick={() => setSectionFilter(sectionFilter === g.section ? null : g.section)}
@@ -555,7 +645,7 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
       {isSpecial
         ? filteredSpecialGroups.map((g) => <SpecialOpCard key={g.op} {...g} />)
         : isStandard
-          ? filteredSectionGroups.map((g) => <SectionCard key={g.section} {...g} />)
+          ? filteredProjectSectionGroups.map((p) => <ProjectSectionCard key={p.project} {...p} />)
           : contractorProjects.map((p) => (
               <ProjectGroup key={p.project} project={p} mode="fab" dimension={dimension} load={load} loadLabel={loadLabel} />
             ))}
@@ -1072,72 +1162,64 @@ function SpecialOpCard({ op, stats, totalThicknessMm, structures }: SpecialOpTop
 }
 
 // ---------------------------------------------------------------------------
-// Standard Ops: Section (Angle / Plate) -> HoleOp -> Structure -> Marks
+// Standard Ops: Project -> Section (Angle/Plate) -> HoleOp -> Structure -> Inline marks
 // ---------------------------------------------------------------------------
 
-interface HoleOpStructNode {
-  op: string;
-  records: any[];
-  stats: Rollup;
-  totalThicknessMm: number;
-  structures: StructureNode[];
-}
-
-interface SectionTopNode {
-  section: string;
-  records: any[];
-  stats: Rollup;
-  totalThicknessMm: number;
-  ops: HoleOpStructNode[];
-}
-
-function groupSectionOpStructure(records: any[]): SectionTopNode[] {
-  const SEC_ORDER = ["ANGLE", "PLATE", "OTHER"];
-  const HOP_ORDER = ["PUNCHING", "DRILLING", "NOT_SET"];
-  const secMap = new Map<string, any[]>();
-  for (const r of records) {
-    const sec = r.sectionType === "ANGLE" ? "ANGLE" : r.sectionType === "PLATE" ? "PLATE" : "OTHER";
-    if (!secMap.has(sec)) secMap.set(sec, []);
-    secMap.get(sec)!.push(r);
-  }
-  return SEC_ORDER.filter((s) => secMap.has(s)).map((sec) => {
-    const srecs = secMap.get(sec)!;
-    const opMap = new Map<string, any[]>();
-    for (const r of srecs) {
-      const op = holeOpOf(r);
-      if (!opMap.has(op)) opMap.set(op, []);
-      opMap.get(op)!.push(r);
-    }
-    const ops = HOP_ORDER.filter((op) => opMap.has(op)).map((op) => {
-      const orecs = opMap.get(op)!;
-      const structMap = new Map<string, any[]>();
-      for (const r of orecs) {
-        const s = r.structure || "(No structure)";
-        if (!structMap.has(s)) structMap.set(s, []);
-        structMap.get(s)!.push(r);
-      }
-      const structures = Array.from(structMap.entries())
-        .map(([structure, urecs]) => {
-          let t = 0; for (const r of urecs) if (r.thicknessMm != null) t += r.thicknessMm;
-          return { structure, records: urecs, stats: rollup(urecs), totalThicknessMm: t };
-        })
-        .sort((a, b) => a.structure.localeCompare(b.structure));
-      let opThickness = 0; for (const r of orecs) if (r.thicknessMm != null) opThickness += r.thicknessMm;
-      return { op, records: orecs, stats: rollup(orecs), totalThicknessMm: opThickness, structures };
-    });
-    let secThickness = 0; for (const r of srecs) if (r.thicknessMm != null) secThickness += r.thicknessMm;
-    return { section: sec, records: srecs, stats: rollup(srecs), totalThicknessMm: secThickness, ops };
-  });
-}
-
 const SECTION_LABELS: Record<string, string> = { ANGLE: "Angle", PLATE: "Plate", OTHER: "Other" };
+
+function InlineMarksList({ records }: { records: any[] }) {
+  return (
+    <div className="divide-y bg-muted/10">
+      {records.map((r, i) => (
+        <div key={i} className="flex items-center justify-between py-1.5 px-4 pl-20 text-xs">
+          <span className="font-medium text-foreground min-w-0 truncate">{r.markId || r.markTail || "-"}</span>
+          <div className="flex items-center gap-3 text-right shrink-0">
+            <span className="font-bold text-primary">{r.thicknessMm != null ? `${r.thicknessMm} mm` : "-"}</span>
+            <span className="text-muted-foreground">{(r.qty ?? 0).toLocaleString()} pcs • {formatWeight(r.balanceWt)}</span>
+            <span className={`font-bold w-10 text-right ${getAgeingColor(r.ageingDays)}`}>
+              {r.ageingDays != null ? `${r.ageingDays}d` : "-"}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StructureInlineGroup({ structure, records, stats, totalThicknessMm }: StructureNode) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="w-full">
+        <div className="flex items-center justify-between py-2 px-4 pl-14 hover:bg-muted/30 transition-colors">
+          <div className="flex items-center gap-3 text-left min-w-0">
+            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
+            <div className="font-medium text-sm truncate">{structure}</div>
+          </div>
+          <div className="flex items-center gap-3 text-right shrink-0">
+            <span className="font-bold text-primary text-sm">{totalThicknessMm.toLocaleString()} mm</span>
+            <div className="text-xs text-muted-foreground">
+              {stats.marks} marks • <span className="font-semibold text-foreground">{formatWeight(stats.weight)}</span>
+            </div>
+            <div className={`font-bold text-sm w-12 ${getAgeingColor(stats.avgAge)}`}>
+              {stats.avgAge !== null ? `${stats.avgAge}d` : "-"}
+            </div>
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <InlineMarksList records={records} />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
 
 function HoleOpStructGroup({ op, stats, totalThicknessMm, structures }: HoleOpStructNode) {
   const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="w-full">
-        <div className="flex items-center justify-between py-3 px-4 pl-6 hover:bg-muted/30 transition-colors">
+        <div className="flex items-center justify-between py-3 px-4 pl-8 hover:bg-muted/30 transition-colors">
           <div className="flex items-center gap-3 text-left min-w-0">
             <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
             <div className="font-semibold text-sm">{HOLE_OP_LABELS[op] ?? op}</div>
@@ -1156,7 +1238,7 @@ function HoleOpStructGroup({ op, stats, totalThicknessMm, structures }: HoleOpSt
       <CollapsibleContent>
         <div className="border-t divide-y">
           {structures.map((s) => (
-            <StructureGroup key={s.structure} {...s} />
+            <StructureInlineGroup key={s.structure} {...s} />
           ))}
         </div>
       </CollapsibleContent>
@@ -1164,7 +1246,39 @@ function HoleOpStructGroup({ op, stats, totalThicknessMm, structures }: HoleOpSt
   );
 }
 
-function SectionCard({ section, stats, totalThicknessMm, ops }: SectionTopNode) {
+function SectionInnerGroup({ section, stats, totalThicknessMm, ops }: SectionTopNode) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="w-full">
+        <div className="flex items-center justify-between py-3 px-4 pl-6 hover:bg-muted/30 transition-colors">
+          <div className="flex items-center gap-3 text-left min-w-0">
+            <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
+            <div className="font-semibold text-sm">{SECTION_LABELS[section] ?? section}</div>
+          </div>
+          <div className="flex items-center gap-4 text-right shrink-0">
+            <span className="font-bold text-primary text-sm">{totalThicknessMm.toLocaleString()} mm</span>
+            <div className="text-xs text-muted-foreground">
+              {stats.marks} marks • <span className="font-semibold text-foreground">{formatWeight(stats.weight)}</span>
+            </div>
+            <div className={`font-bold text-sm w-12 ${getAgeingColor(stats.avgAge)}`}>
+              {stats.avgAge !== null ? `${stats.avgAge}d` : "-"}
+            </div>
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="border-t divide-y">
+          {ops.map((o) => (
+            <HoleOpStructGroup key={o.op} {...o} />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function ProjectSectionCard({ project, stats, totalThicknessMm, sections }: ProjectSectionNode) {
   const [open, setOpen] = useState(false);
   return (
     <Card className="overflow-hidden">
@@ -1173,7 +1287,7 @@ function SectionCard({ section, stats, totalThicknessMm, ops }: SectionTopNode) 
           <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
             <div className="flex items-center gap-4 text-left min-w-0">
               <div className="bg-secondary text-secondary-foreground font-bold px-3 h-12 flex items-center justify-center rounded-md text-sm shrink-0">
-                {SECTION_LABELS[section] ?? section}
+                {project}
               </div>
               <div className="min-w-0">
                 <div className="font-extrabold text-xl text-primary">{totalThicknessMm.toLocaleString()} mm</div>
@@ -1195,8 +1309,8 @@ function SectionCard({ section, stats, totalThicknessMm, ops }: SectionTopNode) 
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="border-t bg-card divide-y">
-            {ops.map((o) => (
-              <HoleOpStructGroup key={o.op} {...o} />
+            {sections.map((s) => (
+              <SectionInnerGroup key={s.section} {...s} />
             ))}
           </div>
         </CollapsibleContent>
