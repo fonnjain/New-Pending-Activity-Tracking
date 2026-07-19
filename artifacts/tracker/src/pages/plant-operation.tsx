@@ -251,6 +251,7 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
   const [opFilter, setOpFilter] = useState<string>("ALL");
   const [load, setLoad] = useState<LoadState>("ALL");
   const [section, setSection] = useState<SectionFilter>("ALL");
+  const [sectionFilter, setSectionFilter] = useState<string | null>(null);
 
   // The operation group control lives beside the tab bar (lifted to the parent).
   // Reset the local sub-filters whenever the group changes, matching the prior
@@ -259,6 +260,7 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
     setOpFilter("ALL");
     setLoad("ALL");
     setSection("ALL");
+    setSectionFilter(null);
   }, [group]);
 
   const groupSet = group === "ALL" ? null : bundleActivitySet(group);
@@ -343,6 +345,14 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
   const sectionGroups = useMemo(
     () => isStandard ? groupSectionOpStructure(displayed) : [],
     [displayed, isStandard],
+  );
+  const filteredSpecialGroups = useMemo(
+    () => sectionFilter ? specialOpGroups.filter(g => g.op === sectionFilter) : specialOpGroups,
+    [specialOpGroups, sectionFilter],
+  );
+  const filteredSectionGroups = useMemo(
+    () => sectionFilter ? sectionGroups.filter(g => g.section === sectionFilter) : sectionGroups,
+    [sectionGroups, sectionFilter],
   );
   // Summary tile shows the total of ALL relevant activities in the scope (the full
   // operation breakdown), independent of the local operation sub-filter (opFilter)
@@ -488,27 +498,64 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
         )}
       </div>
 
-      {!specialLoad && dimension === "hole" && (
-        <div className="grid grid-cols-1 gap-3">
-          <SummaryTile
-            title="Total Thickness (set)"
-            value={`${thicknessBreakdown.totalMm.toLocaleString()} mm`}
-            sub={`${thicknessBreakdown.set.toLocaleString()} marks with thickness set`}
-          />
+      {(isSpecial || (!specialLoad && isStandard)) && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 bg-muted/50 border rounded-md px-3 py-1.5 shrink-0">
+            <span className="text-xs text-muted-foreground uppercase font-semibold tracking-wide whitespace-nowrap">Thickness</span>
+            <span className="font-extrabold text-primary text-sm whitespace-nowrap">{thicknessBreakdown.totalMm.toLocaleString()} mm</span>
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+            {isSpecial
+              ? specialOpGroups.map((g) => (
+                  <button
+                    key={g.op}
+                    onClick={() => setSectionFilter(sectionFilter === g.op ? null : g.op)}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer ${
+                      sectionFilter === g.op
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background border-border text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {SPECIAL_OP_LABELS[g.op] ?? g.op}
+                    <span className="ml-1.5 font-normal opacity-70">{g.totalThicknessMm.toLocaleString()} mm</span>
+                  </button>
+                ))
+              : sectionGroups.map((g) => (
+                  <button
+                    key={g.section}
+                    onClick={() => setSectionFilter(sectionFilter === g.section ? null : g.section)}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer ${
+                      sectionFilter === g.section
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background border-border text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {({"ANGLE":"Angle","PLATE":"Plate","OTHER":"Other"} as Record<string,string>)[g.section] ?? g.section}
+                    <span className="ml-1.5 font-normal opacity-70">{g.totalThicknessMm.toLocaleString()} mm</span>
+                  </button>
+                ))
+            }
+          </div>
+          <Button variant="outline" size="sm" className="gap-2 shrink-0" onClick={handleExport} disabled={displayed.length === 0}>
+            <FileSpreadsheet className="h-4 w-4" />
+            Export Excel
+          </Button>
         </div>
       )}
 
-      <div className="flex justify-end">
-        <Button variant="outline" size="sm" className="gap-2" onClick={handleExport} disabled={displayed.length === 0}>
-          <FileSpreadsheet className="h-4 w-4" />
-          Export Excel
-        </Button>
-      </div>
+      {!isSpecial && !isStandard && (
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" className="gap-2" onClick={handleExport} disabled={displayed.length === 0}>
+            <FileSpreadsheet className="h-4 w-4" />
+            Export Excel
+          </Button>
+        </div>
+      )}
 
       {isSpecial
-        ? specialOpGroups.map((g) => <SpecialOpCard key={g.op} {...g} />)
+        ? filteredSpecialGroups.map((g) => <SpecialOpCard key={g.op} {...g} />)
         : isStandard
-          ? sectionGroups.map((g) => <SectionCard key={g.section} {...g} />)
+          ? filteredSectionGroups.map((g) => <SectionCard key={g.section} {...g} />)
           : contractorProjects.map((p) => (
               <ProjectGroup key={p.project} project={p} mode="fab" dimension={dimension} load={load} loadLabel={loadLabel} />
             ))}
