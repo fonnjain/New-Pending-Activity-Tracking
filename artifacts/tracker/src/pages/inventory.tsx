@@ -567,83 +567,6 @@ function ManualBucketSide({
   );
 }
 
-function ProjectCheckboxFilter({
-  projects,
-  selected,
-  onChange,
-}: {
-  projects: string[];
-  selected: Set<string> | null;
-  onChange: (next: Set<string> | null) => void;
-}) {
-  if (projects.length === 0) return null;
-
-  const allSelected = selected === null;
-  const selectedCount = allSelected ? projects.length : selected.size;
-
-  const toggle = (project: string) => {
-    const current = allSelected ? new Set(projects) : new Set(selected);
-    if (current.has(project)) current.delete(project);
-    else current.add(project);
-    onChange(current.size === projects.length ? null : current);
-  };
-
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-sm">
-            Projects{" "}
-            <span className="text-muted-foreground font-normal">
-              ({selectedCount}/{projects.length} selected)
-            </span>
-          </CardTitle>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => onChange(null)}
-              disabled={allSelected}
-            >
-              Select all
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => onChange(new Set())}
-              disabled={selectedCount === 0}
-            >
-              Clear all
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap gap-x-4 gap-y-2 max-h-48 overflow-auto pr-1">
-          {projects.map((p) => {
-            const checked = allSelected || selected.has(p);
-            return (
-              <label
-                key={p}
-                className="flex items-center gap-1.5 text-sm cursor-pointer select-none"
-              >
-                <input
-                  type="checkbox"
-                  className="h-3.5 w-3.5 accent-primary shrink-0"
-                  checked={checked}
-                  onChange={() => toggle(p)}
-                />
-                <span className="truncate">{p}</span>
-              </label>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 function ManualAddForm({
   knownProjects,
@@ -726,34 +649,11 @@ export default function InventoryView() {
   const isCurrentJobs = jobFilter === CURRENT_JOBS_FILTER_VALUE;
   const { set: currentJobsSet } = useCurrentJobsSet();
 
-  const jobScopedProjects = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of rawRows) {
-      if (isCurrentJobs) {
-        if (currentJobsSet.has(r.project)) set.add(r.project);
-      } else if (jobFilter) {
-        if (r.project === jobFilter) set.add(r.project);
-      } else {
-        set.add(r.project);
-      }
-    }
-    return Array.from(set).sort();
-  }, [rawRows, jobFilter, isCurrentJobs, currentJobsSet]);
-
-  const [selectedProjects, setSelectedProjects] = useState<Set<string> | null>(null);
-
-  useEffect(() => {
-    setSelectedProjects(null);
-  }, [jobFilter]);
-
-  const matchesProjectSelection = (project: string): boolean =>
-    selectedProjects === null || selectedProjects.has(project);
-
   const applyJobFilter = (rows: InventoryStructureCard[]): InventoryStructureCard[] => {
     let out = rows;
     if (isCurrentJobs) out = out.filter((r) => currentJobsSet.has(r.project));
     else if (jobFilter) out = out.filter((r) => r.project === jobFilter);
-    return out.filter((r) => matchesProjectSelection(r.project));
+    return out;
   };
 
   // MFC backfill colours — keyed by mfcBatch only (one colour per batch).
@@ -869,7 +769,7 @@ export default function InventoryView() {
     let out = entries;
     if (isCurrentJobs) out = out.filter((e) => currentJobsSet.has(e.projectCode));
     else if (jobFilter) out = out.filter((e) => e.projectCode === jobFilter);
-    return out.filter((e) => matchesProjectSelection(e.projectCode));
+    return out;
   };
 
   const projectMfcRows = (
@@ -1064,7 +964,7 @@ export default function InventoryView() {
       : jobFilter
         ? jobFilter.replace(/[^\w-]+/g, "-")
         : "all";
-    const tag = selectedProjects !== null ? `${baseTag}-filtered` : baseTag;
+    const tag = baseTag;
     void exportToXlsxSheets(`inventory_${tag}_${date}.xlsx`, sheets);
   };
 
@@ -1090,12 +990,6 @@ export default function InventoryView() {
           </Button>
         </div>
       </div>
-
-      <ProjectCheckboxFilter
-        projects={jobScopedProjects}
-        selected={selectedProjects}
-        onChange={setSelectedProjects}
-      />
 
       {isCurrentJobs && currentJobsSet.size === 0 && (
         <Card className="border-amber-500/40">
