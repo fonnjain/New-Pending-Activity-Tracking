@@ -1,4 +1,4 @@
-import { useTracker, useFilteredRecords } from "@/lib/store";
+import { useTracker, useFilteredRecords, dateRangeWindow } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
@@ -19,9 +19,13 @@ const ROW_CAP = 300;
 function ActivityPerformanceTable({
   activities,
   sortedActivities,
+  moveWindow,
+  isDateFiltered,
 }: {
   activities: Map<string, any[]>;
   sortedActivities: string[];
+  moveWindow: { start: string; end: string };
+  isDateFiltered: boolean;
 }) {
   const { settings } = useSettings();
 
@@ -42,50 +46,31 @@ function ActivityPerformanceTable({
       const projects = new Set<string>();
       const contractors = new Set<string>();
       let weightMt = 0;
-      let aged0to30 = 0;
-      let aged31to60 = 0;
-      let aged60plus = 0;
-      let notAged = 0;
       let ageSum = 0;
       let agedCount = 0;
+      let movedCount = 0;
 
       for (const r of recs) {
         if (r.job) projects.add(r.job);
         if (r.contractor) contractors.add(r.contractor);
         weightMt += r.balanceWt ?? 0;
         const d = r.ageingDays as number | null;
-        if (d == null) {
-          notAged++;
-        } else {
-          agedCount++;
-          ageSum += d;
-          if (d <= 30) aged0to30++;
-          else if (d <= 60) aged31to60++;
-          else aged60plus++;
-        }
+        if (d != null) { agedCount++; ageSum += d; }
+        const lpd: string | null = r.lastProductionDate ?? null;
+        if (lpd && lpd >= moveWindow.start && lpd <= moveWindow.end) movedCount++;
       }
 
       const avgAge = agedCount > 0 ? Math.round(ageSum / agedCount) : null;
       const idealDays = idealDaysMap.get(act.toUpperCase()) ?? null;
 
-      return {
-        act,
-        marks: recs.length,
-        weightMt,
-        projects: projects.size,
-        contractors: contractors.size,
-        avgAge,
-        aged0to30,
-        aged31to60,
-        aged60plus,
-        notAged,
-        idealDays,
-      };
+      return { act, marks: recs.length, weightMt, projects: projects.size, contractors: contractors.size, avgAge, movedCount, idealDays };
     }),
-    [sortedActivities, activities, idealDaysMap],
+    [sortedActivities, activities, idealDaysMap, moveWindow],
   );
 
   if (rows.length === 0) return null;
+
+  const movedLabel = isDateFiltered ? "Moved (period)" : "Moved (3d)";
 
   return (
     <Card>
@@ -103,10 +88,7 @@ function ActivityPerformanceTable({
                 <TableHead className="text-right">Projects</TableHead>
                 <TableHead className="text-right">Contractors</TableHead>
                 <TableHead className="text-right">Avg Age</TableHead>
-                <TableHead className="text-right">0-30d</TableHead>
-                <TableHead className="text-right">31-60d</TableHead>
-                <TableHead className="text-right">&gt;60d</TableHead>
-                <TableHead className="text-right">Not Aged</TableHead>
+                <TableHead className="text-right">{movedLabel}</TableHead>
                 <TableHead className="text-right">Ideal Days</TableHead>
               </TableRow>
             </TableHeader>
@@ -125,10 +107,9 @@ function ActivityPerformanceTable({
                   <TableCell className={`text-right tabular-nums font-medium ${getAgeingColor(r.avgAge)}`}>
                     {r.avgAge != null ? `${r.avgAge}d` : "-"}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums text-green-600 dark:text-green-400">{r.aged0to30}</TableCell>
-                  <TableCell className="text-right tabular-nums text-amber-600 dark:text-amber-400">{r.aged31to60}</TableCell>
-                  <TableCell className="text-right tabular-nums text-red-600 dark:text-red-400">{r.aged60plus}</TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">{r.notAged}</TableCell>
+                  <TableCell className="text-right tabular-nums font-semibold text-primary">
+                    {r.movedCount > 0 ? r.movedCount.toLocaleString() : <span className="text-muted-foreground font-normal">0</span>}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {r.idealDays != null ? `${r.idealDays}d` : "-"}
                   </TableCell>
@@ -144,7 +125,13 @@ function ActivityPerformanceTable({
                 <TableCell className="text-right tabular-nums font-bold">
                   {rows.reduce((s, r) => s + r.weightMt, 0).toFixed(3)}
                 </TableCell>
-                <TableCell colSpan={8} />
+                <TableCell />
+                <TableCell />
+                <TableCell />
+                <TableCell className="text-right tabular-nums font-bold text-primary">
+                  {rows.reduce((s, r) => s + r.movedCount, 0).toLocaleString()}
+                </TableCell>
+                <TableCell />
               </TableRow>
             </TableFooter>
           </Table>
@@ -172,11 +159,28 @@ function KpiTile({ title, value }: { title: string; value: string }) {
 }
 
 function ActivityContent() {
-  const { selectedImportId } = useTracker();
+  const { selectedImportId, filters } = useTracker();
   const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
   const records = useFilteredRecords(allRecords);
+
+  const { moveWindow, isDateFiltered } = useMemo(() => {
+    const win = filters.dateRange ? dateRangeWindow(filters.dateRange) : null;
+    if (win) {
+      return {
+        moveWindow: { start: win.start.toISOString().slice(0, 10), end: win.end.toISOString().slice(0, 10) },
+        isDateFiltered: true,
+      };
+    }
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const fromDate = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+    return {
+      moveWindow: { start: fromDate.toISOString().slice(0, 10), end: todayStr },
+      isDateFiltered: false,
+    };
+  }, [filters.dateRange]);
 
   const { activities, sortedActivities, totalWt, totalMarks, avgAge, notAgedCount, notAgedWt, agedCount } = useMemo(() => {
     // Group by activity. Initial Cutting marks (isInitialCutting=true) are
@@ -296,7 +300,7 @@ function ActivityContent() {
         </div>
       )}
 
-      <ActivityPerformanceTable activities={activities} sortedActivities={sortedActivities} />
+      <ActivityPerformanceTable activities={activities} sortedActivities={sortedActivities} moveWindow={moveWindow} isDateFiltered={isDateFiltered} />
 
       <div className="space-y-3">
         {sortedActivities.map(act => (
