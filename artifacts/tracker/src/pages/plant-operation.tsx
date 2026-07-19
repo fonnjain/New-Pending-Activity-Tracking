@@ -332,7 +332,18 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
     return opFilter === "ALL" ? scope : scope.filter((r) => opOf(r, dimension) === opFilter);
   }, [scope, opFilter, dimension, specialLoad]);
 
-  const projects = useMemo(() => groupProjectContractor(displayed), [displayed]);
+  const contractorProjects = useMemo(
+    () => (!isSpecial && !isStandard) ? groupProjectContractor(displayed) : [],
+    [displayed, isSpecial, isStandard],
+  );
+  const specialProjects = useMemo(
+    () => isSpecial ? groupProjectSpecialOp(displayed) : [],
+    [displayed, isSpecial],
+  );
+  const standardProjects = useMemo(
+    () => isStandard ? groupProjectSectionOp(displayed) : [],
+    [displayed, isStandard],
+  );
   // Summary tile shows the total of ALL relevant activities in the scope (the full
   // operation breakdown), independent of the local operation sub-filter (opFilter)
   // which only narrows the marks table below.
@@ -488,16 +499,20 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
       )}
 
       <div className="flex justify-end">
-        <Button variant="outline" size="sm" className="gap-2" onClick={handleExport} disabled={projects.length === 0}>
+        <Button variant="outline" size="sm" className="gap-2" onClick={handleExport} disabled={displayed.length === 0}>
           <FileSpreadsheet className="h-4 w-4" />
           Export Excel
         </Button>
       </div>
 
-      {projects.map((p) => (
-        <ProjectGroup key={p.project} project={p} mode="fab" dimension={dimension} load={load} loadLabel={loadLabel} />
-      ))}
-      {projects.length === 0 && (
+      {isSpecial
+        ? specialProjects.map((p) => <ProjectGroupSpecialOps key={p.project} project={p} />)
+        : isStandard
+          ? standardProjects.map((p) => <ProjectGroupStandardOps key={p.project} project={p} />)
+          : contractorProjects.map((p) => (
+              <ProjectGroup key={p.project} project={p} mode="fab" dimension={dimension} load={load} loadLabel={loadLabel} />
+            ))}
+      {displayed.length === 0 && (
         <div className="text-center p-8 text-muted-foreground">No fabrication marks match the current filters.</div>
       )}
     </div>
@@ -800,5 +815,374 @@ function ContractorGroup({
         )}
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared marks table (used by Special Ops and Standard Ops group components)
+// ---------------------------------------------------------------------------
+
+function MarksTable({ records, stats }: { records: any[]; stats: Rollup }) {
+  const [showAll, setShowAll] = useState(false);
+
+  const sortedRows = useMemo(
+    () =>
+      [...records].sort((a, b) => {
+        const s = String(a.structure ?? "").localeCompare(String(b.structure ?? ""));
+        if (s !== 0) return s;
+        return compareActivity(a.activity, b.activity) || (b.ageingDays ?? -1) - (a.ageingDays ?? -1);
+      }),
+    [records],
+  );
+
+  const visibleRows = showAll ? sortedRows : sortedRows.slice(0, ROW_CAP);
+
+  return (
+    <div className="overflow-x-auto bg-muted/20">
+      <Table containerClassName="max-h-[28rem]">
+        <TableHeader className="sticky top-0 z-10 bg-muted">
+          <TableRow>
+            <TableHead>Structure</TableHead>
+            <TableHead>Mark</TableHead>
+            <TableHead>Section</TableHead>
+            <TableHead>Activity</TableHead>
+            <TableHead className="text-right">Thick.</TableHead>
+            <TableHead className="text-right">Qty</TableHead>
+            <TableHead className="text-right">Wt</TableHead>
+            <TableHead>Date</TableHead>
+            <TableHead className="text-right">Ageing</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {visibleRows.map((r) => (
+            <TableRow key={r.id}>
+              <TableCell className="whitespace-nowrap">{r.structure || "-"}</TableCell>
+              <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
+              <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || "-"}</TableCell>
+              <TableCell className="font-medium">{r.activity || "-"}</TableCell>
+              <TableCell className="text-right tabular-nums whitespace-nowrap" title={r.thicknessSource ?? "unset"}>
+                {r.thicknessMm != null ? `${r.thicknessMm} mm` : <span className="text-muted-foreground">-</span>}
+              </TableCell>
+              <TableCell className="text-right">{r.balanceQty}</TableCell>
+              <TableCell className="text-right">{formatWeight(r.balanceWt)}</TableCell>
+              <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.assignDate)}</TableCell>
+              <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
+                {ageingCell(r)}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+        <TableFooter className="sticky bottom-0 z-10 bg-muted">
+          <TableRow>
+            <TableCell colSpan={5} className="font-semibold">Total ({stats.marks.toLocaleString()} marks)</TableCell>
+            <TableCell className="text-right font-bold tabular-nums">{stats.qty.toLocaleString()}</TableCell>
+            <TableCell className="text-right font-bold tabular-nums">{formatWeight(stats.weight)}</TableCell>
+            <TableCell colSpan={2} />
+          </TableRow>
+        </TableFooter>
+      </Table>
+      {sortedRows.length > ROW_CAP && (
+        <div className="p-3 text-center text-xs text-muted-foreground border-t">
+          {showAll ? (
+            <span>
+              Showing all {sortedRows.length.toLocaleString()} marks.{" "}
+              <button type="button" onClick={() => setShowAll(false)} className="text-primary font-medium hover:underline">
+                Show less
+              </button>
+            </span>
+          ) : (
+            <span>
+              Showing first {ROW_CAP.toLocaleString()} of {sortedRows.length.toLocaleString()} marks.{" "}
+              <button type="button" onClick={() => setShowAll(true)} className="text-primary font-medium hover:underline">
+                Show all
+              </button>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Special Ops: Project -> SpecialOp (Bending / Welding) -> Marks
+// ---------------------------------------------------------------------------
+
+interface SpecialOpNode {
+  op: "BENDING" | "WELDING" | "OTHER";
+  records: any[];
+  stats: Rollup;
+}
+
+interface ProjectSpecialNode {
+  project: string;
+  records: any[];
+  stats: Rollup;
+  ops: SpecialOpNode[];
+}
+
+function groupProjectSpecialOp(records: any[]): ProjectSpecialNode[] {
+  const projMap = new Map<string, any[]>();
+  for (const r of records) {
+    const j = r.job || "(Unassigned)";
+    if (!projMap.has(j)) projMap.set(j, []);
+    projMap.get(j)!.push(r);
+  }
+  const OP_ORDER: ("BENDING" | "WELDING" | "OTHER")[] = ["BENDING", "WELDING", "OTHER"];
+  return Array.from(projMap.entries())
+    .map(([project, recs]) => {
+      const opMap = new Map<string, any[]>();
+      for (const r of recs) {
+        const op = specialOpOf(r);
+        if (!opMap.has(op)) opMap.set(op, []);
+        opMap.get(op)!.push(r);
+      }
+      const ops = OP_ORDER.filter((op) => opMap.has(op)).map((op) => ({
+        op,
+        records: opMap.get(op)!,
+        stats: rollup(opMap.get(op)!),
+      }));
+      return { project, records: recs, stats: rollup(recs), ops };
+    })
+    .sort((a, b) => b.stats.weight - a.stats.weight);
+}
+
+function SpecialOpGroup({ op, records, stats }: SpecialOpNode) {
+  const [open, setOpen] = useState(false);
+
+  const totalThicknessMm = useMemo(() => {
+    let t = 0;
+    for (const r of records) if (r.thicknessMm != null) t += r.thicknessMm;
+    return t;
+  }, [records]);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="w-full">
+        <div className="flex items-center justify-between py-3 px-4 pl-6 hover:bg-muted/30 transition-colors">
+          <div className="flex items-center gap-3 text-left min-w-0">
+            <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
+            <div className="min-w-0">
+              <div className="font-semibold text-sm">{SPECIAL_OP_LABELS[op] ?? op}</div>
+              <div className="text-[11px] text-muted-foreground">{totalThicknessMm.toLocaleString()} mm total thickness</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-right shrink-0">
+            <div className="text-xs text-muted-foreground">
+              {stats.marks} marks • <span className="font-bold text-foreground">{formatWeight(stats.weight)}</span>
+            </div>
+            <div className={`font-bold text-sm w-12 ${getAgeingColor(stats.avgAge)}`}>
+              {stats.avgAge !== null ? `${stats.avgAge}d` : "-"}
+            </div>
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <MarksTable records={records} stats={stats} />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function ProjectGroupSpecialOps({ project }: { project: ProjectSpecialNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Card className="overflow-hidden">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger className="w-full">
+          <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
+            <div className="flex items-center gap-4 text-left min-w-0">
+              <div className="bg-secondary text-secondary-foreground font-bold px-3 h-12 flex items-center justify-center rounded-md text-sm shrink-0">
+                {project.project}
+              </div>
+              <div className="min-w-0">
+                <div className="font-bold text-lg">{formatWeight(project.stats.weight)}</div>
+                <div className="text-xs text-muted-foreground">
+                  {project.stats.marks.toLocaleString()} marks • {project.stats.qty.toLocaleString()} pcs
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 text-right">
+              <div className="hidden sm:block">
+                <div className="text-xs uppercase text-muted-foreground font-semibold">Avg Age</div>
+                <div className={`font-bold text-lg ${getAgeingColor(project.stats.avgAge)}`}>
+                  {project.stats.avgAge !== null ? `${project.stats.avgAge}d` : "-"}
+                </div>
+              </div>
+              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+            </div>
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="border-t bg-card divide-y">
+            {project.ops.map((o) => (
+              <SpecialOpGroup key={o.op} {...o} />
+            ))}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Standard Ops: Project -> Section (Angle / Plate) -> HoleOp -> Marks
+// ---------------------------------------------------------------------------
+
+interface HoleOpNode {
+  op: string;
+  records: any[];
+  stats: Rollup;
+}
+
+interface SectionNode {
+  section: string;
+  records: any[];
+  stats: Rollup;
+  ops: HoleOpNode[];
+}
+
+interface ProjectStandardNode {
+  project: string;
+  records: any[];
+  stats: Rollup;
+  sections: SectionNode[];
+}
+
+function groupProjectSectionOp(records: any[]): ProjectStandardNode[] {
+  const projMap = new Map<string, any[]>();
+  for (const r of records) {
+    const j = r.job || "(Unassigned)";
+    if (!projMap.has(j)) projMap.set(j, []);
+    projMap.get(j)!.push(r);
+  }
+  const SEC_ORDER = ["ANGLE", "PLATE", "OTHER"];
+  const HOP_ORDER = ["PUNCHING", "DRILLING", "NOT_SET"];
+  return Array.from(projMap.entries())
+    .map(([project, recs]) => {
+      const secMap = new Map<string, any[]>();
+      for (const r of recs) {
+        const sec = r.sectionType === "ANGLE" ? "ANGLE" : r.sectionType === "PLATE" ? "PLATE" : "OTHER";
+        if (!secMap.has(sec)) secMap.set(sec, []);
+        secMap.get(sec)!.push(r);
+      }
+      const sections = SEC_ORDER.filter((s) => secMap.has(s)).map((sec) => {
+        const srecs = secMap.get(sec)!;
+        const opMap = new Map<string, any[]>();
+        for (const r of srecs) {
+          const op = holeOpOf(r);
+          if (!opMap.has(op)) opMap.set(op, []);
+          opMap.get(op)!.push(r);
+        }
+        const ops = HOP_ORDER.filter((op) => opMap.has(op)).map((op) => ({
+          op,
+          records: opMap.get(op)!,
+          stats: rollup(opMap.get(op)!),
+        }));
+        return { section: sec, records: srecs, stats: rollup(srecs), ops };
+      });
+      return { project, records: recs, stats: rollup(recs), sections };
+    })
+    .sort((a, b) => b.stats.weight - a.stats.weight);
+}
+
+const SECTION_LABELS: Record<string, string> = { ANGLE: "Angle", PLATE: "Plate", OTHER: "Other" };
+
+function HoleOpGroup({ op, records, stats }: HoleOpNode) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="w-full">
+        <div className="flex items-center justify-between py-2 px-4 pl-10 hover:bg-muted/30 transition-colors">
+          <div className="flex items-center gap-3 text-left min-w-0">
+            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
+            <div className="font-medium text-sm">{HOLE_OP_LABELS[op] ?? op}</div>
+          </div>
+          <div className="flex items-center gap-4 text-right shrink-0">
+            <div className="text-xs text-muted-foreground">
+              {stats.marks} marks • <span className="font-bold text-foreground">{formatWeight(stats.weight)}</span>
+            </div>
+            <div className={`font-bold text-sm w-12 ${getAgeingColor(stats.avgAge)}`}>
+              {stats.avgAge !== null ? `${stats.avgAge}d` : "-"}
+            </div>
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <MarksTable records={records} stats={stats} />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function SectionGroup({ section, records, stats, ops }: SectionNode) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="w-full">
+        <div className="flex items-center justify-between py-3 px-4 pl-6 hover:bg-muted/30 transition-colors">
+          <div className="flex items-center gap-3 text-left min-w-0">
+            <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
+            <div className="font-semibold text-sm">{SECTION_LABELS[section] ?? section}</div>
+          </div>
+          <div className="flex items-center gap-4 text-right shrink-0">
+            <div className="text-xs text-muted-foreground">
+              {stats.marks} marks • <span className="font-bold text-foreground">{formatWeight(stats.weight)}</span>
+            </div>
+            <div className={`font-bold text-sm w-12 ${getAgeingColor(stats.avgAge)}`}>
+              {stats.avgAge !== null ? `${stats.avgAge}d` : "-"}
+            </div>
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="border-t divide-y">
+          {ops.map((o) => (
+            <HoleOpGroup key={o.op} {...o} />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function ProjectGroupStandardOps({ project }: { project: ProjectStandardNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Card className="overflow-hidden">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger className="w-full">
+          <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
+            <div className="flex items-center gap-4 text-left min-w-0">
+              <div className="bg-secondary text-secondary-foreground font-bold px-3 h-12 flex items-center justify-center rounded-md text-sm shrink-0">
+                {project.project}
+              </div>
+              <div className="min-w-0">
+                <div className="font-bold text-lg">{formatWeight(project.stats.weight)}</div>
+                <div className="text-xs text-muted-foreground">
+                  {project.stats.marks.toLocaleString()} marks • {project.stats.qty.toLocaleString()} pcs
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 text-right">
+              <div className="hidden sm:block">
+                <div className="text-xs uppercase text-muted-foreground font-semibold">Avg Age</div>
+                <div className={`font-bold text-lg ${getAgeingColor(project.stats.avgAge)}`}>
+                  {project.stats.avgAge !== null ? `${project.stats.avgAge}d` : "-"}
+                </div>
+              </div>
+              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+            </div>
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="border-t bg-card divide-y">
+            {project.sections.map((s) => (
+              <SectionGroup key={s.section} {...s} />
+            ))}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </Card>
   );
 }
