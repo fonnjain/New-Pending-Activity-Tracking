@@ -2047,6 +2047,8 @@ function UsersContent() {
 
 // ── Login Activity ────────────────────────────────────────────────────────────
 
+const SESSION_IDLE_MS = 5 * 60 * 1000; // must match server constant
+
 function formatDuration(seconds: number | null): string {
   if (seconds === null || seconds < 0) return "—";
   if (seconds < 60) return `${seconds}s`;
@@ -2063,7 +2065,51 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 }
 
-function DayBlock({ date, sessions }: { date: string; sessions: UserSessionEntry[] }) {
+/** Derive the effective "end time" and duration for a session row. */
+function sessionStatus(s: UserSessionEntry, now: number): {
+  statusLabel: string;
+  statusClass: string;
+  endTime: string | null;
+  durationSeconds: number | null;
+} {
+  if (s.logoutAt) {
+    // Closed session
+    return {
+      statusLabel: formatTime(s.logoutAt),
+      statusClass: "",
+      endTime: s.logoutAt,
+      durationSeconds: s.durationSeconds ?? null,
+    };
+  }
+
+  // Open session — determine if still active or idle-ended
+  const anchor = s.lastActivityAt ?? s.loginAt;
+  const idleMs = now - new Date(anchor).getTime();
+  const durationSeconds = Math.max(0, Math.round(
+    (new Date(anchor).getTime() - new Date(s.loginAt).getTime()) / 1000,
+  ));
+
+  if (idleMs < SESSION_IDLE_MS) {
+    // Heartbeat received recently → genuinely active
+    return {
+      statusLabel: "Active",
+      statusClass: "text-green-600 font-medium",
+      endTime: null,
+      durationSeconds,
+    };
+  }
+
+  // No heartbeat for >= 5 min → session effectively ended at last activity
+  const idleMinutes = Math.floor(idleMs / 60_000);
+  return {
+    statusLabel: `Idle (${idleMinutes}m ago)`,
+    statusClass: "text-muted-foreground",
+    endTime: anchor,
+    durationSeconds,
+  };
+}
+
+function DayBlock({ date, sessions, now }: { date: string; sessions: UserSessionEntry[]; now: number }) {
   const [open, setOpen] = useState(true);
 
   // Parse date for display (YYYY-MM-DD → dd-mm-yyyy)
@@ -2092,29 +2138,28 @@ function DayBlock({ date, sessions }: { date: string; sessions: UserSessionEntry
             <thead>
               <tr className="border-b border-border bg-muted/20">
                 <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">User</th>
-                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Login</th>
-                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Logout</th>
-                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Duration</th>
+                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Session Start</th>
+                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Session End</th>
+                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Active Duration</th>
               </tr>
             </thead>
             <tbody>
-              {sessions.map((s) => (
-                <tr key={s.id} className="border-b border-border last:border-0 hover:bg-muted/20 transition-colors">
-                  <td className="py-2 px-3">
-                    <div className="font-medium text-sm">{s.displayName || <span className="italic text-muted-foreground">—</span>}</div>
-                    <div className="text-xs text-muted-foreground">{s.email}</div>
-                  </td>
-                  <td className="py-2 px-3 text-xs tabular-nums">{formatTime(s.loginAt)}</td>
-                  <td className="py-2 px-3 text-xs tabular-nums">
-                    {s.logoutAt ? (
-                      formatTime(s.logoutAt)
-                    ) : (
-                      <span className="text-green-600 font-medium">Active</span>
-                    )}
-                  </td>
-                  <td className="py-2 px-3 text-xs tabular-nums">{formatDuration(s.durationSeconds ?? null)}</td>
-                </tr>
-              ))}
+              {sessions.map((s) => {
+                const status = sessionStatus(s, now);
+                return (
+                  <tr key={s.id} className="border-b border-border last:border-0 hover:bg-muted/20 transition-colors">
+                    <td className="py-2 px-3">
+                      <div className="font-medium text-sm">{s.displayName || <span className="italic text-muted-foreground">—</span>}</div>
+                      <div className="text-xs text-muted-foreground">{s.email}</div>
+                    </td>
+                    <td className="py-2 px-3 text-xs tabular-nums">{formatTime(s.loginAt)}</td>
+                    <td className={`py-2 px-3 text-xs tabular-nums ${status.statusClass}`}>
+                      {status.statusLabel}
+                    </td>
+                    <td className="py-2 px-3 text-xs tabular-nums">{formatDuration(status.durationSeconds)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -2127,14 +2172,17 @@ function LoginActivitySection() {
   const { data, isLoading } = useGetUserActivity({ query: { queryKey: getGetUserActivityQueryKey() } });
   const days = data?.days ?? [];
   const totalSessions = data?.totalSessions ?? 0;
+  const now = Date.now();
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold">Login Activity</h2>
+          <h2 className="text-base font-semibold">Usage Activity</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {isLoading ? "Loading..." : `${totalSessions} session${totalSessions !== 1 ? "s" : ""} total`}
+            {isLoading
+              ? "Loading..."
+              : `${totalSessions} session${totalSessions !== 1 ? "s" : ""} total — sessions split automatically after 5 min of inactivity`}
           </p>
         </div>
       </div>
@@ -2145,12 +2193,12 @@ function LoginActivitySection() {
         </Card>
       ) : days.length === 0 ? (
         <Card className="border-border">
-          <CardContent className="p-6 text-center text-muted-foreground text-sm">No login activity yet.</CardContent>
+          <CardContent className="p-6 text-center text-muted-foreground text-sm">No activity yet.</CardContent>
         </Card>
       ) : (
         <div className="space-y-2">
           {days.map((day) => (
-            <DayBlock key={day.date} date={day.date} sessions={day.sessions} />
+            <DayBlock key={day.date} date={day.date} sessions={day.sessions} now={now} />
           ))}
         </div>
       )}

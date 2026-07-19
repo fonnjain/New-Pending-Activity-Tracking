@@ -212,6 +212,7 @@ router.get(
             email: s.email,
             displayName: s.displayName ?? null,
             loginAt: s.loginAt.toISOString(),
+            lastActivityAt: s.lastActivityAt ? s.lastActivityAt.toISOString() : null,
             logoutAt: s.logoutAt ? s.logoutAt.toISOString() : null,
             durationSeconds: s.durationSeconds ?? null,
           })),

@@ -7,6 +7,7 @@ export const userSessionLogTable = pgTable("user_session_log", {
   email: text("email").notNull(),
   displayName: text("display_name"),
   loginAt: timestamp("login_at", { withTimezone: true }).notNull().defaultNow(),
+  lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
   logoutAt: timestamp("logout_at", { withTimezone: true }),
   durationSeconds: integer("duration_seconds"),
 });

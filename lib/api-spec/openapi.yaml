@@ -387,6 +387,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /auth/heartbeat:
+    post:
+      operationId: authHeartbeat
+      tags: [auth]
+      summary: Record user activity heartbeat
+      description: >
+        Records that the authenticated user is active right now. Updates the
+        current open session's lastActivityAt timestamp. If the open session has
+        been idle for more than 5 minutes (now − lastActivityAt > 300 s) the
+        server closes it (logoutAt = lastActivityAt, durationSeconds computed)
+        and immediately opens a fresh one. Call every ~60 s while the user is
+        active. Fire-and-forget — clients may ignore the response.
+      responses:
+        "200":
+          description: Heartbeat recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required:
+                  - ok
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /auth/logout:
     post:
       operationId: logout
@@ -1768,6 +1798,9 @@ components:
           type: ["string", "null"]
         loginAt:
           type: string
+        lastActivityAt:
+          type: ["string", "null"]
+          description: ISO-8601. Last heartbeat received; null for legacy rows. Used to determine idle vs active.
         logoutAt:
           type: ["string", "null"]
         durationSeconds:

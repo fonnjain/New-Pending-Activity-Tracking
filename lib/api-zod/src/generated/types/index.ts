@@ -12,6 +12,7 @@ export * from './adminRecomputeResult';
 export * from './aiStatus';
 export * from './appUser';
 export * from './authCredentials';
+export * from './authHeartbeat200';
 export * from './authStatus';
 export * from './balanceReconciliation';
 export * from './balanceReconciliationRow';

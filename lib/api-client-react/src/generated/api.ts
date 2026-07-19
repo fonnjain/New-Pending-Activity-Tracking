@@ -23,6 +23,7 @@ import type {
   AdminRecomputeResult,
   AiStatus,
   AuthCredentials,
+  AuthHeartbeat200,
   AuthStatus,
   ChangePassword200,
   ChangePasswordRequest,
@@ -1408,6 +1409,78 @@ export const useLogin = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getLoginMutationOptions(options));
+    }
+
+export const getAuthHeartbeatUrl = () => {
+
+
+
+
+  return `/api/auth/heartbeat`
+}
+
+/**
+ * Records that the authenticated user is active right now. Updates the current open session's lastActivityAt timestamp. If the open session has been idle for more than 5 minutes (now − lastActivityAt > 300 s) the server closes it (logoutAt = lastActivityAt, durationSeconds computed) and immediately opens a fresh one. Call every ~60 s while the user is active. Fire-and-forget — clients may ignore the response.
+
+ * @summary Record user activity heartbeat
+ */
+export const authHeartbeat = async ( options?: RequestInit): Promise<AuthHeartbeat200> => {
+
+  return customFetch<AuthHeartbeat200>(getAuthHeartbeatUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getAuthHeartbeatMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authHeartbeat>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof authHeartbeat>>, TError,void, TContext> => {
+
+const mutationKey = ['authHeartbeat'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof authHeartbeat>>, void> = () => {
+
+
+          return  authHeartbeat(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AuthHeartbeatMutationResult = NonNullable<Awaited<ReturnType<typeof authHeartbeat>>>
+
+    export type AuthHeartbeatMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Record user activity heartbeat
+ */
+export const useAuthHeartbeat = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authHeartbeat>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof authHeartbeat>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getAuthHeartbeatMutationOptions(options));
     }
 
 export const getLogoutUrl = () => {

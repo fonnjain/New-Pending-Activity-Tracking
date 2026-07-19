@@ -162,6 +162,74 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   }
 });
 
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+router.post("/auth/heartbeat", requireAuth, async (req, res): Promise<void> => {
+  const userId = req.user!.id;
+  const user = req.user!;
+  const now = new Date();
+
+  try {
+    // Find the user's most recent open session
+    const open = await db
+      .select({
+        id: userSessionLogTable.id,
+        loginAt: userSessionLogTable.loginAt,
+        lastActivityAt: userSessionLogTable.lastActivityAt,
+      })
+      .from(userSessionLogTable)
+      .where(and(eq(userSessionLogTable.userId, userId), isNull(userSessionLogTable.logoutAt)))
+      .orderBy(desc(userSessionLogTable.loginAt))
+      .limit(1);
+
+    if (open.length === 0) {
+      // No open session at all — create one (e.g. user was already logged in before this feature)
+      await db.insert(userSessionLogTable).values({
+        userId,
+        email: user.email,
+        displayName: user.displayName,
+        loginAt: now,
+        lastActivityAt: now,
+      });
+    } else {
+      const session = open[0]!;
+      const anchor = session.lastActivityAt ?? session.loginAt;
+      const idleMs = now.getTime() - anchor.getTime();
+
+      if (idleMs <= IDLE_TIMEOUT_MS) {
+        // Still within the same active session — just bump lastActivityAt
+        await db
+          .update(userSessionLogTable)
+          .set({ lastActivityAt: now })
+          .where(eq(userSessionLogTable.id, session.id));
+      } else {
+        // Gap > 5 min: close the old session at its last known activity, open a new one
+        const logoutAt = anchor;
+        const durationSeconds = Math.max(0, Math.round(
+          (logoutAt.getTime() - session.loginAt.getTime()) / 1000,
+        ));
+        await db
+          .update(userSessionLogTable)
+          .set({ logoutAt, durationSeconds })
+          .where(eq(userSessionLogTable.id, session.id));
+
+        await db.insert(userSessionLogTable).values({
+          userId,
+          email: user.email,
+          displayName: user.displayName,
+          loginAt: now,
+          lastActivityAt: now,
+        });
+      }
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    req.log.warn({ err }, "Heartbeat error");
+    res.json({ ok: false });
+  }
+});
+
 router.post("/auth/logout", async (req, res): Promise<void> => {
   const userId = getSessionUserId(req);
   res.clearCookie(COOKIE_NAME, cookieOptions());

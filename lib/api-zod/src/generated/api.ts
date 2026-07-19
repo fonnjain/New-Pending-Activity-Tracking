@@ -839,6 +839,16 @@ export const LoginResponse = zod.object({
 
 
 /**
+ * Records that the authenticated user is active right now. Updates the current open session's lastActivityAt timestamp. If the open session has been idle for more than 5 minutes (now − lastActivityAt > 300 s) the server closes it (logoutAt = lastActivityAt, durationSeconds computed) and immediately opens a fresh one. Call every ~60 s while the user is active. Fire-and-forget — clients may ignore the response.
+
+ * @summary Record user activity heartbeat
+ */
+export const AuthHeartbeatResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
  * Clears the session cookie.
  * @summary Log out
  */
@@ -937,6 +947,7 @@ export const GetUserActivityResponse = zod.object({
   "email": zod.string(),
   "displayName": zod.string().nullish(),
   "loginAt": zod.string(),
+  "lastActivityAt": zod.string().nullish().describe('ISO-8601. Last heartbeat received; null for legacy rows. Used to determine idle vs active.'),
   "logoutAt": zod.string().nullish(),
   "durationSeconds": zod.number().nullish()
 }))

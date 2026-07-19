@@ -63,6 +63,11 @@ export interface UserSessionEntry {
   /** @nullable */
   displayName?: string | null;
   loginAt: string;
+  /**
+     * ISO-8601. Last heartbeat received; null for legacy rows. Used to determine idle vs active.
+     * @nullable
+     */
+  lastActivityAt?: string | null;
   /** @nullable */
   logoutAt?: string | null;
   /** @nullable */
@@ -2263,6 +2268,10 @@ project: string;
 
 export type DeleteContractorCategoryParams = {
 nameKey: string;
+};
+
+export type AuthHeartbeat200 = {
+  ok: boolean;
 };
 
 export type ChangePassword200 = {
