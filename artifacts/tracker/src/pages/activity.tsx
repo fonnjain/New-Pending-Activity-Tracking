@@ -526,22 +526,25 @@ function ActivityContent() {
     return { activities, sortedActivities, totalWt, totalMarks: records.length, avgAge, notAgedCount, notAgedWt, agedCount: aged.length };
   }, [records]);
 
-  // Top-3 most active dates (by mark count), shown chronologically.
-  // When a date filter is active: restrict to the filter window.
-  // When no filter: use the entire dataset (pick the 3 most active production dates in the data).
+  // 3 most recent production dates in the data, shown chronologically (oldest → newest).
+  // When a date filter is active: restrict to dates within the filter window.
+  // When no filter: all dates ≤ today, pick the 3 most recent.
   const moveDates = useMemo(() => {
-    const counts = new Map<string, number>();
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const seen = new Set<string>();
     for (const r of records) {
       const lpd = r.lastProductionDate as string | null;
       if (!lpd) continue;
-      if (isDateFiltered && (lpd < moveWindow.start || lpd > moveWindow.end)) continue;
-      counts.set(lpd, (counts.get(lpd) ?? 0) + 1);
+      if (isDateFiltered) {
+        if (lpd < moveWindow.start || lpd > moveWindow.end) continue;
+      } else {
+        if (lpd > todayStr) continue; // exclude future dates
+      }
+      seen.add(lpd);
     }
-    return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])  // most active first
-      .slice(0, 3)
-      .map(([d]) => d)
-      .sort(); // chronological order (oldest → newest)
+    return [...seen]
+      .sort()           // ascending
+      .slice(-3);       // take the 3 most recent, already in chronological order
   }, [records, moveWindow, isDateFiltered]);
 
   const handleExport = () => {
