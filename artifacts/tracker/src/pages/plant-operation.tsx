@@ -327,7 +327,7 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
   const [load, setLoad] = useState<LoadState>("ALL");
   const [section, setSection] = useState<SectionFilter>("ALL");
   const [sectionFilter, setSectionFilter] = useState<string | null>(null);
-  const [sectionTextFilter, setSectionTextFilter] = useState<string>("");
+  const [sectionTextFilter, setSectionTextFilter] = useState<Set<string>>(new Set());
 
   // The operation group control lives beside the tab bar (lifted to the parent).
   // Reset the local sub-filters whenever the group changes, matching the prior
@@ -337,7 +337,7 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
     setLoad("ALL");
     setSection("ALL");
     setSectionFilter(null);
-    setSectionTextFilter("");
+    setSectionTextFilter(new Set());
   }, [group]);
 
   const groupSet = group === "ALL" ? null : bundleActivitySet(group);
@@ -420,8 +420,8 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
   }, [displayed]);
 
   const filteredDisplayed = useMemo(
-    () => sectionTextFilter
-      ? displayed.filter((r) => r.section === sectionTextFilter)
+    () => sectionTextFilter.size > 0
+      ? displayed.filter((r) => sectionTextFilter.has(r.section ?? ""))
       : displayed,
     [displayed, sectionTextFilter],
   );
@@ -571,28 +571,47 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
         </div>
       </div>
 
-      {/* Profile (section text) filter — always visible, populated from current scope */}
-      <div className="flex items-center gap-3">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">Profile</span>
-        <select
-          value={sectionTextFilter}
-          onChange={(e) => setSectionTextFilter(e.target.value)}
-          disabled={sectionTextOptions.length === 0}
-          className="text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed min-w-[180px]"
-        >
-          <option value="">All Profiles</option>
-          {sectionTextOptions.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-        {sectionTextFilter && (
-          <button
-            onClick={() => setSectionTextFilter("")}
-            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
-          >
-            Clear
-          </button>
-        )}
+      {/* Sections (section text) multi-select filter */}
+      <div className="flex items-start gap-3">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap pt-1.5">Sections</span>
+        <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+          {sectionTextOptions.length === 0 ? (
+            <span className="text-xs text-muted-foreground italic">No sections in current scope</span>
+          ) : (
+            sectionTextOptions.map((s) => {
+              const active = sectionTextFilter.has(s);
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => {
+                    setSectionTextFilter((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(s)) next.delete(s); else next.add(s);
+                      return next;
+                    });
+                  }}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors cursor-pointer ${
+                    active
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-background border-border text-foreground hover:bg-muted"
+                  }`}
+                >
+                  {s}
+                </button>
+              );
+            })
+          )}
+          {sectionTextFilter.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setSectionTextFilter(new Set())}
+              className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 ml-1"
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       <div className={`grid grid-cols-2 gap-3 ${dimension === "special" ? "md:grid-cols-3" : "md:grid-cols-4"}`}>
@@ -702,7 +721,7 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
 // ---------------------------------------------------------------------------
 
 function GalvanizationTab({ records }: { records: any[] }) {
-  const [sectionTextFilter, setSectionTextFilter] = useState<string>("");
+  const [sectionTextFilter, setSectionTextFilter] = useState<Set<string>>(new Set());
 
   const scope = useMemo(
     () => records.filter((r) => GALVA_SET.has((r.activity ?? "").toUpperCase())),
@@ -718,7 +737,7 @@ function GalvanizationTab({ records }: { records: any[] }) {
   }, [scope]);
 
   const displayed = useMemo(
-    () => sectionTextFilter ? scope.filter((r) => r.section === sectionTextFilter) : scope,
+    () => sectionTextFilter.size > 0 ? scope.filter((r) => sectionTextFilter.has(r.section ?? "")) : scope,
     [scope, sectionTextFilter],
   );
 
@@ -770,28 +789,47 @@ function GalvanizationTab({ records }: { records: any[] }) {
 
   return (
     <div className="space-y-4">
-      {/* Profile (section text) filter */}
-      <div className="flex items-center gap-3">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">Profile</span>
-        <select
-          value={sectionTextFilter}
-          onChange={(e) => setSectionTextFilter(e.target.value)}
-          disabled={sectionTextOptions.length === 0}
-          className="text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed min-w-[180px]"
-        >
-          <option value="">All Profiles</option>
-          {sectionTextOptions.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-        {sectionTextFilter && (
-          <button
-            onClick={() => setSectionTextFilter("")}
-            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
-          >
-            Clear
-          </button>
-        )}
+      {/* Sections (section text) multi-select filter */}
+      <div className="flex items-start gap-3">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap pt-1.5">Sections</span>
+        <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+          {sectionTextOptions.length === 0 ? (
+            <span className="text-xs text-muted-foreground italic">No sections in current scope</span>
+          ) : (
+            sectionTextOptions.map((s) => {
+              const active = sectionTextFilter.has(s);
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => {
+                    setSectionTextFilter((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(s)) next.delete(s); else next.add(s);
+                      return next;
+                    });
+                  }}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors cursor-pointer ${
+                    active
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-background border-border text-foreground hover:bg-muted"
+                  }`}
+                >
+                  {s}
+                </button>
+              );
+            })
+          )}
+          {sectionTextFilter.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setSectionTextFilter(new Set())}
+              className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 ml-1"
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
