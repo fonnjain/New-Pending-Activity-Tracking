@@ -526,21 +526,23 @@ function ActivityContent() {
     return { activities, sortedActivities, totalWt, totalMarks: records.length, avgAge, notAgedCount, notAgedWt, agedCount: aged.length };
   }, [records]);
 
-  // Top-3 most active dates within the moveWindow (by mark count), shown chronologically.
+  // Top-3 most active dates (by mark count), shown chronologically.
+  // When a date filter is active: restrict to the filter window.
+  // When no filter: use the entire dataset (pick the 3 most active production dates in the data).
   const moveDates = useMemo(() => {
     const counts = new Map<string, number>();
     for (const r of records) {
       const lpd = r.lastProductionDate as string | null;
-      if (lpd && lpd >= moveWindow.start && lpd <= moveWindow.end) {
-        counts.set(lpd, (counts.get(lpd) ?? 0) + 1);
-      }
+      if (!lpd) continue;
+      if (isDateFiltered && (lpd < moveWindow.start || lpd > moveWindow.end)) continue;
+      counts.set(lpd, (counts.get(lpd) ?? 0) + 1);
     }
     return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])
+      .sort((a, b) => b[1] - a[1])  // most active first
       .slice(0, 3)
       .map(([d]) => d)
       .sort(); // chronological order (oldest → newest)
-  }, [records, moveWindow]);
+  }, [records, moveWindow, isDateFiltered]);
 
   const handleExport = () => {
     const avg = (recs: any[]) => {
