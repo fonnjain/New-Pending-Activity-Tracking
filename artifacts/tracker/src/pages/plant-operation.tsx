@@ -548,20 +548,6 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
             />
           </div>
         )}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-muted-foreground uppercase">Profile</span>
-          <select
-            value={sectionTextFilter}
-            onChange={(e) => setSectionTextFilter(e.target.value)}
-            disabled={sectionTextOptions.length === 0}
-            className="text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <option value="">All Profiles</option>
-            {sectionTextOptions.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
         <div className="flex items-center gap-2 ml-auto">
           <Segmented
             value={opFilter}
@@ -583,6 +569,30 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
             }
           />
         </div>
+      </div>
+
+      {/* Profile (section text) filter — always visible, populated from current scope */}
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">Profile</span>
+        <select
+          value={sectionTextFilter}
+          onChange={(e) => setSectionTextFilter(e.target.value)}
+          disabled={sectionTextOptions.length === 0}
+          className="text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed min-w-[180px]"
+        >
+          <option value="">All Profiles</option>
+          {sectionTextOptions.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+        {sectionTextFilter && (
+          <button
+            onClick={() => setSectionTextFilter("")}
+            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       <div className={`grid grid-cols-2 gap-3 ${dimension === "special" ? "md:grid-cols-3" : "md:grid-cols-4"}`}>
@@ -692,26 +702,41 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
 // ---------------------------------------------------------------------------
 
 function GalvanizationTab({ records }: { records: any[] }) {
+  const [sectionTextFilter, setSectionTextFilter] = useState<string>("");
+
   const scope = useMemo(
     () => records.filter((r) => GALVA_SET.has((r.activity ?? "").toUpperCase())),
     [records],
   );
 
-  const total = useMemo(() => rollup(scope), [scope]);
+  const sectionTextOptions = useMemo(() => {
+    const vals = new Set<string>();
+    for (const r of scope) {
+      if (r.section && r.section.trim()) vals.add(r.section.trim());
+    }
+    return Array.from(vals).sort();
+  }, [scope]);
+
+  const displayed = useMemo(
+    () => sectionTextFilter ? scope.filter((r) => r.section === sectionTextFilter) : scope,
+    [scope, sectionTextFilter],
+  );
+
+  const total = useMemo(() => rollup(displayed), [displayed]);
 
   const thickness = useMemo(() => {
     let set = 0;
     let totalMm = 0;
-    for (const r of scope) {
+    for (const r of displayed) {
       if (r.thicknessMm != null) {
         set += 1;
         totalMm += r.thicknessMm;
       }
     }
     return { set, totalMm };
-  }, [scope]);
+  }, [displayed]);
 
-  const projects = useMemo(() => groupProjectContractor(scope), [scope]);
+  const projects = useMemo(() => groupProjectContractor(displayed), [displayed]);
 
   const handleExport = () => {
     const rows = projects.flatMap((p) =>
@@ -745,6 +770,30 @@ function GalvanizationTab({ records }: { records: any[] }) {
 
   return (
     <div className="space-y-4">
+      {/* Profile (section text) filter */}
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">Profile</span>
+        <select
+          value={sectionTextFilter}
+          onChange={(e) => setSectionTextFilter(e.target.value)}
+          disabled={sectionTextOptions.length === 0}
+          className="text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed min-w-[180px]"
+        >
+          <option value="">All Profiles</option>
+          {sectionTextOptions.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+        {sectionTextFilter && (
+          <button
+            onClick={() => setSectionTextFilter("")}
+            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <SummaryTile title="Galvanizing" value={formatWeight(total.weight)} sub={`${total.marks.toLocaleString()} marks`} />
         <SummaryTile title="Balance Qty" value={total.qty.toLocaleString()} />
