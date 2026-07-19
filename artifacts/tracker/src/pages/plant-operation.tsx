@@ -113,7 +113,7 @@ function passesHoleLoad(
 ): boolean {
   const act = (r.activity ?? "").toUpperCase();
   if (group === "TLT_STANDARD_OPERATIONS") {
-    return load === "OPERATIONAL" ? act === "RFI" : act === "C";
+    return load === "OPERATIONAL" ? act === "RFI" : act === "C" && !r.isInitialCutting;
   }
   if (group === "TLT_QUALITY") {
     return load === "OPERATIONAL"

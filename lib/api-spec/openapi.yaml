@@ -2648,6 +2648,13 @@ components:
         fg:
           type: ["string", "null"]
           description: Finished Goods placeholder. Blank (null) everywhere for now — not in any process sequence/bundle and not in the row hash. Reserved for future use.
+        isInitialCutting:
+          type: boolean
+          description: >
+            True when Type="Job Card Not Started" AND Job Card Status="Initial". These marks
+            are already counted as Release Balance and must NOT contribute to any Cutting (C)
+            balance figure. Additive, not hashed. Backfilled for existing rows via the proxy
+            activity='C' AND assign_date IS NULL AND contractor IS NULL.
       required:
         - id
         - importId
@@ -2683,6 +2690,7 @@ components:
         - ntltSubtype
         - groupKey
         - active
+        - isInitialCutting
     SummaryFilters:
       type: object
       description: >

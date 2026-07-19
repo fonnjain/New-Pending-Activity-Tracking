@@ -672,6 +672,9 @@ function fabLoadMatch(
   column: FabLoadColumn,
   r: ApiRecord,
 ): boolean {
+  // Initial Cutting marks (unreleased, counted as Release Balance) must not
+  // appear in any fabrication load figure — operational or in-hand.
+  if (r.isInitialCutting) return false;
   const act = normalizeActivity(r.activity);
   const rank = activityRank(r.activity);
   const sec = r.sectionType;

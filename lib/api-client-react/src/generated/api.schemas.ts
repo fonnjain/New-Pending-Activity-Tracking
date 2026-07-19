@@ -753,6 +753,9 @@ export interface Record {
      * @nullable
      */
   fg?: string | null;
+  /** True when Type="Job Card Not Started" AND Job Card Status="Initial". These marks are already counted as Release Balance and must NOT contribute to any Cutting (C) balance figure. Additive, not hashed. Backfilled for existing rows via the proxy activity='C' AND assign_date IS NULL AND contractor IS NULL.
+   */
+  isInitialCutting: boolean;
 }
 
 /**

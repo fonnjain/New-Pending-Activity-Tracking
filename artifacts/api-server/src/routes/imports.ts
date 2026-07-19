@@ -351,6 +351,10 @@ function serializeRecord(
     holeOperation: hole.holeOperation,
     // Finished Goods placeholder — currently blank everywhere (nothing writes it).
     fg: r.fg ?? null,
+    // Initial Cutting exclusion: true when Type="Job Card Not Started" AND
+    // Job Card Status="Initial". These marks must NOT contribute to any Cutting
+    // balance figure — they are already counted as Release Balance.
+    isInitialCutting: r.isInitialCutting,
   };
 }
 

@@ -86,6 +86,13 @@ export const recordPoolTable = pgTable("record_pool", {
   // ACTIVITY_BUNDLE, and it is excluded from the row hash so it never affects
   // dedup/identity. Nullable so legacy rows stay valid.
   fg: text("fg"),
+  // --- Initial Cutting exclusion (additive, NOT part of the row hash). ---
+  // True when Type (col A) = "Job Card Not Started" AND Job Card Status (col G) = "Initial".
+  // These are unreleased marks already counted as Release Balance. They carry activity = "C"
+  // but must NOT contribute to any Cutting balance figure. Defaults false (safe for old-format
+  // rows that have no Type/Job Card Status columns). Backfilled for existing rows via the
+  // best-available proxy: activity='C' AND assign_date IS NULL AND contractor IS NULL.
+  isInitialCutting: boolean("is_initial_cutting").notNull().default(false),
 });
 
 export const insertRecordPoolSchema = createInsertSchema(recordPoolTable).omit({

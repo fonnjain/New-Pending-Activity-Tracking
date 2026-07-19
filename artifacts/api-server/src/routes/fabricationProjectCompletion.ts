@@ -165,7 +165,8 @@ router.get(
         )
         .groupBy(recordPoolTable.job, recordPoolTable.structure),
 
-      // Cutting balance (activity = C) per (project, structure).
+      // Cutting balance (activity = C, excluding Initial marks which are counted
+      // as Release Balance) per (project, structure).
       db
         .select({
           project: recordPoolTable.job,
@@ -183,6 +184,7 @@ router.get(
             eq(importRowsTable.importId, latestImport.id),
             eq(recordPoolTable.category, "TLT"),
             eq(sql`upper(${recordPoolTable.activity})`, "C"),
+            eq(recordPoolTable.isInitialCutting, false),
           ),
         )
         .groupBy(recordPoolTable.job, recordPoolTable.structure),

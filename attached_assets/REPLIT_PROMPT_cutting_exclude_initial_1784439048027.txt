@@ -1,0 +1,85 @@
+TASK: Exclude "Job Card Not Started + Initial" marks from the CUTTING (C) balance. These marks
+are not in cutting — they are unreleased material, and they are already counted as Release
+Balance. Counting them in Cutting double-counts them.
+
+=====================================================================
+THE RULE
+=====================================================================
+When computing the Cutting balance (Activity = "C"), EXCLUDE any mark where:
+
+        Col A "Type"             == "Job Card Not Started"
+    AND Col G "Job Card Status"  == "Initial"
+
+Keep everything else (i.e. Job Card Status = "Authorized" and any other status).
+
+=====================================================================
+WHY (verified against WIP 18-Jul)
+=====================================================================
+All Cutting marks are Type = "Job Card Not Started"; they differ only by Job Card Status:
+
+    Type                      Status        Marks        Weight
+    Job Card Not Started      Authorized   15,770    2,779.224 MT   <- KEEP (real cutting)
+    Job Card Not Started      Initial       8,723    2,052.839 MT   <- EXCLUDE
+                                           ------    ------------
+                              TOTAL        24,493    4,832.064 MT
+
+The excluded set is EXACTLY the Release Balance population — verified identical on both count
+and weight (Release Balance = Not Started + Initial = 8,723 marks / 2,052.839 MT; 100% of those
+marks carry Activity = C). Release Balance itself is verified equal to Order Review Col S
+(Balance Release) per structure.
+
+So today the same 2,052.839 MT appears BOTH as Release Balance AND as Cutting balance. After
+this change the two are disjoint:
+    Release Balance = material not yet released (Not Started + Initial)
+    Cutting         = work authorized and actually on the floor (Authorized)
+
+Additional confirmation this is the right cut: 100% of the excluded marks have NO Assign Date
+(they cannot be aged, because they have not been released yet). They were the bulk of the
+"unaged cutting" problem. After exclusion, un-ageable Cutting falls from ~54% to 29.7% of
+marks (4,687 of 15,770), making Cutting ageing far more meaningful.
+
+=====================================================================
+EXPECTED RESULT
+=====================================================================
+    Cutting BEFORE:  24,493 marks   4,832.064 MT
+    Excluded:         8,723 marks   2,052.839 MT   (-42.5% of cutting weight)
+    Cutting AFTER:   15,770 marks   2,779.224 MT
+
+=====================================================================
+WHERE TO APPLY
+=====================================================================
+Apply consistently EVERYWHERE the Cutting (C) balance is computed or displayed, including:
+  - Project-wise page and its Excel export ("Cutting (C) wt / marks" column)
+  - Activity-wise page / any per-activity aggregation of Activity = C
+  - Overview / dashboard cutting totals
+  - Contractor-wise and Plant-Operation-wise cutting figures
+  - The row "Total" must be recomputed so it still reconciles
+    (Cutting + Quality Check + Galvanising + FG = Total)
+  - Reports and any Excel export containing a Cutting column
+Implement the exclusion in ONE shared place (a single predicate/helper) so no code path can
+diverge.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change the Release Balance / Release Balance Computed definition. It STILL includes
+  Not Started + Initial — that is its correct definition. Only CUTTING loses these marks.
+- Do NOT drop these marks from the data or from Balance Wt / Marks / Balance Qty totals; they
+  remain part of the project's overall balance. They are excluded from the CUTTING bucket only.
+- Do NOT apply the exclusion to any other activity (RFI, NH, B, HAB, W, Q, TS, G, GB, Y, FG).
+- Do NOT change ageing rules in this task (Activity C still ages from Assign Date).
+- Do NOT change parsing identity/hash/dedup, Activity values, or qty.
+- Do NOT forward-fill the project code.
+
+=====================================================================
+ACCEPTANCE CHECK (WIP 18-Jul, TLT / Order Nature = "Structure")
+=====================================================================
+- App-wide Cutting = 15,770 marks / 2,779.224 MT (was 24,493 / 4,832.064).
+- No mark with Type = "Job Card Not Started" AND Job Card Status = "Initial" contributes to any
+  Cutting figure anywhere in the app or its exports.
+- Release Balance / Release Balance Computed are UNCHANGED (still include those marks).
+- Per-project rows still reconcile: Cutting + Quality Check + Galvanising + FG = Total.
+- Balance Wt, Balance Qty and Marks totals per project are UNCHANGED (nothing was deleted).
+- Confirm the same rule is applied in the Excel exports, not just the UI.
+Report: the new app-wide Cutting marks/weight, confirmation Release Balance is unchanged, and
+the list of pages/exports where the exclusion was applied.

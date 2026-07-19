@@ -40,9 +40,11 @@ function ActivityContent() {
   const records = useFilteredRecords(allRecords);
 
   const { activities, sortedActivities, totalWt, totalMarks, avgAge, notAgedCount, notAgedWt, agedCount } = useMemo(() => {
-    // Group by activity
+    // Group by activity. Initial Cutting marks (isInitialCutting=true) are
+    // excluded from the "C" bucket — they are Release Balance, not active Cutting.
     const activities = new Map<string, any[]>();
     records.forEach(r => {
+      if (r.isInitialCutting) return;
       const act = r.activity || "Unassigned";
       if (!activities.has(act)) activities.set(act, []);
       activities.get(act)!.push(r);

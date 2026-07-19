@@ -41,6 +41,17 @@ export function isCutting(activity: string | null | undefined): boolean {
   return (activity ?? "").trim().toUpperCase() === "C";
 }
 
+// Active cutting: activity is "C" AND the mark is NOT an unreleased Initial mark.
+// Initial marks (Type="Job Card Not Started" + Job Card Status="Initial") are
+// already counted as Release Balance and must NOT contribute to any Cutting figure.
+// Use this predicate everywhere a Cutting BALANCE figure is computed or displayed.
+export function isActiveCutting(r: {
+  activity?: string | null;
+  isInitialCutting?: boolean;
+}): boolean {
+  return isCutting(r.activity) && !r.isInitialCutting;
+}
+
 // Label for a row with no ageing date:
 //   pre-production (C, NTF, NTFSW, BL) + no Assign Date -> "Not started"
 //   everything else + no Last Production Entry Date      -> "No production date"

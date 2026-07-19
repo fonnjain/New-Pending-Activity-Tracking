@@ -991,6 +991,16 @@ export function parseWorkbook(
     base.holeOperation = holeOp.holeOperation;
     base.holeOperationSource = holeOp.holeOperationSource;
 
+    // Additive exclusion flag: marks that are Job Card Not Started + Initial are
+    // already counted as Release Balance and must NOT contribute to any Cutting
+    // figure. NOT part of the hash; computed from "Type" (col A in new format)
+    // and "Job Card Status" (col G in new format). Defaults false for old-format
+    // rows (which lack these columns and can't have Initial status).
+    const jcStatus = cellToString(row["Job Card Status"]).trim().toUpperCase();
+    base.isInitialCutting =
+      rowType.trim().toUpperCase() === "JOB CARD NOT STARTED" &&
+      jcStatus === "INITIAL";
+
     rows.push({ ...base, hash: hashRow(base, rawBatch) });
   }
 

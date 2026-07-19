@@ -250,7 +250,9 @@ function JobDashboardContent() {
         const phases = emptyPhases();
         for (const r of recs) {
           const key = processPhase(r.activity);
-          if (key) {
+          // Initial Cutting marks (isInitialCutting=true) are already counted
+          // as Release Balance — exclude them from the Cutting phase bucket.
+          if (key && !(key === "cutting" && r.isInitialCutting)) {
             phases[key].marks += 1;
             phases[key].weight += r.balanceWt;
           }
@@ -798,7 +800,8 @@ function JobDetail({
         const phases = emptyPhases();
         for (const r of recs) {
           const key = processPhase(r.activity);
-          if (key) {
+          // Initial Cutting marks excluded from the Cutting phase — they are Release Balance.
+          if (key && !(key === "cutting" && r.isInitialCutting)) {
             phases[key].marks += 1;
             phases[key].weight += r.balanceWt;
           }
