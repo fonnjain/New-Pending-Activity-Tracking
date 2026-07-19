@@ -2,14 +2,13 @@ import { useTracker, useFilteredRecords, dateRangeWindow } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
-import { StatusDot } from "@/components/status-dot";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { ChevronDown, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
-import { formatWeight, formatDate } from "@/lib/utils";
+import { formatWeight } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { compareActivity } from "@workspace/domain";
 import { useSettings } from "@/lib/settings";
@@ -17,24 +16,28 @@ import { useSettings } from "@/lib/settings";
 const ROW_CAP = 300;
 
 // ---------------------------------------------------------------------------
-// Activity Performance — hierarchical drill-down
-// Activity → Project → MFC → Contractor → Marks (section / thickness / qty / wt / ageing)
+// helpers
 // ---------------------------------------------------------------------------
 
 function actPerfRollup(
   recs: any[],
   moveWindow: { start: string; end: string },
-): { marks: number; weightMt: number; avgAge: number | null; movedCount: number } {
-  let weightMt = 0, ageSum = 0, agedCount = 0, movedCount = 0;
+): { marks: number; qty: number; weightMt: number; avgAge: number | null; movedCount: number } {
+  let weightMt = 0, qty = 0, ageSum = 0, agedCount = 0, movedCount = 0;
   for (const r of recs) {
     weightMt += r.balanceWt ?? 0;
+    qty += r.balanceQty ?? 0;
     const d = r.ageingDays as number | null;
     if (d != null) { agedCount++; ageSum += d; }
     const lpd: string | null = r.lastProductionDate ?? null;
     if (lpd && lpd >= moveWindow.start && lpd <= moveWindow.end) movedCount++;
   }
-  return { marks: recs.length, weightMt, avgAge: agedCount > 0 ? Math.round(ageSum / agedCount) : null, movedCount };
+  return { marks: recs.length, qty, weightMt, avgAge: agedCount > 0 ? Math.round(ageSum / agedCount) : null, movedCount };
 }
+
+// ---------------------------------------------------------------------------
+// Mark-level list (leaf of drill-down)
+// ---------------------------------------------------------------------------
 
 function ActPerfMarksList({ records }: { records: any[] }) {
   const [showAll, setShowAll] = useState(false);
@@ -223,14 +226,19 @@ function ActPerfProjectGroup({
   );
 }
 
-function ActivityPerfCard({
-  act, records, idealDays, moveWindow, isDateFiltered,
+// ---------------------------------------------------------------------------
+// Per-activity drill-down row inside the summary table
+// ---------------------------------------------------------------------------
+
+function ActivityDrillRow({
+  act, records, idealDays, moveWindow, isDateFiltered, totalWt,
 }: {
   act: string;
   records: any[];
   idealDays: number | null;
   moveWindow: { start: string; end: string };
   isDateFiltered: boolean;
+  totalWt: number;
 }) {
   const [open, setOpen] = useState(false);
   const stats = useMemo(() => actPerfRollup(records, moveWindow), [records, moveWindow]);
@@ -262,51 +270,58 @@ function ActivityPerfCard({
     [projectMap],
   );
 
+  const sharePct = totalWt > 0 ? (stats.weightMt / totalWt) * 100 : 0;
   const movedLabel = isDateFiltered ? "Moved (period)" : "Moved (3d)";
 
   return (
-    <Card className="overflow-hidden">
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger className="w-full">
-          <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors gap-3">
-            <div className="flex items-center gap-3 text-left min-w-0">
-              <div className="bg-secondary text-secondary-foreground font-bold w-11 h-11 flex items-center justify-center rounded-md text-sm shrink-0">
-                {act}
-              </div>
-              <div className="min-w-0">
-                <div className="font-extrabold text-xl text-primary">{formatWeight(stats.weightMt)}</div>
-                <div className="text-xs text-muted-foreground">
-                  {stats.marks.toLocaleString()} marks • {sortedProjects.length} project{sortedProjects.length !== 1 ? "s" : ""}
-                  {idealDays != null && <span className="ml-2">• Ideal: {idealDays}d</span>}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-4 text-right shrink-0">
-              <div className="hidden sm:block leading-tight">
-                <div className="text-[10px] uppercase text-muted-foreground font-semibold">Avg Age</div>
-                <div className={`font-bold text-lg ${getAgeingColor(stats.avgAge)}`}>
-                  {stats.avgAge != null ? `${stats.avgAge}d` : "-"}
-                </div>
-              </div>
-              <div className="hidden sm:block leading-tight">
-                <div className="text-[10px] uppercase text-muted-foreground font-semibold">{movedLabel}</div>
-                <div className="font-bold text-lg text-primary">{stats.movedCount.toLocaleString()}</div>
-              </div>
-              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
-            </div>
+    <>
+      <TableRow
+        className="cursor-pointer hover:bg-muted/40 transition-colors"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <TableCell>
+          <div className="flex items-center gap-2">
+            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
+            <span className="font-bold text-sm font-mono">{act}</span>
+            {idealDays != null && (
+              <span className="text-[10px] text-muted-foreground">({idealDays}d ideal)</span>
+            )}
           </div>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="border-t bg-card divide-y">
-            {sortedProjects.map((p) => (
-              <ActPerfProjectGroup key={p} project={p} mfcMap={projectMap.get(p)!} moveWindow={moveWindow} />
-            ))}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-    </Card>
+        </TableCell>
+        <TableCell className="text-right tabular-nums font-medium">{stats.marks.toLocaleString()}</TableCell>
+        <TableCell className="text-right tabular-nums">{stats.qty.toLocaleString()}</TableCell>
+        <TableCell className="text-right tabular-nums font-semibold">{formatWeight(stats.weightMt)}</TableCell>
+        <TableCell className="text-right tabular-nums text-muted-foreground text-xs">
+          {sharePct.toFixed(1)}%
+        </TableCell>
+        <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(stats.avgAge)}`}>
+          {stats.avgAge != null ? `${stats.avgAge}d` : "-"}
+        </TableCell>
+        <TableCell className="text-right tabular-nums text-muted-foreground">
+          {stats.movedCount > 0 ? <span className="text-primary font-semibold">{stats.movedCount}</span> : "-"}
+        </TableCell>
+        <TableCell className="text-right text-muted-foreground text-xs">
+          {sortedProjects.length}
+        </TableCell>
+      </TableRow>
+      {open && (
+        <TableRow>
+          <TableCell colSpan={8} className="p-0 bg-muted/10">
+            <div className="border-y divide-y">
+              {sortedProjects.map((p) => (
+                <ActPerfProjectGroup key={p} project={p} mfcMap={projectMap.get(p)!} moveWindow={moveWindow} />
+              ))}
+            </div>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Activity Performance Table — flat summary with expandable drill-down
+// ---------------------------------------------------------------------------
 
 function ActivityPerformanceTable({
   activities,
@@ -330,26 +345,79 @@ function ActivityPerformanceTable({
     return m;
   }, [settings]);
 
+  const totalWt = useMemo(
+    () => sortedActivities.reduce((s, a) => s + (activities.get(a) ?? []).reduce((x, r) => x + (r.balanceWt ?? 0), 0), 0),
+    [activities, sortedActivities],
+  );
+
+  const totalMarks = useMemo(
+    () => sortedActivities.reduce((s, a) => s + (activities.get(a) ?? []).length, 0),
+    [activities, sortedActivities],
+  );
+
+  const totalQty = useMemo(
+    () => sortedActivities.reduce((s, a) => s + (activities.get(a) ?? []).reduce((x, r) => x + (r.balanceQty ?? 0), 0), 0),
+    [activities, sortedActivities],
+  );
+
+  const movedLabel = isDateFiltered ? "Moved (period)" : "Moved (3d)";
+
   if (sortedActivities.length === 0) return null;
 
   return (
-    <div className="space-y-2">
-      <div className="px-1">
+    <Card>
+      <div className="px-4 pt-4 pb-1">
         <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Activity Performance</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">Click any row to drill into Project &rarr; MFC Batch &rarr; Contractor &rarr; Marks</p>
       </div>
-      {sortedActivities.map((act) => (
-        <ActivityPerfCard
-          key={act}
-          act={act}
-          records={activities.get(act)!}
-          idealDays={idealDaysMap.get(act.toUpperCase()) ?? null}
-          moveWindow={moveWindow}
-          isDateFiltered={isDateFiltered}
-        />
-      ))}
-    </div>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Activity</TableHead>
+              <TableHead className="text-right">Marks</TableHead>
+              <TableHead className="text-right">Qty</TableHead>
+              <TableHead className="text-right">Balance Wt</TableHead>
+              <TableHead className="text-right">Share</TableHead>
+              <TableHead className="text-right">Avg Age</TableHead>
+              <TableHead className="text-right">{movedLabel}</TableHead>
+              <TableHead className="text-right">Projects</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sortedActivities.map((act) => (
+              <ActivityDrillRow
+                key={act}
+                act={act}
+                records={activities.get(act)!}
+                idealDays={idealDaysMap.get(act.toUpperCase()) ?? null}
+                moveWindow={moveWindow}
+                isDateFiltered={isDateFiltered}
+                totalWt={totalWt}
+              />
+            ))}
+          </TableBody>
+          <TableFooter>
+            <TableRow>
+              <TableCell className="font-semibold">Total</TableCell>
+              <TableCell className="text-right font-bold tabular-nums">{totalMarks.toLocaleString()}</TableCell>
+              <TableCell className="text-right font-bold tabular-nums">{totalQty.toLocaleString()}</TableCell>
+              <TableCell className="text-right font-bold tabular-nums">{formatWeight(totalWt)}</TableCell>
+              <TableCell className="text-right text-muted-foreground">100%</TableCell>
+              <TableCell />
+              <TableCell />
+              <TableCell />
+            </TableRow>
+          </TableFooter>
+        </Table>
+      </div>
+    </Card>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Page root
+// ---------------------------------------------------------------------------
 
 export default function ActivityView() {
   const { selectedImportId } = useTracker();
@@ -370,7 +438,7 @@ function KpiTile({ title, value }: { title: string; value: string }) {
 
 function ActivityContent() {
   const { selectedImportId, filters } = useTracker();
-  const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
+  const { data: allRecords, isLoading } = useGetImportRecords(selectedImportId as number, {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
   const records = useFilteredRecords(allRecords);
@@ -393,8 +461,6 @@ function ActivityContent() {
   }, [filters.dateRange]);
 
   const { activities, sortedActivities, totalWt, totalMarks, avgAge, notAgedCount, notAgedWt, agedCount } = useMemo(() => {
-    // Group by activity. Initial Cutting marks (isInitialCutting=true) are
-    // excluded from the "C" bucket — they are Release Balance, not active Cutting.
     const activities = new Map<string, any[]>();
     records.forEach(r => {
       if (r.isInitialCutting) return;
@@ -499,20 +565,30 @@ function ActivityContent() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiTile title="Marks" value={totalMarks.toLocaleString()} />
-        <KpiTile title="Balance Weight" value={formatWeight(totalWt)} />
-        <KpiTile title={`Avg Age (${agedCount.toLocaleString()} ageable)`} value={avgAge !== null ? `${avgAge}d` : "-"} />
-        <KpiTile title="Activities" value={sortedActivities.length.toLocaleString()} />
+        <KpiTile title="Marks" value={isLoading ? "..." : totalMarks.toLocaleString()} />
+        <KpiTile title="Balance Weight" value={isLoading ? "..." : formatWeight(totalWt)} />
+        <KpiTile title={`Avg Age (${agedCount.toLocaleString()} ageable)`} value={isLoading ? "..." : avgAge !== null ? `${avgAge}d` : "-"} />
+        <KpiTile title="Activities" value={isLoading ? "..." : sortedActivities.length.toLocaleString()} />
       </div>
+
       {notAgedCount > 0 && (
         <div className="text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2 border border-border">
           Not aged: <span className="font-semibold text-foreground">{notAgedCount.toLocaleString()} marks ({notAgedWt.toFixed(3)} MT)</span> have no reference date (no Assign Date for pre-production, no Last Production Entry Date otherwise) — excluded from ageing buckets and averages above.
         </div>
       )}
 
-      <ActivityPerformanceTable activities={activities} sortedActivities={sortedActivities} moveWindow={moveWindow} isDateFiltered={isDateFiltered} />
-      {sortedActivities.length === 0 && <div className="text-center p-8 text-muted-foreground">No activities found matching filters.</div>}
+      {isLoading ? (
+        <div className="text-center p-8 text-muted-foreground text-sm">Loading activity data...</div>
+      ) : sortedActivities.length === 0 ? (
+        <div className="text-center p-8 text-muted-foreground">No activities found matching filters.</div>
+      ) : (
+        <ActivityPerformanceTable
+          activities={activities}
+          sortedActivities={sortedActivities}
+          moveWindow={moveWindow}
+          isDateFiltered={isDateFiltered}
+        />
+      )}
     </div>
   );
 }
-
