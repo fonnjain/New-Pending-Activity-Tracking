@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type DeleteInventoryManualAParams = {
-id: number;
+export type DeleteInventoryMfcBatchColorParams = {
+project: string;
+mfcBatch: string;
 };

@@ -1888,58 +1888,6 @@ export const GetInventoryBucketsResponse = zod.object({
 
 
 /**
- * Returns the persisted Bucket A list (free-text project entries the user maintains directly on the Inventory page). Survives re-uploads of both WIP and Order Review files. Public (read-only).
-
- * @summary List manual Bucket A ("Project to Start") entries
- */
-export const ListInventoryManualAResponseItem = zod.object({
-  "id": zod.number(),
-  "projectCode": zod.string(),
-  "mfcBatch": zod.string().nullable().describe('Bucket E only -- MFC Batch letter (A\/B\/C\/D) or \"Z\" (not yet batched). Governs which structures are removed from Buckets C and D. Always null for Bucket A entries.'),
-  "woOrderQtyMt": zod.number().nullable().describe('Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries.'),
-  "side": zod.enum(['in_house', 'out_vendor']),
-  "note": zod.string().nullable(),
-  "createdAt": zod.string()
-}).describe('One persisted manual entry for Inventory Bucket A (\"Project to Start\") or Bucket E (\"Material Ready But Not Dispatched\"). Never derived; never cleared by a WIP or Order Review re-upload.\n')
-export const ListInventoryManualAResponse = zod.array(ListInventoryManualAResponseItem)
-
-
-/**
- * Inserts a new Bucket A entry, or updates one in place when `id` is supplied. Requires authentication.
-
- * @summary Add or update a manual Bucket A entry
- */
-export const UpsertInventoryManualABody = zod.object({
-  "id": zod.number().optional().describe('Omit to insert a new entry; supply to update an existing one.'),
-  "projectCode": zod.string(),
-  "mfcBatch": zod.string().nullish().describe('Bucket E only -- MFC Batch letter (A\/B\/C\/D) or \"Z\". Omit or null for Bucket A entries.'),
-  "woOrderQtyMt": zod.number().nullish().describe('Bucket A only -- manually typed Work Order Qty weight (MT). Ignored for Bucket E entries.'),
-  "side": zod.enum(['in_house', 'out_vendor']),
-  "note": zod.string().nullish()
-})
-
-export const UpsertInventoryManualAResponse = zod.object({
-  "id": zod.number(),
-  "projectCode": zod.string(),
-  "mfcBatch": zod.string().nullable().describe('Bucket E only -- MFC Batch letter (A\/B\/C\/D) or \"Z\" (not yet batched). Governs which structures are removed from Buckets C and D. Always null for Bucket A entries.'),
-  "woOrderQtyMt": zod.number().nullable().describe('Bucket A only -- manually typed Work Order Qty weight (MT) for a brand-new project not yet in WIP or Order Review. Always null for Bucket E entries.'),
-  "side": zod.enum(['in_house', 'out_vendor']),
-  "note": zod.string().nullable(),
-  "createdAt": zod.string()
-}).describe('One persisted manual entry for Inventory Bucket A (\"Project to Start\") or Bucket E (\"Material Ready But Not Dispatched\"). Never derived; never cleared by a WIP or Order Review re-upload.\n')
-
-
-/**
- * Removes one Bucket A entry by id. Requires authentication.
-
- * @summary Remove a manual Bucket A entry
- */
-export const DeleteInventoryManualAQueryParams = zod.object({
-  "id": zod.coerce.number()
-})
-
-
-/**
  * Returns the persisted Bucket E list (dropdown-picked project entries the user maintains directly on the Inventory page). Survives re-uploads of both WIP and Order Review files. Public (read-only).
 
  * @summary List manual Bucket E ("Material Ready But Not Dispatched") entries
@@ -1992,46 +1940,56 @@ export const DeleteInventoryManualEQueryParams = zod.object({
 
 
 /**
- * Returns all stored MFC batch → colour mappings. The colour is applied as an Excel cell background when the inventory bucket list is exported. Public (read-only).
+ * Returns all stored (project, MFC batch) → colour mappings, along with optional milestone dates. Applied as Excel cell background fills when the inventory bucket list is exported. Public (read-only).
 
- * @summary List backfill colour choices for MFC batches
+ * @summary List MFC batch colour assignments (per project + batch pair)
  */
-export const ListInventoryMfcColorsResponseItem = zod.object({
+export const ListInventoryMfcBatchColorsResponseItem = zod.object({
+  "id": zod.number(),
+  "project": zod.string(),
   "mfcBatch": zod.string(),
-  "side": zod.enum(['in_house', 'out_vendor']),
-  "color": zod.enum(['green', 'white', 'yellow']),
-  "createdAt": zod.string()
-}).describe('A stored backfill colour for an MFC batch on a specific side. Applied as an Excel cell background when the inventory bucket list is exported to .xlsx. In-House and Out-Vendor sides can have different colours for the same batch.\n')
-export const ListInventoryMfcColorsResponse = zod.array(ListInventoryMfcColorsResponseItem)
+  "color": zod.enum(['white', 'yellow', 'green', 'blue']),
+  "dateOfClientMfc": zod.string().nullish(),
+  "projectStartDate": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}).describe('A stored backfill colour for a (project, MFC batch) pair, with optional milestone dates. The colour is applied as an Excel cell background when the inventory bucket list is exported. A reminder is shown on the Bucket List page when the project is no longer in Bucket A.\n')
+export const ListInventoryMfcBatchColorsResponse = zod.array(ListInventoryMfcBatchColorsResponseItem)
 
 
 /**
- * Inserts or replaces the colour assigned to an MFC batch. Requires authentication.
+ * Inserts or updates the colour and optional milestone dates for a (project, MFC batch) pair. Requires authentication.
 
- * @summary Set or replace the backfill colour for an MFC batch
+ * @summary Set or replace the colour for a (project, MFC batch) pair
  */
-export const UpsertInventoryMfcColorBody = zod.object({
+export const UpsertInventoryMfcBatchColorBody = zod.object({
+  "project": zod.string(),
   "mfcBatch": zod.string(),
-  "side": zod.enum(['in_house', 'out_vendor']),
-  "color": zod.enum(['green', 'white', 'yellow'])
+  "color": zod.enum(['white', 'yellow', 'green', 'blue']),
+  "dateOfClientMfc": zod.string().nullish(),
+  "projectStartDate": zod.string().nullish()
 })
 
-export const UpsertInventoryMfcColorResponse = zod.object({
+export const UpsertInventoryMfcBatchColorResponse = zod.object({
+  "id": zod.number(),
+  "project": zod.string(),
   "mfcBatch": zod.string(),
-  "side": zod.enum(['in_house', 'out_vendor']),
-  "color": zod.enum(['green', 'white', 'yellow']),
-  "createdAt": zod.string()
-}).describe('A stored backfill colour for an MFC batch on a specific side. Applied as an Excel cell background when the inventory bucket list is exported to .xlsx. In-House and Out-Vendor sides can have different colours for the same batch.\n')
+  "color": zod.enum(['white', 'yellow', 'green', 'blue']),
+  "dateOfClientMfc": zod.string().nullish(),
+  "projectStartDate": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}).describe('A stored backfill colour for a (project, MFC batch) pair, with optional milestone dates. The colour is applied as an Excel cell background when the inventory bucket list is exported. A reminder is shown on the Bucket List page when the project is no longer in Bucket A.\n')
 
 
 /**
- * Removes the stored colour for the given MFC batch and side. After deletion the batch exports with no background fill for that side. Requires authentication.
+ * Removes the stored colour entry for the given project + MFC batch. Requires authentication.
 
- * @summary Remove the colour assignment for an MFC batch on a specific side
+ * @summary Remove the colour assignment for a (project, MFC batch) pair
  */
-export const DeleteInventoryMfcColorQueryParams = zod.object({
-  "mfcBatch": zod.coerce.string(),
-  "side": zod.enum(['in_house', 'out_vendor'])
+export const DeleteInventoryMfcBatchColorQueryParams = zod.object({
+  "project": zod.coerce.string(),
+  "mfcBatch": zod.coerce.string()
 })
 
 

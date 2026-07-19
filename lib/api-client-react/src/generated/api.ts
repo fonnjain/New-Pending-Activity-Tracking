@@ -41,9 +41,8 @@ import type {
   DeleteAllResult,
   DeleteContractorCategoryParams,
   DeleteFabricationPriorityParams,
-  DeleteInventoryManualAParams,
   DeleteInventoryManualEParams,
-  DeleteInventoryMfcColorParams,
+  DeleteInventoryMfcBatchColorParams,
   DeleteInventorySideOverrideParams,
   DeleteManualThicknessParams,
   DeleteRsjThicknessParams,
@@ -59,8 +58,8 @@ import type {
   InventoryBucketsResponse,
   InventoryManualEntry,
   InventoryManualEntryInput,
-  InventoryMfcColor,
-  InventoryMfcColorInput,
+  InventoryMfcBatchColor,
+  InventoryMfcBatchColorInput,
   InventorySideOverride,
   InventorySideOverrideInput,
   ListImportsParams,
@@ -3699,237 +3698,6 @@ export function useGetInventoryBuckets<TData = Awaited<ReturnType<typeof getInve
 
 
 
-export const getListInventoryManualAUrl = () => {
-
-
-
-
-  return `/api/inventory-manual/a`
-}
-
-/**
- * Returns the persisted Bucket A list (free-text project entries the user maintains directly on the Inventory page). Survives re-uploads of both WIP and Order Review files. Public (read-only).
-
- * @summary List manual Bucket A ("Project to Start") entries
- */
-export const listInventoryManualA = async ( options?: RequestInit): Promise<InventoryManualEntry[]> => {
-
-  return customFetch<InventoryManualEntry[]>(getListInventoryManualAUrl(),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getListInventoryManualAQueryKey = () => {
-    return [
-    `/api/inventory-manual/a`
-    ] as const;
-    }
-
-
-export const getListInventoryManualAQueryOptions = <TData = Awaited<ReturnType<typeof listInventoryManualA>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventoryManualA>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getListInventoryManualAQueryKey();
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInventoryManualA>>> = ({ signal }) => listInventoryManualA({ signal, ...requestOptions });
-
-
-
-
-
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listInventoryManualA>>, TError, TData> & { queryKey: QueryKey }
-}
-
-export type ListInventoryManualAQueryResult = NonNullable<Awaited<ReturnType<typeof listInventoryManualA>>>
-export type ListInventoryManualAQueryError = ErrorType<unknown>
-
-
-/**
- * @summary List manual Bucket A ("Project to Start") entries
- */
-
-export function useListInventoryManualA<TData = Awaited<ReturnType<typeof listInventoryManualA>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventoryManualA>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-
- ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-
-  const queryOptions = getListInventoryManualAQueryOptions(options)
-
-  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
-
-
-
-
-
-
-
-export const getUpsertInventoryManualAUrl = () => {
-
-
-
-
-  return `/api/inventory-manual/a`
-}
-
-/**
- * Inserts a new Bucket A entry, or updates one in place when `id` is supplied. Requires authentication.
-
- * @summary Add or update a manual Bucket A entry
- */
-export const upsertInventoryManualA = async (inventoryManualEntryInput: InventoryManualEntryInput, options?: RequestInit): Promise<InventoryManualEntry> => {
-
-  return customFetch<InventoryManualEntry>(getUpsertInventoryManualAUrl(),
-  {
-    ...options,
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(
-      inventoryManualEntryInput,)
-  }
-);}
-
-
-
-
-export const getUpsertInventoryManualAMutationOptions = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryManualA>>, TError,{data: BodyType<InventoryManualEntryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryManualA>>, TError,{data: BodyType<InventoryManualEntryInput>}, TContext> => {
-
-const mutationKey = ['upsertInventoryManualA'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertInventoryManualA>>, {data: BodyType<InventoryManualEntryInput>}> = (props) => {
-          const {data} = props ?? {};
-
-          return  upsertInventoryManualA(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type UpsertInventoryManualAMutationResult = NonNullable<Awaited<ReturnType<typeof upsertInventoryManualA>>>
-    export type UpsertInventoryManualAMutationBody = BodyType<InventoryManualEntryInput>
-    export type UpsertInventoryManualAMutationError = ErrorType<ErrorResponse>
-
-    /**
- * @summary Add or update a manual Bucket A entry
- */
-export const useUpsertInventoryManualA = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryManualA>>, TError,{data: BodyType<InventoryManualEntryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof upsertInventoryManualA>>,
-        TError,
-        {data: BodyType<InventoryManualEntryInput>},
-        TContext
-      > => {
-      return useMutation(getUpsertInventoryManualAMutationOptions(options));
-    }
-
-export const getDeleteInventoryManualAUrl = (params: DeleteInventoryManualAParams,) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : value.toString())
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0 ? `/api/inventory-manual/a?${stringifiedParams}` : `/api/inventory-manual/a`
-}
-
-/**
- * Removes one Bucket A entry by id. Requires authentication.
-
- * @summary Remove a manual Bucket A entry
- */
-export const deleteInventoryManualA = async (params: DeleteInventoryManualAParams, options?: RequestInit): Promise<void> => {
-
-  return customFetch<void>(getDeleteInventoryManualAUrl(params),
-  {
-    ...options,
-    method: 'DELETE'
-
-
-  }
-);}
-
-
-
-
-export const getDeleteInventoryManualAMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryManualA>>, TError,{params: DeleteInventoryManualAParams}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryManualA>>, TError,{params: DeleteInventoryManualAParams}, TContext> => {
-
-const mutationKey = ['deleteInventoryManualA'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteInventoryManualA>>, {params: DeleteInventoryManualAParams}> = (props) => {
-          const {params} = props ?? {};
-
-          return  deleteInventoryManualA(params,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type DeleteInventoryManualAMutationResult = NonNullable<Awaited<ReturnType<typeof deleteInventoryManualA>>>
-
-    export type DeleteInventoryManualAMutationError = ErrorType<unknown>
-
-    /**
- * @summary Remove a manual Bucket A entry
- */
-export const useDeleteInventoryManualA = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryManualA>>, TError,{params: DeleteInventoryManualAParams}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof deleteInventoryManualA>>,
-        TError,
-        {params: DeleteInventoryManualAParams},
-        TContext
-      > => {
-      return useMutation(getDeleteInventoryManualAMutationOptions(options));
-    }
-
 export const getListInventoryManualEUrl = () => {
 
 
@@ -4161,22 +3929,22 @@ export const useDeleteInventoryManualE = <TError = ErrorType<unknown>,
       return useMutation(getDeleteInventoryManualEMutationOptions(options));
     }
 
-export const getListInventoryMfcColorsUrl = () => {
+export const getListInventoryMfcBatchColorsUrl = () => {
 
 
 
 
-  return `/api/inventory-manual/mfc-colors`
+  return `/api/inventory-manual/mfc-batch-colors`
 }
 
 /**
- * Returns all stored MFC batch → colour mappings. The colour is applied as an Excel cell background when the inventory bucket list is exported. Public (read-only).
+ * Returns all stored (project, MFC batch) → colour mappings, along with optional milestone dates. Applied as Excel cell background fills when the inventory bucket list is exported. Public (read-only).
 
- * @summary List backfill colour choices for MFC batches
+ * @summary List MFC batch colour assignments (per project + batch pair)
  */
-export const listInventoryMfcColors = async ( options?: RequestInit): Promise<InventoryMfcColor[]> => {
+export const listInventoryMfcBatchColors = async ( options?: RequestInit): Promise<InventoryMfcBatchColor[]> => {
 
-  return customFetch<InventoryMfcColor[]>(getListInventoryMfcColorsUrl(),
+  return customFetch<InventoryMfcBatchColor[]>(getListInventoryMfcBatchColorsUrl(),
   {
     ...options,
     method: 'GET'
@@ -4189,45 +3957,45 @@ export const listInventoryMfcColors = async ( options?: RequestInit): Promise<In
 
 
 
-export const getListInventoryMfcColorsQueryKey = () => {
+export const getListInventoryMfcBatchColorsQueryKey = () => {
     return [
-    `/api/inventory-manual/mfc-colors`
+    `/api/inventory-manual/mfc-batch-colors`
     ] as const;
     }
 
 
-export const getListInventoryMfcColorsQueryOptions = <TData = Awaited<ReturnType<typeof listInventoryMfcColors>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventoryMfcColors>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getListInventoryMfcBatchColorsQueryOptions = <TData = Awaited<ReturnType<typeof listInventoryMfcBatchColors>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventoryMfcBatchColors>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListInventoryMfcColorsQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListInventoryMfcBatchColorsQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInventoryMfcColors>>> = ({ signal }) => listInventoryMfcColors({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInventoryMfcBatchColors>>> = ({ signal }) => listInventoryMfcBatchColors({ signal, ...requestOptions });
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listInventoryMfcColors>>, TError, TData> & { queryKey: QueryKey }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listInventoryMfcBatchColors>>, TError, TData> & { queryKey: QueryKey }
 }
 
-export type ListInventoryMfcColorsQueryResult = NonNullable<Awaited<ReturnType<typeof listInventoryMfcColors>>>
-export type ListInventoryMfcColorsQueryError = ErrorType<unknown>
+export type ListInventoryMfcBatchColorsQueryResult = NonNullable<Awaited<ReturnType<typeof listInventoryMfcBatchColors>>>
+export type ListInventoryMfcBatchColorsQueryError = ErrorType<unknown>
 
 
 /**
- * @summary List backfill colour choices for MFC batches
+ * @summary List MFC batch colour assignments (per project + batch pair)
  */
 
-export function useListInventoryMfcColors<TData = Awaited<ReturnType<typeof listInventoryMfcColors>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventoryMfcColors>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export function useListInventoryMfcBatchColors<TData = Awaited<ReturnType<typeof listInventoryMfcBatchColors>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInventoryMfcBatchColors>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getListInventoryMfcColorsQueryOptions(options)
+  const queryOptions = getListInventoryMfcBatchColorsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -4240,39 +4008,39 @@ export function useListInventoryMfcColors<TData = Awaited<ReturnType<typeof list
 
 
 
-export const getUpsertInventoryMfcColorUrl = () => {
+export const getUpsertInventoryMfcBatchColorUrl = () => {
 
 
 
 
-  return `/api/inventory-manual/mfc-colors`
+  return `/api/inventory-manual/mfc-batch-colors`
 }
 
 /**
- * Inserts or replaces the colour assigned to an MFC batch. Requires authentication.
+ * Inserts or updates the colour and optional milestone dates for a (project, MFC batch) pair. Requires authentication.
 
- * @summary Set or replace the backfill colour for an MFC batch
+ * @summary Set or replace the colour for a (project, MFC batch) pair
  */
-export const upsertInventoryMfcColor = async (inventoryMfcColorInput: InventoryMfcColorInput, options?: RequestInit): Promise<InventoryMfcColor> => {
+export const upsertInventoryMfcBatchColor = async (inventoryMfcBatchColorInput: InventoryMfcBatchColorInput, options?: RequestInit): Promise<InventoryMfcBatchColor> => {
 
-  return customFetch<InventoryMfcColor>(getUpsertInventoryMfcColorUrl(),
+  return customFetch<InventoryMfcBatchColor>(getUpsertInventoryMfcBatchColorUrl(),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(
-      inventoryMfcColorInput,)
+      inventoryMfcBatchColorInput,)
   }
 );}
 
 
 
 
-export const getUpsertInventoryMfcColorMutationOptions = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryMfcColor>>, TError,{data: BodyType<InventoryMfcColorInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryMfcColor>>, TError,{data: BodyType<InventoryMfcColorInput>}, TContext> => {
+export const getUpsertInventoryMfcBatchColorMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryMfcBatchColor>>, TError,{data: BodyType<InventoryMfcBatchColorInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryMfcBatchColor>>, TError,{data: BodyType<InventoryMfcBatchColorInput>}, TContext> => {
 
-const mutationKey = ['upsertInventoryMfcColor'];
+const mutationKey = ['upsertInventoryMfcBatchColor'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4282,10 +4050,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertInventoryMfcColor>>, {data: BodyType<InventoryMfcColorInput>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertInventoryMfcBatchColor>>, {data: BodyType<InventoryMfcBatchColorInput>}> = (props) => {
           const {data} = props ?? {};
 
-          return  upsertInventoryMfcColor(data,requestOptions)
+          return  upsertInventoryMfcBatchColor(data,requestOptions)
         }
 
 
@@ -4295,25 +4063,25 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type UpsertInventoryMfcColorMutationResult = NonNullable<Awaited<ReturnType<typeof upsertInventoryMfcColor>>>
-    export type UpsertInventoryMfcColorMutationBody = BodyType<InventoryMfcColorInput>
-    export type UpsertInventoryMfcColorMutationError = ErrorType<ErrorResponse>
+    export type UpsertInventoryMfcBatchColorMutationResult = NonNullable<Awaited<ReturnType<typeof upsertInventoryMfcBatchColor>>>
+    export type UpsertInventoryMfcBatchColorMutationBody = BodyType<InventoryMfcBatchColorInput>
+    export type UpsertInventoryMfcBatchColorMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Set or replace the backfill colour for an MFC batch
+ * @summary Set or replace the colour for a (project, MFC batch) pair
  */
-export const useUpsertInventoryMfcColor = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryMfcColor>>, TError,{data: BodyType<InventoryMfcColorInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useUpsertInventoryMfcBatchColor = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertInventoryMfcBatchColor>>, TError,{data: BodyType<InventoryMfcBatchColorInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof upsertInventoryMfcColor>>,
+        Awaited<ReturnType<typeof upsertInventoryMfcBatchColor>>,
         TError,
-        {data: BodyType<InventoryMfcColorInput>},
+        {data: BodyType<InventoryMfcBatchColorInput>},
         TContext
       > => {
-      return useMutation(getUpsertInventoryMfcColorMutationOptions(options));
+      return useMutation(getUpsertInventoryMfcBatchColorMutationOptions(options));
     }
 
-export const getDeleteInventoryMfcColorUrl = (params: DeleteInventoryMfcColorParams,) => {
+export const getDeleteInventoryMfcBatchColorUrl = (params: DeleteInventoryMfcBatchColorParams,) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -4325,17 +4093,17 @@ export const getDeleteInventoryMfcColorUrl = (params: DeleteInventoryMfcColorPar
 
   const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `/api/inventory-manual/mfc-colors?${stringifiedParams}` : `/api/inventory-manual/mfc-colors`
+  return stringifiedParams.length > 0 ? `/api/inventory-manual/mfc-batch-colors?${stringifiedParams}` : `/api/inventory-manual/mfc-batch-colors`
 }
 
 /**
- * Removes the stored colour for the given MFC batch and side. After deletion the batch exports with no background fill for that side. Requires authentication.
+ * Removes the stored colour entry for the given project + MFC batch. Requires authentication.
 
- * @summary Remove the colour assignment for an MFC batch on a specific side
+ * @summary Remove the colour assignment for a (project, MFC batch) pair
  */
-export const deleteInventoryMfcColor = async (params: DeleteInventoryMfcColorParams, options?: RequestInit): Promise<void> => {
+export const deleteInventoryMfcBatchColor = async (params: DeleteInventoryMfcBatchColorParams, options?: RequestInit): Promise<void> => {
 
-  return customFetch<void>(getDeleteInventoryMfcColorUrl(params),
+  return customFetch<void>(getDeleteInventoryMfcBatchColorUrl(params),
   {
     ...options,
     method: 'DELETE'
@@ -4347,11 +4115,11 @@ export const deleteInventoryMfcColor = async (params: DeleteInventoryMfcColorPar
 
 
 
-export const getDeleteInventoryMfcColorMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryMfcColor>>, TError,{params: DeleteInventoryMfcColorParams}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryMfcColor>>, TError,{params: DeleteInventoryMfcColorParams}, TContext> => {
+export const getDeleteInventoryMfcBatchColorMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryMfcBatchColor>>, TError,{params: DeleteInventoryMfcBatchColorParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryMfcBatchColor>>, TError,{params: DeleteInventoryMfcBatchColorParams}, TContext> => {
 
-const mutationKey = ['deleteInventoryMfcColor'];
+const mutationKey = ['deleteInventoryMfcBatchColor'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4361,10 +4129,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteInventoryMfcColor>>, {params: DeleteInventoryMfcColorParams}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteInventoryMfcBatchColor>>, {params: DeleteInventoryMfcBatchColorParams}> = (props) => {
           const {params} = props ?? {};
 
-          return  deleteInventoryMfcColor(params,requestOptions)
+          return  deleteInventoryMfcBatchColor(params,requestOptions)
         }
 
 
@@ -4374,22 +4142,22 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type DeleteInventoryMfcColorMutationResult = NonNullable<Awaited<ReturnType<typeof deleteInventoryMfcColor>>>
+    export type DeleteInventoryMfcBatchColorMutationResult = NonNullable<Awaited<ReturnType<typeof deleteInventoryMfcBatchColor>>>
 
-    export type DeleteInventoryMfcColorMutationError = ErrorType<unknown>
+    export type DeleteInventoryMfcBatchColorMutationError = ErrorType<unknown>
 
     /**
- * @summary Remove the colour assignment for an MFC batch on a specific side
+ * @summary Remove the colour assignment for a (project, MFC batch) pair
  */
-export const useDeleteInventoryMfcColor = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryMfcColor>>, TError,{params: DeleteInventoryMfcColorParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useDeleteInventoryMfcBatchColor = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInventoryMfcBatchColor>>, TError,{params: DeleteInventoryMfcBatchColorParams}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof deleteInventoryMfcColor>>,
+        Awaited<ReturnType<typeof deleteInventoryMfcBatchColor>>,
         TError,
-        {params: DeleteInventoryMfcColorParams},
+        {params: DeleteInventoryMfcBatchColorParams},
         TContext
       > => {
-      return useMutation(getDeleteInventoryMfcColorMutationOptions(options));
+      return useMutation(getDeleteInventoryMfcBatchColorMutationOptions(options));
     }
 
 export const getListInventorySideOverridesUrl = () => {

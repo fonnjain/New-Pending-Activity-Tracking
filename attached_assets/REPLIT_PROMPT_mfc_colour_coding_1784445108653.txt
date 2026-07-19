@@ -1,0 +1,180 @@
+TASK: Add an MFC Batch Colour Coding feature. The user assigns a colour (and two dates) to a
+specific (Project, MFC Batch) pair. The colour is SAVED and follows that pair everywhere in the
+Bucket List, including when it moves from one bucket to another.
+
+=====================================================================
+THE ENTRY FORM — five fields, in this order
+=====================================================================
+FIELD 1 — PROJECT (dropdown)
+  Reuse the EXISTING local job/project picker component already used elsewhere in the app
+  (do not build a new one). Lists known projects.
+
+FIELD 2 — MFC BATCH (dropdown, CASCADES from Field 1)
+  Populated ONLY with the MFC batches that actually apply to the selected project, derived from
+  WIP (Col X "Batch No.", blank -> "Z"), using the standard structure->batch assignment already
+  used by the Bucket List:
+        any mark with a real batch (A/B/C/D) -> that batch
+        all marks blank                      -> "Z" (Not Yet Batched)
+        2+ real batches                      -> heaviest by balance weight
+  Disabled/empty until a project is chosen; refreshes when the project changes. Never offer a
+  batch the project does not have.
+  Verified examples (WIP 18-Jul, 65 projects have batches):
+        824 -> [A, B, Z]      886 -> [A, B, C]      912 -> [A, B, C, Z]
+        920 -> [B, C, D, Z]   904 -> [A]            862 -> [Z]
+        VS-33 -> [Z]          839 -> [B]            926 -> [A, B]
+  (35 projects have 1 batch, 14 have 2, 14 have 3, 2 have 4.)
+  BUCKET A PROJECTS: these have no WIP marks, so their only option is "Z". Include them in the
+  picker with Z as the sole choice.
+
+FIELD 3 — COLOUR (choice of exactly four)
+        White, Yellow, Green, Blue
+  Present as swatches/radio buttons showing the actual colour, with the name as a label.
+  Ensure White is visibly distinguishable (needs a border/outline against a light background).
+  No other colours; no free-text colour entry.
+
+FIELD 4 — DATE OF CLIENT MFC (date picker with calendar)
+  Default: current system date. User can change it.
+
+FIELD 5 — PROJECT START DATE (date picker with calendar)
+  Default: current system date. User can change it.
+
+Both date fields use the app's existing date-picker component and date format, and must open a
+calendar. Store as dates (not free text).
+
+=====================================================================
+LAYOUT — sequential fields, results in a table on the Bucket List page
+=====================================================================
+The five fields are filled ONE AFTER THE OTHER, in the order below, as a single inline row/form
+on the BUCKET LIST page (not a modal on another page, not a separate screen):
+
+    Field 1 (Project)  ->  Field 2 (MFC Batch)  ->  Field 3 (Colour)
+                       ->  Field 4 (Client MFC Date)  ->  Field 5 (Project Start Date)  -> Save
+
+  - Each field UNLOCKS the next: Field 2 stays disabled until a project is picked; Field 3
+    stays disabled until a batch is picked; and so on. This makes the dependency obvious and
+    prevents an invalid combination being saved.
+  - Fields 4 and 5 are pre-filled with today's date, so the user can simply accept them.
+  - Keep it on ONE line where the width allows, wrapping to a second line on narrow screens.
+
+SAVED ASSIGNMENTS ARE SHOWN AS A TABLE on the Bucket List page, directly below the entry row.
+Columns:
+    Project | MFC Batch | Colour | Client MFC Date | Project Start Date | Actions (edit/delete)
+  - The Colour cell shows the actual colour swatch plus its name (White outlined so it is
+    visible).
+  - Sortable by Project, Batch and either date; keep the styling consistent with the other
+    tables on the page.
+  - This table IS the management view — do not build a separate management screen elsewhere.
+  - Clicking Edit loads that row back into the entry fields (same sequential behaviour) and
+    saves as an update, not a duplicate.
+
+=====================================================================
+PERSISTENCE AND SCOPE — the key requirement
+=====================================================================
+The assignment is keyed on (normalized project, MFC batch) and is SAVED.
+
+*** THE COLOUR FOLLOWS THE (PROJECT, MFC BATCH) PAIR ACROSS BUCKETS. ***
+If a (project, batch) pair is showing in Bucket A today and moves to B, C or D on a later
+import, it keeps its colour and its two dates. The colour is a property of the pair, NOT of a
+bucket, a row, or an import. Nothing is re-entered and nothing is lost on re-upload.
+
+Requirements:
+  - Store one record per (project, mfcBatch): colour, dateOfClientMfc, projectStartDate,
+    plus created/updated timestamps.
+  - Persist across WIP and Order Review imports. Bucket membership is recomputed each import;
+    the colour records are NOT touched.
+  - Look up the colour at READ time by (project, mfcBatch) wherever bucket rows are rendered.
+  - Re-selecting the same (project, batch) EDITS the existing record (upsert), not a duplicate.
+  - Allow editing and deleting an assignment.
+  - If a project's batches change so an assigned batch no longer exists in WIP, KEEP the record
+    and flag it (e.g. "batch not currently present") — never silently delete the user's data.
+  - A pair with no assignment simply has no colour; do not invent a default.
+
+REMEMBER the MFC lifecycle: a project typically starts as "Z" (Bucket A, or newly in B with
+unbatched marks) and later gains real batches A/B/C/D. A colour set against (project, Z) applies
+to the Z pair only; when marks are batched into A, that is a DIFFERENT pair and needs its own
+assignment. Do not attempt to migrate a Z colour onto a real batch automatically.
+
+=====================================================================
+REMINDER ON TRANSITION — prompt the user to assign colour + dates
+=====================================================================
+When a project BECOMES ELIGIBLE TO LEAVE BUCKET A (a work order is raised, Order Review Col J
+> 0, or release progress appears, Col L > 0) and therefore moves out of Bucket A into B/C/D,
+the user must be REMINDED to assign a colour and the two dates for it.
+
+Trigger: detected on import. Compare the newly computed Bucket A membership against the
+previous import's membership. Any project that WAS in Bucket A and is NOT any more has
+transitioned — raise a reminder for it.
+
+Reminder behaviour:
+  - Show a clear, dismissible notice on the Bucket List page, e.g.
+        "3 projects have started and need a colour assigned: 951, 956, 962"
+    listing the transitioned projects.
+  - Clicking a project in the notice pre-fills Field 1 with it, so the user can complete the
+    sequence immediately.
+  - Also raise the reminder when a transitioned project's (project, batch) pair has NO colour
+    assignment yet — the point is to catch UNASSIGNED pairs, not merely the movement.
+  - Remember: a just-transitioned project is usually ALL "Z" at first (WIP marks exist but are
+    not yet batched), so the pair needing a colour will typically be (project, "Z"). When its
+    marks are later batched into A/B/C/D, those are NEW pairs — raise the reminder again for
+    any new pair that has no colour.
+  - The reminder is informational only. It must NEVER block the import, and must NEVER
+    auto-assign a colour.
+  - Dismissing it hides it until a further transition or a new unassigned pair appears; do not
+    re-nag on every page load for the same already-dismissed pair.
+
+To support this, store the previous import's Bucket A membership (or equivalent) so
+transitions can be detected. This is the ONLY thing that may be persisted about bucket
+membership — actual membership is still recomputed from the files every time.
+
+=====================================================================
+DISPLAY
+=====================================================================
+- Show the assigned colour on the corresponding rows in the Bucket List (all buckets A/B/C/D/E)
+  — e.g. a colour swatch/left border/chip on the MFC Batch cell for that (project, batch).
+- Do not replace the MFC letter with the colour; show both.
+- Keep contrast readable; White must still be visible (outline it).
+- Include the colour and both dates in the Bucket List Excel export as columns
+  (e.g. "Colour", "Client MFC Date", "Project Start Date"), blank where unassigned.
+- Provide a simple management view listing all assignments (project, batch, colour, both dates)
+  with edit/delete.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change bucket membership rules, the MFC batch assignment logic, the completed-structure
+  exclusion, the grouping, or any weights.
+- Do NOT re-add the In-House / Out-Vendor split.
+- Do NOT re-add manual entry for Bucket A membership — this feature only assigns colour/dates,
+  it does NOT put projects into buckets.
+- Do NOT store bucket membership or MFC batch on the colour record; derive those from the files
+  each import and join by (project, batch) at read time.
+- Do NOT offer colours other than White, Yellow, Green, Blue.
+- Do NOT forward-fill the project code.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- Selecting project 824 in Field 1 offers exactly [A, B, Z] in Field 2; 920 offers
+  [B, C, D, Z]; 904 offers [A] only; 862 offers [Z] only. No project offers a batch it lacks.
+- A Bucket A project (e.g. 963) offers only [Z].
+- Field 3 offers exactly four colours: White, Yellow, Green, Blue — White is visibly outlined.
+- Fields 4 and 5 open a calendar and default to today's date; both are editable and saved.
+- Assigning a colour to (824, A) shows that colour on 824's MFC-A rows in the Bucket List.
+- PERSISTENCE TEST: assign a colour, then re-import WIP and Order Review. The colour and both
+  dates are still applied to the same (project, batch) pair.
+- CROSS-BUCKET TEST: a (project, batch) pair that appears in a different bucket after an import
+  still shows its colour — the colour is not tied to a bucket.
+- Re-selecting the same (project, batch) updates the existing record rather than creating a
+  duplicate.
+- Colour and both dates appear in the Excel export; unassigned rows are blank.
+- LAYOUT: the five fields sit on the Bucket List page and unlock one after the other (Field 2
+  disabled until a project is chosen, Field 3 until a batch is chosen, etc.). Saved assignments
+  appear in a table below with columns Project | MFC Batch | Colour | Client MFC Date |
+  Project Start Date | Actions, and Edit loads the row back into the fields.
+- REMINDER: after an import where a project leaves Bucket A, a dismissible notice lists the
+  transitioned projects and clicking one pre-fills Field 1. The reminder also appears for any
+  transitioned (project, batch) pair with no colour yet, never blocks the import, and never
+  auto-assigns a colour.
+Report: the Field 2 options rendered for 824 / 920 / 904 / 862, and confirmation the colour
+survives a re-import and a bucket change.

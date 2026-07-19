@@ -1,0 +1,149 @@
+TASK: Make Bucket A ("Project to Start") fully DATA-DRIVEN from the Order Review file, and
+REMOVE the manual user-entry capability for Bucket A entirely.
+
+=====================================================================
+CHANGE 1 — Bucket A membership is now derived, not entered
+=====================================================================
+Bucket A = every PROJECT in the Order Review file where BOTH are true:
+
+        WO Order Qty Weight   (Order Review Col J)  ==  0
+    AND Progress > Release    (Order Review Col L)  ==  0
+
+Meaning: the order exists in the book, but no work order has been raised and nothing has been
+released to the shop. It has not started.
+
+Grain: PROJECT level (one row per project), matching how Bucket A is presented today.
+
+A project LEAVES Bucket A automatically as soon as either a work order is raised (Col J > 0)
+or any release progress appears (Col L > 0). No user action, no flag, no stored state —
+membership is recomputed from the file on every import.
+
+Use a small tolerance for the zero test (e.g. abs(value) < 0.001) to avoid float noise.
+
+=====================================================================
+CHANGE 2 — Remove manual entry for Bucket A
+=====================================================================
+- DELETE the "add to Bucket A" UI (form, dropdowns, buttons, project + WO-qty inputs).
+- DELETE the edit/delete controls for Bucket A rows.
+- Remove the persistence for manual Bucket A entries (drop/retire the table or columns used
+  only for manual A records). If existing manual A rows are stored, they are no longer read —
+  make sure nothing in Bucket A renders from stored user input.
+- Bucket A becomes read-only, exactly like B, C and D.
+
+*** Bucket E KEEPS its manual entry (project + MFC Batch). Do NOT remove Bucket E's UI. ***
+
+=====================================================================
+CHANGE 3 — MFC on transition OUT of Bucket A (into B/C/D)
+=====================================================================
+The "Z" in Bucket A is a CONSTANT only while the project sits in Bucket A. The moment a
+project becomes eligible to leave Bucket A (a work order is raised, Col J > 0, or release
+progress appears, Col L > 0), it stops being a Bucket A row and is evaluated by the normal
+B/C/D rules — and from that point its MFC batch MUST be looked up from WIP like every other
+bucket structure, NOT carried over as a hard-coded "Z".
+
+Required behaviour once a project leaves Bucket A:
+  - Apply the standard structure -> MFC batch assignment used by B/C/D:
+        if any of the structure's WIP marks has a real batch (A/B/C/D) -> that batch
+        if all its marks are blank                                     -> "Z" (Not Yet Batched)
+        if 2+ real batches                                             -> heaviest by balance weight
+  - The project's rows then group under whichever real batches WIP reports. A project can span
+    several batches at once — that is normal and expected.
+  - Nothing is stored or cached. MFC is re-derived from WIP on EVERY import, so a project that
+    is "Z" today automatically shows A/B/C/D as soon as the shop batches its marks. There must
+    be no manual step and no persisted batch value.
+
+Expected shape of a just-transitioned project: it will typically be ALL "Z" at first (WIP marks
+now exist, but the shop has not batched them yet), then progressively shift to real batches.
+VERIFIED on current data — of the 28 projects already in Bucket B:
+    12 are ALL Z  (807, 885, 890, 908, 910, 914, 937, 946, 948, 958, 960, VS-33)
+     5 are partly batched (900, 912, 917, 938, 944 — a mix of Z and real batches)
+    11 are fully batched (824, 920, 926, 928, 929, 933, 934, 935, 939, 940, 942)
+This is the natural lifecycle: Bucket A (Z, no WIP) -> Bucket B all-Z (WIP exists, unbatched)
+-> partly batched -> fully batched. Do not treat the all-Z state as an error.
+
+IMPORTANT: do not special-case "projects that came from Bucket A". There is no transition
+event to handle and no state to migrate — membership and MFC are both recomputed from the
+files each time. A project simply stops matching the Bucket A rule and starts matching B/C/D.
+
+=====================================================================
+DISPLAY
+=====================================================================
+Show per project: Project, number of Structures, and Order Qty Weight (Order Review Col G) —
+this is the order-book scope that has not started. Optionally show WO Qty (always 0) and
+Progress Release (always 0) if it helps the user trust the rule; keep it clean otherwise.
+
+MFC BATCH = "Z" FOR ALL BUCKET A PROJECTS.
+Show the MFC Batch column in Bucket A, exactly as buckets B/C/D do, with the value "Z" for
+every row. Rationale: a Bucket A project has no work order, therefore no WIP marks, therefore
+no batch has been assigned. "Z" is the app's existing convention for "Not Yet Batched", so this
+is consistent rather than a special case.
+
+VERIFIED: none of the 46 Bucket A projects appears in the WIP file at all (0 of 46), so none
+can have a real batch (A/B/C/D). Z is unambiguous for every one of them.
+
+Do NOT invent a separate label such as "N/A", "-", "None" or "No Batch" — use "Z", the same
+value and styling used elsewhere in the Bucket List, so the column reads consistently across
+all buckets.
+
+Bucket A remains at PROJECT grain, so the "Group by MFC" toggle simply puts all 46 projects
+under a single Z group. Keep that behaviour consistent with the toggle on B/C/D; do not exempt
+Bucket A from the MFC column any more.
+
+No In-House / Out-Vendor split (that bifurcation is being removed from the Bucket List
+generally).
+
+=====================================================================
+EXPECTED RESULT (verified, Order Review 18-Jul)
+=====================================================================
+Bucket A = 46 projects, 238 structures, 4,612.368 MT (Order Qty, Col G).
+
+VERIFIED: the two conditions coincide exactly — every project with Col J == 0 also has
+Col L == 0. There are ZERO projects with a zero work order but partial release. So the rule is
+unambiguous on current data; still implement BOTH conditions as specified.
+
+The 46 projects (Order Qty Col G, MT):
+  963 1704.459 | 833 615.918 | 951 572.818 | VS-112 440.721 | 956 352.630 | 962 128.537
+  PG 120.589 | 910A 81.819 | 828 77.863 | 949 73.555 | 895 62.812 | 695 62.206 | 662 48.811
+  872 41.859 | 875 36.341 | 756 21.010 | 664 20.177 | 671F 18.444 | GETCO 18.394
+  803 12.501 | 849 10.535 | VR073 10.361 | 869 8.935 | 735 8.760 | 877 8.700 | BPTCL 8.595
+  VR070 7.922 | 597A 5.893 | 776 5.211 | 817 4.927 | 686 3.712 | 788 2.930 | 665 2.518
+  714 2.514 | 590 2.236 | 737 1.613 | 844 1.189 | 524 1.122 | 818 0.946 | 864 0.859
+  867 0.735 | 659 0.336 | 761 0.217 | VS-100 0.114 | 674 0.024 | 749 0.000
+
+Note: project 749 has zero Order Qty as well (an empty shell row in the source file) — it still
+qualifies for Bucket A under the rule. Display it; do not special-case it.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT remove or alter Bucket E's manual entry (project + MFC Batch) or its C/D removal rule.
+- Do NOT change Buckets B, C, D membership rules, the completed-structure exclusion, the MFC
+  grouping, or the clamp.
+- Do NOT apply a Side (In-House / Out-Vendor) split to Bucket A.
+- Do NOT derive Bucket A's MFC batch from data — it is always the literal "Z".
+- Do NOT store Bucket A membership; always derive it from the latest Order Review import.
+- Do NOT forward-fill the project code.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- Bucket A shows 46 projects / 238 structures / 4,612.368 MT total Order Qty.
+- Largest rows: 963 (1704.459), 833 (615.918), 951 (572.818), VS-112 (440.721), 956 (352.630).
+- There is NO way to add, edit or delete a Bucket A row in the UI; no manual-entry form remains.
+- No Bucket A row originates from stored user input.
+- A project with Col J > 0 or Col L > 0 does NOT appear in Bucket A.
+- Bucket A shows an MFC Batch column, and EVERY row reads "Z" (all 46). No row shows A/B/C/D,
+  and no alternative label ("N/A", "-", "None") is used.
+- The MFC column in Bucket A is styled the same as in buckets B/C/D.
+- TRANSITION: a project that leaves Bucket A gets its MFC batch from WIP via the standard
+  B/C/D assignment — the "Z" is NOT carried over as a fixed value. Confirm with the projects
+  already in Bucket B: 824 shows batch B, 920 shows C and D, 926 shows A and B, 935 shows
+  A/B/C — none of these is forced to Z. Meanwhile 908, 910, 937, 948 correctly show all Z
+  (WIP marks exist but are not yet batched).
+- No batch value is persisted anywhere; re-importing WIP re-derives every project's MFC.
+- Re-importing Order Review recomputes Bucket A from scratch (membership is not persisted).
+- Bucket E manual entry still works unchanged.
+- The Excel export for Bucket A matches the on-screen list.
+Report: the Bucket A project count, structure count and total Order Qty weight, plus
+confirmation that the manual-entry UI and its persistence have been removed.

@@ -7,17 +7,15 @@ import {
   recordPoolTable,
   orderReviewImportsTable,
   orderReviewRowsTable,
-  inventoryManualATable,
   inventoryManualETable,
   inventorySideOverrideTable,
-  inventoryMfcColorTable,
+  inventoryMfcBatchColorTable,
 } from "@workspace/db";
 import { requireAuth } from "./auth";
 import {
-  UpsertInventoryManualABody,
   UpsertInventoryManualEBody,
   UpsertInventorySideOverrideBody,
-  UpsertInventoryMfcColorBody,
+  UpsertInventoryMfcBatchColorBody,
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
@@ -148,68 +146,10 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
 });
 
 // ---------------------------------------------------------------------------
-// Manual buckets A ("Project to Start") and E ("Material Ready But Not
-// Dispatched"). Persisted lists the user maintains directly on the page;
-// never derived, never cleared by a re-upload. Two structurally identical
-// tables (A = free-text project entry, E = dropdown-picked project) kept
-// separate per their distinct entry UX / lifecycle.
+// Manual bucket E ("Material Ready But Not Dispatched"). Persisted list the
+// user maintains directly on the page; never derived, never cleared by a
+// re-upload.
 // ---------------------------------------------------------------------------
-
-router.get("/inventory-manual/a", async (_req, res): Promise<void> => {
-  const rows = await db
-    .select()
-    .from(inventoryManualATable)
-    .orderBy(inventoryManualATable.createdAt);
-  res.json(rows);
-});
-
-router.put("/inventory-manual/a", requireAuth, async (req, res): Promise<void> => {
-  const parsed = UpsertInventoryManualABody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
-  const projectCode = parsed.data.projectCode.trim();
-  if (!projectCode) {
-    res.status(400).json({ error: "projectCode is required" });
-    return;
-  }
-  const values = {
-    projectCode,
-    woOrderQtyMt: parsed.data.woOrderQtyMt ?? null,
-    side: parsed.data.side,
-    note: parsed.data.note ?? null,
-  };
-  if (parsed.data.id != null) {
-    const [row] = await db
-      .update(inventoryManualATable)
-      .set(values)
-      .where(eq(inventoryManualATable.id, parsed.data.id))
-      .returning();
-    if (!row) {
-      res.status(404).json({ error: "Entry not found" });
-      return;
-    }
-    res.json(row);
-    return;
-  }
-  const [row] = await db.insert(inventoryManualATable).values(values).returning();
-  res.json(row);
-});
-
-router.delete(
-  "/inventory-manual/a",
-  requireAuth,
-  async (req, res): Promise<void> => {
-    const id = Number(req.query.id);
-    if (!Number.isInteger(id) || id <= 0) {
-      res.status(400).json({ error: "id is required" });
-      return;
-    }
-    await db.delete(inventoryManualATable).where(eq(inventoryManualATable.id, id));
-    res.status(204).end();
-  },
-);
 
 router.get("/inventory-manual/e", async (_req, res): Promise<void> => {
   const rows = await db
@@ -332,92 +272,78 @@ router.delete(
 );
 
 // ---------------------------------------------------------------------------
-// MFC batch backfill colours — GET / PUT / DELETE
+// MFC batch colour assignments — keyed by (project, mfcBatch) pair.
+// Each entry stores a colour (white/yellow/green/blue) and optional milestone
+// dates.  Applied as Excel cell background fills on the bucket list export.
 // ---------------------------------------------------------------------------
 
-router.get("/inventory-manual/mfc-colors", async (_req, res): Promise<void> => {
+router.get("/inventory-manual/mfc-batch-colors", async (_req, res): Promise<void> => {
   const rows = await db
     .select()
-    .from(inventoryMfcColorTable)
-    .orderBy(inventoryMfcColorTable.mfcBatch);
-
-  // Expand each row's per-side colors map into flat {mfcBatch,side,color} entries.
-  // Backcompat: old rows have `color` set but empty `colors` — treat as in_house.
-  const result: Array<{
-    mfcBatch: string;
-    side: string;
-    color: string;
-    createdAt: Date;
-  }> = [];
-  for (const row of rows) {
-    const sideColors: Record<string, string> = {
-      ...(row.colors as Record<string, string> | null ?? {}),
-    };
-    if (row.color && !sideColors.in_house) {
-      sideColors.in_house = row.color;
-    }
-    for (const [side, color] of Object.entries(sideColors)) {
-      if (color) result.push({ mfcBatch: row.mfcBatch, side, color, createdAt: row.createdAt });
-    }
-  }
-  res.json(result);
+    .from(inventoryMfcBatchColorTable)
+    .orderBy(inventoryMfcBatchColorTable.project, inventoryMfcBatchColorTable.mfcBatch);
+  res.json(rows);
 });
 
 router.put(
-  "/inventory-manual/mfc-colors",
+  "/inventory-manual/mfc-batch-colors",
   requireAuth,
   async (req, res): Promise<void> => {
-    const parsed = UpsertInventoryMfcColorBody.safeParse(req.body);
+    const parsed = UpsertInventoryMfcBatchColorBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const { mfcBatch, side, color } = parsed.data;
-    const batch = mfcBatch.trim();
-    if (!batch) {
-      res.status(400).json({ error: "mfcBatch is required" });
+    const project = parsed.data.project.trim();
+    const mfcBatch = parsed.data.mfcBatch.trim().toUpperCase() || "Z";
+    if (!project) {
+      res.status(400).json({ error: "project is required" });
       return;
     }
+    const now = new Date();
     const [row] = await db
-      .insert(inventoryMfcColorTable)
-      .values({ mfcBatch: batch, color: "", colors: { [side]: color } })
+      .insert(inventoryMfcBatchColorTable)
+      .values({
+        project,
+        mfcBatch,
+        color: parsed.data.color,
+        dateOfClientMfc: parsed.data.dateOfClientMfc ?? null,
+        projectStartDate: parsed.data.projectStartDate ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
       .onConflictDoUpdate({
-        target: inventoryMfcColorTable.mfcBatch,
-        // Merge new side entry into existing map using PostgreSQL jsonb || operator.
-        // Left side = current DB value; right side = EXCLUDED (the row being inserted).
+        target: [inventoryMfcBatchColorTable.project, inventoryMfcBatchColorTable.mfcBatch],
         set: {
-          colors: sql`inventory_mfc_color.colors || excluded.colors`,
-          createdAt: new Date(),
+          color: parsed.data.color,
+          dateOfClientMfc: parsed.data.dateOfClientMfc ?? null,
+          projectStartDate: parsed.data.projectStartDate ?? null,
+          updatedAt: sql`now()`,
         },
       })
       .returning();
-    res.json({ mfcBatch: row.mfcBatch, side, color, createdAt: row.createdAt });
+    res.json(row);
   },
 );
 
 router.delete(
-  "/inventory-manual/mfc-colors",
+  "/inventory-manual/mfc-batch-colors",
   requireAuth,
   async (req, res): Promise<void> => {
+    const project = String(req.query.project ?? "").trim();
     const mfcBatch = String(req.query.mfcBatch ?? "").trim();
-    const side = String(req.query.side ?? "").trim();
-    if (!mfcBatch || !side) {
-      res.status(400).json({ error: "mfcBatch and side are required" });
+    if (!project || !mfcBatch) {
+      res.status(400).json({ error: "project and mfcBatch are required" });
       return;
     }
-    // Remove the side key from the colors jsonb map.
     await db
-      .update(inventoryMfcColorTable)
-      .set({ colors: sql`${inventoryMfcColorTable.colors} - ${side}` })
-      .where(eq(inventoryMfcColorTable.mfcBatch, mfcBatch));
-    // Delete the row entirely if both maps are now empty.
-    await db.delete(inventoryMfcColorTable).where(
-      and(
-        eq(inventoryMfcColorTable.mfcBatch, mfcBatch),
-        sql`${inventoryMfcColorTable.colors} = '{}'::jsonb`,
-        sql`${inventoryMfcColorTable.color} = ''`,
-      ),
-    );
+      .delete(inventoryMfcBatchColorTable)
+      .where(
+        and(
+          eq(inventoryMfcBatchColorTable.project, project),
+          eq(inventoryMfcBatchColorTable.mfcBatch, mfcBatch),
+        ),
+      );
     res.status(204).end();
   },
 );

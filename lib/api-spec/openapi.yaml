@@ -1273,71 +1273,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InventoryBucketsResponse"
-  /inventory-manual/a:
-    get:
-      operationId: listInventoryManualA
-      tags: [inventory]
-      summary: List manual Bucket A ("Project to Start") entries
-      description: >
-        Returns the persisted Bucket A list (free-text project entries the user
-        maintains directly on the Inventory page). Survives re-uploads of both
-        WIP and Order Review files. Public (read-only).
-      responses:
-        "200":
-          description: Bucket A entries
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/InventoryManualEntry"
-    put:
-      operationId: upsertInventoryManualA
-      tags: [inventory]
-      summary: Add or update a manual Bucket A entry
-      description: >
-        Inserts a new Bucket A entry, or updates one in place when `id` is
-        supplied. Requires authentication.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/InventoryManualEntryInput"
-      responses:
-        "200":
-          description: Saved entry
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/InventoryManualEntry"
-        "400":
-          description: Invalid payload
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: Entry not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-    delete:
-      operationId: deleteInventoryManualA
-      tags: [inventory]
-      summary: Remove a manual Bucket A entry
-      description: >
-        Removes one Bucket A entry by id. Requires authentication.
-      parameters:
-        - name: id
-          in: query
-          required: true
-          schema:
-            type: integer
-      responses:
-        "204":
-          description: Deleted
   /inventory-manual/e:
     get:
       operationId: listInventoryManualE
@@ -1403,44 +1338,44 @@ paths:
       responses:
         "204":
           description: Deleted
-  /inventory-manual/mfc-colors:
+  /inventory-manual/mfc-batch-colors:
     get:
-      operationId: listInventoryMfcColors
+      operationId: listInventoryMfcBatchColors
       tags: [inventory]
-      summary: List backfill colour choices for MFC batches
+      summary: List MFC batch colour assignments (per project + batch pair)
       description: >
-        Returns all stored MFC batch → colour mappings. The colour is applied
-        as an Excel cell background when the inventory bucket list is exported.
-        Public (read-only).
+        Returns all stored (project, MFC batch) → colour mappings, along with
+        optional milestone dates. Applied as Excel cell background fills when
+        the inventory bucket list is exported. Public (read-only).
       responses:
         "200":
-          description: MFC colour entries
+          description: MFC batch colour entries
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/InventoryMfcColor"
+                  $ref: "#/components/schemas/InventoryMfcBatchColor"
     put:
-      operationId: upsertInventoryMfcColor
+      operationId: upsertInventoryMfcBatchColor
       tags: [inventory]
-      summary: Set or replace the backfill colour for an MFC batch
+      summary: Set or replace the colour for a (project, MFC batch) pair
       description: >
-        Inserts or replaces the colour assigned to an MFC batch. Requires
-        authentication.
+        Inserts or updates the colour and optional milestone dates for a
+        (project, MFC batch) pair. Requires authentication.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/InventoryMfcColorInput"
+              $ref: "#/components/schemas/InventoryMfcBatchColorInput"
       responses:
         "200":
           description: Saved entry
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/InventoryMfcColor"
+                $ref: "#/components/schemas/InventoryMfcBatchColor"
         "400":
           description: Invalid payload
           content:
@@ -1448,25 +1383,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
     delete:
-      operationId: deleteInventoryMfcColor
+      operationId: deleteInventoryMfcBatchColor
       tags: [inventory]
-      summary: Remove the colour assignment for an MFC batch on a specific side
+      summary: Remove the colour assignment for a (project, MFC batch) pair
       description: >
-        Removes the stored colour for the given MFC batch and side. After
-        deletion the batch exports with no background fill for that side.
+        Removes the stored colour entry for the given project + MFC batch.
         Requires authentication.
       parameters:
+        - name: project
+          in: query
+          required: true
+          schema:
+            type: string
         - name: mfcBatch
           in: query
           required: true
           schema:
             type: string
-        - name: side
-          in: query
-          required: true
-          schema:
-            type: string
-            enum: [in_house, out_vendor]
       responses:
         "204":
           description: Deleted
@@ -3309,43 +3242,59 @@ components:
         - available
         - asOnDate
         - rows
-    InventoryMfcColor:
+    InventoryMfcBatchColor:
       type: object
       description: >
-        A stored backfill colour for an MFC batch on a specific side. Applied
-        as an Excel cell background when the inventory bucket list is exported
-        to .xlsx. In-House and Out-Vendor sides can have different colours for
-        the same batch.
+        A stored backfill colour for a (project, MFC batch) pair, with optional
+        milestone dates. The colour is applied as an Excel cell background when
+        the inventory bucket list is exported. A reminder is shown on the Bucket
+        List page when the project is no longer in Bucket A.
       properties:
+        id:
+          type: integer
+        project:
+          type: string
         mfcBatch:
           type: string
-        side:
-          type: string
-          enum: [in_house, out_vendor]
         color:
           type: string
-          enum: [green, white, yellow]
+          enum: [white, yellow, green, blue]
+        dateOfClientMfc:
+          type: string
+          nullable: true
+        projectStartDate:
+          type: string
+          nullable: true
         createdAt:
           type: string
+        updatedAt:
+          type: string
       required:
+        - id
+        - project
         - mfcBatch
-        - side
         - color
         - createdAt
-    InventoryMfcColorInput:
+        - updatedAt
+    InventoryMfcBatchColorInput:
       type: object
       properties:
+        project:
+          type: string
         mfcBatch:
           type: string
-        side:
-          type: string
-          enum: [in_house, out_vendor]
         color:
           type: string
-          enum: [green, white, yellow]
+          enum: [white, yellow, green, blue]
+        dateOfClientMfc:
+          type: string
+          nullable: true
+        projectStartDate:
+          type: string
+          nullable: true
       required:
+        - project
         - mfcBatch
-        - side
         - color
     InventorySideOverride:
       type: object

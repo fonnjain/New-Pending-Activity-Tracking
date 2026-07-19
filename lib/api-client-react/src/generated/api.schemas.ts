@@ -1249,55 +1249,47 @@ export interface InventoryBucketsResponse {
   rows: InventoryBucketRow[];
 }
 
-export type InventoryMfcColorSide = typeof InventoryMfcColorSide[keyof typeof InventoryMfcColorSide];
+export type InventoryMfcBatchColorColor = typeof InventoryMfcBatchColorColor[keyof typeof InventoryMfcBatchColorColor];
 
 
-export const InventoryMfcColorSide = {
-  in_house: 'in_house',
-  out_vendor: 'out_vendor',
-} as const;
-
-export type InventoryMfcColorColor = typeof InventoryMfcColorColor[keyof typeof InventoryMfcColorColor];
-
-
-export const InventoryMfcColorColor = {
-  green: 'green',
+export const InventoryMfcBatchColorColor = {
   white: 'white',
   yellow: 'yellow',
+  green: 'green',
+  blue: 'blue',
 } as const;
 
 /**
- * A stored backfill colour for an MFC batch on a specific side. Applied as an Excel cell background when the inventory bucket list is exported to .xlsx. In-House and Out-Vendor sides can have different colours for the same batch.
+ * A stored backfill colour for a (project, MFC batch) pair, with optional milestone dates. The colour is applied as an Excel cell background when the inventory bucket list is exported. A reminder is shown on the Bucket List page when the project is no longer in Bucket A.
 
  */
-export interface InventoryMfcColor {
+export interface InventoryMfcBatchColor {
+  id: number;
+  project: string;
   mfcBatch: string;
-  side: InventoryMfcColorSide;
-  color: InventoryMfcColorColor;
+  color: InventoryMfcBatchColorColor;
+  dateOfClientMfc?: string | null;
+  projectStartDate?: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
-export type InventoryMfcColorInputSide = typeof InventoryMfcColorInputSide[keyof typeof InventoryMfcColorInputSide];
+export type InventoryMfcBatchColorInputColor = typeof InventoryMfcBatchColorInputColor[keyof typeof InventoryMfcBatchColorInputColor];
 
 
-export const InventoryMfcColorInputSide = {
-  in_house: 'in_house',
-  out_vendor: 'out_vendor',
-} as const;
-
-export type InventoryMfcColorInputColor = typeof InventoryMfcColorInputColor[keyof typeof InventoryMfcColorInputColor];
-
-
-export const InventoryMfcColorInputColor = {
-  green: 'green',
+export const InventoryMfcBatchColorInputColor = {
   white: 'white',
   yellow: 'yellow',
+  green: 'green',
+  blue: 'blue',
 } as const;
 
-export interface InventoryMfcColorInput {
+export interface InventoryMfcBatchColorInput {
+  project: string;
   mfcBatch: string;
-  side: InventoryMfcColorInputSide;
-  color: InventoryMfcColorInputColor;
+  color: InventoryMfcBatchColorInputColor;
+  dateOfClientMfc?: string | null;
+  projectStartDate?: string | null;
 }
 
 export type InventorySideOverrideBucket = typeof InventorySideOverrideBucket[keyof typeof InventorySideOverrideBucket];
@@ -2311,26 +2303,14 @@ from: number;
 to: number;
 };
 
-export type DeleteInventoryManualAParams = {
-id: number;
-};
-
 export type DeleteInventoryManualEParams = {
 id: number;
 };
 
-export type DeleteInventoryMfcColorParams = {
+export type DeleteInventoryMfcBatchColorParams = {
+project: string;
 mfcBatch: string;
-side: DeleteInventoryMfcColorSide;
 };
-
-export type DeleteInventoryMfcColorSide = typeof DeleteInventoryMfcColorSide[keyof typeof DeleteInventoryMfcColorSide];
-
-
-export const DeleteInventoryMfcColorSide = {
-  in_house: 'in_house',
-  out_vendor: 'out_vendor',
-} as const;
 
 export type DeleteInventorySideOverrideParams = {
 projectCode: string;

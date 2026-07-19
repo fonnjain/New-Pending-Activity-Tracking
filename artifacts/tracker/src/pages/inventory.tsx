@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { useTracker, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
 import {
   useGetAuthStatus,
   useListInventoryManualE,
   useUpsertInventoryManualE,
   useDeleteInventoryManualE,
-  useListInventoryMfcColors,
-  useUpsertInventoryMfcColor,
-  useDeleteInventoryMfcColor,
+  useListInventoryMfcBatchColors,
+  useUpsertInventoryMfcBatchColor,
+  useDeleteInventoryMfcBatchColor,
   getListInventoryManualEQueryKey,
-  getListInventoryMfcColorsQueryKey,
+  getListInventoryMfcBatchColorsQueryKey,
   type InventoryManualEntry,
+  type InventoryMfcBatchColor,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -46,19 +47,30 @@ function mt(n: number | null | undefined): string {
   return n.toFixed(3);
 }
 
-type MfcColorName = "green" | "white" | "yellow";
+type MfcColorName = "white" | "yellow" | "green" | "blue";
 
 const MFC_COLOR_CSS: Record<MfcColorName, string> = {
-  green: "#92D050",
   white: "#FFFFFF",
   yellow: "#FFFF00",
+  green: "#92D050",
+  blue: "#00B0F0",
 };
 
 const MFC_COLOR_ARGB: Record<MfcColorName, string> = {
-  green: "FF92D050",
   white: "FFFFFFFF",
   yellow: "FFFFFF00",
+  green: "FF92D050",
+  blue: "FF00B0F0",
 };
+
+const MFC_COLOR_LABEL: Record<MfcColorName, string> = {
+  white: "White",
+  yellow: "Yellow",
+  green: "Green",
+  blue: "Blue",
+};
+
+const MFC_COLOR_NAMES: MfcColorName[] = ["white", "yellow", "green", "blue"];
 
 const SIDE_LABELS: Record<InventorySide, string> = {
   in_house: "In-House",
@@ -133,6 +145,20 @@ const BUCKET_CD_COLUMNS: ColumnDef[] = [
   YARD_COLUMN,
 ];
 
+function ColorDot({ color, size = "sm" }: { color: MfcColorName; size?: "sm" | "md" }) {
+  const px = size === "md" ? "w-3.5 h-3.5" : "w-2.5 h-2.5";
+  return (
+    <span
+      className={`inline-block ${px} rounded-full shrink-0`}
+      style={{
+        background: MFC_COLOR_CSS[color],
+        border: color === "white" ? "1px solid #9CA3AF" : "1px solid transparent",
+      }}
+      title={MFC_COLOR_LABEL[color]}
+    />
+  );
+}
+
 function SummaryFooter({ summary }: { summary: BucketSummary }) {
   const lines: [string, number][] = [
     ["Total Release Balance", summary.releaseBalanceMt],
@@ -153,9 +179,16 @@ function SummaryFooter({ summary }: { summary: BucketSummary }) {
   );
 }
 
-// Bucket A: read-only computed panel. Groups qualifying structures by project
-// and shows project name, structure count, and summed Order Qty Weight (Col G).
-function BucketAPanel({ rows }: { rows: InventoryStructureCard[] }) {
+// Bucket A: read-only computed panel. Groups qualifying structures by project,
+// shows project name, MFC Batch (always "Z"), structure count, and Order Qty
+// Weight (Col G). Color dot shown if a (project, "Z") colour entry exists.
+function BucketAPanel({
+  rows,
+  mfcBatchColorMap,
+}: {
+  rows: InventoryStructureCard[];
+  mfcBatchColorMap: Map<string, InventoryMfcBatchColor>;
+}) {
   const groups = useMemo(() => groupByProject(rows), [rows]);
   const totalWeight = groups.reduce((s, g) => s + g.weightMt, 0);
   const totalCount = groups.reduce((s, g) => s + g.count, 0);
@@ -171,20 +204,32 @@ function BucketAPanel({ rows }: { rows: InventoryStructureCard[] }) {
   return (
     <div className="border rounded-md overflow-hidden">
       <div className="divide-y max-h-80 overflow-auto">
-        {groups.map((g) => (
-          <div
-            key={g.project}
-            className="flex items-center justify-between px-3 py-2 text-sm hover:bg-muted/30"
-          >
-            <span className="font-medium">{g.project}</span>
-            <span className="flex items-center gap-4 text-xs text-muted-foreground">
-              <span>
-                {g.count} structure{g.count === 1 ? "" : "s"}
+        {groups.map((g) => {
+          const colorEntry = mfcBatchColorMap.get(`${g.project}\u0001Z`);
+          const colorName = colorEntry?.color as MfcColorName | undefined;
+          return (
+            <div
+              key={g.project}
+              className="flex items-center justify-between px-3 py-2 text-sm hover:bg-muted/30"
+            >
+              <span className="flex items-center gap-1.5 min-w-0">
+                {colorName && colorName in MFC_COLOR_CSS && (
+                  <ColorDot color={colorName} />
+                )}
+                <span className="font-medium truncate">{g.project}</span>
+                <span className="shrink-0 text-[10px] font-medium px-1 py-px rounded border border-border/60 text-muted-foreground">
+                  Z
+                </span>
               </span>
-              <span className="tabular-nums font-medium text-foreground">{mt(g.weightMt)} MT</span>
-            </span>
-          </div>
-        ))}
+              <span className="flex items-center gap-4 text-xs text-muted-foreground">
+                <span>
+                  {g.count} structure{g.count === 1 ? "" : "s"}
+                </span>
+                <span className="tabular-nums font-medium text-foreground">{mt(g.weightMt)} MT</span>
+              </span>
+            </div>
+          );
+        })}
       </div>
       <div className="px-3 py-2 border-t bg-muted/20 flex items-center justify-between text-[11px]">
         <span className="text-muted-foreground">
@@ -200,9 +245,11 @@ function BucketAPanel({ rows }: { rows: InventoryStructureCard[] }) {
 function ProjectRow({
   group,
   columns,
+  mfcBatchColorMap,
 }: {
   group: ProjectGroup;
   columns: ColumnDef[];
+  mfcBatchColorMap: Map<string, InventoryMfcBatchColor>;
 }) {
   const [open, setOpen] = useState(false);
   const mfcGroups = useMemo(() => groupByMfcBatch(group.rows), [group.rows]);
@@ -233,51 +280,50 @@ function ProjectRow({
       </button>
       {open && (
         <div className="pl-6 pb-0.5">
-          {mfcGroups.map(({ mfcBatch, rows: mfcRows }) => (
-            <div
-              key={mfcBatch}
-              className="flex items-center justify-between gap-2 px-2 py-1 text-xs border-t first:border-t-0"
-            >
-              <span className="flex items-center gap-1.5 min-w-0">
-                <span className="shrink-0 text-[10px] font-medium px-1 py-px rounded border border-border/60 text-muted-foreground">
-                  {mfcBatch}
-                </span>
-                <span className="text-muted-foreground shrink-0">{mfcRows.length} str</span>
-              </span>
-              <span className="flex items-center gap-3 shrink-0">
-                {columns.map((col) => (
-                  <span key={col.key} className="tabular-nums text-right">
-                    <span className="text-muted-foreground mr-1">{col.label}</span>
-                    {mt(sumColumnOrNull(mfcRows, col.get))}
+          {mfcGroups.map(({ mfcBatch, rows: mfcRows }) => {
+            const colorEntry = mfcBatchColorMap.get(`${group.project}\u0001${mfcBatch}`);
+            const colorName = colorEntry?.color as MfcColorName | undefined;
+            return (
+              <div
+                key={mfcBatch}
+                className="flex items-center justify-between gap-2 px-2 py-1 text-xs border-t first:border-t-0"
+              >
+                <span className="flex items-center gap-1.5 min-w-0">
+                  {colorName && colorName in MFC_COLOR_CSS && (
+                    <ColorDot color={colorName} />
+                  )}
+                  <span className="shrink-0 text-[10px] font-medium px-1 py-px rounded border border-border/60 text-muted-foreground">
+                    {mfcBatch}
                   </span>
-                ))}
-              </span>
-            </div>
-          ))}
+                  <span className="text-muted-foreground shrink-0">{mfcRows.length} str</span>
+                </span>
+                <span className="flex items-center gap-3 shrink-0">
+                  {columns.map((col) => (
+                    <span key={col.key} className="tabular-nums text-right">
+                      <span className="text-muted-foreground mr-1">{col.label}</span>
+                      {mt(sumColumnOrNull(mfcRows, col.get))}
+                    </span>
+                  ))}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-const MFC_COLOR_NAMES: MfcColorName[] = ["green", "white", "yellow"];
-
 function MfcTopRow({
   mfcBatch,
   rows,
   columns,
-  currentColor,
-  canEdit,
-  onSetColor,
-  onClearColor,
+  mfcBatchColorMap,
 }: {
   mfcBatch: string;
   rows: InventoryStructureCard[];
   columns: ColumnDef[];
-  currentColor?: string;
-  canEdit?: boolean;
-  onSetColor?: (color: string) => void;
-  onClearColor?: () => void;
+  mfcBatchColorMap: Map<string, InventoryMfcBatchColor>;
 }) {
   const [open, setOpen] = useState(false);
   const projectGroups = useMemo(() => groupByProject(rows), [rows]);
@@ -301,49 +347,12 @@ function MfcTopRow({
           ) : (
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           )}
-          {currentColor && currentColor in MFC_COLOR_CSS && (
-            <span
-              style={{
-                background: MFC_COLOR_CSS[currentColor as MfcColorName],
-                border: currentColor === "white" ? "1px solid #9CA3AF" : "none",
-              }}
-              className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
-              title={`Backfill: ${currentColor}`}
-            />
-          )}
           <span className="font-medium shrink-0">MFC {mfcBatch}</span>
           <span className="text-[10px] text-muted-foreground shrink-0">
             {projectGroups.length} proj &middot; {rows.length} str
           </span>
         </div>
         <span className="flex items-center gap-3 shrink-0 px-3 py-1.5">
-          {canEdit && (
-            <span className="flex items-center gap-0.5" title="Set backfill colour">
-              {MFC_COLOR_NAMES.map((c) => {
-                const active = currentColor === c;
-                return (
-                  <button
-                    key={c}
-                    type="button"
-                    title={c.charAt(0).toUpperCase() + c.slice(1)}
-                    onClick={() => {
-                      if (active) onClearColor?.();
-                      else onSetColor?.(c);
-                    }}
-                    style={{
-                      background: MFC_COLOR_CSS[c],
-                      border: active
-                        ? "2px solid #1F2937"
-                        : c === "white"
-                          ? "1px solid #9CA3AF"
-                          : "1px solid transparent",
-                    }}
-                    className="w-5 h-5 rounded-full cursor-pointer"
-                  />
-                );
-              })}
-            </span>
-          )}
           {columns.map((col) => (
             <span key={col.key} className="text-[11px] tabular-nums text-right">
               <span className="text-muted-foreground mr-1">{col.label}</span>
@@ -354,27 +363,34 @@ function MfcTopRow({
       </div>
       {open && (
         <div className="pl-6 pb-0.5">
-          {projectGroups.map((g) => (
-            <div
-              key={g.project}
-              className="flex items-center border-t first:border-t-0 hover:bg-muted/20"
-            >
-              <div className="flex-1 flex items-center justify-between gap-2 px-3 py-1 text-xs min-w-0">
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <span className="font-medium truncate">{g.project}</span>
-                  <span className="text-muted-foreground shrink-0">{g.count} str</span>
-                </span>
-                <span className="flex items-center gap-3 shrink-0">
-                  {columns.map((col) => (
-                    <span key={col.key} className="tabular-nums text-right">
-                      <span className="text-muted-foreground mr-1">{col.label}</span>
-                      {mt(sumColumnOrNull(g.rows, col.get))}
-                    </span>
-                  ))}
-                </span>
+          {projectGroups.map((g) => {
+            const colorEntry = mfcBatchColorMap.get(`${g.project}\u0001${mfcBatch}`);
+            const colorName = colorEntry?.color as MfcColorName | undefined;
+            return (
+              <div
+                key={g.project}
+                className="flex items-center border-t first:border-t-0 hover:bg-muted/20"
+              >
+                <div className="flex-1 flex items-center justify-between gap-2 px-3 py-1 text-xs min-w-0">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    {colorName && colorName in MFC_COLOR_CSS && (
+                      <ColorDot color={colorName} />
+                    )}
+                    <span className="font-medium truncate">{g.project}</span>
+                    <span className="text-muted-foreground shrink-0">{g.count} str</span>
+                  </span>
+                  <span className="flex items-center gap-3 shrink-0">
+                    {columns.map((col) => (
+                      <span key={col.key} className="tabular-nums text-right">
+                        <span className="text-muted-foreground mr-1">{col.label}</span>
+                        {mt(sumColumnOrNull(g.rows, col.get))}
+                      </span>
+                    ))}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -387,19 +403,13 @@ function AutoBucketPanel({
   columns,
   clampRelease,
   groupByMfc,
-  mfcColorMap,
-  canEdit,
-  onSetMfcColor,
-  onClearMfcColor,
+  mfcBatchColorMap,
 }: {
   rows: InventoryStructureCard[];
   columns: ColumnDef[];
   clampRelease: boolean;
   groupByMfc: boolean;
-  mfcColorMap: Map<string, string>;
-  canEdit: boolean;
-  onSetMfcColor: (mfc: string, color: string) => void;
-  onClearMfcColor: (mfc: string) => void;
+  mfcBatchColorMap: Map<string, InventoryMfcBatchColor>;
 }) {
   const groups = useMemo(() => groupByProject(rows), [rows]);
   const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
@@ -424,14 +434,18 @@ function AutoBucketPanel({
               mfcBatch={mfcBatch}
               rows={mfcRows}
               columns={columns}
-              currentColor={mfcColorMap.get(mfcBatch)}
-              canEdit={canEdit}
-              onSetColor={(color) => onSetMfcColor(mfcBatch, color)}
-              onClearColor={() => onClearMfcColor(mfcBatch)}
+              mfcBatchColorMap={mfcBatchColorMap}
             />
           ))
         ) : (
-          groups.map((g) => <ProjectRow key={g.project} group={g} columns={columns} />)
+          groups.map((g) => (
+            <ProjectRow
+              key={g.project}
+              group={g}
+              columns={columns}
+              mfcBatchColorMap={mfcBatchColorMap}
+            />
+          ))
         )}
       </div>
       <SummaryFooter summary={summary} />
@@ -567,7 +581,6 @@ function ManualBucketSide({
   );
 }
 
-
 function ManualAddForm({
   knownProjects,
   projectMfcBatches,
@@ -634,6 +647,293 @@ function ManualAddForm({
   );
 }
 
+// Sequential MFC Batch Colour entry form. Each field unlocks the next.
+function MfcBatchColorForm({
+  knownProjects,
+  projectMfcBatches,
+  onSave,
+  isPending,
+}: {
+  knownProjects: string[];
+  projectMfcBatches: Map<string, string[]>;
+  onSave: (entry: {
+    project: string;
+    mfcBatch: string;
+    color: MfcColorName;
+    dateOfClientMfc?: string;
+    projectStartDate?: string;
+  }) => void;
+  isPending: boolean;
+}) {
+  const [project, setProject] = useState("");
+  const [mfcBatch, setMfcBatch] = useState("");
+  const [color, setColor] = useState<MfcColorName | "">("");
+  const [dateOfClientMfc, setDateOfClientMfc] = useState("");
+  const [projectStartDate, setProjectStartDate] = useState("");
+
+  const batchOptions = useMemo(() => {
+    if (!project) return [];
+    const known = projectMfcBatches.get(project) ?? [];
+    return known.includes("Z") ? known : [...known, "Z"];
+  }, [project, projectMfcBatches]);
+
+  const handleProjectChange = (v: string | null) => {
+    setProject(v ?? "");
+    setMfcBatch("");
+    setColor("");
+    setDateOfClientMfc("");
+    setProjectStartDate("");
+  };
+
+  const handleBatchChange = (v: string | null) => {
+    setMfcBatch(v ?? "");
+    setColor("");
+    setDateOfClientMfc("");
+    setProjectStartDate("");
+  };
+
+  const handleColorSelect = (c: MfcColorName) => {
+    setColor((prev) => (prev === c ? "" : c));
+    setDateOfClientMfc("");
+    setProjectStartDate("");
+  };
+
+  const canSubmit = !!project && !!mfcBatch && !!color && !isPending;
+
+  const handleSubmit = () => {
+    if (!project || !mfcBatch || !color) return;
+    onSave({
+      project,
+      mfcBatch,
+      color,
+      dateOfClientMfc: dateOfClientMfc || undefined,
+      projectStartDate: projectStartDate || undefined,
+    });
+    setProject("");
+    setMfcBatch("");
+    setColor("");
+    setDateOfClientMfc("");
+    setProjectStartDate("");
+  };
+
+  const step2Enabled = !!project;
+  const step3Enabled = step2Enabled && !!mfcBatch;
+  const step4Enabled = step3Enabled && !!color;
+  const step5Enabled = step4Enabled;
+
+  return (
+    <div className="space-y-2 px-3 py-3 border-b">
+      <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-2">
+        Add / Update Entry
+      </p>
+      {/* Step 1: Project */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground w-36 shrink-0">1. Project</span>
+        <div className="w-52">
+          <SearchableSelect
+            value={project || null}
+            onChange={handleProjectChange}
+            options={knownProjects}
+            allLabel="Select project..."
+          />
+        </div>
+      </div>
+      {/* Step 2: MFC Batch */}
+      <div className="flex items-center gap-2">
+        <span className={`text-xs w-36 shrink-0 ${step2Enabled ? "text-muted-foreground" : "text-muted-foreground/40"}`}>
+          2. MFC Batch
+        </span>
+        <div className="w-52">
+          <SearchableSelect
+            value={mfcBatch || null}
+            onChange={handleBatchChange}
+            options={batchOptions.length > 0 ? batchOptions : ["Z"]}
+            allLabel={step2Enabled ? "Select batch..." : "Select project first"}
+            disabled={!step2Enabled}
+          />
+        </div>
+      </div>
+      {/* Step 3: Colour */}
+      <div className="flex items-center gap-2">
+        <span className={`text-xs w-36 shrink-0 ${step3Enabled ? "text-muted-foreground" : "text-muted-foreground/40"}`}>
+          3. Colour
+        </span>
+        <div className="flex items-center gap-1.5">
+          {MFC_COLOR_NAMES.map((c) => {
+            const active = color === c;
+            return (
+              <button
+                key={c}
+                type="button"
+                title={MFC_COLOR_LABEL[c]}
+                disabled={!step3Enabled}
+                onClick={() => handleColorSelect(c)}
+                style={{
+                  background: MFC_COLOR_CSS[c],
+                  border: active
+                    ? "2.5px solid #1F2937"
+                    : c === "white"
+                      ? "1px solid #9CA3AF"
+                      : "1px solid transparent",
+                  opacity: !step3Enabled ? 0.35 : 1,
+                }}
+                className="w-6 h-6 rounded-full cursor-pointer disabled:cursor-not-allowed"
+              />
+            );
+          })}
+          {color && (
+            <span className="text-xs text-muted-foreground ml-1">
+              {MFC_COLOR_LABEL[color]}
+            </span>
+          )}
+        </div>
+      </div>
+      {/* Step 4: Date of Client MFC */}
+      <div className="flex items-center gap-2">
+        <span className={`text-xs w-36 shrink-0 ${step4Enabled ? "text-muted-foreground" : "text-muted-foreground/40"}`}>
+          4. Date of Client MFC
+        </span>
+        <input
+          type="date"
+          value={dateOfClientMfc}
+          onChange={(e) => setDateOfClientMfc(e.target.value)}
+          disabled={!step4Enabled}
+          className="h-8 rounded-md border border-input bg-background px-2 py-1 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+        />
+        {dateOfClientMfc && (
+          <button
+            type="button"
+            className="text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setDateOfClientMfc("")}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {/* Step 5: Project Start Date */}
+      <div className="flex items-center gap-2">
+        <span className={`text-xs w-36 shrink-0 ${step5Enabled ? "text-muted-foreground" : "text-muted-foreground/40"}`}>
+          5. Project Start Date
+        </span>
+        <input
+          type="date"
+          value={projectStartDate}
+          onChange={(e) => setProjectStartDate(e.target.value)}
+          disabled={!step5Enabled}
+          className="h-8 rounded-md border border-input bg-background px-2 py-1 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+        />
+        {projectStartDate && (
+          <button
+            type="button"
+            className="text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setProjectStartDate("")}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      <div className="pt-1">
+        <Button size="sm" className="h-8" disabled={!canSubmit} onClick={handleSubmit}>
+          {isPending ? "Saving..." : "Save"}
+        </Button>
+        <span className="text-[11px] text-muted-foreground ml-2">
+          Fields 4 and 5 are optional
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function formatDateDisplay(d: string | null | undefined): string {
+  if (!d) return "-";
+  const parts = d.split("-");
+  if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  return d;
+}
+
+// Management table listing all stored (project, mfcBatch) colour entries.
+function MfcBatchColorTable({
+  entries,
+  canEdit,
+  onDelete,
+  deletingKey,
+}: {
+  entries: InventoryMfcBatchColor[];
+  canEdit: boolean;
+  onDelete: (project: string, mfcBatch: string) => void;
+  deletingKey: string | null;
+}) {
+  if (entries.length === 0) {
+    return (
+      <div className="py-4 text-center text-xs text-muted-foreground border-t">
+        No colour entries saved yet.
+      </div>
+    );
+  }
+
+  const sorted = [...entries].sort((a, b) =>
+    a.project.localeCompare(b.project) || a.mfcBatch.localeCompare(b.mfcBatch),
+  );
+
+  return (
+    <div className="border-t overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b bg-muted/30">
+            <th className="px-3 py-2 text-left font-medium text-muted-foreground">Project</th>
+            <th className="px-3 py-2 text-left font-medium text-muted-foreground">MFC Batch</th>
+            <th className="px-3 py-2 text-left font-medium text-muted-foreground">Colour</th>
+            <th className="px-3 py-2 text-left font-medium text-muted-foreground">Date of Client MFC</th>
+            <th className="px-3 py-2 text-left font-medium text-muted-foreground">Project Start Date</th>
+            {canEdit && <th className="px-2 py-2" />}
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {sorted.map((e) => {
+            const colorName = e.color as MfcColorName;
+            const key = `${e.project}\u0001${e.mfcBatch}`;
+            return (
+              <tr key={key} className="hover:bg-muted/20">
+                <td className="px-3 py-1.5 font-medium">{e.project}</td>
+                <td className="px-3 py-1.5">
+                  <span className="text-[10px] font-medium px-1 py-px rounded border border-border/60 text-muted-foreground">
+                    {e.mfcBatch}
+                  </span>
+                </td>
+                <td className="px-3 py-1.5">
+                  <span className="flex items-center gap-1.5">
+                    {colorName in MFC_COLOR_CSS && <ColorDot color={colorName} size="md" />}
+                    <span>{MFC_COLOR_LABEL[colorName] ?? colorName}</span>
+                  </span>
+                </td>
+                <td className="px-3 py-1.5 text-muted-foreground">
+                  {formatDateDisplay(e.dateOfClientMfc)}
+                </td>
+                <td className="px-3 py-1.5 text-muted-foreground">
+                  {formatDateDisplay(e.projectStartDate)}
+                </td>
+                {canEdit && (
+                  <td className="px-2 py-1.5">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      disabled={deletingKey === key}
+                      onClick={() => onDelete(e.project, e.mfcBatch)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function InventoryView() {
   const { filters } = useTracker();
   const queryClient = useQueryClient();
@@ -656,25 +956,44 @@ export default function InventoryView() {
     return out;
   };
 
-  // MFC backfill colours — keyed by mfcBatch only (one colour per batch).
-  const { data: mfcColors = [] } = useListInventoryMfcColors();
-  const upsertMfcColor = useUpsertInventoryMfcColor();
-  const deleteMfcColor = useDeleteInventoryMfcColor();
-  const mfcColorMap = useMemo(
-    () => new Map(mfcColors.map((c) => [c.mfcBatch, c.color])),
-    [mfcColors],
+  // MFC batch colour assignments — keyed by "project\u0001mfcBatch".
+  const { data: mfcBatchColors = [] } = useListInventoryMfcBatchColors();
+  const upsertMfcBatchColor = useUpsertInventoryMfcBatchColor();
+  const deleteMfcBatchColor = useDeleteInventoryMfcBatchColor();
+  const [deletingColorKey, setDeletingColorKey] = useState<string | null>(null);
+
+  const mfcBatchColorMap = useMemo(
+    () => new Map(mfcBatchColors.map((c) => [`${c.project}\u0001${c.mfcBatch}`, c])),
+    [mfcBatchColors],
   );
+
   const invalidateMfcColors = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: getListInventoryMfcColorsQueryKey() }),
+    () => queryClient.invalidateQueries({ queryKey: getListInventoryMfcBatchColorsQueryKey() }),
     [queryClient],
   );
-  const setMfcColor = useCallback(
-    (mfcBatch: string, color: string) => {
-      upsertMfcColor.mutate(
-        { data: { mfcBatch, side: "in_house", color: color as MfcColorName } },
+
+  const saveMfcBatchColor = useCallback(
+    (entry: {
+      project: string;
+      mfcBatch: string;
+      color: MfcColorName;
+      dateOfClientMfc?: string;
+      projectStartDate?: string;
+    }) => {
+      upsertMfcBatchColor.mutate(
+        {
+          data: {
+            project: entry.project,
+            mfcBatch: entry.mfcBatch,
+            color: entry.color,
+            dateOfClientMfc: entry.dateOfClientMfc ?? null,
+            projectStartDate: entry.projectStartDate ?? null,
+          },
+        },
         {
           onSuccess: () => {
             invalidateMfcColors();
+            toast({ title: "Colour saved" });
           },
           onError: (err) => {
             toast({
@@ -686,27 +1005,31 @@ export default function InventoryView() {
         },
       );
     },
-    [upsertMfcColor, invalidateMfcColors, toast],
+    [upsertMfcBatchColor, invalidateMfcColors, toast],
   );
-  const clearMfcColor = useCallback(
-    (mfcBatch: string) => {
-      deleteMfcColor.mutate(
-        { params: { mfcBatch, side: "in_house" } },
+
+  const removeMfcBatchColor = useCallback(
+    (project: string, mfcBatch: string) => {
+      const key = `${project}\u0001${mfcBatch}`;
+      setDeletingColorKey(key);
+      deleteMfcBatchColor.mutate(
+        { params: { project, mfcBatch } },
         {
-          onSuccess: () => {
+          onSettled: () => {
+            setDeletingColorKey(null);
             invalidateMfcColors();
           },
           onError: (err) => {
             toast({
               variant: "destructive",
-              title: "Failed to clear colour",
+              title: "Failed to delete",
               description: err?.message ?? "Unknown error",
             });
           },
         },
       );
     },
-    [deleteMfcColor, invalidateMfcColors, toast],
+    [deleteMfcBatchColor, invalidateMfcColors, toast],
   );
 
   const bucketA = applyJobFilter(buckets.a);
@@ -719,6 +1042,19 @@ export default function InventoryView() {
     for (const r of rawRows) set.add(r.project);
     return Array.from(set).sort();
   }, [rawRows]);
+
+  // Reminder: projects with stored colour entries no longer in Bucket A.
+  const bucketAProjectSet = useMemo(
+    () => new Set(buckets.a.map((r) => r.project)),
+    [buckets.a],
+  );
+  const reminderProjects = useMemo(
+    () =>
+      [...new Set(mfcBatchColors.map((c) => c.project))].filter(
+        (p) => !bucketAProjectSet.has(p),
+      ).sort(),
+    [mfcBatchColors, bucketAProjectSet],
+  );
 
   const upsertE = useUpsertInventoryManualE();
   const deleteE = useDeleteInventoryManualE();
@@ -772,6 +1108,7 @@ export default function InventoryView() {
     return out;
   };
 
+  // Build per-(project, mfcBatch) rows for export sheets.
   const projectMfcRows = (
     rows: InventoryStructureCard[],
     columns: ColumnDef[],
@@ -788,7 +1125,9 @@ export default function InventoryView() {
           structureCount: 1,
         };
         for (const col of columns) row[col.key] = col.get(r) ?? 0;
-        const colorName = mfcColorMap.get(r.mfcBatch ?? "Z") as MfcColorName | undefined;
+        // Look up colour by (project, mfcBatch) pair.
+        const colorEntry = mfcBatchColorMap.get(key);
+        const colorName = colorEntry?.color as MfcColorName | undefined;
         if (colorName && colorName in MFC_COLOR_ARGB) {
           row._bgColor = MFC_COLOR_ARGB[colorName];
         }
@@ -913,14 +1252,29 @@ export default function InventoryView() {
         name: "A - " + BUCKET_LABELS.a.slice(0, 28),
         columns: [
           { label: "Project", field: "project" },
+          { label: "MFC Batch", field: "mfcBatch" },
+          { label: "Colour", field: "colour" },
+          { label: "Date of Client MFC", field: "dateOfClientMfc" },
+          { label: "Project Start Date", field: "projectStartDate" },
           { label: "Structures", field: "structures", numeric: true, decimals: 0 },
           { label: "Order Qty (MT)", field: "orderQtyMt", numeric: true, decimals: 3, total: true },
         ],
-        rows: bucketAGroups.map((g) => ({
-          project: g.project,
-          structures: g.count,
-          orderQtyMt: g.weightMt,
-        })),
+        rows: bucketAGroups.map((g) => {
+          const colorEntry = mfcBatchColorMap.get(`${g.project}\u0001Z`);
+          const colorName = colorEntry?.color as MfcColorName | undefined;
+          return {
+            project: g.project,
+            mfcBatch: "Z",
+            colour: colorName ? MFC_COLOR_LABEL[colorName] : "",
+            dateOfClientMfc: colorEntry?.dateOfClientMfc ?? "",
+            projectStartDate: colorEntry?.projectStartDate ?? "",
+            structures: g.count,
+            orderQtyMt: g.weightMt,
+            ...(colorName && colorName in MFC_COLOR_ARGB
+              ? { _bgColor: MFC_COLOR_ARGB[colorName] }
+              : {}),
+          };
+        }),
       },
       autoBucketSheet(
         "B - Raw Material Incomplete",
@@ -964,8 +1318,7 @@ export default function InventoryView() {
       : jobFilter
         ? jobFilter.replace(/[^\w-]+/g, "-")
         : "all";
-    const tag = baseTag;
-    void exportToXlsxSheets(`inventory_${tag}_${date}.xlsx`, sheets);
+    void exportToXlsxSheets(`inventory_${baseTag}_${date}.xlsx`, sheets);
   };
 
   return (
@@ -1056,8 +1409,45 @@ export default function InventoryView() {
           {isLoading ? (
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
-            <BucketAPanel rows={bucketA} />
+            <BucketAPanel rows={bucketA} mfcBatchColorMap={mfcBatchColorMap} />
           )}
+        </CardContent>
+      </Card>
+
+      {/* MFC Batch Colour Management */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">MFC Batch Colour</CardTitle>
+        </CardHeader>
+        <CardContent className="px-0 pb-0">
+          {reminderProjects.length > 0 && (
+            <div className="mx-3 mb-3 flex items-start gap-2 p-3 rounded-md border border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/20 text-sm">
+              <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-medium">Reminder:</span>{" "}
+                {reminderProjects.length === 1
+                  ? "The following project has"
+                  : "The following projects have"}{" "}
+                a colour assignment but{" "}
+                {reminderProjects.length === 1 ? "is" : "are"} no longer in Bucket A:{" "}
+                <span className="font-medium">{reminderProjects.join(", ")}</span>
+              </div>
+            </div>
+          )}
+          {canEdit && (
+            <MfcBatchColorForm
+              knownProjects={knownProjects}
+              projectMfcBatches={projectMfcBatches}
+              onSave={saveMfcBatchColor}
+              isPending={upsertMfcBatchColor.isPending}
+            />
+          )}
+          <MfcBatchColorTable
+            entries={mfcBatchColors}
+            canEdit={canEdit}
+            onDelete={removeMfcBatchColor}
+            deletingKey={deletingColorKey}
+          />
         </CardContent>
       </Card>
 
@@ -1089,10 +1479,7 @@ export default function InventoryView() {
               columns={BUCKET_B_COLUMNS}
               clampRelease={false}
               groupByMfc={groupByMfc}
-              mfcColorMap={mfcColorMap}
-              canEdit={canEdit}
-              onSetMfcColor={setMfcColor}
-              onClearMfcColor={clearMfcColor}
+              mfcBatchColorMap={mfcBatchColorMap}
             />
           )}
         </CardContent>
@@ -1112,10 +1499,7 @@ export default function InventoryView() {
               columns={BUCKET_CD_COLUMNS}
               clampRelease
               groupByMfc={groupByMfc}
-              mfcColorMap={mfcColorMap}
-              canEdit={canEdit}
-              onSetMfcColor={setMfcColor}
-              onClearMfcColor={clearMfcColor}
+              mfcBatchColorMap={mfcBatchColorMap}
             />
           )}
         </CardContent>
@@ -1135,10 +1519,7 @@ export default function InventoryView() {
               columns={BUCKET_CD_COLUMNS}
               clampRelease
               groupByMfc={groupByMfc}
-              mfcColorMap={mfcColorMap}
-              canEdit={canEdit}
-              onSetMfcColor={setMfcColor}
-              onClearMfcColor={clearMfcColor}
+              mfcBatchColorMap={mfcBatchColorMap}
             />
           )}
         </CardContent>
@@ -1185,7 +1566,8 @@ export default function InventoryView() {
 
       {!canEdit && (
         <p className="text-xs text-muted-foreground text-center">
-          Sign in (Data page) to add or remove manual Bucket E entries.
+          Sign in (Data page) to add or remove manual Bucket E entries and manage MFC Batch
+          Colours.
         </p>
       )}
     </div>

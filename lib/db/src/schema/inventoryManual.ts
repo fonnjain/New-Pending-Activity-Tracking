@@ -1,47 +1,23 @@
-import { pgTable, serial, text, timestamp, doublePrecision, unique, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
-// Inventory page (5-bucket board A-E). Buckets B/C/D are auto-computed (never
-// stored); A and E are MANUAL, persisted lists the user maintains directly on
-// the page. Two separate tables because A is free-text project entry while E
-// is a dropdown pick from known projects — kept structurally identical so both
-// share one CRUD shape, but never merged into a single table (different entry
-// UX + independent lifecycles).
-//   projectCode = the project/structure label as entered by the user (free
-//                 text for A, picked from a dropdown for E).
-//   side        = "in_house" | "out_vendor" — which half of the bucket board
-//                 this entry renders under.
-export const inventoryManualATable = pgTable("inventory_manual_a", {
-  id: serial("id").primaryKey(),
-  projectCode: text("project_code").notNull(),
-  // Work Order Qty weight (MT), manually typed. Bucket A projects are BRAND
-  // NEW (not in WIP or Order Review yet), so nothing can be auto-filled --
-  // the user types the project's WO Order Qty weight directly. Drives the
-  // single Bucket A summary line ("Under Production Weight" = sum across all
-  // A entries). Not used by Bucket E (E aggregates real Order Review data).
-  woOrderQtyMt: doublePrecision("wo_order_qty_mt"),
-  side: text("side").notNull(),
-  note: text("note"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
-
-export const insertInventoryManualASchema = createInsertSchema(
-  inventoryManualATable,
-).omit({ id: true, createdAt: true });
-export type InsertInventoryManualA = z.infer<
-  typeof insertInventoryManualASchema
->;
-export type InventoryManualARow = typeof inventoryManualATable.$inferSelect;
+// Inventory page (5-bucket board A-E).
+//
+// Bucket A is fully data-driven (Order Review rows where WO Order Qty ≈ 0 AND
+// Release Qty ≈ 0). No manual A table — `inventory_manual_a` was retired.
+//
+// Bucket E ("Material Ready But Not Dispatched") remains manual: a dropdown-
+// pick list the user maintains on the page.  One row per (project, mfcBatch,
+// side) the user has confirmed is physically ready.
+//
+//   projectCode = project label as entered by the user (picked from dropdown)
+//   mfcBatch    = MFC batch letter (A/B/C/D) or "Z" (= not yet batched)
+//   side        = "in_house" | "out_vendor"
 
 export const inventoryManualETable = pgTable("inventory_manual_e", {
   id: serial("id").primaryKey(),
   projectCode: text("project_code").notNull(),
-  // MFC Batch letter (A/B/C/D) or "Z" (= not yet batched). Governs which
-  // structures are removed from Buckets C and D when this E entry is active.
-  // Default "Z" handles any pre-migration rows.
   mfcBatch: text("mfc_batch").notNull().default("Z"),
   side: text("side").notNull(),
   note: text("note"),
@@ -92,29 +68,59 @@ export type InsertInventorySideOverride = z.infer<
 >;
 export type InventorySideOverrideRow = typeof inventorySideOverrideTable.$inferSelect;
 
-// Backfill colour override for an MFC batch on the Inventory Bucket list page.
-// One row per mfcBatch; per-side colours stored in the `colors` jsonb map.
-// e.g. colors = { "in_house": "green", "out_vendor": "yellow" }
-// Used only for Excel export background fill — not applied to the on-screen UI.
+// Legacy per-batch colour table (inventory_mfc_color).  Kept in the schema so
+// the existing table is not dropped on `db push`; no new writes, no new reads.
+// Can be physically dropped once confirmed unused.
 export const inventoryMfcColorTable = pgTable("inventory_mfc_color", {
   mfcBatch: text("mfc_batch").primaryKey(),
-  // Legacy single-color column kept for old-row backcompat (read-only).
-  // New writes go to `colors`; this column is never updated after migration.
   color: text("color").notNull().default(""),
-  // Per-side color map: { in_house?: string, out_vendor?: string }
-  colors: jsonb("colors")
-    .$type<Partial<Record<string, string>>>()
-    .notNull()
-    .default({}),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 });
 
-export const insertInventoryMfcColorSchema = createInsertSchema(
-  inventoryMfcColorTable,
+// MFC Batch Colour — per (project, mfcBatch) pair.
+//
+// Records the backfill colour assigned to a specific (project, MFC batch)
+// combination, plus two optional milestone dates:
+//   dateOfClientMfc  = date the client confirmed the MFC batch (YYYY-MM-DD)
+//   projectStartDate = date the project is scheduled to start (YYYY-MM-DD)
+//
+// Used on the Bucket List page: displayed as a colour dot on the relevant
+// project rows and included in the Excel export as a cell background fill.
+// A reminder notice is shown when a stored entry's project is no longer in
+// Bucket A (i.e. it has moved into active production).
+export const inventoryMfcBatchColorTable = pgTable(
+  "inventory_mfc_batch_color",
+  {
+    id: serial("id").primaryKey(),
+    project: text("project").notNull(),
+    mfcBatch: text("mfc_batch").notNull(),
+    // One of: white | yellow | green | blue
+    color: text("color").notNull(),
+    // Optional milestone dates stored as YYYY-MM-DD text strings.
+    dateOfClientMfc: text("date_of_client_mfc"),
+    projectStartDate: text("project_start_date"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("inventory_mfc_batch_color_project_batch").on(
+      table.project,
+      table.mfcBatch,
+    ),
+  ],
 );
-export type InsertInventoryMfcColor = z.infer<
-  typeof insertInventoryMfcColorSchema
+
+export const insertInventoryMfcBatchColorSchema = createInsertSchema(
+  inventoryMfcBatchColorTable,
+).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertInventoryMfcBatchColor = z.infer<
+  typeof insertInventoryMfcBatchColorSchema
 >;
-export type InventoryMfcColorRow = typeof inventoryMfcColorTable.$inferSelect;
+export type InventoryMfcBatchColorRow =
+  typeof inventoryMfcBatchColorTable.$inferSelect;
