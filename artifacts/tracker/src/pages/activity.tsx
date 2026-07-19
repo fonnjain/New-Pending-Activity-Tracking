@@ -51,8 +51,9 @@ function ActPerfMarksList({ records }: { records: any[] }) {
         <Table containerClassName="max-h-[20rem]">
           <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
+              <TableHead className="whitespace-nowrap">Mark</TableHead>
               <TableHead>Section</TableHead>
-              <TableHead className="text-right">Thick.</TableHead>
+              <TableHead className="text-right whitespace-nowrap">Thick.</TableHead>
               <TableHead className="text-right">Qty</TableHead>
               <TableHead className="text-right">Wt</TableHead>
               <TableHead className="text-right">Ageing</TableHead>
@@ -61,8 +62,13 @@ function ActPerfMarksList({ records }: { records: any[] }) {
           <TableBody>
             {visible.map((r, i) => (
               <TableRow key={r.id ?? i}>
-                <TableCell className="text-muted-foreground max-w-[200px] truncate">{r.section || "-"}</TableCell>
-                <TableCell className="text-right tabular-nums whitespace-nowrap">{r.thicknessMm != null ? `${r.thicknessMm} mm` : "-"}</TableCell>
+                <TableCell className="max-w-[80px] whitespace-nowrap">
+                  <span className="font-mono text-xs font-semibold">{r.markTail || r.markId || "-"}</span>
+                </TableCell>
+                <TableCell className="max-w-[200px]">
+                  <span className="font-medium text-foreground block truncate" title={r.section || ""}>{r.section || "-"}</span>
+                </TableCell>
+                <TableCell className="text-right tabular-nums whitespace-nowrap font-bold text-primary">{r.thicknessMm != null ? `${r.thicknessMm} mm` : "-"}</TableCell>
                 <TableCell className="text-right tabular-nums">{r.balanceQty ?? 0}</TableCell>
                 <TableCell className="text-right tabular-nums font-medium">{formatWeight(r.balanceWt)}</TableCell>
                 <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
@@ -73,7 +79,7 @@ function ActPerfMarksList({ records }: { records: any[] }) {
           </TableBody>
           <TableFooter className="sticky bottom-0 z-10 bg-muted">
             <TableRow>
-              <TableCell colSpan={2} className="font-semibold">Total ({records.length.toLocaleString()} marks)</TableCell>
+              <TableCell colSpan={3} className="font-semibold">Total ({records.length.toLocaleString()} marks)</TableCell>
               <TableCell className="text-right font-bold tabular-nums">{totalQty.toLocaleString()}</TableCell>
               <TableCell className="text-right font-bold tabular-nums">{formatWeight(totalWt)}</TableCell>
               <TableCell />

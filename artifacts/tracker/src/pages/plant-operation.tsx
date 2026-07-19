@@ -1202,12 +1202,12 @@ function InlineMarksList({ records }: { records: any[] }) {
   return (
     <div className="divide-y bg-muted/10">
       {records.map((r, i) => (
-        <div key={i} className="flex items-center justify-between py-1.5 px-4 pl-20 text-xs gap-2">
-          <span className="text-muted-foreground min-w-0 truncate flex-1">{r.section || "-"}</span>
+        <div key={i} className="flex items-center py-1.5 px-4 pl-20 text-xs gap-3">
+          <span className="font-medium text-foreground min-w-0 truncate flex-1" title={r.section || ""}>{r.section || "-"}</span>
           <div className="flex items-center gap-3 text-right shrink-0">
             <span className="font-bold text-primary whitespace-nowrap">{r.thicknessMm != null ? `${r.thicknessMm} mm` : "-"}</span>
             <span className="text-muted-foreground max-w-[120px] truncate text-right" title={r.contractor || ""}>{r.contractor || "-"}</span>
-            <span className="text-muted-foreground whitespace-nowrap">{(r.qty ?? 0).toLocaleString()} pcs • {formatWeight(r.balanceWt)}</span>
+            <span className="text-muted-foreground whitespace-nowrap">{(r.balanceQty ?? 0).toLocaleString()} pcs • {formatWeight(r.balanceWt)}</span>
             <span className={`font-bold w-10 text-right ${getAgeingColor(r.ageingDays)}`}>
               {r.ageingDays != null ? `${r.ageingDays}d` : "-"}
             </span>
