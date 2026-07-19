@@ -2,24 +2,15 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useTracker, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
 import {
   useGetAuthStatus,
-  useListInventoryManualA,
   useListInventoryManualE,
-  useUpsertInventoryManualA,
-  useDeleteInventoryManualA,
   useUpsertInventoryManualE,
   useDeleteInventoryManualE,
-  useListInventorySideOverrides,
-  useUpsertInventorySideOverride,
-  useDeleteInventorySideOverride,
   useListInventoryMfcColors,
   useUpsertInventoryMfcColor,
   useDeleteInventoryMfcColor,
-  getListInventoryManualAQueryKey,
   getListInventoryManualEQueryKey,
-  getListInventorySideOverridesQueryKey,
   getListInventoryMfcColorsQueryKey,
   type InventoryManualEntry,
-  type InventorySideOverride,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -37,20 +28,18 @@ import {
 } from "@/lib/inventory";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { NumberInput } from "@/components/ui/number-input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Segmented } from "@/components/ui/segmented";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Boxes, ChevronRight, ChevronDown, Trash2, AlertTriangle, FileSpreadsheet, ArrowRightLeft, X } from "lucide-react";
+  Boxes,
+  ChevronRight,
+  ChevronDown,
+  Trash2,
+  AlertTriangle,
+  FileSpreadsheet,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { exportToXlsxSheets, type XlsxSheet, type XlsxSummaryRow, type XlsxBlockGroup } from "@/lib/export";
+import { exportToXlsxSheets, type XlsxSheet, type XlsxSummaryRow } from "@/lib/export";
 
 function mt(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "-";
@@ -60,14 +49,14 @@ function mt(n: number | null | undefined): string {
 type MfcColorName = "green" | "white" | "yellow";
 
 const MFC_COLOR_CSS: Record<MfcColorName, string> = {
-  green:  "#92D050",
-  white:  "#FFFFFF",
+  green: "#92D050",
+  white: "#FFFFFF",
   yellow: "#FFFF00",
 };
 
 const MFC_COLOR_ARGB: Record<MfcColorName, string> = {
-  green:  "FF92D050",
-  white:  "FFFFFFFF",
+  green: "FF92D050",
+  white: "FFFFFFFF",
   yellow: "FFFFFF00",
 };
 
@@ -76,133 +65,11 @@ const SIDE_LABELS: Record<InventorySide, string> = {
   out_vendor: "Out-Vendor",
 };
 
-type BucketId = "b" | "c" | "d";
-
-const BUCKET_SOURCE_LABEL: Record<BucketId, string> = {
-  b: "B",
-  c: "C",
-  d: "D",
-};
-
-function makeBucketSelKey(bucket: BucketId, side: InventorySide, project: string) {
-  return `${bucket}|${side}|${project}`;
-}
-
-function parseBucketSelKey(key: string): { bucket: BucketId; side: InventorySide; project: string } {
-  const idx1 = key.indexOf("|");
-  const idx2 = key.indexOf("|", idx1 + 1);
-  return {
-    bucket: key.slice(0, idx1) as BucketId,
-    side: key.slice(idx1 + 1, idx2) as InventorySide,
-    project: key.slice(idx2 + 1),
-  };
-}
-
 interface ProjectGroup {
   project: string;
   rows: InventoryStructureCard[];
   count: number;
   weightMt: number;
-}
-
-// Unique key for a physical structure within a bucket (project + structure + subType + mfcBatch).
-// Used to match the in-house card (carries release balance + r_in fraction) with its
-// out-vendor counterpart (carries 0 release + r_out fraction) so they can be merged.
-function structureCardKey(r: InventoryStructureCard): string {
-  return `${r.project}\u0001${r.structure ?? ""}\u0001${r.subType ?? ""}\u0001${r.mfcBatch}`;
-}
-
-function addNullable(a: number | null, b: number | null): number | null {
-  if (a == null && b == null) return null;
-  return (a ?? 0) + (b ?? 0);
-}
-
-// Merge a pair of cards for the same physical structure into a single card with
-// full undivided values.  Release Balance always comes from the in-house card
-// (spec rule: release balance is 100% in-house; out-vendor card has 0).
-// Fab/Galva/Yard are summed so their total equals the raw undivided figure.
-function mergeStructureCards(
-  inCard: InventoryStructureCard,
-  outCard: InventoryStructureCard | undefined,
-): InventoryStructureCard {
-  if (!outCard) return { ...inCard, mixed: false };
-  return {
-    ...inCard,
-    // fileBalReleaseMt: from inCard (spec: release balance fully on in-house card)
-    balFabMt: addNullable(inCard.balFabMt, outCard.balFabMt),
-    balGalvMt: addNullable(inCard.balGalvMt, outCard.balGalvMt),
-    galvMt: addNullable(inCard.galvMt, outCard.galvMt),
-    mixed: false,
-  };
-}
-
-// Applies stored side overrides to an auto-computed bucket pair.
-// Any project in the override map for this bucket is moved to the stored side
-// regardless of what the contractor classification produced.
-//
-// Each physical structure can have TWO cards: an in-house card (release balance +
-// r_in fraction of Fab/Galva/Yard) and an out-vendor card (0 release + r_out
-// fraction).  Without merging, both cards would land on the target side when a
-// project is overridden, causing the same structure to appear twice with split
-// values and an inflated structure count.  This function merges the pair into a
-// single card with the full undivided values before placing it on the target side.
-function applyOverridesToBucket(
-  inHouse: InventoryStructureCard[],
-  outVendor: InventoryStructureCard[],
-  bucket: BucketId,
-  overrides: InventorySideOverride[],
-): { inHouse: InventoryStructureCard[]; outVendor: InventoryStructureCard[] } {
-  const toOutVendor = new Set<string>();
-  const toInHouse = new Set<string>();
-  for (const o of overrides) {
-    if (o.bucket !== bucket) continue;
-    if (o.side === "out_vendor") toOutVendor.add(o.projectCode);
-    else toInHouse.add(o.projectCode);
-  }
-  if (toOutVendor.size === 0 && toInHouse.size === 0) return { inHouse, outVendor };
-
-  // Index in-house and out-vendor cards for overridden projects so counterpart
-  // pairs can be found and merged.
-  const inCards = new Map<string, InventoryStructureCard>();
-  const outCards = new Map<string, InventoryStructureCard>();
-  for (const r of inHouse) {
-    if (toOutVendor.has(r.project) || toInHouse.has(r.project)) {
-      inCards.set(structureCardKey(r), r);
-    }
-  }
-  for (const r of outVendor) {
-    if (toOutVendor.has(r.project) || toInHouse.has(r.project)) {
-      outCards.set(structureCardKey(r), r);
-    }
-  }
-
-  const newInHouse: InventoryStructureCard[] = [];
-  const newOutVendor: InventoryStructureCard[] = [];
-
-  // Non-overridden projects: keep on their current side unchanged.
-  for (const r of inHouse) {
-    if (!toOutVendor.has(r.project) && !toInHouse.has(r.project)) newInHouse.push(r);
-  }
-  for (const r of outVendor) {
-    if (!toOutVendor.has(r.project) && !toInHouse.has(r.project)) newOutVendor.push(r);
-  }
-
-  // Overridden projects: merge inCard + outCard → single merged card on target side.
-  // Drive from inCards (computeAutoBuckets always creates an inCard for every structure).
-  for (const [key, inCard] of inCards) {
-    const merged = mergeStructureCards(inCard, outCards.get(key));
-    if (toOutVendor.has(inCard.project)) newOutVendor.push(merged);
-    else newInHouse.push(merged);
-  }
-  // Defensive: handle outCard-only rows (shouldn't occur per computeAutoBuckets invariant).
-  for (const [key, outCard] of outCards) {
-    if (!inCards.has(key)) {
-      if (toOutVendor.has(outCard.project)) newOutVendor.push(outCard);
-      else newInHouse.push(outCard);
-    }
-  }
-
-  return { inHouse: newInHouse, outVendor: newOutVendor };
 }
 
 function groupByProject(rows: InventoryStructureCard[]): ProjectGroup[] {
@@ -237,11 +104,6 @@ function groupByMfcBatch(
     .map(([mfcBatch, bRows]) => ({ mfcBatch, rows: bRows }));
 }
 
-// Per-bucket data column definitions (spec-mandated). B shows the raw Release
-// Balance (always > 0 there) + a combined Fab+Galva; C/D show the CLAMPED
-// Release Balance (display-only; never affects bucket membership) + Fab and
-// Galva as separate columns. Yard (Progress Galvanising, Col N) is on every
-// auto bucket.
 interface ColumnDef {
   key: string;
   label: string;
@@ -271,11 +133,6 @@ const BUCKET_CD_COLUMNS: ColumnDef[] = [
   YARD_COLUMN,
 ];
 
-// Five-line footer shown on every side of Buckets B/C/D/E (spec-mandated).
-// Total Release Balance, Under Production (Fab+Galva), Total Yard, Operation
-// Weight (Under Production + Yard), Grand Total (Release Balance + Operation).
-// Shown PER SIDE (not combined) because mixed structures legitimately appear
-// on both sides, so a naive combined total would double-count them.
 function SummaryFooter({ summary }: { summary: BucketSummary }) {
   const lines: [string, number][] = [
     ["Total Release Balance", summary.releaseBalanceMt],
@@ -296,90 +153,46 @@ function SummaryFooter({ summary }: { summary: BucketSummary }) {
   );
 }
 
-function AutoBucketSide({
-  bucket,
-  side,
-  rows,
-  columns,
-  clampRelease,
-  groupByMfc,
-  selectedKeys,
-  onToggle,
-  overriddenProjects,
-  onResetOverride,
-  canEdit,
-  mfcColorMap,
-  onSetMfcColor,
-  onClearMfcColor,
-}: {
-  bucket: BucketId;
-  side: InventorySide;
-  rows: InventoryStructureCard[];
-  columns: ColumnDef[];
-  clampRelease: boolean;
-  groupByMfc: boolean;
-  selectedKeys: Set<string>;
-  onToggle: (key: string) => void;
-  overriddenProjects: Set<string>;
-  onResetOverride: (project: string) => void;
-  canEdit: boolean;
-  mfcColorMap: Map<string, string>;
-  onSetMfcColor: (mfc: string, side: InventorySide, color: string) => void;
-  onClearMfcColor: (mfc: string, side: InventorySide) => void;
-}) {
+// Bucket A: read-only computed panel. Groups qualifying structures by project
+// and shows project name, structure count, and summed Order Qty Weight (Col G).
+function BucketAPanel({ rows }: { rows: InventoryStructureCard[] }) {
   const groups = useMemo(() => groupByProject(rows), [rows]);
-  const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
   const totalWeight = groups.reduce((s, g) => s + g.weightMt, 0);
   const totalCount = groups.reduce((s, g) => s + g.count, 0);
-  const summary = useMemo(() => computeBucketSummary(rows, clampRelease), [rows, clampRelease]);
+
+  if (groups.length === 0) {
+    return (
+      <div className="py-6 text-center text-sm text-muted-foreground">
+        No projects — all structures have WO Order Qty or Release Qty allocated.
+      </div>
+    );
+  }
 
   return (
-    <div className="border rounded-md">
-      <div className="px-3 py-2 border-b bg-muted/40 flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide">
-          {SIDE_LABELS[side]}
-        </span>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          {totalCount} structure{totalCount === 1 ? "" : "s"} · {mt(totalWeight)} MT
-        </span>
-      </div>
-      <div className="max-h-96 overflow-auto divide-y">
-        {rows.length === 0 ? (
-          <div className="py-6 text-center text-xs text-muted-foreground">
-            No structures.
+    <div className="border rounded-md overflow-hidden">
+      <div className="divide-y max-h-80 overflow-auto">
+        {groups.map((g) => (
+          <div
+            key={g.project}
+            className="flex items-center justify-between px-3 py-2 text-sm hover:bg-muted/30"
+          >
+            <span className="font-medium">{g.project}</span>
+            <span className="flex items-center gap-4 text-xs text-muted-foreground">
+              <span>
+                {g.count} structure{g.count === 1 ? "" : "s"}
+              </span>
+              <span className="tabular-nums font-medium text-foreground">{mt(g.weightMt)} MT</span>
+            </span>
           </div>
-        ) : groupByMfc ? (
-          mfcGroups.map(({ mfcBatch, rows: mfcRows }) => (
-            <MfcTopRow
-              key={mfcBatch}
-              mfcBatch={mfcBatch}
-              rows={mfcRows}
-              columns={columns}
-              getChecked={(project) => selectedKeys.has(makeBucketSelKey(bucket, side, project))}
-              onToggle={(project) => onToggle(makeBucketSelKey(bucket, side, project))}
-              getIsOverridden={(project) => overriddenProjects.has(project)}
-              onReset={canEdit ? onResetOverride : undefined}
-              currentColor={mfcColorMap.get(`${mfcBatch}|${side}`)}
-              canEdit={canEdit}
-              onSetColor={(color) => onSetMfcColor(mfcBatch, side, color)}
-              onClearColor={() => onClearMfcColor(mfcBatch, side)}
-            />
-          ))
-        ) : (
-          groups.map((g) => (
-            <ProjectRow
-              key={g.project}
-              group={g}
-              columns={columns}
-              checked={selectedKeys.has(makeBucketSelKey(bucket, side, g.project))}
-              onToggle={() => onToggle(makeBucketSelKey(bucket, side, g.project))}
-              isOverridden={overriddenProjects.has(g.project)}
-              onReset={canEdit ? () => onResetOverride(g.project) : undefined}
-            />
-          ))
-        )}
+        ))}
       </div>
-      <SummaryFooter summary={summary} />
+      <div className="px-3 py-2 border-t bg-muted/20 flex items-center justify-between text-[11px]">
+        <span className="text-muted-foreground">
+          {groups.length} project{groups.length === 1 ? "" : "s"} &middot; {totalCount}{" "}
+          structure{totalCount === 1 ? "" : "s"}
+        </span>
+        <span className="tabular-nums font-medium">{mt(totalWeight)} MT</span>
+      </div>
     </div>
   );
 }
@@ -387,75 +200,37 @@ function AutoBucketSide({
 function ProjectRow({
   group,
   columns,
-  checked,
-  onToggle,
-  isOverridden,
-  onReset,
 }: {
   group: ProjectGroup;
   columns: ColumnDef[];
-  checked: boolean;
-  onToggle: () => void;
-  isOverridden?: boolean;
-  onReset?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const mfcGroups = useMemo(() => groupByMfcBatch(group.rows), [group.rows]);
   return (
     <div>
-      <div className="flex items-center hover:bg-muted/30">
-        <label
-          className="flex items-center px-2.5 py-1.5 cursor-pointer shrink-0"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <input
-            type="checkbox"
-            className="h-3.5 w-3.5 accent-primary"
-            checked={checked}
-            onChange={() => onToggle()}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex-1 flex items-center justify-between pr-3 py-1.5 text-sm gap-2 min-w-0"
-        >
-          <span className="flex items-center gap-1.5 min-w-0">
-            {open ? (
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            )}
-            <span className="font-medium truncate">{group.project}</span>
-            <span className="text-[10px] text-muted-foreground shrink-0">
-              {group.count} str
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-1.5 text-sm gap-2 min-w-0 hover:bg-muted/30"
+      >
+        <span className="flex items-center gap-1.5 min-w-0">
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          )}
+          <span className="font-medium truncate">{group.project}</span>
+          <span className="text-[10px] text-muted-foreground shrink-0">{group.count} str</span>
+        </span>
+        <span className="flex items-center gap-3 shrink-0">
+          {columns.map((col) => (
+            <span key={col.key} className="text-[11px] tabular-nums text-right">
+              <span className="text-muted-foreground mr-1">{col.label}</span>
+              {mt(sumColumnOrNull(group.rows, col.get))}
             </span>
-            {isOverridden && (
-              <span className="text-[9px] px-1 py-px rounded border border-blue-400/50 text-blue-600 dark:text-blue-400 font-medium shrink-0">
-                side overridden
-              </span>
-            )}
-          </span>
-          <span className="flex items-center gap-3 shrink-0">
-            {columns.map((col) => (
-              <span key={col.key} className="text-[11px] tabular-nums text-right">
-                <span className="text-muted-foreground mr-1">{col.label}</span>
-                {mt(sumColumnOrNull(group.rows, col.get))}
-              </span>
-            ))}
-          </span>
-        </button>
-        {isOverridden && onReset && (
-          <button
-            type="button"
-            title="Reset side override"
-            onClick={(e) => { e.stopPropagation(); onReset(); }}
-            className="px-2 py-1 text-muted-foreground hover:text-destructive shrink-0"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        )}
-      </div>
+          ))}
+        </span>
+      </button>
       {open && (
         <div className="pl-6 pb-0.5">
           {mfcGroups.map(({ mfcBatch, rows: mfcRows }) => (
@@ -491,10 +266,6 @@ function MfcTopRow({
   mfcBatch,
   rows,
   columns,
-  getChecked,
-  onToggle,
-  getIsOverridden,
-  onReset,
   currentColor,
   canEdit,
   onSetColor,
@@ -503,10 +274,6 @@ function MfcTopRow({
   mfcBatch: string;
   rows: InventoryStructureCard[];
   columns: ColumnDef[];
-  getChecked: (project: string) => boolean;
-  onToggle: (project: string) => void;
-  getIsOverridden: (project: string) => boolean;
-  onReset?: (project: string) => void;
   currentColor?: string;
   canEdit?: boolean;
   onSetColor?: (color: string) => void;
@@ -516,19 +283,17 @@ function MfcTopRow({
   const projectGroups = useMemo(() => groupByProject(rows), [rows]);
   return (
     <div>
-      {/*
-        Row layout: toggle trigger (left) + color-picker + column values (right).
-        The color-picker and column values are intentionally OUTSIDE the toggle
-        trigger div so their click events never compete with the collapse handler.
-        No stopPropagation needed.
-      */}
       <div className="w-full flex items-center justify-between hover:bg-muted/30 text-sm">
-        {/* Toggle trigger — only the left label area */}
         <div
           role="button"
           tabIndex={0}
           onClick={() => setOpen((v) => !v)}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); } }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setOpen((v) => !v);
+            }
+          }}
           className="flex items-center gap-1.5 min-w-0 px-3 py-1.5 cursor-pointer select-none flex-1"
         >
           {open ? (
@@ -548,10 +313,9 @@ function MfcTopRow({
           )}
           <span className="font-medium shrink-0">MFC {mfcBatch}</span>
           <span className="text-[10px] text-muted-foreground shrink-0">
-            {projectGroups.length} proj · {rows.length} str
+            {projectGroups.length} proj &middot; {rows.length} str
           </span>
         </div>
-        {/* Right side: color picker + column values — outside the toggle trigger */}
         <span className="flex items-center gap-3 shrink-0 px-3 py-1.5">
           {canEdit && (
             <span className="flex items-center gap-0.5" title="Set backfill colour">
@@ -571,8 +335,8 @@ function MfcTopRow({
                       border: active
                         ? "2px solid #1F2937"
                         : c === "white"
-                        ? "1px solid #9CA3AF"
-                        : "1px solid transparent",
+                          ? "1px solid #9CA3AF"
+                          : "1px solid transparent",
                     }}
                     className="w-5 h-5 rounded-full cursor-pointer"
                   />
@@ -590,72 +354,97 @@ function MfcTopRow({
       </div>
       {open && (
         <div className="pl-6 pb-0.5">
-          {projectGroups.map((g) => {
-            const overridden = getIsOverridden(g.project);
-            return (
-              <div
-                key={g.project}
-                className="flex items-center gap-1 border-t first:border-t-0 hover:bg-muted/20"
-              >
-                <label
-                  className="flex items-center px-2 py-1 cursor-pointer shrink-0"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <input
-                    type="checkbox"
-                    className="h-3 w-3 accent-primary"
-                    checked={getChecked(g.project)}
-                    onChange={() => onToggle(g.project)}
-                  />
-                </label>
-                <div className="flex-1 flex items-center justify-between gap-2 pr-2 py-1 text-xs min-w-0">
-                  <span className="flex items-center gap-1.5 min-w-0">
-                    <span className="font-medium truncate">{g.project}</span>
-                    <span className="text-muted-foreground shrink-0">{g.count} str</span>
-                    {overridden && (
-                      <span className="text-[9px] px-1 py-px rounded border border-blue-400/50 text-blue-600 dark:text-blue-400 font-medium shrink-0">
-                        side overridden
-                      </span>
-                    )}
-                  </span>
-                  <span className="flex items-center gap-3 shrink-0">
-                    {columns.map((col) => (
-                      <span key={col.key} className="tabular-nums text-right">
-                        <span className="text-muted-foreground mr-1">{col.label}</span>
-                        {mt(sumColumnOrNull(g.rows, col.get))}
-                      </span>
-                    ))}
-                    {overridden && onReset && (
-                      <button
-                        type="button"
-                        title="Reset side override"
-                        onClick={(e) => { e.stopPropagation(); onReset(g.project); }}
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </span>
-                </div>
+          {projectGroups.map((g) => (
+            <div
+              key={g.project}
+              className="flex items-center border-t first:border-t-0 hover:bg-muted/20"
+            >
+              <div className="flex-1 flex items-center justify-between gap-2 px-3 py-1 text-xs min-w-0">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-medium truncate">{g.project}</span>
+                  <span className="text-muted-foreground shrink-0">{g.count} str</span>
+                </span>
+                <span className="flex items-center gap-3 shrink-0">
+                  {columns.map((col) => (
+                    <span key={col.key} className="tabular-nums text-right">
+                      <span className="text-muted-foreground mr-1">{col.label}</span>
+                      {mt(sumColumnOrNull(g.rows, col.get))}
+                    </span>
+                  ))}
+                </span>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-// Bucket E aggregates the same Release Balance / Fab+Galva / Yard data
-// columns as C/D, but rolled up per-project across ALL of the project's
-// structures in the latest Order Review (rawRows), not per manual entry.
+// Single flat panel for an auto-computed bucket (B, C, or D).
+function AutoBucketPanel({
+  rows,
+  columns,
+  clampRelease,
+  groupByMfc,
+  mfcColorMap,
+  canEdit,
+  onSetMfcColor,
+  onClearMfcColor,
+}: {
+  rows: InventoryStructureCard[];
+  columns: ColumnDef[];
+  clampRelease: boolean;
+  groupByMfc: boolean;
+  mfcColorMap: Map<string, string>;
+  canEdit: boolean;
+  onSetMfcColor: (mfc: string, color: string) => void;
+  onClearMfcColor: (mfc: string) => void;
+}) {
+  const groups = useMemo(() => groupByProject(rows), [rows]);
+  const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
+  const totalWeight = groups.reduce((s, g) => s + g.weightMt, 0);
+  const totalCount = groups.reduce((s, g) => s + g.count, 0);
+  const summary = useMemo(() => computeBucketSummary(rows, clampRelease), [rows, clampRelease]);
+
+  return (
+    <div className="border rounded-md">
+      <div className="px-3 py-2 border-b bg-muted/40 flex items-center justify-between">
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {totalCount} structure{totalCount === 1 ? "" : "s"} &middot; {mt(totalWeight)} MT
+        </span>
+      </div>
+      <div className="max-h-96 overflow-auto divide-y">
+        {rows.length === 0 ? (
+          <div className="py-6 text-center text-xs text-muted-foreground">No structures.</div>
+        ) : groupByMfc ? (
+          mfcGroups.map(({ mfcBatch, rows: mfcRows }) => (
+            <MfcTopRow
+              key={mfcBatch}
+              mfcBatch={mfcBatch}
+              rows={mfcRows}
+              columns={columns}
+              currentColor={mfcColorMap.get(mfcBatch)}
+              canEdit={canEdit}
+              onSetColor={(color) => onSetMfcColor(mfcBatch, color)}
+              onClearColor={() => onClearMfcColor(mfcBatch)}
+            />
+          ))
+        ) : (
+          groups.map((g) => <ProjectRow key={g.project} group={g} columns={columns} />)
+        )}
+      </div>
+      <SummaryFooter summary={summary} />
+    </div>
+  );
+}
+
 function ManualEntryList({
   entries,
   onDelete,
   canEdit,
   deletingId,
   rawRows,
-  showWeight,
   projectMfcBatches,
 }: {
   entries: InventoryManualEntry[];
@@ -663,11 +452,12 @@ function ManualEntryList({
   canEdit: boolean;
   deletingId: number | null;
   rawRows?: Parameters<typeof aggregateProjectColumns>[0];
-  showWeight?: boolean;
   projectMfcBatches?: Map<string, string[]>;
 }) {
   if (entries.length === 0) {
-    return <div className="py-4 text-center text-xs text-muted-foreground">No entries.</div>;
+    return (
+      <div className="py-4 text-center text-xs text-muted-foreground">No entries.</div>
+    );
   }
   return (
     <div className="divide-y">
@@ -676,7 +466,6 @@ function ManualEntryList({
         const agg = rawRows
           ? aggregateProjectColumns(rawRows, e.projectCode, batch ?? undefined)
           : null;
-        // Flag entries whose batch no longer appears in the project's current WIP.
         const stale =
           batch != null &&
           projectMfcBatches != null &&
@@ -687,18 +476,19 @@ function ManualEntryList({
               <span className="flex items-center gap-1.5 min-w-0 truncate">
                 <span className="truncate">{e.projectCode}</span>
                 {batch && (
-                  <span className={`shrink-0 text-[10px] font-medium px-1 py-px rounded border ${stale ? "border-amber-500/60 text-amber-600 dark:text-amber-400" : "border-border/60 text-muted-foreground"}`}>
+                  <span
+                    className={`shrink-0 text-[10px] font-medium px-1 py-px rounded border ${
+                      stale
+                        ? "border-amber-500/60 text-amber-600 dark:text-amber-400"
+                        : "border-border/60 text-muted-foreground"
+                    }`}
+                  >
                     {batch}
                     {stale && " (not in WIP)"}
                   </span>
                 )}
               </span>
               <div className="flex items-center gap-2 shrink-0">
-                {showWeight && (
-                  <span className="text-xs tabular-nums text-muted-foreground">
-                    {mt(e.woOrderQtyMt)} MT
-                  </span>
-                )}
                 {e.note && <span className="text-xs text-muted-foreground">{e.note}</span>}
                 {canEdit && (
                   <Button
@@ -741,7 +531,6 @@ function ManualBucketSide({
   canEdit,
   deletingId,
   rawRows,
-  showWeight,
   summary,
   projectMfcBatches,
 }: {
@@ -751,7 +540,6 @@ function ManualBucketSide({
   canEdit: boolean;
   deletingId: number | null;
   rawRows?: Parameters<typeof aggregateProjectColumns>[0];
-  showWeight?: boolean;
   summary?: BucketSummary;
   projectMfcBatches?: Map<string, string[]>;
 }) {
@@ -772,7 +560,6 @@ function ManualBucketSide({
         canEdit={canEdit}
         deletingId={deletingId}
         rawRows={rawRows}
-        showWeight={showWeight}
         projectMfcBatches={projectMfcBatches}
       />
       {summary && <SummaryFooter summary={summary} />}
@@ -859,88 +646,56 @@ function ProjectCheckboxFilter({
 }
 
 function ManualAddForm({
-  mode,
   knownProjects,
   projectMfcBatches,
   onAdd,
   isPending,
 }: {
-  mode: "a" | "e";
   knownProjects: string[];
-  /** Per-project batch lists for the cascading MFC dropdown (mode "e" only). */
   projectMfcBatches?: Map<string, string[]>;
-  onAdd: (projectCode: string, side: InventorySide, woOrderQtyMt: number | null, mfcBatch?: string) => void;
+  onAdd: (projectCode: string, side: InventorySide, mfcBatch: string) => void;
   isPending: boolean;
 }) {
   const [projectCode, setProjectCode] = useState("");
   const [mfcBatch, setMfcBatch] = useState("");
   const [side, setSide] = useState<InventorySide>("in_house");
-  const [woOrderQtyMt, setWoOrderQtyMt] = useState<number | "">("");
 
-  // Reset MFC batch whenever the project changes.
   const handleProjectChange = (v: string | null) => {
     setProjectCode(v ?? "");
     setMfcBatch("");
   };
 
-  const batchOptions = mode === "e" && projectCode
-    ? (projectMfcBatches?.get(projectCode) ?? [])
-    : [];
+  const batchOptions = projectCode ? (projectMfcBatches?.get(projectCode) ?? []) : [];
 
   const submit = () => {
     const code = projectCode.trim();
-    if (!code) return;
-    if (mode === "a" && woOrderQtyMt === "") return;
-    if (mode === "e" && !mfcBatch) return;
-    onAdd(code, side, mode === "a" ? (woOrderQtyMt as number) : null, mode === "e" ? mfcBatch : undefined);
+    if (!code || !mfcBatch) return;
+    onAdd(code, side, mfcBatch);
     setProjectCode("");
     setMfcBatch("");
-    setWoOrderQtyMt("");
   };
 
-  const canSubmit =
-    !!projectCode.trim() &&
-    (mode === "a" ? woOrderQtyMt !== "" : !!mfcBatch) &&
-    !isPending;
+  const canSubmit = !!projectCode.trim() && !!mfcBatch && !isPending;
 
   return (
     <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b">
-      {mode === "a" ? (
-        <>
-          <Input
-            placeholder="Project code"
-            value={projectCode}
-            onChange={(e) => setProjectCode(e.target.value)}
-            className="h-8 w-40"
-          />
-          <NumberInput
-            placeholder="WO Qty (MT)"
-            value={woOrderQtyMt}
-            onValueChange={(raw) => setWoOrderQtyMt(raw === "" ? "" : Number(raw))}
-            className="h-8 w-28"
-          />
-        </>
-      ) : (
-        <>
-          <div className="w-44">
-            <SearchableSelect
-              value={projectCode || null}
-              onChange={handleProjectChange}
-              options={knownProjects}
-              allLabel="Select project..."
-            />
-          </div>
-          <div className="w-36">
-            <SearchableSelect
-              value={mfcBatch || null}
-              onChange={(v) => setMfcBatch(v ?? "")}
-              options={batchOptions}
-              allLabel={projectCode ? "Select batch..." : "Select project first"}
-              disabled={!projectCode || batchOptions.length === 0}
-            />
-          </div>
-        </>
-      )}
+      <div className="w-44">
+        <SearchableSelect
+          value={projectCode || null}
+          onChange={handleProjectChange}
+          options={knownProjects}
+          allLabel="Select project..."
+        />
+      </div>
+      <div className="w-36">
+        <SearchableSelect
+          value={mfcBatch || null}
+          onChange={(v) => setMfcBatch(v ?? "")}
+          options={batchOptions}
+          allLabel={projectCode ? "Select batch..." : "Select project first"}
+          disabled={!projectCode || batchOptions.length === 0}
+        />
+      </div>
       <Segmented
         value={side}
         onChange={(v) => setSide(v as InventorySide)}
@@ -949,12 +704,7 @@ function ManualAddForm({
           { value: "out_vendor", label: "Out-Vendor" },
         ]}
       />
-      <Button
-        size="sm"
-        className="h-8"
-        disabled={!canSubmit}
-        onClick={submit}
-      >
+      <Button size="sm" className="h-8" disabled={!canSubmit} onClick={submit}>
         Add
       </Button>
     </div>
@@ -964,21 +714,18 @@ function ManualAddForm({
 export default function InventoryView() {
   const { filters } = useTracker();
   const queryClient = useQueryClient();
-  const { available, asOnDate, isLoading, rawRows, buckets, manualA, manualE, projectMfcBatches } = useInventoryData();
+  const { available, asOnDate, isLoading, rawRows, buckets, manualE, projectMfcBatches } =
+    useInventoryData();
   const { data: authStatus } = useGetAuthStatus();
   const canEdit = !!authStatus?.authenticated;
   const { toast } = useToast();
 
-  /** Controls grouping mode for Buckets B, C, D (not A or E). */
   const [groupByMfc, setGroupByMfc] = useState(false);
 
   const jobFilter = filters.job;
   const isCurrentJobs = jobFilter === CURRENT_JOBS_FILTER_VALUE;
-  const { set: currentJobsSet, meta: currentJobsMeta } = useCurrentJobsSet();
+  const { set: currentJobsSet } = useCurrentJobsSet();
 
-  // Distinct projects present under the current Job filter (before the
-  // project-checkbox refinement below). Drives the checkbox list so it
-  // always reflects the active All/single-project/Current-Jobs scope.
   const jobScopedProjects = useMemo(() => {
     const set = new Set<string>();
     for (const r of rawRows) {
@@ -993,13 +740,8 @@ export default function InventoryView() {
     return Array.from(set).sort();
   }, [rawRows, jobFilter, isCurrentJobs, currentJobsSet]);
 
-  // Further, user-controlled refinement on top of the Job filter. `null`
-  // means "no refinement" (everything the Job filter allows is shown).
   const [selectedProjects, setSelectedProjects] = useState<Set<string> | null>(null);
 
-  // Reset the refinement whenever the underlying Job-filter scope changes so
-  // a stale per-project selection from a previous scope can't silently hide
-  // data in the new one.
   useEffect(() => {
     setSelectedProjects(null);
   }, [jobFilter]);
@@ -1014,104 +756,63 @@ export default function InventoryView() {
     return out.filter((r) => matchesProjectSelection(r.project));
   };
 
-  // Side overrides — loaded once, applied before rendering each auto-computed bucket.
-  const { data: sideOverrides = [] } = useListInventorySideOverrides();
-  const upsertSideOverride = useUpsertInventorySideOverride();
-  const deleteSideOverride = useDeleteInventorySideOverride();
-
-  // MFC backfill colours — loaded once, used by the color picker + export.
+  // MFC backfill colours — keyed by mfcBatch only (one colour per batch).
   const { data: mfcColors = [] } = useListInventoryMfcColors();
   const upsertMfcColor = useUpsertInventoryMfcColor();
   const deleteMfcColor = useDeleteInventoryMfcColor();
   const mfcColorMap = useMemo(
-    () => new Map(mfcColors.map((c) => [`${c.mfcBatch}|${c.side}`, c.color])),
+    () => new Map(mfcColors.map((c) => [c.mfcBatch, c.color])),
     [mfcColors],
   );
   const invalidateMfcColors = useCallback(
     () => queryClient.invalidateQueries({ queryKey: getListInventoryMfcColorsQueryKey() }),
     [queryClient],
   );
-  const setMfcColor = useCallback((mfcBatch: string, side: InventorySide, color: string) => {
-    upsertMfcColor.mutate(
-      { data: { mfcBatch, side, color: color as MfcColorName } },
-      {
-        onSuccess: () => { invalidateMfcColors(); },
-        onError: (err) => {
-          toast({
-            variant: "destructive",
-            title: "Failed to save colour",
-            description: err?.message ?? "Unknown error",
-          });
+  const setMfcColor = useCallback(
+    (mfcBatch: string, color: string) => {
+      upsertMfcColor.mutate(
+        { data: { mfcBatch, side: "in_house", color: color as MfcColorName } },
+        {
+          onSuccess: () => {
+            invalidateMfcColors();
+          },
+          onError: (err) => {
+            toast({
+              variant: "destructive",
+              title: "Failed to save colour",
+              description: err?.message ?? "Unknown error",
+            });
+          },
         },
-      },
-    );
-  }, [upsertMfcColor, invalidateMfcColors, toast]);
-  const clearMfcColor = useCallback((mfcBatch: string, side: InventorySide) => {
-    deleteMfcColor.mutate(
-      { params: { mfcBatch, side } },
-      {
-        onSuccess: () => { invalidateMfcColors(); },
-        onError: (err) => {
-          toast({
-            variant: "destructive",
-            title: "Failed to clear colour",
-            description: err?.message ?? "Unknown error",
-          });
+      );
+    },
+    [upsertMfcColor, invalidateMfcColors, toast],
+  );
+  const clearMfcColor = useCallback(
+    (mfcBatch: string) => {
+      deleteMfcColor.mutate(
+        { params: { mfcBatch, side: "in_house" } },
+        {
+          onSuccess: () => {
+            invalidateMfcColors();
+          },
+          onError: (err) => {
+            toast({
+              variant: "destructive",
+              title: "Failed to clear colour",
+              description: err?.message ?? "Unknown error",
+            });
+          },
         },
-      },
-    );
-  }, [deleteMfcColor, invalidateMfcColors, toast]);
-
-  const bPair = applyOverridesToBucket(
-    applyJobFilter(buckets.b.inHouse),
-    applyJobFilter(buckets.b.outVendor),
-    "b",
-    sideOverrides,
-  );
-  const bInHouse = bPair.inHouse;
-  const bOutVendor = bPair.outVendor;
-
-  const cPair = applyOverridesToBucket(
-    applyJobFilter(buckets.c.inHouse),
-    applyJobFilter(buckets.c.outVendor),
-    "c",
-    sideOverrides,
-  );
-  const cInHouse = cPair.inHouse;
-  const cOutVendor = cPair.outVendor;
-
-  const dPair = applyOverridesToBucket(
-    applyJobFilter(buckets.d.inHouse),
-    applyJobFilter(buckets.d.outVendor),
-    "d",
-    sideOverrides,
-  );
-  const dInHouse = dPair.inHouse;
-  const dOutVendor = dPair.outVendor;
-
-  // Per-bucket sets of projects that have a stored side override (for badge display).
-  const bOverriddenProjects = useMemo(
-    () => new Set(sideOverrides.filter((o) => o.bucket === "b").map((o) => o.projectCode)),
-    [sideOverrides],
-  );
-  const cOverriddenProjects = useMemo(
-    () => new Set(sideOverrides.filter((o) => o.bucket === "c").map((o) => o.projectCode)),
-    [sideOverrides],
-  );
-  const dOverriddenProjects = useMemo(
-    () => new Set(sideOverrides.filter((o) => o.bucket === "d").map((o) => o.projectCode)),
-    [sideOverrides],
+      );
+    },
+    [deleteMfcColor, invalidateMfcColors, toast],
   );
 
-  const resetSideOverride = (projectCode: string, bucket: string) => {
-    deleteSideOverride.mutate(
-      { params: { projectCode, bucket } },
-      {
-        onSuccess: () =>
-          queryClient.invalidateQueries({ queryKey: getListInventorySideOverridesQueryKey() }),
-      },
-    );
-  };
+  const bucketA = applyJobFilter(buckets.a);
+  const bRows = applyJobFilter(buckets.b);
+  const cRows = applyJobFilter(buckets.c);
+  const dRows = applyJobFilter(buckets.d);
 
   const knownProjects = useMemo(() => {
     const set = new Set<string>();
@@ -1119,107 +820,20 @@ export default function InventoryView() {
     return Array.from(set).sort();
   }, [rawRows]);
 
-  // ----- Bucket B/C/D row-selection state for the side-override dialog -----
-  const [bucketSelection, setBucketSelection] = useState<Set<string>>(new Set());
-  const [moveDialogOpen, setMoveDialogOpen] = useState(false);
-  const [moveSide, setMoveSide] = useState<InventorySide>("out_vendor");
-
-  // When a checkbox is checked, immediately open the override dialog.
-  // Unchecking does not re-open.  Cancel always clears selection so the user
-  // can pick a fresh project and get the popup again.
-  const toggleBucketItem = (key: string) => {
-    const isAdding = !bucketSelection.has(key);
-    setBucketSelection((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-    if (isAdding) {
-      // Pre-fill target side as opposite of the item's source side.
-      const parsed = parseBucketSelKey(key);
-      setMoveSide(parsed.side === "in_house" ? "out_vendor" : "in_house");
-      setMoveDialogOpen(true);
-    }
-  };
-
-  const clearBucketSelection = () => setBucketSelection(new Set());
-
-  const selectedBucketItems = useMemo(
-    () => [...bucketSelection].map(parseBucketSelKey),
-    [bucketSelection],
-  );
-
-  // Unique (project, bucket) pairs — a project in B and C would appear twice.
-  const uniqueProjectBuckets = useMemo(() => {
-    const seen = new Set<string>();
-    const pairs: Array<{ project: string; bucket: "b" | "c" | "d" }> = [];
-    for (const item of selectedBucketItems) {
-      const key = `${item.bucket}|${item.project}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        pairs.push({ project: item.project, bucket: item.bucket as "b" | "c" | "d" });
-      }
-    }
-    return pairs;
-  }, [selectedBucketItems]);
-
-  const openMoveDialog = () => {
-    const inHouseCount = selectedBucketItems.filter((i) => i.side === "in_house").length;
-    setMoveSide(inHouseCount >= selectedBucketItems.length / 2 ? "out_vendor" : "in_house");
-    setMoveDialogOpen(true);
-  };
-
-  const applyMove = () => {
-    for (const { project, bucket } of uniqueProjectBuckets) {
-      upsertSideOverride.mutate(
-        { data: { projectCode: project, bucket, side: moveSide } },
-        {
-          onSuccess: () =>
-            queryClient.invalidateQueries({ queryKey: getListInventorySideOverridesQueryKey() }),
-        },
-      );
-    }
-    setMoveDialogOpen(false);
-    clearBucketSelection();
-  };
-  // ---------------------------------------------------------------
-
-  const upsertA = useUpsertInventoryManualA();
-  const deleteA = useDeleteInventoryManualA();
   const upsertE = useUpsertInventoryManualE();
   const deleteE = useDeleteInventoryManualE();
-  const [deletingAId, setDeletingAId] = useState<number | null>(null);
   const [deletingEId, setDeletingEId] = useState<number | null>(null);
 
-  const addA = (projectCode: string, side: InventorySide, woOrderQtyMt: number | null) => {
-    upsertA.mutate(
-      { data: { projectCode, side, woOrderQtyMt } },
-      { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListInventoryManualAQueryKey() }) },
-    );
-  };
-  const removeA = (id: number) => {
-    setDeletingAId(id);
-    deleteA.mutate(
-      { params: { id } },
-      {
-        onSettled: () => {
-          setDeletingAId(null);
-          queryClient.invalidateQueries({ queryKey: getListInventoryManualAQueryKey() });
-        },
-      },
-    );
-  };
   const addE = (projectCode: string, side: InventorySide, mfcBatch: string) => {
     upsertE.mutate(
       { data: { projectCode, side, mfcBatch } },
-      { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListInventoryManualEQueryKey() }) },
+      {
+        onSuccess: () =>
+          queryClient.invalidateQueries({ queryKey: getListInventoryManualEQueryKey() }),
+      },
     );
   };
-  const addESlot = (projectCode: string, side: InventorySide, _woOrderQtyMt: number | null, mfcBatch?: string) =>
-    addE(projectCode, side, mfcBatch ?? "Z");
 
-  const manualAWeightSum = manualA.reduce((s, e) => s + (e.woOrderQtyMt ?? 0), 0);
   const manualEInHouseSummary = useMemo(
     () =>
       computeManualESummary(
@@ -1251,9 +865,6 @@ export default function InventoryView() {
     );
   };
 
-  // Export honours the current Job filter (applyJobFilter is already applied
-  // to buckets B/C/D above); manual Buckets A/E are filtered the same way so
-  // a filtered export never leaks other projects' manual entries.
   const applyJobFilterManual = (entries: InventoryManualEntry[]): InventoryManualEntry[] => {
     let out = entries;
     if (isCurrentJobs) out = out.filter((e) => currentJobsSet.has(e.projectCode));
@@ -1261,15 +872,10 @@ export default function InventoryView() {
     return out.filter((e) => matchesProjectSelection(e.projectCode));
   };
 
-  // Export grain: one row per (project, mfcBatch). sortMfcFirst=true orders
-  // MFC->Project (mirrors Group-by-MFC mode); false orders Project->MFC
-  // (mirrors Group-by-Project mode).
   const projectMfcRows = (
-    side: InventorySide,
     rows: InventoryStructureCard[],
     columns: ColumnDef[],
     sortMfcFirst: boolean,
-    mfcColorMap?: Map<string, string>,
   ): Record<string, string | number | null>[] => {
     const map = new Map<string, Record<string, string | number | null>>();
     for (const r of rows) {
@@ -1277,19 +883,14 @@ export default function InventoryView() {
       const existing = map.get(key);
       if (!existing) {
         const row: Record<string, string | number | null> = {
-          side: SIDE_LABELS[side],
           project: r.project,
           mfcBatch: r.mfcBatch,
           structureCount: 1,
         };
         for (const col of columns) row[col.key] = col.get(r) ?? 0;
-        if (mfcColorMap) {
-          // Use the same "?? Z" fallback as groupByMfcBatch so null-batch rows
-          // match the color stored under the "Z" key.
-          const colorName = mfcColorMap.get(`${r.mfcBatch ?? "Z"}|${side}`) as MfcColorName | undefined;
-          if (colorName && colorName in MFC_COLOR_ARGB) {
-            row._bgColor = MFC_COLOR_ARGB[colorName];
-          }
+        const colorName = mfcColorMap.get(r.mfcBatch ?? "Z") as MfcColorName | undefined;
+        if (colorName && colorName in MFC_COLOR_ARGB) {
+          row._bgColor = MFC_COLOR_ARGB[colorName];
         }
         map.set(key, row);
       } else {
@@ -1331,33 +932,38 @@ export default function InventoryView() {
 
   const summaryToRows = (label: string, summary: BucketSummary): XlsxSummaryRow[] => [
     { label: `${label} SUMMARY`, values: {} },
-    { label: "Total Release Balance", values: { release: summary.releaseBalanceMt, fab: summary.releaseBalanceMt } },
-    { label: "Under Production", values: { fabGalva: summary.underProductionMt, fab: summary.underProductionMt } },
+    {
+      label: "Total Release Balance",
+      values: { release: summary.releaseBalanceMt, fab: summary.releaseBalanceMt },
+    },
+    {
+      label: "Under Production",
+      values: { fabGalva: summary.underProductionMt, fab: summary.underProductionMt },
+    },
     { label: "Total Yard", values: { yard: summary.yardMt } },
-    { label: "Operation Weight", values: { fab: summary.operationWeightMt, fabGalva: summary.operationWeightMt } },
-    { label: "Grand Total Weight", values: { fab: summary.grandTotalMt, fabGalva: summary.grandTotalMt } },
+    {
+      label: "Operation Weight",
+      values: { fab: summary.operationWeightMt, fabGalva: summary.operationWeightMt },
+    },
+    {
+      label: "Grand Total Weight",
+      values: { fab: summary.grandTotalMt, fabGalva: summary.grandTotalMt },
+    },
   ];
 
   const autoBucketSheet = (
     name: string,
-    inHouse: InventoryStructureCard[],
-    outVendor: InventoryStructureCard[],
+    rows: InventoryStructureCard[],
     columns: ColumnDef[],
     clampRelease: boolean,
     mfcFirst: boolean,
-    mfcColorMap?: Map<string, string>,
   ): XlsxSheet => {
-    // Column order mirrors the active grouping:
-    // Project-grouped → Side, Project, MFC Batch, data…, Structures
-    // MFC-grouped     → Side, MFC Batch, Project, data…, Structures
     const baseColumns = mfcFirst
       ? [
-          { label: "Side", field: "side" },
           { label: "MFC Batch", field: "mfcBatch" },
           { label: "Project", field: "project" },
         ]
       : [
-          { label: "Side", field: "side" },
           { label: "Project", field: "project" },
           { label: "MFC Batch", field: "mfcBatch" },
         ];
@@ -1376,12 +982,8 @@ export default function InventoryView() {
       columns: [...baseColumns, ...dataColumns],
       sections: [
         {
-          rows: projectMfcRows("in_house", inHouse, columns, mfcFirst, mfcColorMap),
-          summaryRows: summaryToRows("In-House", computeBucketSummary(inHouse, clampRelease)),
-        },
-        {
-          rows: projectMfcRows("out_vendor", outVendor, columns, mfcFirst, mfcColorMap),
-          summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(outVendor, clampRelease)),
+          rows: projectMfcRows(rows, columns, mfcFirst),
+          summaryRows: summaryToRows(name, computeBucketSummary(rows, clampRelease)),
         },
       ],
     };
@@ -1395,8 +997,6 @@ export default function InventoryView() {
         side: SIDE_LABELS[e.side as InventorySide],
         project: e.projectCode,
         mfcBatch: batch ?? "",
-        woOrderQtyMt: e.woOrderQtyMt,
-        note: e.note ?? "",
         releaseBalanceMt: agg?.releaseBalanceMt ?? null,
         fabGalvaMt: agg?.fabGalvaMt ?? null,
         yardMt: agg?.yardMt ?? null,
@@ -1405,31 +1005,52 @@ export default function InventoryView() {
     });
 
   const handleExport = () => {
-    const filteredManualA = applyJobFilterManual(manualA);
     const filteredManualE = applyJobFilterManual(manualE);
+    const bucketAGroups = groupByProject(bucketA);
 
     const sheets: XlsxSheet[] = [
       {
         name: "A - " + BUCKET_LABELS.a.slice(0, 28),
         columns: [
-          { label: "Side", field: "side" },
           { label: "Project", field: "project" },
-          { label: "WO Qty (MT)", field: "woOrderQtyMt", numeric: true, decimals: 3, total: true },
-          { label: "Note", field: "note" },
+          { label: "Structures", field: "structures", numeric: true, decimals: 0 },
+          { label: "Order Qty (MT)", field: "orderQtyMt", numeric: true, decimals: 3, total: true },
         ],
-        rows: manualBucketRows(filteredManualA, false),
+        rows: bucketAGroups.map((g) => ({
+          project: g.project,
+          structures: g.count,
+          orderQtyMt: g.weightMt,
+        })),
       },
-      autoBucketSheet("B - Raw Material Incomplete", bInHouse, bOutVendor, BUCKET_B_COLUMNS, false, groupByMfc, mfcColorMap),
-      autoBucketSheet("C - RM Complete", cInHouse, cOutVendor, BUCKET_CD_COLUMNS, true, groupByMfc, mfcColorMap),
-      autoBucketSheet("D - Dispatch Clearance", dInHouse, dOutVendor, BUCKET_CD_COLUMNS, true, groupByMfc, mfcColorMap),
+      autoBucketSheet(
+        "B - Raw Material Incomplete",
+        bRows,
+        BUCKET_B_COLUMNS,
+        false,
+        groupByMfc,
+      ),
+      autoBucketSheet("C - RM Complete", cRows, BUCKET_CD_COLUMNS, true, groupByMfc),
+      autoBucketSheet("D - Dispatch Clearance", dRows, BUCKET_CD_COLUMNS, true, groupByMfc),
       {
         name: "E - Ready Not Dispatched",
         columns: [
           { label: "Side", field: "side" },
           { label: "Project", field: "project" },
           { label: "MFC Batch", field: "mfcBatch" },
-          { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
-          { label: "Fab+Galva (MT)", field: "fabGalvaMt", numeric: true, decimals: 3, total: true },
+          {
+            label: "Release Balance (MT)",
+            field: "releaseBalanceMt",
+            numeric: true,
+            decimals: 3,
+            total: true,
+          },
+          {
+            label: "Fab+Galva (MT)",
+            field: "fabGalvaMt",
+            numeric: true,
+            decimals: 3,
+            total: true,
+          },
           { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
           { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
         ],
@@ -1437,104 +1058,14 @@ export default function InventoryView() {
       },
     ];
 
-    // Combined sheet: InHouse blocks side-by-side on top, OutVendor below.
-    // B/C/D use projectMfcRows (project-first ordering in the combined sheet).
-    const allManualA = manualBucketRows(filteredManualA, false);
-    const allManualE = manualBucketRows(filteredManualE, true);
-    const aRowsIH = allManualA.filter((r) => r.side === SIDE_LABELS.in_house);
-    const aRowsOV = allManualA.filter((r) => r.side === SIDE_LABELS.out_vendor);
-    const eRowsIH = allManualE.filter((r) => r.side === SIDE_LABELS.in_house);
-    const eRowsOV = allManualE.filter((r) => r.side === SIDE_LABELS.out_vendor);
-
-    // blockCols: used in the Combined sheet; no "Side" column (side is the band label).
-    // Column order mirrors the active grouping toggle.
-    const blockCols = (cols: ColumnDef[]) => groupByMfc
-      ? [
-          { label: "MFC Batch", field: "mfcBatch" },
-          { label: "Project", field: "project" },
-          ...cols.map((c) => ({ label: c.label, field: c.key, numeric: true, decimals: 3, total: true })),
-          { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
-        ]
-      : [
-          { label: "Project", field: "project" },
-          { label: "MFC Batch", field: "mfcBatch" },
-          ...cols.map((c) => ({ label: c.label, field: c.key, numeric: true, decimals: 3, total: true })),
-          { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
-        ];
-
-    const aCols: XlsxBlockGroup["columns"] = [
-      { label: "Project", field: "project" },
-      { label: "WO Qty (MT)", field: "woOrderQtyMt", numeric: true, decimals: 3, total: true },
-    ];
-    const eCols: XlsxBlockGroup["columns"] = groupByMfc
-      ? [
-          { label: "MFC Batch", field: "mfcBatch" },
-          { label: "Project", field: "project" },
-          { label: "Release Bal. (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
-          { label: "Fab+Galva (MT)", field: "fabGalvaMt", numeric: true, decimals: 3, total: true },
-          { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
-          { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
-        ]
-      : [
-          { label: "Project", field: "project" },
-          { label: "MFC Batch", field: "mfcBatch" },
-          { label: "Release Bal. (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
-          { label: "Fab+Galva (MT)", field: "fabGalvaMt", numeric: true, decimals: 3, total: true },
-          { label: "Yard (MT)", field: "yardMt", numeric: true, decimals: 3, total: true },
-          { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
-        ];
-
-    const combined = {
-      inHouse: [
-        { label: "A - " + BUCKET_LABELS.a.slice(0, 26), columns: aCols, rows: aRowsIH },
-        {
-          label: "B - Raw Material Incomplete",
-          columns: blockCols(BUCKET_B_COLUMNS),
-          rows: projectMfcRows("in_house", bInHouse, BUCKET_B_COLUMNS, groupByMfc, mfcColorMap),
-          summaryRows: summaryToRows("In-House", computeBucketSummary(bInHouse, false)),
-        },
-        {
-          label: "C - RM Complete",
-          columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectMfcRows("in_house", cInHouse, BUCKET_CD_COLUMNS, groupByMfc, mfcColorMap),
-          summaryRows: summaryToRows("In-House", computeBucketSummary(cInHouse, true)),
-        },
-        {
-          label: "D - Dispatch Clearance",
-          columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectMfcRows("in_house", dInHouse, BUCKET_CD_COLUMNS, groupByMfc, mfcColorMap),
-          summaryRows: summaryToRows("In-House", computeBucketSummary(dInHouse, true)),
-        },
-        { label: "E - Ready Not Dispatched", columns: eCols, rows: eRowsIH },
-      ] satisfies XlsxBlockGroup[],
-      outVendor: [
-        { label: "A - " + BUCKET_LABELS.a.slice(0, 26), columns: aCols, rows: aRowsOV },
-        {
-          label: "B - Raw Material Incomplete",
-          columns: blockCols(BUCKET_B_COLUMNS),
-          rows: projectMfcRows("out_vendor", bOutVendor, BUCKET_B_COLUMNS, groupByMfc, mfcColorMap),
-          summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(bOutVendor, false)),
-        },
-        {
-          label: "C - RM Complete",
-          columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectMfcRows("out_vendor", cOutVendor, BUCKET_CD_COLUMNS, groupByMfc, mfcColorMap),
-          summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(cOutVendor, true)),
-        },
-        {
-          label: "D - Dispatch Clearance",
-          columns: blockCols(BUCKET_CD_COLUMNS),
-          rows: projectMfcRows("out_vendor", dOutVendor, BUCKET_CD_COLUMNS, groupByMfc, mfcColorMap),
-          summaryRows: summaryToRows("Out-Vendor", computeBucketSummary(dOutVendor, true)),
-        },
-        { label: "E - Ready Not Dispatched", columns: eCols, rows: eRowsOV },
-      ] satisfies XlsxBlockGroup[],
-    };
-
     const date = new Date().toISOString().slice(0, 10);
-    const baseTag = isCurrentJobs ? "current-jobs" : jobFilter ? jobFilter.replace(/[^\w-]+/g, "-") : "all";
+    const baseTag = isCurrentJobs
+      ? "current-jobs"
+      : jobFilter
+        ? jobFilter.replace(/[^\w-]+/g, "-")
+        : "all";
     const tag = selectedProjects !== null ? `${baseTag}-filtered` : baseTag;
-    void exportToXlsxSheets(`inventory_${tag}_${date}.xlsx`, sheets, combined);
+    void exportToXlsxSheets(`inventory_${tag}_${date}.xlsx`, sheets);
   };
 
   return (
@@ -1571,9 +1102,8 @@ export default function InventoryView() {
           <CardContent className="py-4 flex items-center gap-2 text-sm">
             <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
             <span>
-              No Current Jobs list has been uploaded (or it&apos;s empty), so
-              the Current Jobs filter matches nothing. Upload a project-code
-              list on the Data page.
+              No Current Jobs list has been uploaded (or it&apos;s empty), so the Current Jobs
+              filter matches nothing. Upload a project-code list on the Data page.
             </span>
           </CardContent>
         </Card>
@@ -1584,9 +1114,8 @@ export default function InventoryView() {
           <CardContent className="py-4 flex items-center gap-2 text-sm">
             <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
             <span>
-              No Order Review file has been ingested yet. Buckets B, C and D need
-              the Order Review upload (Data page) to compute — Buckets A and E
-              below are manual and work regardless.
+              No Order Review file has been ingested yet. Buckets A, B, C and D need the Order
+              Review upload (Data page) to compute — Bucket E below is manual and works regardless.
             </span>
           </CardContent>
         </Card>
@@ -1599,68 +1128,44 @@ export default function InventoryView() {
         </div>
       )}
 
-      {available && (buckets.excludedNullReleaseCount > 0 || buckets.excludedNullInspectionCount > 0) && (
-        <Card className="border-amber-500/40">
-          <CardContent className="py-3 flex items-center gap-2 text-sm">
-            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
-            <span>
-              {buckets.excludedNullReleaseCount > 0 && (
-                <>
-                  {buckets.excludedNullReleaseCount} structure
-                  {buckets.excludedNullReleaseCount === 1 ? "" : "s"} excluded from
-                  Bucket B/C (no Balance Release value).{" "}
-                </>
-              )}
-              {buckets.excludedNullInspectionCount > 0 && (
-                <>
-                  {buckets.excludedNullInspectionCount} structure
-                  {buckets.excludedNullInspectionCount === 1 ? "" : "s"} excluded
-                  from Bucket D (no Inspection value).
-                </>
-              )}
-            </span>
-          </CardContent>
-        </Card>
-      )}
+      {available &&
+        (buckets.excludedNullReleaseCount > 0 || buckets.excludedNullInspectionCount > 0) && (
+          <Card className="border-amber-500/40">
+            <CardContent className="py-3 flex items-center gap-2 text-sm">
+              <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+              <span>
+                {buckets.excludedNullReleaseCount > 0 && (
+                  <>
+                    {buckets.excludedNullReleaseCount} structure
+                    {buckets.excludedNullReleaseCount === 1 ? "" : "s"} excluded from Bucket B/C
+                    (no Balance Release value).{" "}
+                  </>
+                )}
+                {buckets.excludedNullInspectionCount > 0 && (
+                  <>
+                    {buckets.excludedNullInspectionCount} structure
+                    {buckets.excludedNullInspectionCount === 1 ? "" : "s"} excluded from Bucket D
+                    (no Inspection value).
+                  </>
+                )}
+              </span>
+            </CardContent>
+          </Card>
+        )}
 
-      {/* Bucket A */}
+      {/* Bucket A — computed from Order Review */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">A — {BUCKET_LABELS.a}</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          {canEdit && (
-            <ManualAddForm mode="a" knownProjects={knownProjects} onAdd={addA} isPending={upsertA.isPending} />
+        <CardContent>
+          {isLoading ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
+          ) : (
+            <BucketAPanel rows={bucketA} />
           )}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <ManualBucketSide side="in_house" entries={manualA} onDelete={removeA} canEdit={canEdit} deletingId={deletingAId} showWeight />
-            <ManualBucketSide side="out_vendor" entries={manualA} onDelete={removeA} canEdit={canEdit} deletingId={deletingAId} showWeight />
-          </div>
-          <div className="flex items-center justify-between text-xs px-1">
-            <span className="text-muted-foreground">Under Production Weight</span>
-            <span className="tabular-nums font-medium">{mt(manualAWeightSum)} MT</span>
-          </div>
         </CardContent>
       </Card>
-
-      {/* Selection action bar — appears when any B/C/D project rows are checked */}
-      {bucketSelection.size > 0 && (
-        <div className="flex items-center justify-between gap-3 px-3 py-2 bg-primary/5 border border-primary/20 rounded-md">
-          <span className="text-sm font-medium">
-            {bucketSelection.size} project{bucketSelection.size === 1 ? "" : "s"} selected
-          </span>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="h-8" onClick={clearBucketSelection}>
-              Clear
-            </Button>
-            {canEdit && (
-              <Button size="sm" className="h-8 gap-1.5" onClick={openMoveDialog}>
-                <ArrowRightLeft className="h-3.5 w-3.5" /> Move Contractor
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Group-by toggle for Buckets B / C / D */}
       <div className="flex items-center gap-2">
@@ -1676,67 +1181,6 @@ export default function InventoryView() {
         <span className="text-xs text-muted-foreground">(applies to B, C, D)</span>
       </div>
 
-      {/* Side-override dialog — auto-opens on checkbox check; cancel clears selection */}
-      <Dialog open={moveDialogOpen} onOpenChange={(open) => { if (!open) { setMoveDialogOpen(false); clearBucketSelection(); } }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Set side for selected projects</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            {/* Selected summary */}
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                Selected ({uniqueProjectBuckets.length})
-              </p>
-              <div className="border rounded-md divide-y max-h-36 overflow-auto">
-                {uniqueProjectBuckets.map((item) => (
-                  <div
-                    key={`${item.bucket}|${item.project}`}
-                    className="flex items-center justify-between px-2.5 py-1 text-xs"
-                  >
-                    <span className="font-medium truncate">{item.project}</span>
-                    <span className="text-muted-foreground shrink-0 ml-2">
-                      Bucket {BUCKET_SOURCE_LABEL[item.bucket as keyof typeof BUCKET_SOURCE_LABEL]}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Target side */}
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground">Target side</p>
-              <Segmented
-                value={moveSide}
-                onChange={(v) => setMoveSide(v as InventorySide)}
-                options={[
-                  { value: "in_house", label: "In-House" },
-                  { value: "out_vendor", label: "Out-Vendor" },
-                ]}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                This override is stored permanently and applied on every page load,
-                regardless of the contractor classification in the WIP file.
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setMoveDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={upsertSideOverride.isPending}
-              onClick={applyMove}
-            >
-              Apply to {uniqueProjectBuckets.length} project
-              {uniqueProjectBuckets.length === 1 ? "" : "s"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Bucket B */}
       <Card>
         <CardHeader>
@@ -1746,10 +1190,16 @@ export default function InventoryView() {
           {isLoading ? (
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide bucket="b" side="in_house" rows={bInHouse} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={bOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "b")} canEdit={canEdit} mfcColorMap={mfcColorMap} onSetMfcColor={setMfcColor} onClearMfcColor={clearMfcColor} />
-              <AutoBucketSide bucket="b" side="out_vendor" rows={bOutVendor} columns={BUCKET_B_COLUMNS} clampRelease={false} groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={bOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "b")} canEdit={canEdit} mfcColorMap={mfcColorMap} onSetMfcColor={setMfcColor} onClearMfcColor={clearMfcColor} />
-            </div>
+            <AutoBucketPanel
+              rows={bRows}
+              columns={BUCKET_B_COLUMNS}
+              clampRelease={false}
+              groupByMfc={groupByMfc}
+              mfcColorMap={mfcColorMap}
+              canEdit={canEdit}
+              onSetMfcColor={setMfcColor}
+              onClearMfcColor={clearMfcColor}
+            />
           )}
         </CardContent>
       </Card>
@@ -1763,10 +1213,16 @@ export default function InventoryView() {
           {isLoading ? (
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide bucket="c" side="in_house" rows={cInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={cOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "c")} canEdit={canEdit} mfcColorMap={mfcColorMap} onSetMfcColor={setMfcColor} onClearMfcColor={clearMfcColor} />
-              <AutoBucketSide bucket="c" side="out_vendor" rows={cOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={cOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "c")} canEdit={canEdit} mfcColorMap={mfcColorMap} onSetMfcColor={setMfcColor} onClearMfcColor={clearMfcColor} />
-            </div>
+            <AutoBucketPanel
+              rows={cRows}
+              columns={BUCKET_CD_COLUMNS}
+              clampRelease
+              groupByMfc={groupByMfc}
+              mfcColorMap={mfcColorMap}
+              canEdit={canEdit}
+              onSetMfcColor={setMfcColor}
+              onClearMfcColor={clearMfcColor}
+            />
           )}
         </CardContent>
       </Card>
@@ -1780,10 +1236,16 @@ export default function InventoryView() {
           {isLoading ? (
             <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <AutoBucketSide bucket="d" side="in_house" rows={dInHouse} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={dOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "d")} canEdit={canEdit} mfcColorMap={mfcColorMap} onSetMfcColor={setMfcColor} onClearMfcColor={clearMfcColor} />
-              <AutoBucketSide bucket="d" side="out_vendor" rows={dOutVendor} columns={BUCKET_CD_COLUMNS} clampRelease groupByMfc={groupByMfc} selectedKeys={bucketSelection} onToggle={toggleBucketItem} overriddenProjects={dOverriddenProjects} onResetOverride={(p) => resetSideOverride(p, "d")} canEdit={canEdit} mfcColorMap={mfcColorMap} onSetMfcColor={setMfcColor} onClearMfcColor={clearMfcColor} />
-            </div>
+            <AutoBucketPanel
+              rows={dRows}
+              columns={BUCKET_CD_COLUMNS}
+              clampRelease
+              groupByMfc={groupByMfc}
+              mfcColorMap={mfcColorMap}
+              canEdit={canEdit}
+              onSetMfcColor={setMfcColor}
+              onClearMfcColor={clearMfcColor}
+            />
           )}
         </CardContent>
       </Card>
@@ -1795,18 +1257,41 @@ export default function InventoryView() {
         </CardHeader>
         <CardContent className="space-y-3">
           {canEdit && (
-            <ManualAddForm mode="e" knownProjects={knownProjects} projectMfcBatches={projectMfcBatches} onAdd={addESlot} isPending={upsertE.isPending} />
+            <ManualAddForm
+              knownProjects={knownProjects}
+              projectMfcBatches={projectMfcBatches}
+              onAdd={addE}
+              isPending={upsertE.isPending}
+            />
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <ManualBucketSide side="in_house" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} rawRows={rawRows} summary={manualEInHouseSummary} projectMfcBatches={projectMfcBatches} />
-            <ManualBucketSide side="out_vendor" entries={manualE} onDelete={removeE} canEdit={canEdit} deletingId={deletingEId} rawRows={rawRows} summary={manualEOutVendorSummary} projectMfcBatches={projectMfcBatches} />
+            <ManualBucketSide
+              side="in_house"
+              entries={manualE}
+              onDelete={removeE}
+              canEdit={canEdit}
+              deletingId={deletingEId}
+              rawRows={rawRows}
+              summary={manualEInHouseSummary}
+              projectMfcBatches={projectMfcBatches}
+            />
+            <ManualBucketSide
+              side="out_vendor"
+              entries={manualE}
+              onDelete={removeE}
+              canEdit={canEdit}
+              deletingId={deletingEId}
+              rawRows={rawRows}
+              summary={manualEOutVendorSummary}
+              projectMfcBatches={projectMfcBatches}
+            />
           </div>
         </CardContent>
       </Card>
 
       {!canEdit && (
         <p className="text-xs text-muted-foreground text-center">
-          Sign in (Data page) to add or remove manual Bucket A / E entries.
+          Sign in (Data page) to add or remove manual Bucket E entries.
         </p>
       )}
     </div>

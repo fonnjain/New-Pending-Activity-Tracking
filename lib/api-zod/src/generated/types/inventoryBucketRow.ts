@@ -5,18 +5,21 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { InventoryBucketRowWipWeightByContractor } from './inventoryBucketRowWipWeightByContractor';
 
 /**
- * One (project, structure) row from the latest Order Review snapshot, joined to the distinct contractors touching that structure in the newest WIP import. Raw only — the client derives B/C/D membership and in-house/out-vendor sides from these fields.
+ * One (project, structure) row from the latest Order Review snapshot, joined to the newest WIP import for hasWipMarks and mfcBatch resolution. Client derives Bucket A/B/C/D membership from these fields.
 
  */
 export interface InventoryBucketRow {
   project: string;
   structure: string | null;
   subType: string | null;
+  /** Order Qty Weight (Col G). Display weight for Bucket A. */
   weightMt: number | null;
+  /** WO Order Qty Weight (Col J). Zero check drives Bucket A. */
   woOrderQtyMt: number | null;
+  /** Progress -> Release (Col L). Together with woOrderQtyMt drives Bucket A (both ≈ 0). */
+  releaseMt: number | null;
   /** Balance -> Release (Col S). Drives Bucket B (>0) / Bucket C (<=0). */
   fileBalReleaseMt: number | null;
   /** Progress -> Inspection (Col O). Drives Bucket D (>0). */
@@ -27,17 +30,10 @@ export interface InventoryBucketRow {
   balFabMt: number | null;
   /** Balance -> Galvanising (Col U). The "Galva" data column (B combines with balFabMt into Fab+Galva; C/D show separately). */
   balGalvMt: number | null;
-  /** Distinct contractor names touching this structure in the newest WIP import. */
-  contractors: string[];
-  /** True when this row was last touched by an earlier Order Review upload, not the newest one. */
-  notInLatest: boolean;
   /** True when this (project, structure) has at least one mark in the latest WIP import with Order Nature = Structure. False means all production is finished and the structure has dropped out of the WIP file — these rows are excluded from Buckets B/C/D by the client.
    */
   hasWipMarks: boolean;
   /** MFC Batch letter (A/B/C/D) resolved from the structure's WIP marks (the batch with the greatest cumulative Balance Weight wins when multiple real batches appear on one structure). "Z" when all marks have blank/no batch, meaning the structure is live but not yet assigned to a batch.
    */
   mfcBatch: string;
-  /** Sum of WIP Balance Wt (kg) per contractor across all Structure-order-nature WIP marks for this (project, structure). Empty-string key represents a blank contractor (treated as in-house). Used client-side to compute the in-house / out-vendor weight-split ratio so mixed structures are never double-counted.
-   */
-  wipWeightByContractor: InventoryBucketRowWipWeightByContractor;
 }

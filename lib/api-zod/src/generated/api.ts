@@ -1873,19 +1873,17 @@ export const GetInventoryBucketsResponse = zod.object({
   "project": zod.string(),
   "structure": zod.string().nullable(),
   "subType": zod.string().nullable(),
-  "weightMt": zod.number().nullable(),
-  "woOrderQtyMt": zod.number().nullable(),
+  "weightMt": zod.number().nullable().describe('Order Qty Weight (Col G). Display weight for Bucket A.'),
+  "woOrderQtyMt": zod.number().nullable().describe('WO Order Qty Weight (Col J). Zero check drives Bucket A.'),
+  "releaseMt": zod.number().nullable().describe('Progress -> Release (Col L). Together with woOrderQtyMt drives Bucket A (both ≈ 0).'),
   "fileBalReleaseMt": zod.number().nullable().describe('Balance -> Release (Col S). Drives Bucket B (>0) \/ Bucket C (<=0).'),
   "inspectionMt": zod.number().nullable().describe('Progress -> Inspection (Col O). Drives Bucket D (>0).'),
   "galvMt": zod.number().nullable().describe('Progress -> Galvanising (Col N). The \"Yard\" data column shown on every auto bucket (B\/C\/D\/E).'),
   "balFabMt": zod.number().nullable().describe('Balance -> Fabrication (Col T). The \"Fab\" data column (B combines with balGalvMt into Fab+Galva; C\/D show separately).'),
   "balGalvMt": zod.number().nullable().describe('Balance -> Galvanising (Col U). The \"Galva\" data column (B combines with balFabMt into Fab+Galva; C\/D show separately).'),
-  "contractors": zod.array(zod.string()).describe('Distinct contractor names touching this structure in the newest WIP import.'),
-  "notInLatest": zod.boolean().describe('True when this row was last touched by an earlier Order Review upload, not the newest one.'),
   "hasWipMarks": zod.boolean().describe('True when this (project, structure) has at least one mark in the latest WIP import with Order Nature = Structure. False means all production is finished and the structure has dropped out of the WIP file — these rows are excluded from Buckets B\/C\/D by the client.\n'),
-  "mfcBatch": zod.string().describe('MFC Batch letter (A\/B\/C\/D) resolved from the structure\'s WIP marks (the batch with the greatest cumulative Balance Weight wins when multiple real batches appear on one structure). \"Z\" when all marks have blank\/no batch, meaning the structure is live but not yet assigned to a batch.\n'),
-  "wipWeightByContractor": zod.record(zod.string(), zod.number()).describe('Sum of WIP Balance Wt (kg) per contractor across all Structure-order-nature WIP marks for this (project, structure). Empty-string key represents a blank contractor (treated as in-house). Used client-side to compute the in-house \/ out-vendor weight-split ratio so mixed structures are never double-counted.\n')
-}).describe('One (project, structure) row from the latest Order Review snapshot, joined to the distinct contractors touching that structure in the newest WIP import. Raw only — the client derives B\/C\/D membership and in-house\/out-vendor sides from these fields.\n'))
+  "mfcBatch": zod.string().describe('MFC Batch letter (A\/B\/C\/D) resolved from the structure\'s WIP marks (the batch with the greatest cumulative Balance Weight wins when multiple real batches appear on one structure). \"Z\" when all marks have blank\/no batch, meaning the structure is live but not yet assigned to a batch.\n')
+}).describe('One (project, structure) row from the latest Order Review snapshot, joined to the newest WIP import for hasWipMarks and mfcBatch resolution. Client derives Bucket A\/B\/C\/D membership from these fields.\n'))
 })
 
 

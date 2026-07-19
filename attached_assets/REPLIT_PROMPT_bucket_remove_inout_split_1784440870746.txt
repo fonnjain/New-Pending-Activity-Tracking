@@ -1,0 +1,99 @@
+TASK: Remove the In-House / Out-Vendor bifurcation from the Bucket List entirely. Each bucket
+becomes ONE single list. No side split, no weight splitting, no ratios.
+
+=====================================================================
+WHAT TO REMOVE
+=====================================================================
+Delete the two-column / two-panel In-House vs Out-Vendor presentation from buckets B, C and D
+(and anywhere else in the Bucket List it appears):
+  - No "IN-HOUSE" / "OUT-VENDOR" panels, headers, sections or side badges.
+  - No "Side" column in the UI or in the Excel export.
+  - No per-side subtotals, counts or summary blocks.
+  - REMOVE the weight-splitting logic entirely: no in-house ratio, no proportional split of
+    Fabrication / Galvanising / Yard, no "Release Balance is 100% in-house" rule. All of that
+    machinery goes away — it exists only to serve the split.
+  - Do not compute a contractor-derived side for bucket rows at all.
+
+This also removes the double-counting problem by construction: each structure's Order-Review
+weight is now counted ONCE, in one row.
+
+=====================================================================
+WHAT THE BUCKET LIST BECOMES
+=====================================================================
+One flat list per bucket, using the FULL Order-Review value per structure (no division):
+    Release Balance = Col S (Balance Release)
+    Fabrication     = Col T (Balance Fabrication)
+    Galvanising     = Col U (Balance Galvanising)
+    Yard            = Col N (Progress Galvanising)
+
+Everything else stays exactly as it is now:
+  - Grouping: Project -> MFC Batch (no structure rows), plus the "Group by MFC" toggle that
+    inverts to MFC Batch -> Projects.
+  - MFC Batch column (A/B/C/D/Z) retained.
+  - Completed structures (no WIP marks) remain EXCLUDED.
+  - Bucket membership rules unchanged: B = Balance Release > 0; C = Balance Release <= 0;
+    D = Progress Inspection > 0.
+  - The clamp (max(0, ...) for C/D Release Balance display) still applies.
+  - Bucket A and Bucket E behaviour unchanged (A is manual project + WO qty; E is manual
+    project + MFC Batch, and its C/D removal rule still applies, with Bucket B exempt).
+  - Excel export keeps its per-bucket sheets, minus the Side column.
+
+Contractor information is NOT needed anywhere in the Bucket List after this change. The
+Contractor Wise page is unaffected and keeps its own contractor logic.
+
+=====================================================================
+EXPECTED VALUES (verified, 18-Jul files, TLT, completed excluded)
+=====================================================================
+BUCKET B — 204 structures
+  MFC  proj  str    Rel Bal        Fab      Galva       Yard
+  A       6   33    283.940   1158.921    357.893    668.359
+  B      11   37    373.831    682.444    295.686    683.124
+  C       5   38    655.101    864.376    163.206    191.987
+  D       1    6      7.588     39.953      0.303      1.562
+  Z      17   90   1088.275    159.245     15.371   1804.728
+  TOTAL     204   2408.735   2904.939    832.459   3349.760
+
+BUCKET C — 525 structures  (Release Balance clamps to 0 by design)
+  A      25  137      0.000    298.635     75.041    938.015
+  B      23  136      0.000    811.265    412.082   2630.774
+  C       6   35      0.000    186.258     50.186     60.690
+  D       1   18      0.000     52.563      2.502      2.408
+  Z      39  199      0.000    375.779    128.128   3037.491
+  TOTAL     525      0.000   1724.500    667.939   6669.378
+
+BUCKET D — 292 structures
+  A      11   80    199.758    660.773    108.903   1144.369
+  B      10   75     24.014    411.631    294.874   2736.214
+  C       2   35     11.434     91.209     36.712      7.856
+  D       1    1      0.000      1.072      1.009      0.160
+  Z      20  101    165.690    183.618     81.816   4623.836
+  TOTAL     292    400.896   1348.303    523.314   8512.435
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change bucket membership rules, the completed-structure exclusion, the MFC batch
+  assignment, the Project/MFC grouping, the toggle, or the clamp.
+- Do NOT change Bucket A or Bucket E logic (including E's removal from C and D only).
+- Do NOT touch the Contractor Wise page or the contractor classification used elsewhere.
+- Do NOT join on WIP Col H; the structure join stays Order Review Col C == WIP Col J (Alias).
+- Do NOT forward-fill the project code.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- No In-House / Out-Vendor panels, headers, badges, "Side" column or per-side subtotals remain
+  anywhere in the Bucket List UI or its Excel export.
+- The split/ratio code is deleted (not merely hidden). Grep confirms no in-house ratio or
+  proportional weight split remains in the bucket code path.
+- Structure counts: Bucket B = 204, Bucket C = 525, Bucket D = 292.
+- Bucket totals match the tables above exactly, e.g. Bucket B Rel Bal 2408.735,
+  Fab 2904.939, Galva 832.459, Yard 3349.760.
+- Each structure contributes its FULL Order-Review value once — no fractional values like
+  23.8235... remain from the old split.
+- Project/MFC grouping and the "Group by MFC" toggle still work; totals reconcile between
+  the two grouping modes.
+- Bucket A and Bucket E still behave as before.
+Report: the three bucket structure counts, the per-MFC tables, and confirmation the splitting
+logic has been removed from the code.

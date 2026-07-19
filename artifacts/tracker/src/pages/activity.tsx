@@ -12,8 +12,147 @@ import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 import { formatWeight, formatDate } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { compareActivity } from "@workspace/domain";
+import { useSettings } from "@/lib/settings";
 
 const ROW_CAP = 300;
+
+function ActivityPerformanceTable({
+  activities,
+  sortedActivities,
+}: {
+  activities: Map<string, any[]>;
+  sortedActivities: string[];
+}) {
+  const { settings } = useSettings();
+
+  const idealDaysMap = useMemo(() => {
+    const m = new Map<string, number>();
+    const acts = settings?.activities ?? {};
+    for (const [code, cfg] of Object.entries(acts)) {
+      if (cfg?.idealDays != null) {
+        m.set(code.toUpperCase(), cfg.idealDays);
+      }
+    }
+    return m;
+  }, [settings]);
+
+  const rows = useMemo(() =>
+    sortedActivities.map((act) => {
+      const recs = activities.get(act)!;
+      const projects = new Set<string>();
+      const contractors = new Set<string>();
+      let weightMt = 0;
+      let aged0to30 = 0;
+      let aged31to60 = 0;
+      let aged60plus = 0;
+      let notAged = 0;
+      let ageSum = 0;
+      let agedCount = 0;
+
+      for (const r of recs) {
+        if (r.job) projects.add(r.job);
+        if (r.contractor) contractors.add(r.contractor);
+        weightMt += r.balanceWt ?? 0;
+        const d = r.ageingDays as number | null;
+        if (d == null) {
+          notAged++;
+        } else {
+          agedCount++;
+          ageSum += d;
+          if (d <= 30) aged0to30++;
+          else if (d <= 60) aged31to60++;
+          else aged60plus++;
+        }
+      }
+
+      const avgAge = agedCount > 0 ? Math.round(ageSum / agedCount) : null;
+      const idealDays = idealDaysMap.get(act.toUpperCase()) ?? null;
+
+      return {
+        act,
+        marks: recs.length,
+        weightMt,
+        projects: projects.size,
+        contractors: contractors.size,
+        avgAge,
+        aged0to30,
+        aged31to60,
+        aged60plus,
+        notAged,
+        idealDays,
+      };
+    }),
+    [sortedActivities, activities, idealDaysMap],
+  );
+
+  if (rows.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Activity Performance Summary</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-12">Activity</TableHead>
+                <TableHead className="text-right">Marks</TableHead>
+                <TableHead className="text-right">Wt (MT)</TableHead>
+                <TableHead className="text-right">Projects</TableHead>
+                <TableHead className="text-right">Contractors</TableHead>
+                <TableHead className="text-right">Avg Age</TableHead>
+                <TableHead className="text-right">0-30d</TableHead>
+                <TableHead className="text-right">31-60d</TableHead>
+                <TableHead className="text-right">&gt;60d</TableHead>
+                <TableHead className="text-right">Not Aged</TableHead>
+                <TableHead className="text-right">Ideal Days</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.act}>
+                  <TableCell>
+                    <span className="inline-flex items-center justify-center bg-secondary text-secondary-foreground font-bold w-8 h-7 rounded text-xs">
+                      {r.act}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{r.marks.toLocaleString()}</TableCell>
+                  <TableCell className="text-right tabular-nums">{r.weightMt.toFixed(3)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{r.projects}</TableCell>
+                  <TableCell className="text-right tabular-nums">{r.contractors}</TableCell>
+                  <TableCell className={`text-right tabular-nums font-medium ${getAgeingColor(r.avgAge)}`}>
+                    {r.avgAge != null ? `${r.avgAge}d` : "-"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-green-600 dark:text-green-400">{r.aged0to30}</TableCell>
+                  <TableCell className="text-right tabular-nums text-amber-600 dark:text-amber-400">{r.aged31to60}</TableCell>
+                  <TableCell className="text-right tabular-nums text-red-600 dark:text-red-400">{r.aged60plus}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{r.notAged}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {r.idealDays != null ? `${r.idealDays}d` : "-"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+            <TableFooter className="sticky bottom-0 z-10 bg-muted">
+              <TableRow>
+                <TableCell className="font-semibold">Total</TableCell>
+                <TableCell className="text-right tabular-nums font-bold">
+                  {rows.reduce((s, r) => s + r.marks, 0).toLocaleString()}
+                </TableCell>
+                <TableCell className="text-right tabular-nums font-bold">
+                  {rows.reduce((s, r) => s + r.weightMt, 0).toFixed(3)}
+                </TableCell>
+                <TableCell colSpan={8} />
+              </TableRow>
+            </TableFooter>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function ActivityView() {
   const { selectedImportId } = useTracker();
@@ -156,6 +295,8 @@ function ActivityContent() {
           Not aged: <span className="font-semibold text-foreground">{notAgedCount.toLocaleString()} marks ({notAgedWt.toFixed(3)} MT)</span> have no reference date (no Assign Date for pre-production, no Last Production Entry Date otherwise) — excluded from ageing buckets and averages above.
         </div>
       )}
+
+      <ActivityPerformanceTable activities={activities} sortedActivities={sortedActivities} />
 
       <div className="space-y-3">
         {sortedActivities.map(act => (

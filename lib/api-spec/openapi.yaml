@@ -3221,9 +3221,8 @@ components:
       type: object
       description: >
         One (project, structure) row from the latest Order Review snapshot,
-        joined to the distinct contractors touching that structure in the
-        newest WIP import. Raw only — the client derives B/C/D membership and
-        in-house/out-vendor sides from these fields.
+        joined to the newest WIP import for hasWipMarks and mfcBatch
+        resolution. Client derives Bucket A/B/C/D membership from these fields.
       properties:
         project:
           type: string
@@ -3236,9 +3235,15 @@ components:
         weightMt:
           type: number
           nullable: true
+          description: Order Qty Weight (Col G). Display weight for Bucket A.
         woOrderQtyMt:
           type: number
           nullable: true
+          description: WO Order Qty Weight (Col J). Zero check drives Bucket A.
+        releaseMt:
+          type: number
+          nullable: true
+          description: Progress -> Release (Col L). Together with woOrderQtyMt drives Bucket A (both ≈ 0).
         fileBalReleaseMt:
           type: number
           nullable: true
@@ -3259,14 +3264,6 @@ components:
           type: number
           nullable: true
           description: Balance -> Galvanising (Col U). The "Galva" data column (B combines with balFabMt into Fab+Galva; C/D show separately).
-        contractors:
-          type: array
-          items:
-            type: string
-          description: Distinct contractor names touching this structure in the newest WIP import.
-        notInLatest:
-          type: boolean
-          description: True when this row was last touched by an earlier Order Review upload, not the newest one.
         hasWipMarks:
           type: boolean
           description: >
@@ -3282,31 +3279,20 @@ components:
             multiple real batches appear on one structure). "Z" when all marks
             have blank/no batch, meaning the structure is live but not yet
             assigned to a batch.
-        wipWeightByContractor:
-          type: object
-          additionalProperties:
-            type: number
-          description: >
-            Sum of WIP Balance Wt (kg) per contractor across all Structure-order-nature
-            WIP marks for this (project, structure). Empty-string key represents a blank
-            contractor (treated as in-house). Used client-side to compute the in-house /
-            out-vendor weight-split ratio so mixed structures are never double-counted.
       required:
         - project
         - structure
         - subType
         - weightMt
         - woOrderQtyMt
+        - releaseMt
         - fileBalReleaseMt
         - inspectionMt
         - galvMt
         - balFabMt
         - balGalvMt
-        - contractors
-        - notInLatest
         - hasWipMarks
         - mfcBatch
-        - wipWeightByContractor
     InventoryBucketsResponse:
       type: object
       properties:

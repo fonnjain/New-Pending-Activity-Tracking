@@ -59,27 +59,20 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
     .orderBy(desc(importsTable.id))
     .limit(1);
 
-  const contractorsByKey = new Map<string, Set<string>>();
   // (project, structure) keys that have at least one WIP mark with Order
   // Nature = Structure. Drives completed-structure exclusion: a bucket row
   // with no matching WIP marks is finished production and should be hidden.
   const wipStructureKeys = new Set<string>();
   // batch -> cumulative balance weight per (project, structure); used to
   // resolve the representative MFC Batch when a structure has marks in more
-  // than one real batch (only one structure in the current files).
+  // than one real batch.
   const mfcBatchWt = new Map<string, Map<string, number>>();
-  // contractor -> cumulative balance weight per (project, structure), for
-  // Structure marks only. Used client-side to compute the in-house / out-
-  // vendor weight-split ratio without double-counting mixed structures.
-  // Blank / null contractor uses the empty-string key (treated as in-house).
-  const contractorWeightsByKey = new Map<string, Map<string, number>>();
 
   if (newestWip) {
     const marks = await db
       .select({
         job: recordPoolTable.job,
         structure: recordPoolTable.structure,
-        contractor: recordPoolTable.contractor,
         orderNature: recordPoolTable.orderNature,
         mfcBatch: recordPoolTable.mfcBatch,
         balanceWt: recordPoolTable.balanceWt,
@@ -90,16 +83,6 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
 
     for (const m of marks) {
       const key = `${m.job}\u0001${m.structure}`;
-
-      // Contractor side-classification (unchanged)
-      if (m.contractor) {
-        let set = contractorsByKey.get(key);
-        if (!set) {
-          set = new Set();
-          contractorsByKey.set(key, set);
-        }
-        set.add(m.contractor);
-      }
 
       // Completed-exclusion: only Structure rows can ever match an Order
       // Review (project, structure) key; NTLT rows have no structure so they
@@ -117,22 +100,12 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
           }
           bmap.set(batch, (bmap.get(batch) ?? 0) + (m.balanceWt ?? 0));
         }
-        // Accumulate balance weight per contractor for in-house/out-vendor
-        // ratio computation. Blank/null contractor = "" (resolves to in-house).
-        const c = m.contractor ?? "";
-        let cwmap = contractorWeightsByKey.get(key);
-        if (!cwmap) {
-          cwmap = new Map();
-          contractorWeightsByKey.set(key, cwmap);
-        }
-        cwmap.set(c, (cwmap.get(c) ?? 0) + (m.balanceWt ?? 0));
       }
     }
   }
 
   const rows = latestRows.map((r) => {
     const key = `${r.project}\u0001${r.structure}`;
-    const contractors = contractorsByKey.get(key);
 
     // Completed-exclusion flag: false = no WIP marks → structure is done.
     const hasWipMarks = wipStructureKeys.has(key);
@@ -151,38 +124,23 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
       }
     }
 
-    // Per-contractor balance weight for the hybrid in-house/out-vendor split.
-    // Empty string key = blank contractor (in-house). Sent raw so the client
-    // can apply its own resolveContractorSide classification consistently.
-    const cwmap = contractorWeightsByKey.get(key);
-    const wipWeightByContractor: Record<string, number> = {};
-    if (cwmap) {
-      for (const [c, wt] of cwmap) {
-        wipWeightByContractor[c] = wt;
-      }
-    }
-
     return {
       project: r.project,
       structure: r.structure,
       subType: r.subType,
       weightMt: r.weightMt,
       woOrderQtyMt: r.woOrderQtyMt,
+      releaseMt: r.releaseMt,
       fileBalReleaseMt: r.fileBalReleaseMt,
       inspectionMt: r.inspectionMt,
-      // Data columns for the Inventory page's per-bucket display: galvMt =
-      // Progress Galvanising (col N, "Yard"); balFabMt/balGalvMt = Balance
-      // Fabrication/Galvanising (cols T/U). Sent raw/unclamped — the display
-      // clamp (max(0, releaseBalance)) and Fab+Galva sum are computed
-      // client-side so null-handling ("-" vs 0) stays in one place.
+      // Data columns: galvMt = Progress Galvanising (col N, "Yard");
+      // balFabMt/balGalvMt = Balance Fabrication/Galvanising (cols T/U).
+      // Sent raw/unclamped — display clamp and Fab+Galva sum computed client-side.
       galvMt: r.galvMt,
       balFabMt: r.balFabMt,
       balGalvMt: r.balGalvMt,
-      contractors: contractors ? Array.from(contractors) : [],
-      notInLatest: false,
       hasWipMarks,
       mfcBatch,
-      wipWeightByContractor,
     };
   });
 
