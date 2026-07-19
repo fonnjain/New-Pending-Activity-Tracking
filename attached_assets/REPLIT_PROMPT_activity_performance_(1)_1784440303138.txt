@@ -1,0 +1,116 @@
+TASK: Add an "Activity Performance" view to the Activity Wise page, mirroring the existing
+Contractor Performance view on the Contractor Wise page.
+
+=====================================================================
+GUIDING PRINCIPLE — MIRROR, DO NOT REINVENT
+=====================================================================
+The Contractor Wise page already has a Contractor Performance view. Activity Performance must
+be the SAME view with the grouping dimension swapped from Contractor to Activity.
+
+Before building: read the existing Contractor Performance implementation and reuse it.
+  - Same metrics, same column set, same ordering/sorting behaviour
+  - Same visual treatment (cards/table/colour bands/badges)
+  - Same filters (Order Type TLT/NTLT, Current Jobs, MFC, date, contractor, project)
+  - Same Excel export shape and naming conventions
+  - Same empty/na handling ("-" for no data)
+Only the grouping key changes: rows are ACTIVITIES instead of contractors. If Contractor
+Performance shows a metric this prompt does not list, INCLUDE IT ANYWAY (mirroring wins). If a
+contractor-only metric has no activity equivalent, omit it and say so in your report.
+
+=====================================================================
+GROUPING
+=====================================================================
+One row per Activity (WIP Col S "Activity"), TLT scope = Order Nature (Col C) "Structure",
+respecting the page's Order Type toggle (TLT / NTLT / All) exactly as other pages do.
+
+Activity display names (use the same labels as the targets file):
+    C=Cutting, HG=Grinding, RFI=Ready for Inspection, NH=Notching/Hole, B=Bending,
+    HAB=Heat/Assembly-Bending, W=Welding, Q=Quality, TS=Tee Stock, G=Galvanizing,
+    GB=Galvanizing & Bundle, Y=Yard
+Blank activity = FG Pending (marks with no activity, Type = "FG Pending For Dispatch"). Label
+it "FG Pending", do not show "(blank)" or "Unknown".
+
+=====================================================================
+METRICS PER ACTIVITY (verified values, WIP 18-Jul, TLT)
+=====================================================================
+Include at minimum: Marks, Balance Weight (MT), Projects, Contractors, Avg Ageing (days),
+ageing buckets 0-30 / 31-60 / 60+, and Not Aged count.
+
+  Act    Label                 Marks    Wt(MT)  Proj Contr   Aged  NotAged  AvgAge  0-30 31-60  60+
+  C      Cutting              15,770  2779.224    52    30  11,083   4,687    41.2  5391  3122 2570
+  Y      Yard                  5,481  1904.038    48     3   5,481       0    39.5  2344  2023 1114
+  (FG)   FG Pending            6,358  1139.946    47    10   6,358       0    38.4  4133   855 1370
+  RFI    Ready for Inspection  8,097  1017.589    43    28   8,097       0    25.3  6350  1165  582
+  GB     Galvanizing & Bundle  3,498   657.478    48     7   3,498       0    20.5  2725   753   20
+  G      Galvanizing           3,839   537.463    48     8   3,839       0    25.6  2874   944   21
+  TS     Tee Stock             1,733   344.304    35     6   1,733       0    22.1  1416   178  139
+  NH     Notching / Hole       1,721   211.930    26    23   1,721       0    19.3  1718     0    3
+  Q      Quality               1,793   211.605    40    22   1,793       0    25.3  1638    60   95
+  B      Bending                 568   106.029    20    11     568       0    20.9   567     1    0
+  W      Welding                 440    37.753    16     6     440       0    50.5   320    35   85
+  HAB    Heat/Assembly-Bending    19     7.741     7     4      19       0    19.8    18     1    0
+
+IMPORTANT — these Cutting figures ALREADY apply the new Cutting rule: marks with
+Type (Col A) = "Job Card Not Started" AND Job Card Status (Col G) = "Initial" are EXCLUDED from
+Cutting. Use the shared Cutting predicate; do not recompute it differently here.
+
+=====================================================================
+PERFORMANCE vs TARGET (this is what makes it "performance")
+=====================================================================
+Score each activity against the per-activity target from the Targets & Grace configuration
+(same source the warning system already uses):
+    Ideal Days = 3 for every activity; Blue Grace 7d, Grey Grace 21d, Black Grace 21d.
+Show per activity:
+  - Target (Ideal Days)
+  - Avg Ageing vs Target (e.g. "41.2d vs 3d" and/or a multiple like "13.7x")
+  - % of aged marks BREACHING the target (ageing > ideal days), by marks and by weight
+  - The same Blue/Grey/Black grace banding the warning system uses, so the colours match
+Use the EXISTING targets/grace source and the EXISTING colour semantics — do not introduce a
+second, parallel target definition. If Contractor Performance already renders a target
+comparison, copy that presentation exactly.
+
+CONTEXT the user should see (do not hide it): actual ageing runs far above the 3-day ideal for
+every activity, so breach rates are near-universal. Cutting averages 41.2 days against a 3-day
+ideal. Present this factually; the calibration of the targets is a business decision, not
+something to silently smooth over.
+
+=====================================================================
+NOT-AGED VISIBILITY (required, not optional)
+=====================================================================
+Cutting has 4,687 marks (1,209.103 MT) with NO Assign Date, which cannot be aged and are
+EXCLUDED from all ageing buckets and averages. Every other activity has 0 not-aged marks.
+Show the Not Aged count (and weight) as its own column/figure so the Avg Ageing and bucket
+counts cannot be mistaken for full coverage. State the population each average is computed
+over. Never treat a null ageing as 0.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT alter the Contractor Performance view; only mirror it.
+- Do NOT recompute ageing differently here — reuse the existing ageing logic (Activity C ages
+  from Assign Date; other activities from Last Production Entry Date; UTC whole days; future
+  dates clamp to 0; null is excluded, never 0).
+- Do NOT re-derive the Cutting exclusion; use the shared predicate.
+- Do NOT create a second targets/grace definition.
+- Do NOT forward-fill the project code; use each row's own Col B.
+- Do NOT change parsing identity/hash/dedup, Activity values, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- The Activity Wise page shows an Activity Performance view that visually matches Contractor
+  Performance (same metrics, layout, colours, filters, export).
+- Row values match the table above (TLT, WIP 18-Jul), notably:
+    Cutting 15,770 marks / 2779.224 MT / avg 41.2d / 4,687 not aged
+    Yard 5,481 / 1904.038 / avg 39.5d / 0 not aged
+    Welding 440 / 37.753 / avg 50.5d (highest average ageing)
+    HAB 19 / 7.741 (smallest)
+- Blank activity displays as "FG Pending" (6,358 marks / 1139.946 MT), not "(blank)"/"Unknown".
+- Marks and weight per activity sum to the app's existing Activity Wise totals (no drift).
+- Not Aged is shown and excluded from averages/buckets; only Cutting is non-zero.
+- Target comparison uses the existing Targets & Grace source and matching colour bands.
+- All page filters (Order Type, Current Jobs, MFC, dates, contractor, project) apply.
+- Excel export mirrors the on-screen view.
+Report: the rendered activity table, which Contractor Performance metrics were mirrored, any
+contractor-only metric omitted (and why), and confirmation the Cutting figures use the shared
+exclusion predicate.
