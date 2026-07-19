@@ -17,6 +17,7 @@ import {
 } from "@/lib/velocity";
 import { compareActivity } from "@workspace/domain";
 import { EmptyState } from "./overview";
+import { ProjectCompletionBanner } from "@/components/project-completion-banner";
 import { AlertTriangle, ChevronRight, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
@@ -206,6 +207,8 @@ function StuckContent({ importId }: { importId: number }) {
           and advisory — never changes ageing, activity, or thresholds.
         </p>
       </div>
+
+      <ProjectCompletionBanner />
 
       {!velocity.hasHistory && (
         <Card className="border-border">

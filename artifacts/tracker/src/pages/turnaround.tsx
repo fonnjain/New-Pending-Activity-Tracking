@@ -22,6 +22,7 @@ import { LIFECYCLE_LABELS, lifecycleBgColor, lifecycleTextColor } from "@/lib/tu
 import { TurnaroundWarnings } from "@/components/turnaround-warnings";
 import { AiTurnaroundReport } from "@/components/ai-turnaround-report";
 import { EmptyState } from "./overview";
+import { ProjectCompletionBanner } from "@/components/project-completion-banner";
 import { SlidersHorizontal, Clock, ChevronRight, FileSpreadsheet } from "lucide-react";
 import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 
@@ -58,6 +59,7 @@ function TurnaroundContent({ importId }: { importId: number }) {
         </Link>
       </div>
 
+      <ProjectCompletionBanner />
       <TurnaroundBreakdown records={records} />
       <TurnaroundWarnings records={records} />
       <UrgencyWorklist records={records} />
