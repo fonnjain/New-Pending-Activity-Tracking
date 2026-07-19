@@ -28,6 +28,7 @@ const ADMIN_TABS = [
   { path: "/computed-fg", label: "Computed FG" },
   { path: "/order-reconciliation", label: "Order Reconciliation" },
   { path: "/release-balance", label: "Release Balance" },
+  { path: "/order-review-generated", label: "Order Review (Gen.)" },
   { path: "/contractor-setup", label: "Contractor Setup" },
   { path: "/warning-parameters", label: "Warning Parameters" },
   { path: "/thickness", label: "Thickness" },
@@ -62,6 +63,8 @@ function AdminTabbedPage() {
         <OrderReconciliationContent />
       ) : active === "/release-balance" ? (
         <ReleaseBalanceContent />
+      ) : active === "/order-review-generated" ? (
+        <GeneratedOrderReviewContent />
       ) : active === "/contractor-setup" ? (
         <ContractorSetupContent />
       ) : active === "/warning-parameters" ? (
@@ -839,6 +842,373 @@ function ReleaseBalanceContent() {
     </div>
   );
 }
+
+// ─── Generated Order Review ──────────────────────────────────────────────────
+
+const GEN_FAB_PROG = new Set(["G", "GB", "Y"]);
+const GEN_FAB_BAL  = new Set(["C", "HG", "RFI", "NH", "B", "HAB", "W", "Q", "TS"]);
+const GEN_GALV_BAL = new Set(["C", "HG", "RFI", "NH", "B", "HAB", "W", "Q", "TS", "G", "GB"]);
+
+type GenStructRow = {
+  structure: string; subType: string | null; mfcBatch: string; markCount: number;
+  L: number; M: number; N: number; S: number; T: number; U: number; V: number;
+  orL: number | null; orS: number | null; hasDiff: boolean;
+};
+type GenProjGroup = {
+  project: string; releasePct: number; structures: GenStructRow[];
+  totals: { L: number; M: number; N: number; S: number; T: number; U: number; V: number };
+};
+
+function GeneratedOrderReviewContent() {
+  const { selectedImportId } = useTracker();
+  const { data: allRecordsRaw, isLoading: recLoading } = useGetImportRecords(
+    selectedImportId as number,
+    { query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) } },
+  );
+  const { data: orderStatus, isLoading: orLoading } = useGetOrderStatus({
+    query: { queryKey: getGetOrderStatusQueryKey() },
+  });
+  const isLoading = recLoading || orLoading;
+
+  // OR lookup: "project|structure" → order status row
+  const orByKey = useMemo(() => {
+    const rows = orderStatus?.rows ?? [];
+    return new Map(rows.map((r) => [`${r.project}|${r.structure}`, r]));
+  }, [orderStatus]);
+
+  // Project-level OR summary: project → { releaseMt, woQtyMt }
+  const orProjSummary = useMemo(() => {
+    const m = new Map<string, { releaseMt: number; woQtyMt: number }>();
+    for (const r of orderStatus?.rows ?? []) {
+      const p = m.get(r.project) ?? { releaseMt: 0, woQtyMt: 0 };
+      m.set(r.project, {
+        releaseMt: p.releaseMt + (r.releaseMt ?? 0),
+        woQtyMt:   p.woQtyMt   + (r.woOrderQtyMt ?? 0),
+      });
+    }
+    return m;
+  }, [orderStatus]);
+
+  const projectGroups = useMemo((): GenProjGroup[] => {
+    const records = allRecordsRaw ?? [];
+    // TLT / Structure marks only, with a real project code and a structure
+    const tlt = records.filter(
+      (r) =>
+        (r.category === "TLT" || (r.orderNature ?? "").trim().toUpperCase() === "STRUCTURE") &&
+        r.job && r.job !== "(Unassigned)",
+    );
+
+    // Group: project → structure → marks[]
+    type Rec = typeof tlt[number];
+    const byProj = new Map<string, Map<string, Rec[]>>();
+    for (const r of tlt) {
+      const struct = (r.structure ?? "").trim();
+      if (!struct) continue;
+      if (!byProj.has(r.job)) byProj.set(r.job, new Map());
+      const sm = byProj.get(r.job)!;
+      if (!sm.has(struct)) sm.set(struct, []);
+      sm.get(struct)!.push(r);
+    }
+
+    const groups: GenProjGroup[] = [];
+    for (const [proj, structMap] of byProj) {
+      const orS      = orProjSummary.get(proj);
+      const projWoQty   = orS?.woQtyMt   ?? 0;
+      const projRelease = orS?.releaseMt  ?? 0;
+      const releasePct  = projWoQty > 0 ? (projRelease / projWoQty) * 100 : 0;
+      // Skip projects that are beyond the trust boundary (> 5% released)
+      if (projWoQty > 0 && releasePct >= 5) continue;
+
+      const structures: GenStructRow[] = [];
+      for (const [struct, marks] of structMap) {
+        const actOf   = (r: Rec) => (r.activity ?? "").toUpperCase().trim();
+        const sum     = (arr: Rec[]) => arr.reduce((s, r) => s + (r.balanceWt ?? 0), 0);
+        const toMt    = (kg: number) => kg / 1000;
+        const nonInit = marks.filter((r) => !r.isInitialCutting);
+
+        const L = toMt(sum(nonInit));
+        const S = toMt(sum(marks.filter((r) =>  r.isInitialCutting)));
+        const M = toMt(sum(nonInit.filter((r) => GEN_FAB_PROG.has(actOf(r)))));
+        const T = toMt(sum(nonInit.filter((r) => GEN_FAB_BAL.has(actOf(r)))));
+        const N = toMt(sum(nonInit.filter((r) => actOf(r) === "Y")));
+        const U = toMt(sum(nonInit.filter((r) => GEN_GALV_BAL.has(actOf(r)))));
+        const V = toMt(sum(marks.filter((r) => actOf(r) !== "Y")));
+
+        const orRow = orByKey.get(`${proj}|${struct}`);
+        const orL   = orRow?.releaseMt       ?? null;
+        const orSv  = orRow?.fileBalReleaseMt ?? null;
+        const diffL = orL  != null ? Math.abs(L - orL)  : null;
+        const diffS = orSv != null ? Math.abs(S - orSv) : null;
+
+        structures.push({
+          structure: struct,
+          subType: marks[0]?.towerSubType ?? null,
+          mfcBatch: marks[0]?.mfcBatch ?? "Z",
+          markCount: marks.length,
+          L, M, N, S, T, U, V,
+          orL, orS: orSv,
+          hasDiff: (diffL != null && diffL > 0.5) || (diffS != null && diffS > 0.5),
+        });
+      }
+      structures.sort((a, b) => a.structure.localeCompare(b.structure));
+
+      const sf = (f: keyof Pick<GenStructRow, "L"|"M"|"N"|"S"|"T"|"U"|"V">) =>
+        structures.reduce((s, r) => s + r[f], 0);
+      groups.push({
+        project: proj, releasePct, structures,
+        totals: { L: sf("L"), M: sf("M"), N: sf("N"), S: sf("S"), T: sf("T"), U: sf("U"), V: sf("V") },
+      });
+    }
+    groups.sort((a, b) => a.project.localeCompare(b.project));
+    return groups;
+  }, [allRecordsRaw, orByKey, orProjSummary]);
+
+  const grand = useMemo(() => ({
+    L: projectGroups.reduce((s, g) => s + g.totals.L, 0),
+    M: projectGroups.reduce((s, g) => s + g.totals.M, 0),
+    N: projectGroups.reduce((s, g) => s + g.totals.N, 0),
+    S: projectGroups.reduce((s, g) => s + g.totals.S, 0),
+    T: projectGroups.reduce((s, g) => s + g.totals.T, 0),
+    U: projectGroups.reduce((s, g) => s + g.totals.U, 0),
+    V: projectGroups.reduce((s, g) => s + g.totals.V, 0),
+  }), [projectGroups]);
+
+  const handleExport = () => {
+    const rows = projectGroups.flatMap((pg) =>
+      pg.structures.map((s) => ({
+        project: pg.project, structure: s.structure,
+        subType: s.subType ?? "", mfcBatch: s.mfcBatch, marks: s.markCount,
+        L: s.L, M: s.M, N: s.N, S: s.S, T: s.T, U: s.U, V: s.V,
+        orL: s.orL, orS: s.orS,
+      })),
+    );
+    exportToXlsx(
+      `generated_order_review_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      [
+        { label: "Project",                           field: "project"  },
+        { label: "Structure",                         field: "structure" },
+        { label: "Sub Type",                          field: "subType"  },
+        { label: "MFC Batch",                         field: "mfcBatch" },
+        { label: "Marks",                             field: "marks",   numeric: true },
+        { label: "Progress Release L [Gen] (MT)",     field: "L", numeric: true, decimals: 3, total: true },
+        { label: "Progress Fab M [Gen] (MT)",         field: "M", numeric: true, decimals: 3, total: true },
+        { label: "Progress Galv N [Gen] (MT)",        field: "N", numeric: true, decimals: 3, total: true },
+        { label: "Balance Release S [Gen] (MT)",      field: "S", numeric: true, decimals: 3, total: true },
+        { label: "Balance Fab T [Gen] (MT)",          field: "T", numeric: true, decimals: 3, total: true },
+        { label: "Balance Galv U [Gen] (MT)",         field: "U", numeric: true, decimals: 3, total: true },
+        { label: "Balance Insp V [Gen] (MT)",         field: "V", numeric: true, decimals: 3, total: true },
+        { label: "OR File – Progress Release L (MT)", field: "orL", numeric: true, decimals: 3 },
+        { label: "OR File – Balance Release S (MT)",  field: "orS", numeric: true, decimals: 3 },
+      ] as XlsxColumn[],
+      rows,
+      { sheetName: "Generated Order Review" },
+    );
+  };
+
+  if (!selectedImportId) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-muted-foreground text-sm">
+          No import selected. Select a WIP import from the Data tab to generate this view.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-muted-foreground text-sm">Loading...</CardContent>
+      </Card>
+    );
+  }
+
+  const structCount = projectGroups.reduce((s, g) => s + g.structures.length, 0);
+  const markCount   = projectGroups.reduce((s, g) => g.structures.reduce((ss, str) => ss + str.markCount, 0) + s, 0);
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Generated Order Review</h1>
+          <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
+            <span className="font-semibold uppercase tracking-wide text-xs text-amber-600">
+              Generated — not imported data.
+            </span>{" "}
+            Reconstructed from WIP for newly started projects (Progress Release &lt; 5% of WO Qty).
+            Accurate only while a project is new; beyond 5% released, completed marks have left WIP and
+            the figures would be wrong. This view is read-only and does not affect the imported Order
+            Review anywhere in the app. Where OR file values are available, differences &gt; 0.5 MT are
+            flagged.
+          </p>
+        </div>
+        {projectGroups.length > 0 && (
+          <Button variant="outline" size="sm" onClick={handleExport} className="shrink-0">
+            <FileDown className="h-4 w-4 mr-1.5" />
+            Export
+          </Button>
+        )}
+      </div>
+
+      {projectGroups.length === 0 ? (
+        <Card>
+          <CardContent className="py-10 text-center text-muted-foreground text-sm">
+            No newly started projects — this view populates when a project's marks first appear in WIP
+            (Progress Release &lt; 5% of WO Qty).
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* Summary chips */}
+          <div className="flex gap-3 flex-wrap text-sm">
+            <span className="rounded-md bg-muted px-3 py-1 font-medium">
+              {projectGroups.length} project{projectGroups.length !== 1 ? "s" : ""}
+            </span>
+            <span className="rounded-md bg-muted px-3 py-1 font-medium">
+              {structCount} structure{structCount !== 1 ? "s" : ""}
+            </span>
+            <span className="rounded-md bg-muted px-3 py-1 font-medium">
+              {markCount.toLocaleString()} marks
+            </span>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-muted/60 border-b">
+                      <th className="px-3 py-2 text-left font-semibold min-w-[80px]" rowSpan={2}>Project</th>
+                      <th className="px-3 py-2 text-left font-semibold min-w-[90px]" rowSpan={2}>Structure</th>
+                      <th className="px-3 py-2 text-left font-semibold min-w-[70px]" rowSpan={2}>Sub Type</th>
+                      <th className="px-3 py-2 text-left font-semibold min-w-[55px]" rowSpan={2}>MFC</th>
+                      <th className="px-3 py-2 text-right font-semibold min-w-[50px]" rowSpan={2}>Marks</th>
+                      <th className="px-3 py-2 text-center font-semibold border-l text-blue-700 dark:text-blue-400" colSpan={3}>
+                        Progress (MT)
+                      </th>
+                      <th className="px-3 py-2 text-center font-semibold border-l text-orange-700 dark:text-orange-400" colSpan={4}>
+                        Balance (MT)
+                      </th>
+                    </tr>
+                    <tr className="bg-muted/60 border-b text-[11px]">
+                      <th className="px-3 py-1.5 text-right font-medium border-l min-w-[95px] text-blue-700 dark:text-blue-400">
+                        Release L
+                      </th>
+                      <th className="px-3 py-1.5 text-right font-medium min-w-[65px]">Fab M</th>
+                      <th className="px-3 py-1.5 text-right font-medium min-w-[65px]">Galv N</th>
+                      <th className="px-3 py-1.5 text-right font-medium border-l min-w-[95px] text-orange-700 dark:text-orange-400">
+                        Release S
+                      </th>
+                      <th className="px-3 py-1.5 text-right font-medium min-w-[65px]">Fab T</th>
+                      <th className="px-3 py-1.5 text-right font-medium min-w-[65px]">Galv U</th>
+                      <th className="px-3 py-1.5 text-right font-medium min-w-[65px]">Insp V</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {projectGroups.map((pg) => (
+                      <Fragment key={pg.project}>
+                        {pg.structures.map((s, si) => (
+                          <tr
+                            key={s.structure}
+                            className={`hover:bg-muted/20 ${s.hasDiff ? "bg-amber-50/60 dark:bg-amber-950/20" : ""}`}
+                          >
+                            {si === 0 && (
+                              <td
+                                className="px-3 py-2 font-bold align-top border-r bg-muted/10"
+                                rowSpan={pg.structures.length + 1}
+                              >
+                                <span className="font-mono text-sm">{pg.project}</span>
+                                <br />
+                                <span className="text-muted-foreground font-normal text-[10px]">
+                                  {pg.structures.length} structure{pg.structures.length !== 1 ? "s" : ""}
+                                  {" · "}
+                                  {pct1(pg.releasePct)} released
+                                </span>
+                              </td>
+                            )}
+                            <td className="px-3 py-1.5 font-mono">{s.structure}</td>
+                            <td className="px-3 py-1.5 text-muted-foreground">{s.subType ?? "-"}</td>
+                            <td className="px-3 py-1.5 text-muted-foreground">{s.mfcBatch}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums">{s.markCount}</td>
+                            {/* Progress Release L — with OR comparison */}
+                            <td className="px-3 py-1.5 text-right tabular-nums border-l">
+                              <span className={s.orL != null && Math.abs(s.L - s.orL) > 0.5 ? "text-amber-600 font-semibold" : ""}>
+                                {mt3(s.L)}
+                              </span>
+                              {s.orL != null && (
+                                <span className="block text-[10px] text-muted-foreground leading-tight">
+                                  OR: {mt3(s.orL)}
+                                  {Math.abs(s.L - s.orL) > 0.5 && (
+                                    <AlertTriangle className="inline h-2.5 w-2.5 ml-0.5 text-amber-500" />
+                                  )}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums">{mt3(s.M)}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums">{mt3(s.N)}</td>
+                            {/* Balance Release S — with OR comparison */}
+                            <td className="px-3 py-1.5 text-right tabular-nums border-l">
+                              <span className={s.orS != null && Math.abs(s.S - s.orS) > 0.5 ? "text-amber-600 font-semibold" : ""}>
+                                {mt3(s.S)}
+                              </span>
+                              {s.orS != null && (
+                                <span className="block text-[10px] text-muted-foreground leading-tight">
+                                  OR: {mt3(s.orS)}
+                                  {Math.abs(s.S - s.orS) > 0.5 && (
+                                    <AlertTriangle className="inline h-2.5 w-2.5 ml-0.5 text-amber-500" />
+                                  )}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums">{mt3(s.T)}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums">{mt3(s.U)}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums">{mt3(s.V)}</td>
+                          </tr>
+                        ))}
+                        {/* Per-project subtotal */}
+                        <tr className="bg-muted/40 font-semibold border-t border-b-2 text-[11px]">
+                          {/* project col already spanned */}
+                          <td className="px-3 py-1.5 text-muted-foreground uppercase tracking-wide" colSpan={4}>
+                            Subtotal
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums border-l">{mt3(pg.totals.L)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{mt3(pg.totals.M)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{mt3(pg.totals.N)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums border-l">{mt3(pg.totals.S)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{mt3(pg.totals.T)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{mt3(pg.totals.U)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{mt3(pg.totals.V)}</td>
+                        </tr>
+                      </Fragment>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-muted/60 font-bold border-t-2 text-[11px]">
+                      <td className="px-3 py-2 uppercase tracking-wide">Grand Total</td>
+                      <td colSpan={4} className="px-3 py-2 text-muted-foreground">
+                        {projectGroups.length} projects · {structCount} structures · {markCount.toLocaleString()} marks
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums border-l">{mt3(grand.L)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{mt3(grand.M)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{mt3(grand.N)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums border-l">{mt3(grand.S)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{mt3(grand.T)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{mt3(grand.U)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{mt3(grand.V)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Utility formatters (shared by multiple components below) ─────────────────
 
 function mt3(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "-";

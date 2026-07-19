@@ -1,0 +1,132 @@
+TASK: Add a "Order Review" tab to the DATA page that shows a GENERATED Order Review, built from
+WIP, for NEWLY STARTED projects — the ones that have just begun appearing in WIP as they move
+from Bucket A to Bucket B.
+
+=====================================================================
+WHY THIS IS POSSIBLE (verified research — read this first)
+=====================================================================
+Order Review's Progress columns (L/M/N) are CUMULATIVE WORK DONE. WIP only holds REMAINING
+balance: once a mark is fully produced it disappears from WIP entirely. So for a MATURE project
+WIP can never reconstruct Order Review — the completed history is simply gone.
+
+BUT for a project that has only just started, almost nothing has been produced, so nothing has
+dropped out of WIP yet — WIP therefore holds the COMPLETE picture and the Order Review can be
+generated from it exactly.
+
+VERIFIED match rate of generated Balance Release vs actual Order Review, by project maturity:
+        0-5%  released ->  4 projects, 100% match   <-- the target population
+        5-25% released ->  2 projects,  50% match
+       25-50% released ->  2 projects,  50% match
+       50-90% released ->  7 projects,  71% match
+      90-100% released -> 50 projects,  90% match
+The reconstruction is only trustworthy at the very start. That is exactly the Bucket A -> B
+transition window, which is what this tab is for.
+
+=====================================================================
+SCOPE — which projects appear
+=====================================================================
+Include a project when BOTH are true:
+    1) It has WIP marks (Order Nature = "Structure", project = its own Col B).
+       This is the "data has started appearing in WIP" trigger — i.e. it has left Bucket A.
+    2) Progress Release (Order Review Col L) < 5% of WO Order Qty (Col J).
+       This is the trust boundary; beyond it WIP has lost completed work and the generated
+       figures would be wrong.
+Handle Col J == 0 safely (no divide-by-zero): if a project has WIP marks but no WO qty yet,
+include it and treat released % as 0.
+
+Projects still IN Bucket A are NOT shown here: they have no work order and therefore ZERO WIP
+marks (verified: 0 of 46), so there is nothing to generate. The tab populates automatically the
+moment their marks appear in WIP.
+
+On the 19-Jul files this yields exactly 4 projects:
+    948  (WO 279.93, released 6.03 = 2.2%, 16 structures, 1151 WIP marks)
+    960  (WO 146.08, released 2.04 = 1.4%, 23 structures, 1197 WIP marks)
+    937  (WO  74.47, released 3.19 = 4.3%, 25 structures,  780 WIP marks)
+    958  (WO  18.37, released 0.00 = 0.0%,  3 structures,   18 WIP marks)
+
+=====================================================================
+GENERATION LOGIC (per project + structure, structure = WIP Col J "Alias")
+=====================================================================
+Group WIP marks by (project = Col B, structure = Col J Alias), TLT only (Order Nature = Col C
+= "Structure"). Then:
+
+  RELEASED / NOT RELEASED split (the core of it):
+      notReleased = SUM(Col Q Balance Wt) where Col A "Type" = "Job Card Not Started"
+                                            AND Col G "Job Card Status" = "Initial"
+      released    = SUM(Col Q Balance Wt) for every OTHER mark of that structure
+
+  Generated columns:
+      L  Progress Release      = released
+      S  Balance Release       = notReleased
+      M  Progress Fabrication  = SUM(Col Q) of marks past fabrication
+                                 (Activity in G, GB, Y, or Type = "FG Pending For Dispatch")
+      T  Balance Fabrication   = SUM(Col Q) of marks still in fabrication activities
+                                 (Activity in C, HG, RFI, NH, B, HAB, W, Q, TS)
+      N  Progress Galvanising  = SUM(Col Q) of marks at/after galvanising
+                                 (Activity in Y, or Type = "FG Pending For Dispatch")
+      U  Balance Galvanising   = SUM(Col Q) of marks not yet galvanised
+                                 (Activity in C, HG, RFI, NH, B, HAB, W, Q, TS, G, GB)
+      V  Balance Inspection    = SUM(Col Q) of marks not yet inspected
+                                 (everything except Type = "FG Pending For Dispatch")
+
+  Also show per structure: Tower Sub Type (WIP Col I), MFC Batch (Col X, blank -> "Z"),
+  mark count, and total WIP Balance Wt.
+
+Weights: WIP Col Q is in KG — divide by 1000 and present as MT, 3 dp, consistent with the rest
+of the app.
+
+VERIFIED EXACT (19-Jul) — the generated values reproduce actual Order Review to the gram:
+    958/E02    gen S 4.502  = OR S 4.502   | gen L 0.000 = OR L 0.000
+    958/E602   gen S 10.533 = OR S 10.533  | gen L 0.000 = OR L 0.000
+    960/B03    gen S 12.848 = OR S 12.848  | gen L 0.728 = OR L 0.728
+    960/B603   gen S 53.777 = OR S 53.777  | gen L 0.837 = OR L 0.837
+    937/7BTB   gen S 17.734 = OR S 17.734  | gen L 0.643 = OR L 0.643
+    937/7ISO1  gen S 14.388 = OR S 14.388  | gen L 0.290 = OR L 0.290
+(Every structure of 958, 960 and 937 matches exactly on S, L and T.)
+
+=====================================================================
+DISPLAY — Data page, new "Order Review" tab
+=====================================================================
+- Add the tab to the DATA page alongside the existing tabs. Do NOT create a new top-level page.
+- Table grouped by Project, then structure rows beneath, with columns:
+      Project | Structure | Sub Type | MFC Batch | Marks |
+      Progress: Release (L) | Fabrication (M) | Galvanising (N) |
+      Balance:  Release (S) | Fabrication (T) | Galvanising (U) | Inspection (V)
+- Per-project subtotals and a grand total.
+- Label the tab content clearly as GENERATED, e.g. a caption:
+      "Generated from WIP for newly started projects (Progress Release < 5% of WO Qty).
+       Not a substitute for the Order Review file — accurate only while a project is new."
+  This must be visible; the user has to know it is derived, not imported.
+- Where the actual Order Review file has values for the same project/structure, show a
+  comparison (generated vs file) or at least flag any difference > 0.5 MT, so drift is caught.
+- Excel export of this tab, mirroring the on-screen table.
+- Empty state: if no project currently qualifies, say so plainly ("No newly started projects —
+  this tab populates when a project's marks first appear in WIP").
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT overwrite, replace or feed the real Order Review data with these generated values.
+  This tab is READ-ONLY and purely informational; the imported Order Review remains the single
+  source of truth everywhere else in the app.
+- Do NOT use this for projects beyond the 5% threshold — the figures would be wrong.
+- Do NOT include NTLT (Order Nature != "Structure") — Order Review is TLT-only.
+- Do NOT forward-fill the project code; use each row's own Col B.
+- Do NOT join on WIP Col H (a long descriptive name); the structure key is WIP Col J (Alias).
+- Do NOT change bucket logic, parsing identity/hash/dedup, ageing, Activity, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK (19-Jul files)
+=====================================================================
+- The Data page has an "Order Review" tab showing exactly 4 projects: 948, 960, 937, 958.
+- Project 958 shows 3 structures (E02 4.502, E302 3.338, E602 10.533 Balance Release; all
+  Progress = 0) and totals 18.374 MT.
+- Project 960 shows 23 structures; B03 has Balance Release 12.848 and Progress Release 0.728.
+- Project 937 shows 25 structures; 7BTB has Balance Release 17.734, Progress Release 0.643.
+- Generated values match the actual Order Review file for these projects (differences > 0.5 MT
+  are flagged; there should be none).
+- A project above the 5% threshold (e.g. 912 at 39.9%, 940 at 32.4%) does NOT appear.
+- The "generated" caption is visible and the tab is read-only.
+- The Excel export matches the on-screen table.
+Report: the four projects listed, 958's three structure rows with their values, and
+confirmation that no generated value overwrites the imported Order Review data.
