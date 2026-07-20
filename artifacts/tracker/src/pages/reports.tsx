@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { NetBalanceMovementPanel } from "@/components/NetBalanceMovementPanel";
+import { ContractorNetMovementPanel } from "@/components/ContractorNetMovementPanel";
 import {
   activityRank,
   assignDayKey,
@@ -42,6 +43,8 @@ import {
   useGetFabricationProjectCompletionTlt,
   useGetImportProductionMovement,
   getGetImportProductionMovementQueryKey,
+  useGetImportContractorMovement,
+  getGetImportContractorMovementQueryKey,
   type FabricationProjectCompletionRow,
   type Record as ApiRecord,
   type ContractorMovementEntry,
@@ -93,7 +96,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 type SortKey = "activity" | "ageing" | "contractor";
 
-type ReportType = "jobwise" | "fabload" | "plantop" | "contractorperf" | "fabcompletion" | "dailymov" | "ai";
+type ReportType = "jobwise" | "fabload" | "plantop" | "contractorperf" | "fabcompletion" | "dailymov" | "activitymov" | "contractormov" | "ai";
 
 const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
   {
@@ -131,6 +134,18 @@ const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
     name: "Daily Production Movement (Activity Wise)",
     description:
       "Balance weight moved per activity per day, with per-activity contractor drill-down. Dates driven by the global date filter.",
+  },
+  {
+    id: "activitymov",
+    name: "Activity Wise Net Balance Movement",
+    description:
+      "Net balance weight change (MT) per activity across consecutive imports — negative = clearing, positive = accumulating.",
+  },
+  {
+    id: "contractormov",
+    name: "Contractor Wise Net Balance Movement",
+    description:
+      "Per-contractor Produced, Received, Released, New Intake and Net Change across consecutive imports. TLT marks only.",
   },
   {
     id: "ai",
@@ -2690,6 +2705,44 @@ function DailyProductionMovementReport() {
   );
 }
 
+function ActivityNetMovementReport() {
+  const { selectedImportId, filters } = useTracker();
+  const { data: productionMovement, isLoading } = useGetImportProductionMovement(
+    selectedImportId as number,
+    { query: { enabled: !!selectedImportId, queryKey: getGetImportProductionMovementQueryKey(selectedImportId as number) } },
+  );
+
+  const filteredDays = useMemo((): ProductionMovementDay[] => {
+    const allDays = productionMovement?.days ?? [];
+    if (!filters.dateRange) return allDays;
+    const win = dateRangeWindow(filters.dateRange);
+    if (!win) return allDays;
+    const start = win.start.toISOString().slice(0, 10);
+    const end = win.end.toISOString().slice(0, 10);
+    return allDays.filter((d) => d.dayKey >= start && d.dayKey <= end);
+  }, [productionMovement, filters.dateRange]);
+
+  return (
+    <div className="space-y-4">
+      <NetBalanceMovementPanel days={filteredDays} isLoading={isLoading} />
+    </div>
+  );
+}
+
+function ContractorNetMovementReport() {
+  const { selectedImportId } = useTracker();
+  const { data: movementData, isLoading } = useGetImportContractorMovement(
+    selectedImportId as number,
+    { query: { enabled: !!selectedImportId, queryKey: getGetImportContractorMovementQueryKey(selectedImportId as number) } },
+  );
+
+  return (
+    <div className="space-y-4">
+      <ContractorNetMovementPanel days={movementData?.days ?? []} isLoading={isLoading} />
+    </div>
+  );
+}
+
 export default function ReportsView() {
   const [reportType, setReportType] = useState<ReportType>("jobwise");
   return (
@@ -2740,6 +2793,10 @@ export default function ReportsView() {
         <FabCompletionReport />
       ) : reportType === "dailymov" ? (
         <DailyProductionMovementReport />
+      ) : reportType === "activitymov" ? (
+        <ActivityNetMovementReport />
+      ) : reportType === "contractormov" ? (
+        <ContractorNetMovementReport />
       ) : (
         <AiTurnaroundReport />
       )}
