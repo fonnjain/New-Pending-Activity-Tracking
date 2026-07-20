@@ -328,6 +328,7 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
   const [section, setSection] = useState<SectionFilter>("ALL");
   const [sectionFilter, setSectionFilter] = useState<string | null>(null);
   const [sectionTextFilter, setSectionTextFilter] = useState<Set<string>>(new Set());
+  const [sectionsOpen, setSectionsOpen] = useState(false);
 
   // The operation group control lives beside the tab bar (lifted to the parent).
   // Reset the local sub-filters whenever the group changes, matching the prior
@@ -571,49 +572,6 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
         </div>
       </div>
 
-      {/* Sections (section text) multi-select filter */}
-      <div className="flex items-start gap-3">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap pt-1.5">Sections</span>
-        <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
-          {sectionTextOptions.length === 0 ? (
-            <span className="text-xs text-muted-foreground italic">No sections in current scope</span>
-          ) : (
-            sectionTextOptions.map((s) => {
-              const active = sectionTextFilter.has(s);
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => {
-                    setSectionTextFilter((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(s)) next.delete(s); else next.add(s);
-                      return next;
-                    });
-                  }}
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors cursor-pointer ${
-                    active
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "bg-background border-border text-foreground hover:bg-muted"
-                  }`}
-                >
-                  {s}
-                </button>
-              );
-            })
-          )}
-          {sectionTextFilter.size > 0 && (
-            <button
-              type="button"
-              onClick={() => setSectionTextFilter(new Set())}
-              className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 ml-1"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-      </div>
-
       <div className={`grid grid-cols-2 gap-3 ${dimension === "special" ? "md:grid-cols-3" : "md:grid-cols-4"}`}>
         {specialLoad && specialLoadCounts ? (
           <>
@@ -647,6 +605,63 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
           </>
         )}
       </div>
+
+      {/* Sections (section text) multi-select filter — collapsible, default closed */}
+      {sectionTextOptions.length > 0 && (
+        <Collapsible open={sectionsOpen} onOpenChange={setSectionsOpen}>
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide hover:text-foreground transition-colors cursor-pointer select-none"
+            >
+              <span>Sections</span>
+              <span className="text-muted-foreground/60 font-normal normal-case tracking-normal">
+                ({sectionTextOptions.length})
+                {sectionTextFilter.size > 0 && (
+                  <span className="ml-1 text-primary font-medium">{sectionTextFilter.size} selected</span>
+                )}
+              </span>
+              <ChevronDown className={`w-3.5 h-3.5 ml-0.5 transition-transform ${sectionsOpen ? "rotate-180" : ""}`} />
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="flex items-center gap-1.5 flex-wrap mt-2">
+              {sectionTextOptions.map((s) => {
+                const active = sectionTextFilter.has(s);
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => {
+                      setSectionTextFilter((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(s)) next.delete(s); else next.add(s);
+                        return next;
+                      });
+                    }}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors cursor-pointer ${
+                      active
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background border-border text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                );
+              })}
+              {sectionTextFilter.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSectionTextFilter(new Set())}
+                  className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 ml-1"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       {(isSpecial || (!specialLoad && isStandard)) && (
         <div className="flex items-center gap-2 flex-wrap">
