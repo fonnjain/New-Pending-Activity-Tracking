@@ -1,0 +1,153 @@
+TASK: Add a "Net Balance Movement" tabular view to the Contractor Wise page, mirroring the one
+being added to the Activity Wise page. Two measures per contractor per day: PRODUCED and NET
+CHANGE. The app already holds 20+ days of consecutive imports.
+
+=====================================================================
+THE COLUMNS
+=====================================================================
+For each contractor, between consecutive imports (previous -> current):
+
+  1) PRODUCED (MT) — real output. Mark-level, computed as:
+        completed = sum of PREVIOUS Balance Wt for that contractor's marks that are NO LONGER
+                    in WIP in the current snapshot (fully produced, so they dropped out)
+        reduced   = sum of (previous Balance Wt - current Balance Wt) for that contractor's
+                    marks still present AND still with the SAME contractor, whose weight
+                    DECREASED
+        PRODUCED  = completed + reduced
+
+  2) RECEIVED (MT) — marks REASSIGNED IN from another contractor:
+        sum of CURRENT Balance Wt for marks present in both snapshots whose contractor CHANGED
+        to this contractor.
+
+  3) RELEASED (MT) — marks REASSIGNED OUT to another contractor:
+        sum of PREVIOUS Balance Wt for marks present in both snapshots whose contractor CHANGED
+        away from this contractor.
+
+  4) NEW INTAKE (MT) — marks appearing in the current snapshot that were not in the previous
+        one, attributed to their current contractor.
+
+  5) NET CHANGE (MT) — workload movement, simple aggregate:
+        NET = total balance weight for this contractor now
+            - total balance weight for this contractor in the previous snapshot
+     Positive = workload growing; negative = workload clearing.
+
+Key each mark by (normalized project Col B, structure Col J Alias, Mark No Col K).
+Contractor = WIP Col D; a blank contractor is its own row labelled "(Unassigned)".
+Scope TLT (Order Nature Col C = "Structure"), each row's own project code (no forward fill).
+Col Q is KG — divide by 1000, present MT to 3 dp.
+
+RECONCILIATION (verified exact on 19->20 Jul, zero failures across all contractors):
+        Net = -Produced + Received - Released + New Intake + Increases
+where "Increases" is same-contractor weight going UP (corrections). Use this as an internal
+assertion: if a contractor's columns do not satisfy it, the calculation is wrong.
+
+=====================================================================
+CRITICAL — WHY "PRODUCED" IS NOT THE SAME AS "NET CHANGE"
+=====================================================================
+Marks are REASSIGNED between contractors constantly, and that movement is far larger than
+actual production. VERIFIED 19-Jul -> 20-Jul, whole file:
+        reassigned IN    298.14 MT
+        reassigned OUT   273.36 MT
+        completed         60.08 MT
+        reduced           84.61 MT
+        new intake        54.70 MT
+Reassignment is roughly 3x actual production (145 MT). A net figure alone is therefore
+MISLEADING: it mostly reflects work being handed between contractors, not work being done.
+
+Worked example — UNIT-II on 20-Jul:
+        NET CHANGE = +31.1 MT   (looks like a bottleneck / work piling up)
+        PRODUCED   =  51.2 MT   (13.49 completed + 37.72 reduced — a highly productive day)
+The net is positive only because UNIT-II was GIVEN 97.11 MT of reassigned work while releasing
+37.69 MT. Showing net alone would completely misread this contractor's performance.
+
+THEREFORE, when computing PRODUCED:
+  - EXCLUDE marks whose contractor CHANGED between snapshots. A mark leaving contractor X for
+    contractor Y is NOT production by X, and its arrival is NOT production by Y. That movement
+    belongs in the Released / Received columns instead.
+  - EXCLUDE new marks appearing in the current snapshot — they belong in New Intake.
+  - EXCLUDE weight INCREASES (corrections), never negative production.
+  - Only same-contractor weight reductions, plus marks that genuinely left WIP, count.
+
+The Received and Released columns EXIST PRECISELY SO THIS IS VISIBLE. Without them a user
+cannot explain why UNIT-II's net is +47.01 while it produced 51.21 — the answer (97.11 in,
+37.69 out) must be on screen.
+
+=====================================================================
+DISPLAY
+=====================================================================
+- New tabular view on the CONTRACTOR WISE page, mirroring the Activity Wise "Net Balance
+  Movement" table: rows = contractors, columns = the last N days, plus a total.
+- Show ALL FIVE measures: Produced, Received, Released, New Intake, Net Change. Either one
+  table per day-range with grouped columns, or a day-by-day table with a measure toggle —
+  match whatever the Activity Wise version does so the two pages feel identical.
+- Sort contractors by Produced (descending) by default, so the most productive appear first.
+- Make the semantics explicit on screen:
+      "Produced = work actually completed or advanced by this contractor.
+       Received / Released = marks reassigned between contractors — movement, not production.
+       Net change = overall balance movement (Produced, reassignment and new intake combined)."
+- Consider visually de-emphasising Received/Released (lighter weight or a grouped sub-header)
+  so Produced stays the headline number and reassignment reads as explanation.
+- Respect all existing page filters (Order Type, Current Jobs, MFC, activity, date, project).
+- Include in the Excel export, mirroring the on-screen table.
+
+VERIFIED reference — contractor balance by snapshot (MT) with net deltas:
+    Contractor                     17-Jul  18-Jul    d18  19-Jul    d19  20-Jul    d20
+    (Unassigned)                   3368.4  3270.3  -98.1  3229.5  -40.9  3220.4   -9.1
+    UNIT-II                        2656.1  2733.6  +77.5  2787.2  +53.5  2818.3  +31.1
+    DASHMESH ENTERPRISES GP-2       987.7   965.2  -22.5   884.0  -81.2   890.5   +6.6
+    DASHMESH ENTERPRISES            478.5   520.9  +42.3   516.0   -4.9   519.1   +3.1
+    UNIT-I                          442.8   444.4   +1.5   482.6  +38.2   471.9  -10.7
+    SRIJAN ENTERPRISES (UNIT-II)    301.4   358.5  +57.1   357.5   -0.9   357.3   -0.2
+    CNC APM 1010                    215.9   209.4   -6.5   202.6   -6.8   198.1   -4.4
+    CNC TADM 2532                   238.9   238.1   -0.8   234.7   -3.4   195.4  -39.3
+
+=====================================================================
+GAPS BETWEEN IMPORTS
+=====================================================================
+Deltas are only meaningful between CONSECUTIVE imports. If a day has no upload (weekend/missed
+day), do NOT present a multi-day delta as one day's figure — it would show a false spike.
+Either omit missing days, label the span with its elapsed days ("18-20 Jul (2 days)"), or show
+a per-day average clearly marked as averaged. Use the import's own date (or WIP file date) as
+the day key, not the upload timestamp. If only one import exists, show "-", not zero.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT compute Produced from a simple aggregate difference — it must be mark-level, and it
+  must exclude contractor reassignments, new marks and weight increases.
+- Do NOT display negative Produced; production cannot be negative.
+- Do NOT alter the existing Contractor Performance view; this is an ADDITIONAL table.
+- Do NOT change the contractor classification used elsewhere, or re-add any In-House /
+  Out-Vendor split to the Bucket List.
+- Do NOT include NTLT (Order Nature != "Structure").
+- Do NOT forward-fill the project code.
+- Do NOT change ageing rules, bucket logic, parsing identity/hash/dedup, Activity or qty.
+
+=====================================================================
+ACCEPTANCE CHECK (19-Jul -> 20-Jul)
+=====================================================================
+- The Contractor Wise page shows a Net Balance Movement table with Produced, Received,
+  Released, New Intake and Net Change.
+- Verified values (MT):
+      Contractor                     Produced  Received  Released   New     Net
+      UNIT-II                           51.21     97.11     37.69   0.06  +47.01
+      DASHMESH ENTERPRISES GP-2         20.64     72.19     51.50   0.76  +10.31
+      UNIT-I                            18.83     25.94     30.47   3.54  -15.96
+      CNC TADM 2532                     18.41      0.00     31.58   1.81  -48.18
+      TRANSRAIL STRUCTURES AND TOWRS     9.59      3.77      4.50   0.00   -8.73
+      PREMIER ROLLING & FORGING WORKS    8.75      0.00      5.93   4.06  -10.49
+      CNC APM 1616                       3.77     11.58     11.28   0.00   -2.72
+      DASHMESH ENTERPRISES               3.08     15.18      9.33   0.00  +26.59
+      CNC APM 2020                       1.39     25.58      3.84   0.06  +22.01
+- UNIT-II's Produced (51.21) and Net (+47.01) MUST differ, and Received 97.11 / Released 37.69
+  must be visible to explain the gap — this proves reassignment is excluded from Produced but
+  shown separately.
+- CNC TADM 2532 produced 18.41 while releasing 31.58 and receiving nothing — a contractor
+  winding down, which the columns should make obvious.
+- The reconciliation Net = -Produced + Received - Released + New Intake + Increases holds for
+  every contractor (verified: zero failures).
+- No contractor shows negative Produced.
+- A gap between imports is never rendered as a single-day figure.
+- Filters apply and the Excel export matches the on-screen table.
+Report: the five columns for the top 10 contractors for the latest consecutive pair, and
+confirmation that the reconciliation identity holds for every row.

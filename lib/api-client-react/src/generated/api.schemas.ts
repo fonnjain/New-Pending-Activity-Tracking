@@ -2297,6 +2297,58 @@ export interface ProductionMovementResponse {
   days: ProductionMovementDay[];
 }
 
+/**
+ * Five balance-movement measures for one contractor in one consecutive import pair.
+ */
+export interface ContractorBalanceMeasures {
+  /** MT actually drawn down by this contractor — same-contractor weight reductions plus marks that fully left WIP. Excludes reassignments, new intake, and weight increases (corrections). Always >= 0.
+   */
+  produced: number;
+  /** MT of marks reassigned IN to this contractor from another. */
+  received: number;
+  /** MT of marks reassigned OUT from this contractor to another. */
+  released: number;
+  /** MT of marks appearing for the first time in the current snapshot, attributed to this contractor. */
+  newIntake: number;
+  /** Overall balance delta in MT (curr total − prev total for this contractor). Positive = workload growing; negative = clearing. Reconciles as: netChange = -produced + received - released + newIntake + increases.
+   */
+  netChange: number;
+}
+
+/**
+ * Map of contractor name to movement measures. Blank contractor appears as "(Unassigned)".
+ */
+export type ContractorBalanceMovementDayContractors = {[key: string]: ContractorBalanceMeasures};
+
+/**
+ * One consecutive import pair's per-contractor movement measures.
+ */
+export interface ContractorBalanceMovementDay {
+  /** ID of the current (newer) import. */
+  importId: number;
+  /** YYYY-MM-DD of the current import. */
+  dayKey: string;
+  /** Human-readable label, e.g. "20 Jul" or "18-20 Jul (2d)". */
+  dayLabel: string;
+  /** ID of the previous (older) import. */
+  prevImportId: number;
+  /** YYYY-MM-DD of the previous import. */
+  prevDayKey: string;
+  /** True when the two imports are more than one calendar day apart. */
+  isGap: boolean;
+  /** Calendar days between the two import dates. */
+  elapsedDays: number;
+  /** Map of contractor name to movement measures. Blank contractor appears as "(Unassigned)". */
+  contractors: ContractorBalanceMovementDayContractors;
+}
+
+/**
+ * Per-contractor balance movement across consecutive import pairs.
+ */
+export interface ContractorBalanceMovementResponse {
+  days: ContractorBalanceMovementDay[];
+}
+
 export type DeleteRsjThicknessParams = {
 groupKey: string;
 };

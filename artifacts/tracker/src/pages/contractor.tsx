@@ -1,5 +1,6 @@
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, type ContractorCategoryInfo } from "@/lib/store";
-import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
+import { useGetImportRecords, getGetImportRecordsQueryKey, useGetImportContractorMovement, getGetImportContractorMovementQueryKey } from "@workspace/api-client-react";
+import { ContractorNetMovementPanel } from "@/components/ContractorNetMovementPanel";
 import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -66,6 +67,10 @@ function ContractorContent() {
   const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
+  const { data: movementData, isLoading: movementLoading } = useGetImportContractorMovement(
+    selectedImportId as number,
+    { query: { enabled: !!selectedImportId, queryKey: getGetImportContractorMovementQueryKey(selectedImportId as number) } },
+  );
   const records = useFilteredRecords(allRecords);
   const categoryMap = useContractorCategoryMap();
 
@@ -267,6 +272,11 @@ function ContractorContent() {
           </div>
         </CardContent>
       </Card>
+
+      <ContractorNetMovementPanel
+        days={movementData?.days ?? []}
+        isLoading={movementLoading}
+      />
 
       <ContractorPerformanceReport />
     </div>

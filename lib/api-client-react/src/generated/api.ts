@@ -31,6 +31,7 @@ import type {
   CommitRequest,
   CommitResult,
   CompareImportsParams,
+  ContractorBalanceMovementResponse,
   ContractorCategory,
   ContractorCategoryInput,
   ContractorMovementResponse,
@@ -3221,6 +3222,85 @@ export function useGetImportProductionMovement<TData = Awaited<ReturnType<typeof
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetImportProductionMovementQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetImportContractorMovementUrl = (id: number,) => {
+
+
+
+
+  return `/api/imports/${id}/contractor-movement`
+}
+
+/**
+ * Walks backwards from the given import (up to 7 predecessors) and, for each consecutive pair, computes five mark-level measures per contractor (TLT / orderNature = "Structure" only, no project code forward-fill): Produced (weight actually drawn down — same-contractor reductions + marks that fully left WIP); Received (weight reassigned in from another contractor); Released (weight reassigned out to another contractor); New Intake (new marks attributed to this contractor); Net Change (overall balance delta). Purely additive and advisory — never changes parsing, activity, dedup, ageing, or any warning/milestone/dispatch state.
+
+ * @summary Per-contractor balance movement for consecutive imports (mark-level)
+ */
+export const getImportContractorMovement = async (id: number, options?: RequestInit): Promise<ContractorBalanceMovementResponse> => {
+
+  return customFetch<ContractorBalanceMovementResponse>(getGetImportContractorMovementUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetImportContractorMovementQueryKey = (id: number,) => {
+    return [
+    `/api/imports/${id}/contractor-movement`
+    ] as const;
+    }
+
+
+export const getGetImportContractorMovementQueryOptions = <TData = Awaited<ReturnType<typeof getImportContractorMovement>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportContractorMovement>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImportContractorMovementQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImportContractorMovement>>> = ({ signal }) => getImportContractorMovement(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImportContractorMovement>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetImportContractorMovementQueryResult = NonNullable<Awaited<ReturnType<typeof getImportContractorMovement>>>
+export type GetImportContractorMovementQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Per-contractor balance movement for consecutive imports (mark-level)
+ */
+
+export function useGetImportContractorMovement<TData = Awaited<ReturnType<typeof getImportContractorMovement>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportContractorMovement>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetImportContractorMovementQueryOptions(id,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

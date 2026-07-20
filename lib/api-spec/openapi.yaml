@@ -1149,6 +1149,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /imports/{id}/contractor-movement:
+    get:
+      operationId: getImportContractorMovement
+      tags: [imports]
+      summary: Per-contractor balance movement for consecutive imports (mark-level)
+      description: >
+        Walks backwards from the given import (up to 7 predecessors) and, for
+        each consecutive pair, computes five mark-level measures per contractor
+        (TLT / orderNature = "Structure" only, no project code forward-fill):
+        Produced (weight actually drawn down — same-contractor reductions + marks
+        that fully left WIP); Received (weight reassigned in from another
+        contractor); Released (weight reassigned out to another contractor);
+        New Intake (new marks attributed to this contractor); Net Change
+        (overall balance delta). Purely additive and advisory — never changes
+        parsing, activity, dedup, ageing, or any warning/milestone/dispatch state.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Per-contractor movement for consecutive import pairs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorBalanceMovementResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /milestones:
     get:
       operationId: getMilestones
@@ -4819,3 +4853,83 @@ components:
         - cuttingMarksLeft
         - cuttingMarksReduced
         - netBalance
+    ContractorBalanceMovementResponse:
+      type: object
+      description: Per-contractor balance movement across consecutive import pairs.
+      properties:
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContractorBalanceMovementDay"
+      required:
+        - days
+    ContractorBalanceMeasures:
+      type: object
+      description: Five balance-movement measures for one contractor in one consecutive import pair.
+      properties:
+        produced:
+          type: number
+          description: >
+            MT actually drawn down by this contractor — same-contractor weight
+            reductions plus marks that fully left WIP. Excludes reassignments,
+            new intake, and weight increases (corrections). Always >= 0.
+        received:
+          type: number
+          description: MT of marks reassigned IN to this contractor from another.
+        released:
+          type: number
+          description: MT of marks reassigned OUT from this contractor to another.
+        newIntake:
+          type: number
+          description: MT of marks appearing for the first time in the current snapshot, attributed to this contractor.
+        netChange:
+          type: number
+          description: >
+            Overall balance delta in MT (curr total − prev total for this
+            contractor). Positive = workload growing; negative = clearing.
+            Reconciles as: netChange = -produced + received - released + newIntake + increases.
+      required:
+        - produced
+        - received
+        - released
+        - newIntake
+        - netChange
+    ContractorBalanceMovementDay:
+      type: object
+      description: One consecutive import pair's per-contractor movement measures.
+      properties:
+        importId:
+          type: integer
+          description: ID of the current (newer) import.
+        dayKey:
+          type: string
+          description: YYYY-MM-DD of the current import.
+        dayLabel:
+          type: string
+          description: Human-readable label, e.g. "20 Jul" or "18-20 Jul (2d)".
+        prevImportId:
+          type: integer
+          description: ID of the previous (older) import.
+        prevDayKey:
+          type: string
+          description: YYYY-MM-DD of the previous import.
+        isGap:
+          type: boolean
+          description: True when the two imports are more than one calendar day apart.
+        elapsedDays:
+          type: integer
+          description: Calendar days between the two import dates.
+        contractors:
+          type: object
+          description: Map of contractor name to movement measures. Blank contractor appears as "(Unassigned)".
+          additionalProperties:
+            $ref: "#/components/schemas/ContractorBalanceMeasures"
+      required:
+        - importId
+        - dayKey
+        - dayLabel
+        - prevImportId
+        - prevDayKey
+        - isGap
+        - elapsedDays
+        - contractors

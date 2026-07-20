@@ -1625,6 +1625,35 @@ export const GetImportProductionMovementResponse = zod.object({
 
 
 /**
+ * Walks backwards from the given import (up to 7 predecessors) and, for each consecutive pair, computes five mark-level measures per contractor (TLT / orderNature = "Structure" only, no project code forward-fill): Produced (weight actually drawn down — same-contractor reductions + marks that fully left WIP); Received (weight reassigned in from another contractor); Released (weight reassigned out to another contractor); New Intake (new marks attributed to this contractor); Net Change (overall balance delta). Purely additive and advisory — never changes parsing, activity, dedup, ageing, or any warning/milestone/dispatch state.
+
+ * @summary Per-contractor balance movement for consecutive imports (mark-level)
+ */
+export const GetImportContractorMovementParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetImportContractorMovementResponse = zod.object({
+  "days": zod.array(zod.object({
+  "importId": zod.number().describe('ID of the current (newer) import.'),
+  "dayKey": zod.string().describe('YYYY-MM-DD of the current import.'),
+  "dayLabel": zod.string().describe('Human-readable label, e.g. \"20 Jul\" or \"18-20 Jul (2d)\".'),
+  "prevImportId": zod.number().describe('ID of the previous (older) import.'),
+  "prevDayKey": zod.string().describe('YYYY-MM-DD of the previous import.'),
+  "isGap": zod.boolean().describe('True when the two imports are more than one calendar day apart.'),
+  "elapsedDays": zod.number().describe('Calendar days between the two import dates.'),
+  "contractors": zod.record(zod.string(), zod.object({
+  "produced": zod.number().describe('MT actually drawn down by this contractor — same-contractor weight reductions plus marks that fully left WIP. Excludes reassignments, new intake, and weight increases (corrections). Always >= 0.\n'),
+  "received": zod.number().describe('MT of marks reassigned IN to this contractor from another.'),
+  "released": zod.number().describe('MT of marks reassigned OUT from this contractor to another.'),
+  "newIntake": zod.number().describe('MT of marks appearing for the first time in the current snapshot, attributed to this contractor.'),
+  "netChange": zod.number().describe('Overall balance delta in MT (curr total − prev total for this contractor). Positive = workload growing; negative = clearing. Reconciles as: netChange = -produced + received - released + newIntake + increases.\n')
+}).describe('Five balance-movement measures for one contractor in one consecutive import pair.')).describe('Map of contractor name to movement measures. Blank contractor appears as \"(Unassigned)\".')
+}).describe('One consecutive import pair\'s per-contractor movement measures.'))
+}).describe('Per-contractor balance movement across consecutive import pairs.')
+
+
+/**
  * Deterministically recomputes, from the full append-only import history, two PERMANENT per-project turnaround milestones measured from the project's earliest Assign Date: MILESTONE 1 "Ready for Dispatch" (the first import where no mark remains in an earlier activity C..GB — every mark is at Y or gone) and MILESTONE 2 "Dispatched" (the first import where the project is entirely absent). Captured dates are preserved (capture-once) and persisted, so they survive after a project leaves the report. Includes planned (cumulative Y target) vs actual variance. Project-less rows ("(Unassigned)") are excluded. Purely additive — never changes parsing, activity values, dedup, ageing, warning, or velocity.
 
  * @summary Get permanent per-project turnaround milestones (Ready / Dispatched)

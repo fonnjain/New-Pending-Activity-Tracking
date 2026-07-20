@@ -36,6 +36,188 @@ type MarkRow = {
   orderNature: string | null;
 };
 
+// GET /imports/:id/contractor-movement
+// Mark-level per-contractor balance movement across consecutive imports (TLT only).
+router.get("/imports/:id/contractor-movement", async (req, res): Promise<void> => {
+  const params = GetImportMovementParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const [target] = await db
+    .select({
+      id: importsTable.id,
+      reportDate: importsTable.reportDate,
+      createdAt: importsTable.createdAt,
+    })
+    .from(importsTable)
+    .where(eq(importsTable.id, params.data.id));
+
+  if (!target) {
+    res.status(404).json({ error: "Import not found" });
+    return;
+  }
+
+  const predecessors = await db
+    .select({
+      id: importsTable.id,
+      reportDate: importsTable.reportDate,
+      createdAt: importsTable.createdAt,
+    })
+    .from(importsTable)
+    .where(lt(importsTable.id, target.id))
+    .orderBy(desc(importsTable.id))
+    .limit(7);
+
+  const allImports = [target, ...predecessors];
+  if (allImports.length < 2) {
+    res.json({ days: [] });
+    return;
+  }
+
+  const allIds = allImports.map((i) => i.id);
+
+  type ConMarkRow = {
+    importId: number;
+    job: string;
+    alias: string | null;
+    markNo: string;
+    contractor: string | null;
+    balanceWt: number;
+    orderNature: string | null;
+  };
+
+  const rawRows: ConMarkRow[] = await db
+    .select({
+      importId: importRowsTable.importId,
+      job: recordPoolTable.job,
+      alias: recordPoolTable.alias,
+      markNo: recordPoolTable.markNo,
+      contractor: recordPoolTable.contractor,
+      balanceWt: recordPoolTable.balanceWt,
+      orderNature: recordPoolTable.orderNature,
+    })
+    .from(importRowsTable)
+    .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+    .where(inArray(importRowsTable.importId, allIds));
+
+  // Group by importId, keeping only TLT rows (orderNature = "Structure").
+  // Per mark-key (job|alias|markNo), aggregate balanceWt (sum copies) and pick contractor.
+  type ConMarkState = { contractor: string; balanceWt: number };
+
+  const byImportCon = new Map<number, Map<string, ConMarkState>>();
+  for (const r of rawRows) {
+    if (r.orderNature !== "Structure") continue;
+    const markKey = `${r.job}\x00${r.alias ?? ""}\x00${r.markNo}`;
+    const con = r.contractor?.trim() || "(Unassigned)";
+    if (!byImportCon.has(r.importId)) byImportCon.set(r.importId, new Map());
+    const stateMap = byImportCon.get(r.importId)!;
+    const ex = stateMap.get(markKey);
+    if (!ex) {
+      stateMap.set(markKey, { contractor: con, balanceWt: r.balanceWt });
+    } else {
+      // Same mark-key, multiple copies: same contractor, sum weights.
+      stateMap.set(markKey, { contractor: ex.contractor, balanceWt: ex.balanceWt + r.balanceWt });
+    }
+  }
+
+  type ConMeasures = {
+    produced: number;
+    received: number;
+    released: number;
+    newIntake: number;
+    netChange: number;
+  };
+
+  const days = [];
+
+  for (let i = 0; i < allImports.length - 1; i++) {
+    const curr = allImports[i];
+    const prev = allImports[i + 1];
+
+    const currKey = importDayKey(curr.reportDate, curr.createdAt);
+    const prevKey = importDayKey(prev.reportDate, prev.createdAt);
+    const elapsed = Math.round(
+      (Date.parse(currKey + "T00:00:00Z") - Date.parse(prevKey + "T00:00:00Z")) / 86_400_000,
+    );
+
+    const currState = byImportCon.get(curr.id) ?? new Map<string, ConMarkState>();
+    const prevState = byImportCon.get(prev.id) ?? new Map<string, ConMarkState>();
+
+    // Accumulators (kg)
+    const producedKg = new Map<string, number>();
+    const receivedKg = new Map<string, number>();
+    const releasedKg = new Map<string, number>();
+    const newIntakeKg = new Map<string, number>();
+
+    const add = (map: Map<string, number>, key: string, val: number) =>
+      map.set(key, (map.get(key) ?? 0) + val);
+
+    // All mark keys across both imports
+    const allKeys = new Set([...prevState.keys(), ...currState.keys()]);
+
+    for (const markKey of allKeys) {
+      const pEntry = prevState.get(markKey);
+      const cEntry = currState.get(markKey);
+
+      if (pEntry && cEntry) {
+        if (pEntry.contractor === cEntry.contractor) {
+          // Same contractor: weight reduction = produced, weight increase = ignored (correction)
+          const diff = pEntry.balanceWt - cEntry.balanceWt;
+          if (diff > 0) add(producedKg, pEntry.contractor, diff);
+          // diff < 0 is an increase (correction) — excluded from produced per spec
+        } else {
+          // Contractor changed: released from prev, received by curr
+          add(releasedKg, pEntry.contractor, pEntry.balanceWt);
+          add(receivedKg, cEntry.contractor, cEntry.balanceWt);
+        }
+      } else if (pEntry && !cEntry) {
+        // Mark fully left WIP → full previous weight = produced by that contractor
+        add(producedKg, pEntry.contractor, pEntry.balanceWt);
+      } else if (!pEntry && cEntry) {
+        // New mark: new intake for current contractor
+        add(newIntakeKg, cEntry.contractor, cEntry.balanceWt);
+      }
+    }
+
+    // Net change: sum(curr balanceWt for con) − sum(prev balanceWt for con) in kg
+    const currTotKg = new Map<string, number>();
+    for (const { contractor, balanceWt } of currState.values())
+      add(currTotKg, contractor, balanceWt);
+    const prevTotKg = new Map<string, number>();
+    for (const { contractor, balanceWt } of prevState.values())
+      add(prevTotKg, contractor, balanceWt);
+
+    const allCons = new Set([...currTotKg.keys(), ...prevTotKg.keys()]);
+
+    const contractors: Record<string, ConMeasures> = {};
+    for (const con of allCons) {
+      contractors[con] = {
+        produced:   Math.max(0, (producedKg.get(con)  ?? 0) / 1000),
+        received:   (receivedKg.get(con)  ?? 0) / 1000,
+        released:   (releasedKg.get(con)  ?? 0) / 1000,
+        newIntake:  (newIntakeKg.get(con) ?? 0) / 1000,
+        netChange:  ((currTotKg.get(con) ?? 0) - (prevTotKg.get(con) ?? 0)) / 1000,
+      };
+    }
+
+    days.push({
+      importId: curr.id,
+      dayKey: currKey,
+      dayLabel: buildDayLabel(currKey, prevKey, elapsed),
+      prevImportId: prev.id,
+      prevDayKey: prevKey,
+      isGap: elapsed > 1,
+      elapsedDays: elapsed,
+      contractors,
+    });
+  }
+
+  days.reverse(); // chronological: oldest first
+  res.json({ days });
+});
+
 // GET /imports/:id/production-movement
 // Returns per-consecutive-pair cutting output (mark-level TLT) + net balance delta.
 router.get("/imports/:id/production-movement", async (req, res): Promise<void> => {
