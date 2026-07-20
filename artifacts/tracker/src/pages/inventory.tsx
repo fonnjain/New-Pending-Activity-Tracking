@@ -1699,48 +1699,6 @@ export default function InventoryView() {
         </CardContent>
       </Card>
 
-      {/* MFC Batch Colour Management */}
-      <div ref={mfcSectionRef}>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">MFC Batch Colour</CardTitle>
-          </CardHeader>
-          <CardContent className="px-0 pb-0">
-            {reminderProjects.length > 0 && (
-              <div className="mx-3 mb-3 flex items-start gap-2 p-3 rounded-md border border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/20 text-sm">
-                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-medium">Reminder:</span>{" "}
-                  {reminderProjects.length === 1
-                    ? "The following project has"
-                    : "The following projects have"}{" "}
-                  a colour assignment but{" "}
-                  {reminderProjects.length === 1 ? "is" : "are"} no longer in Bucket A:{" "}
-                  <span className="font-medium">{reminderProjects.join(", ")}</span>
-                </div>
-              </div>
-            )}
-            {canEdit && (
-              <MfcBatchColorForm
-                key={mfcFormPrefill?.key ?? 0}
-                knownProjects={knownProjects}
-                projectMfcBatches={projectMfcBatches}
-                onSave={saveMfcBatchColor}
-                isPending={upsertMfcBatchColor.isPending}
-                initialProject={mfcFormPrefill?.project}
-                initialBatch={mfcFormPrefill?.mfcBatch}
-              />
-            )}
-            <MfcBatchColorTable
-              entries={mfcBatchColors}
-              canEdit={canEdit}
-              onDelete={removeMfcBatchColor}
-              deletingKey={deletingColorKey}
-            />
-          </CardContent>
-        </Card>
-      </div>
-
       {/* Group-by toggle for Pre-B / B / C / D */}
       <div className="flex items-center gap-2">
         <span className="text-xs text-muted-foreground">Group by</span>
@@ -1755,25 +1713,70 @@ export default function InventoryView() {
         <span className="text-xs text-muted-foreground">(applies to Pre-B, B, C, D)</span>
       </div>
 
-      {/* Pre-Bucket B — qualifies for B but colour + dates not yet assigned */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Pre-B — {BUCKET_LABELS.preB}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
-          ) : (
-            <PreBucketBPanel
-              rows={preBRows}
-              columns={BUCKET_B_COLUMNS}
-              groupByMfc={groupByMfc}
-              onAssignColour={handleAssignColour}
-              canAssign={canEdit}
-            />
-          )}
-        </CardContent>
-      </Card>
+      {/* MFC Batch Colour + Pre-B side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        {/* MFC Batch Colour Management */}
+        <div ref={mfcSectionRef}>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">MFC Batch Colour</CardTitle>
+            </CardHeader>
+            <CardContent className="px-0 pb-0">
+              {reminderProjects.length > 0 && (
+                <div className="mx-3 mb-3 flex items-start gap-2 p-3 rounded-md border border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/20 text-sm">
+                  <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-medium">Reminder:</span>{" "}
+                    {reminderProjects.length === 1
+                      ? "The following project has"
+                      : "The following projects have"}{" "}
+                    a colour assignment but{" "}
+                    {reminderProjects.length === 1 ? "is" : "are"} no longer in Bucket A:{" "}
+                    <span className="font-medium">{reminderProjects.join(", ")}</span>
+                  </div>
+                </div>
+              )}
+              {canEdit && (
+                <MfcBatchColorForm
+                  key={mfcFormPrefill?.key ?? 0}
+                  knownProjects={knownProjects}
+                  projectMfcBatches={projectMfcBatches}
+                  onSave={saveMfcBatchColor}
+                  isPending={upsertMfcBatchColor.isPending}
+                  initialProject={mfcFormPrefill?.project}
+                  initialBatch={mfcFormPrefill?.mfcBatch}
+                />
+              )}
+              <MfcBatchColorTable
+                entries={mfcBatchColors}
+                canEdit={canEdit}
+                onDelete={removeMfcBatchColor}
+                deletingKey={deletingColorKey}
+              />
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Pre-Bucket B — qualifies for B but colour + dates not yet assigned */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Pre-B — {BUCKET_LABELS.preB}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
+            ) : (
+              <PreBucketBPanel
+                rows={preBRows}
+                columns={BUCKET_B_COLUMNS}
+                groupByMfc={groupByMfc}
+                onAssignColour={handleAssignColour}
+                canAssign={canEdit}
+              />
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Bucket B */}
       <Card>
