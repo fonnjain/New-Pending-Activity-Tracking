@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
+import { NetBalanceMovementPanel } from "@/components/NetBalanceMovementPanel";
 import {
   activityRank,
   assignDayKey,
@@ -39,9 +40,12 @@ import {
   getListFabricationPrioritiesQueryKey,
   useGetContractorMovement,
   useGetFabricationProjectCompletionTlt,
+  useGetImportProductionMovement,
+  getGetImportProductionMovementQueryKey,
   type FabricationProjectCompletionRow,
   type Record as ApiRecord,
   type ContractorMovementEntry,
+  type ProductionMovementDay,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -2423,6 +2427,15 @@ function DailyProductionMovementReport() {
   });
   const records = useFilteredRecords(allRecords);
 
+  // Production movement: consecutive-import cutting output + net balance delta.
+  const { data: productionMovement, isLoading: isMovementLoading } =
+    useGetImportProductionMovement(selectedImportId as number, {
+      query: {
+        enabled: !!selectedImportId,
+        queryKey: getGetImportProductionMovementQueryKey(selectedImportId as number),
+      },
+    });
+
   const { moveWindow, isDateFiltered } = useMemo(() => {
     const win = filters.dateRange ? dateRangeWindow(filters.dateRange) : null;
     if (win) {
@@ -2435,9 +2448,28 @@ function DailyProductionMovementReport() {
     return { moveWindow: { start: todayStr, end: todayStr }, isDateFiltered: false };
   }, [filters.dateRange]);
 
+  // dayKey (import date) → cutting output in kg, consistent with balanceWt units used elsewhere.
+  const cuttingByDayKey = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const day of productionMovement?.days ?? []) {
+      if (day.cuttingOutputMt > 0) {
+        map.set(day.dayKey, day.cuttingOutputMt * 1000);
+      }
+    }
+    return map;
+  }, [productionMovement]);
+
+  // Days to show in the Net Balance panel, optionally filtered to the active date window.
+  const filteredProductionMovementDays = useMemo((): ProductionMovementDay[] => {
+    const allDays = productionMovement?.days ?? [];
+    if (!isDateFiltered) return allDays;
+    return allDays.filter((d) => d.dayKey >= moveWindow.start && d.dayKey <= moveWindow.end);
+  }, [productionMovement, isDateFiltered, moveWindow]);
+
   const moveDates = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
     const seen = new Set<string>();
+    // Dates from lastProductionDate on records (non-C activities)
     for (const r of records) {
       const lpd = r.lastProductionDate as string | null;
       if (!lpd) continue;
@@ -2448,8 +2480,17 @@ function DailyProductionMovementReport() {
       }
       seen.add(lpd);
     }
+    // Also include import day keys that have cutting output (C activity)
+    for (const dk of cuttingByDayKey.keys()) {
+      if (isDateFiltered) {
+        if (dk < moveWindow.start || dk > moveWindow.end) continue;
+      } else {
+        if (dk > todayStr) continue;
+      }
+      seen.add(dk);
+    }
     return [...seen].sort().slice(-7);
-  }, [records, moveWindow, isDateFiltered]);
+  }, [records, moveWindow, isDateFiltered, cuttingByDayKey]);
 
   const { activities, sortedActivities } = useMemo(() => {
     const activities = new Map<string, any[]>();
@@ -2465,12 +2506,17 @@ function DailyProductionMovementReport() {
   const summaryRows = useMemo(
     () => sortedActivities.map((act) => {
       const recs = activities.get(act) ?? [];
-      const perDate = moveDates.map((d) =>
-        recs.reduce((s: number, r: any) => (r.lastProductionDate === d ? s + (r.balanceWt ?? 0) : s), 0),
-      );
+      // C row: mark-level cutting output from consecutive import comparison (not LPD-based).
+      // All other activities: sum balanceWt for marks whose lastProductionDate matches the column date.
+      const perDate =
+        act === "C"
+          ? moveDates.map((d) => cuttingByDayKey.get(d) ?? 0)
+          : moveDates.map((d) =>
+              recs.reduce((s: number, r: any) => (r.lastProductionDate === d ? s + (r.balanceWt ?? 0) : s), 0),
+            );
       return { act, perDate, total: perDate.reduce((s, v) => s + v, 0) };
     }),
-    [sortedActivities, activities, moveDates],
+    [sortedActivities, activities, moveDates, cuttingByDayKey],
   );
 
   const colTotals = useMemo(
@@ -2575,7 +2621,7 @@ function DailyProductionMovementReport() {
         <CardContent className="p-0">
           {isLoading ? (
             <div className="p-8 text-center text-muted-foreground text-sm">Loading...</div>
-          ) : moveDates.length === 0 ? (
+          ) : moveDates.length === 0 && !isMovementLoading ? (
             <div className="p-8 text-center text-muted-foreground text-sm">
               No production dates found. Apply a date filter to see movement data.
             </div>
@@ -2596,7 +2642,15 @@ function DailyProductionMovementReport() {
                 <tbody className="divide-y">
                   {summaryRows.map(({ act, perDate, total }) => (
                     <tr key={act} className={total > 0 ? "hover:bg-muted/30" : "opacity-40"}>
-                      <td className="px-4 py-2 font-bold font-mono">{act}</td>
+                      <td className="px-4 py-2 font-bold font-mono">
+                        {act}
+                        {act === "C" && (
+                          <span
+                            title="Mark-level cutting output: marks that left C + weight reduction of marks still at C, compared between consecutive imports. Excludes intake."
+                            className="ml-1 text-[10px] text-muted-foreground cursor-help align-super"
+                          >*</span>
+                        )}
+                      </td>
                       {perDate.map((wt, i) => (
                         <td key={moveDates[i]} className="px-4 py-2 text-right tabular-nums whitespace-nowrap">
                           {wt > 0
@@ -2628,6 +2682,10 @@ function DailyProductionMovementReport() {
           )}
         </CardContent>
       </Card>
+      <NetBalanceMovementPanel
+        days={filteredProductionMovementDays}
+        isLoading={isMovementLoading}
+      />
     </div>
   );
 }

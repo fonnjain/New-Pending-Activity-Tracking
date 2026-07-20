@@ -1115,6 +1115,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /imports/{id}/production-movement:
+    get:
+      operationId: getImportProductionMovement
+      tags: [imports]
+      summary: Cutting output (mark-level) + net balance delta for consecutive imports
+      description: >
+        Walks backwards from the given import (up to 7 predecessors) and, for
+        each consecutive pair, computes: (1) TLT Cutting output — mark-level
+        balance drawdown between snapshots (marks that left C + marks still at C
+        whose weight decreased); (2) net balance delta per activity (current
+        minus previous import balance weight in MT). FG delta is derived from
+        parseSummary.fgWipByJob. Only consecutive pairs are compared — gaps
+        (elapsed days > 1) are flagged but still returned. Purely additive and
+        advisory — never changes parsing, activity, dedup, ageing, or any
+        warning/milestone/dispatch state.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Cutting output + net balance delta for consecutive import pairs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductionMovementResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /milestones:
     get:
       operationId: getMilestones
@@ -4710,3 +4744,78 @@ components:
         - summary
         - actionPlan
         - detailed
+    ProductionMovementResponse:
+      type: object
+      description: >
+        Cutting output (mark-level TLT) and net balance delta per activity for
+        consecutive import pairs. Days are in chronological order (oldest first).
+      properties:
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductionMovementDay"
+      required:
+        - days
+    ProductionMovementDay:
+      type: object
+      description: >
+        One consecutive import pair. cuttingOutputMt is the sum of TLT balance
+        weight drawn down from marks that were at activity C in the previous
+        import (left C entirely, or still at C with reduced weight). netBalance
+        maps activity code to MT delta (curr − prev); negative = clearing,
+        positive = accumulating. isGap=true when the two imports are more than
+        one calendar day apart.
+      properties:
+        importId:
+          type: integer
+          description: ID of the current (newer) import.
+        dayKey:
+          type: string
+          description: YYYY-MM-DD of the current import (reportDate, else createdAt UTC date).
+        dayLabel:
+          type: string
+          description: Human-readable label, e.g. "20 Jul" or "18-20 Jul (2d)".
+        prevImportId:
+          type: integer
+          description: ID of the previous (older) import.
+        prevDayKey:
+          type: string
+          description: YYYY-MM-DD of the previous import.
+        isGap:
+          type: boolean
+          description: True when the two imports are more than one calendar day apart.
+        elapsedDays:
+          type: integer
+          description: Calendar days between the two import dates.
+        cuttingOutputMt:
+          type: number
+          description: >
+            Mark-level TLT cutting output in MT. Sum of balance weight of marks
+            that left C entirely plus the weight reduction of marks still at C.
+            Excludes marks entering C (intake) and weight increases (corrections).
+        cuttingMarksLeft:
+          type: integer
+          description: Count of TLT marks that were at C in prev and are no longer at C in curr.
+        cuttingMarksReduced:
+          type: integer
+          description: Count of TLT marks still at C in both imports whose balance weight decreased.
+        netBalance:
+          type: object
+          description: >
+            Net balance delta in MT per activity (curr balance − prev balance).
+            Negative = material leaving (good); positive = material accumulating (potential bottleneck).
+            Key "FG" is derived from parseSummary fgWipByJob.
+          additionalProperties:
+            type: number
+      required:
+        - importId
+        - dayKey
+        - dayLabel
+        - prevImportId
+        - prevDayKey
+        - isGap
+        - elapsedDays
+        - cuttingOutputMt
+        - cuttingMarksLeft
+        - cuttingMarksReduced
+        - netBalance

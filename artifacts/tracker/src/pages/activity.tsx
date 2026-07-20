@@ -1,5 +1,11 @@
 import { useTracker, useFilteredRecords, dateRangeWindow } from "@/lib/store";
-import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
+import {
+  useGetImportRecords,
+  getGetImportRecordsQueryKey,
+  useGetImportProductionMovement,
+  getGetImportProductionMovementQueryKey,
+} from "@workspace/api-client-react";
+import { NetBalanceMovementPanel } from "@/components/NetBalanceMovementPanel";
 import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
 import { Card, CardContent } from "@/components/ui/card";
@@ -417,32 +423,35 @@ function ActivityDailyMovementTable({
   activities,
   sortedActivities,
   moveDates,
+  cuttingByDayKey,
 }: {
   activities: Map<string, any[]>;
   sortedActivities: string[];
   moveDates: string[];
+  cuttingByDayKey?: Map<string, number>;
 }) {
-  // Per-activity, per-date: sum of balanceWt for marks whose lastProductionDate === date
+  // Per-activity, per-date weight matrix.
+  // C row uses mark-level cutting output (cuttingByDayKey) when available;
+  // all other activities use lastProductionDate-based sums.
   const matrix = useMemo(() => {
     const result = new Map<string, number[]>();
     for (const act of sortedActivities) {
-      const recs = activities.get(act) ?? [];
-      result.set(act, moveDates.map((d) =>
-        recs.reduce((s, r) => (r.lastProductionDate === d ? s + (r.balanceWt ?? 0) : s), 0),
-      ));
+      if (act === "C" && cuttingByDayKey) {
+        result.set(act, moveDates.map((d) => cuttingByDayKey.get(d) ?? 0));
+      } else {
+        const recs = activities.get(act) ?? [];
+        result.set(act, moveDates.map((d) =>
+          recs.reduce((s, r) => (r.lastProductionDate === d ? s + (r.balanceWt ?? 0) : s), 0),
+        ));
+      }
     }
     return result;
-  }, [activities, sortedActivities, moveDates]);
+  }, [activities, sortedActivities, moveDates, cuttingByDayKey]);
 
-  // Column totals
+  // Column totals derived from the matrix (automatically picks up C override).
   const colTotals = useMemo(
-    () => moveDates.map((d) =>
-      sortedActivities.reduce(
-        (s, a) => s + (activities.get(a) ?? []).reduce((x, r) => (r.lastProductionDate === d ? x + (r.balanceWt ?? 0) : x), 0),
-        0,
-      ),
-    ),
-    [moveDates, sortedActivities, activities],
+    () => moveDates.map((_, di) => sortedActivities.reduce((s, a) => s + (matrix.get(a)?.[di] ?? 0), 0)),
+    [moveDates, sortedActivities, matrix],
   );
 
   const grandTotal = colTotals.reduce((s, v) => s + v, 0);
@@ -477,7 +486,15 @@ function ActivityDailyMovementTable({
               const hasAny = rowTotal > 0;
               return (
                 <TableRow key={act} className={hasAny ? "" : "opacity-40"}>
-                  <TableCell className="font-bold text-sm font-mono">{act}</TableCell>
+                  <TableCell className="font-bold text-sm font-mono">
+                    {act}
+                    {act === "C" && cuttingByDayKey && (
+                      <span
+                        title="Mark-level cutting output: marks that left C + weight reduction of marks still at C, compared between consecutive imports."
+                        className="ml-1 text-[10px] text-muted-foreground cursor-help align-super"
+                      >*</span>
+                    )}
+                  </TableCell>
                   {row.map((wt, i) => (
                     <TableCell key={moveDates[i]} className="text-right tabular-nums whitespace-nowrap">
                       {wt > 0
@@ -539,6 +556,15 @@ function ActivityContent() {
   });
   const records = useFilteredRecords(allRecords);
 
+  // Production movement: consecutive-import cutting output + net balance delta.
+  const { data: productionMovement, isLoading: isMovementLoading } =
+    useGetImportProductionMovement(selectedImportId as number, {
+      query: {
+        enabled: !!selectedImportId,
+        queryKey: getGetImportProductionMovementQueryKey(selectedImportId as number),
+      },
+    });
+
   const { moveWindow, isDateFiltered } = useMemo(() => {
     const win = filters.dateRange ? dateRangeWindow(filters.dateRange) : null;
     if (win) {
@@ -555,6 +581,24 @@ function ActivityContent() {
       isDateFiltered: false,
     };
   }, [filters.dateRange]);
+
+  // dayKey (import date) → cutting output in kg, consistent with balanceWt units.
+  const cuttingByDayKey = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const day of productionMovement?.days ?? []) {
+      if (day.cuttingOutputMt > 0) {
+        map.set(day.dayKey, day.cuttingOutputMt * 1000);
+      }
+    }
+    return map;
+  }, [productionMovement]);
+
+  // Days to show in the Net Balance panel, optionally filtered to the active date window.
+  const filteredProductionMovementDays = useMemo(() => {
+    const allDays = productionMovement?.days ?? [];
+    if (!isDateFiltered) return allDays;
+    return allDays.filter((d) => d.dayKey >= moveWindow.start && d.dayKey <= moveWindow.end);
+  }, [productionMovement, isDateFiltered, moveWindow]);
 
   const { activities, sortedActivities, totalWt, totalMarks, avgAge, notAgedCount, notAgedWt, agedCount } = useMemo(() => {
     const activities = new Map<string, any[]>();
@@ -581,6 +625,7 @@ function ActivityContent() {
   // Last 7 production dates in the data, shown chronologically (oldest → newest).
   // When a date filter is active: restrict to dates within the filter window.
   // When no filter: all dates ≤ today, pick the 7 most recent.
+  // Also includes import day keys with cutting output so the C row always has a column.
   const moveDates = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
     const seen = new Set<string>();
@@ -590,14 +635,21 @@ function ActivityContent() {
       if (isDateFiltered) {
         if (lpd < moveWindow.start || lpd > moveWindow.end) continue;
       } else {
-        if (lpd > todayStr) continue; // exclude future dates
+        if (lpd > todayStr) continue;
       }
       seen.add(lpd);
     }
-    return [...seen]
-      .sort()           // ascending
-      .slice(-7);       // take the 7 most recent, already in chronological order
-  }, [records, moveWindow, isDateFiltered]);
+    // Include import day keys with cutting output (C activity)
+    for (const dk of cuttingByDayKey.keys()) {
+      if (isDateFiltered) {
+        if (dk < moveWindow.start || dk > moveWindow.end) continue;
+      } else {
+        if (dk > todayStr) continue;
+      }
+      seen.add(dk);
+    }
+    return [...seen].sort().slice(-7);
+  }, [records, moveWindow, isDateFiltered, cuttingByDayKey]);
 
   const handleExport = () => {
     const avg = (recs: any[]) => {
@@ -709,6 +761,11 @@ function ActivityContent() {
             activities={activities}
             sortedActivities={sortedActivities}
             moveDates={moveDates}
+            cuttingByDayKey={cuttingByDayKey}
+          />
+          <NetBalanceMovementPanel
+            days={filteredProductionMovementDays}
+            isLoading={isMovementLoading}
           />
         </>
       )}

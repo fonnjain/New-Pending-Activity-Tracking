@@ -1599,6 +1599,32 @@ export const GetImportVelocityResponse = zod.object({
 
 
 /**
+ * Walks backwards from the given import (up to 7 predecessors) and, for each consecutive pair, computes: (1) TLT Cutting output — mark-level balance drawdown between snapshots (marks that left C + marks still at C whose weight decreased); (2) net balance delta per activity (current minus previous import balance weight in MT). FG delta is derived from parseSummary.fgWipByJob. Only consecutive pairs are compared — gaps (elapsed days > 1) are flagged but still returned. Purely additive and advisory — never changes parsing, activity, dedup, ageing, or any warning/milestone/dispatch state.
+
+ * @summary Cutting output (mark-level) + net balance delta for consecutive imports
+ */
+export const GetImportProductionMovementParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetImportProductionMovementResponse = zod.object({
+  "days": zod.array(zod.object({
+  "importId": zod.number().describe('ID of the current (newer) import.'),
+  "dayKey": zod.string().describe('YYYY-MM-DD of the current import (reportDate, else createdAt UTC date).'),
+  "dayLabel": zod.string().describe('Human-readable label, e.g. \"20 Jul\" or \"18-20 Jul (2d)\".'),
+  "prevImportId": zod.number().describe('ID of the previous (older) import.'),
+  "prevDayKey": zod.string().describe('YYYY-MM-DD of the previous import.'),
+  "isGap": zod.boolean().describe('True when the two imports are more than one calendar day apart.'),
+  "elapsedDays": zod.number().describe('Calendar days between the two import dates.'),
+  "cuttingOutputMt": zod.number().describe('Mark-level TLT cutting output in MT. Sum of balance weight of marks that left C entirely plus the weight reduction of marks still at C. Excludes marks entering C (intake) and weight increases (corrections).\n'),
+  "cuttingMarksLeft": zod.number().describe('Count of TLT marks that were at C in prev and are no longer at C in curr.'),
+  "cuttingMarksReduced": zod.number().describe('Count of TLT marks still at C in both imports whose balance weight decreased.'),
+  "netBalance": zod.record(zod.string(), zod.number()).describe('Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key \"FG\" is derived from parseSummary fgWipByJob.\n')
+}).describe('One consecutive import pair. cuttingOutputMt is the sum of TLT balance weight drawn down from marks that were at activity C in the previous import (left C entirely, or still at C with reduced weight). netBalance maps activity code to MT delta (curr − prev); negative = clearing, positive = accumulating. isGap=true when the two imports are more than one calendar day apart.\n'))
+}).describe('Cutting output (mark-level TLT) and net balance delta per activity for consecutive import pairs. Days are in chronological order (oldest first).\n')
+
+
+/**
  * Deterministically recomputes, from the full append-only import history, two PERMANENT per-project turnaround milestones measured from the project's earliest Assign Date: MILESTONE 1 "Ready for Dispatch" (the first import where no mark remains in an earlier activity C..GB — every mark is at Y or gone) and MILESTONE 2 "Dispatched" (the first import where the project is entirely absent). Captured dates are preserved (capture-once) and persisted, so they survive after a project leaves the report. Includes planned (cumulative Y target) vs actual variance. Project-less rows ("(Unassigned)") are excluded. Purely additive — never changes parsing, activity values, dedup, ageing, warning, or velocity.
 
  * @summary Get permanent per-project turnaround milestones (Ready / Dispatched)

@@ -1,0 +1,128 @@
+TASK: Fix the "Daily Production Movement" panel so the Cutting (C) row is populated, and add a
+second view showing net balance movement per activity (a bottleneck view). The app already
+holds 20+ days of consecutive imports, so snapshot-to-snapshot comparison is available.
+
+=====================================================================
+PROBLEM — the C row is permanently blank
+=====================================================================
+Daily Production Movement currently plots each activity by Last Production Entry Date (Col V).
+Cutting can never appear: VERIFIED on WIP 20-Jul, 0 of 24,423 C marks have a Last Production
+Entry Date, while every other activity has 100% coverage. This is by design — cutting records
+progress via Assign Date, not a production entry.
+
+Do NOT "fix" this by plotting C from Assign Date. Assign Date is when material was ASSIGNED
+INTO cutting — that is INTAKE, not output — and putting intake in a column headed "Production
+Movement" alongside genuine output for other activities would be misleading.
+
+=====================================================================
+CHANGE 1 — Cutting row = balance delta between consecutive imports
+=====================================================================
+Real cutting production shows up as CUTTING BALANCE WEIGHT BEING REDUCED between snapshots.
+Nothing flows into C from an earlier stage (it is the first stage), so its reduction is
+genuine output.
+
+*** COMPUTE IT AT MARK LEVEL, NOT AS AN AGGREGATE DIFFERENCE. ***
+An aggregate delta badly understates output, because newly released work entering C masks the
+work leaving it. VERIFIED 19-Jul -> 20-Jul:
+    marks that LEFT C entirely          456 marks   106.632 MT   <- finished cutting
+    marks still in C with weight DOWN    47 marks    22.003 MT   <- partial progress
+    ------------------------------------------------------------
+    TRUE CUTTING OUTPUT                             128.635 MT
+    marks that ENTERED C (new release)  332 marks    14.709 MT   <- intake, excluded
+    NET aggregate change                            -84.317 MT   <- what a naive delta shows
+A simple aggregate would report 84.317 MT against a true 128.635 MT — a third of production
+lost.
+
+ALGORITHM (per pair of consecutive imports, previous -> current):
+    Key each mark by (normalized project Col B, structure Col J Alias, Mark No Col K).
+    Consider only marks whose activity was "C" in the PREVIOUS snapshot.
+      outputA = sum of previous Balance Wt for marks that are NO LONGER in C in the current
+                snapshot (they moved on, or left WIP entirely = fully produced)
+      outputB = sum of (previous Balance Wt - current Balance Wt) for marks still in C whose
+                weight DECREASED
+      Cutting output for that day = outputA + outputB
+    EXCLUDE marks that entered C (not present in the previous snapshot) and any weight
+    increases — those are intake/corrections, not production.
+Scope TLT (Order Nature Col C = "Structure"), using each row's own project code (no forward
+fill). Weights are KG in Col Q — divide by 1000 for MT.
+
+Label the C row so its basis is clear (e.g. "C (from balance reduction)") and keep a tooltip
+explaining that cutting has no production-date stamp, so output is measured as balance drawdown
+between imports.
+
+=====================================================================
+CHANGE 2 — All other activities: unchanged
+=====================================================================
+RFI, NH, B, HAB, W, Q, TS, G, GB, Y and FG keep using Last Production Entry Date exactly as
+today. They have 100% date coverage and the date directly records "work was done on this mark
+that day", with no in/out ambiguity. Do not switch them to deltas.
+
+=====================================================================
+CHANGE 3 — New second view: NET BALANCE MOVEMENT (bottleneck view)
+=====================================================================
+Add a second panel/tab beneath (or beside) Daily Production Movement, showing the NET change
+in balance weight per activity between consecutive imports:
+
+    net change for activity A on day N = balance(A, day N) - balance(A, day N-1)
+
+Present as a table (rows = activity, columns = the last N days, plus a total) and/or a small
+trend chart. Positive = material accumulating at that stage; negative = clearing.
+
+Explain the semantics on screen, because this is the point of the view:
+    net change = (work arriving from the previous stage) - (work leaving to the next stage)
+A rising figure means work is piling up at that activity — a bottleneck signal. Only Cutting is
+unambiguous (nothing feeds into it), which is why Cutting output is measured separately in
+Change 1.
+
+VERIFIED reference values (MT balance per activity, consecutive snapshots):
+    Act    17-Jul   18-Jul     d18   19-Jul     d19   20-Jul     d20
+    C      4884.7   4832.1   -52.6   4817.0   -15.1   4705.3  -111.7
+    RFI     996.7   1017.6   +20.9    980.1   -37.5   1018.7   +38.6
+    NH      214.8    211.9    -2.9    213.0    +1.0    212.0    -1.0
+    B       153.4    106.0   -47.4    106.0    +0.0    127.1   +21.1
+    Q       213.7    211.6    -2.1    212.8    +1.2    189.6   -23.2
+    TS      341.5    344.3    +2.8    382.0   +37.7    395.1   +13.1
+    G       571.1    537.5   -33.6    506.1   -31.3    554.5   +48.4
+    GB      605.8    657.5   +51.7    602.7   -54.8    569.7   -33.0
+    Y      1950.7   1904.0   -46.7   1854.1   -49.9   1818.8   -35.3
+    FG     1013.6   1139.9  +126.4   1247.8  +107.9   1308.4   +60.5
+Sanity: FG rises steadily while Yard falls steadily — finished goods accumulating and material
+dispatching. TS climbing (+37.7 then +13.1) is exactly the kind of pile-up this view should
+surface.
+
+=====================================================================
+GAPS BETWEEN IMPORTS — must be handled
+=====================================================================
+Deltas are only meaningful between CONSECUTIVE imports. If there is a gap (no upload for one or
+more days, e.g. a weekend or a missed day):
+  - Do NOT present a multi-day delta as a single day's production — it would show a false spike.
+  - Either omit the missing days, or show the delta against the actual elapsed days and label
+    it (e.g. "18-20 Jul (2 days)"), or show a per-day average and mark it as averaged.
+  - If only one import exists, show the row as "-" with an explanation, not zero.
+Use the import's own date (or the WIP file date) as the day key, not the upload timestamp.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT plot Cutting from Assign Date anywhere in this panel.
+- Do NOT switch the other activities to deltas.
+- Do NOT compute cutting output as a simple aggregate difference — it must be mark-level.
+- Do NOT count marks entering C, or weight increases, as production.
+- Do NOT include NTLT (Order Nature != "Structure").
+- Do NOT forward-fill the project code.
+- Do NOT change the ageing rules, bucket logic, parsing identity/hash/dedup, Activity or qty.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- The C row in Daily Production Movement is POPULATED, not "-".
+- For 19-Jul -> 20-Jul the C row shows 128.635 MT (456 marks left C = 106.632 MT, plus 47 marks
+  with reduced weight = 22.003 MT). It must NOT show 84.317 MT (the naive aggregate) and must
+  NOT include the 14.709 MT of new intake.
+- Other activity rows are unchanged and still driven by Last Production Entry Date.
+- The new net-balance view reproduces the table above, including FG +126.4 / +107.9 / +60.5 and
+  Y -46.7 / -49.9 / -35.3.
+- A gap between imports is never rendered as a single-day figure.
+- Both views respect the page filters and appear in the Excel export.
+Report: the C output figure for the latest consecutive pair with its mark-level breakdown, and
+the net-balance table for the last 7 available days.

@@ -14,6 +14,7 @@ import inventoryRouter from "./inventory";
 import currentJobsRouter from "./currentJobs";
 import releaseBalanceRouter from "./releaseBalance";
 import fabricationProjectCompletionRouter from "./fabricationProjectCompletion";
+import productionMovementRouter from "./productionMovement";
 
 const router: IRouter = Router();
 
@@ -32,5 +33,6 @@ router.use(inventoryRouter);
 router.use(currentJobsRouter);
 router.use(releaseBalanceRouter);
 router.use(fabricationProjectCompletionRouter);
+router.use(productionMovementRouter);
 
 export default router;

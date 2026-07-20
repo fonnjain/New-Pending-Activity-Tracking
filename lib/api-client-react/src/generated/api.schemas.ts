@@ -2252,6 +2252,51 @@ export interface ReportResult {
   detailed: ReportDetailed | null;
 }
 
+/**
+ * Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key "FG" is derived from parseSummary fgWipByJob.
+
+ */
+export type ProductionMovementDayNetBalance = {[key: string]: number};
+
+/**
+ * One consecutive import pair. cuttingOutputMt is the sum of TLT balance weight drawn down from marks that were at activity C in the previous import (left C entirely, or still at C with reduced weight). netBalance maps activity code to MT delta (curr − prev); negative = clearing, positive = accumulating. isGap=true when the two imports are more than one calendar day apart.
+
+ */
+export interface ProductionMovementDay {
+  /** ID of the current (newer) import. */
+  importId: number;
+  /** YYYY-MM-DD of the current import (reportDate, else createdAt UTC date). */
+  dayKey: string;
+  /** Human-readable label, e.g. "20 Jul" or "18-20 Jul (2d)". */
+  dayLabel: string;
+  /** ID of the previous (older) import. */
+  prevImportId: number;
+  /** YYYY-MM-DD of the previous import. */
+  prevDayKey: string;
+  /** True when the two imports are more than one calendar day apart. */
+  isGap: boolean;
+  /** Calendar days between the two import dates. */
+  elapsedDays: number;
+  /** Mark-level TLT cutting output in MT. Sum of balance weight of marks that left C entirely plus the weight reduction of marks still at C. Excludes marks entering C (intake) and weight increases (corrections).
+   */
+  cuttingOutputMt: number;
+  /** Count of TLT marks that were at C in prev and are no longer at C in curr. */
+  cuttingMarksLeft: number;
+  /** Count of TLT marks still at C in both imports whose balance weight decreased. */
+  cuttingMarksReduced: number;
+  /** Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key "FG" is derived from parseSummary fgWipByJob.
+   */
+  netBalance: ProductionMovementDayNetBalance;
+}
+
+/**
+ * Cutting output (mark-level TLT) and net balance delta per activity for consecutive import pairs. Days are in chronological order (oldest first).
+
+ */
+export interface ProductionMovementResponse {
+  days: ProductionMovementDay[];
+}
+
 export type DeleteRsjThicknessParams = {
 groupKey: string;
 };

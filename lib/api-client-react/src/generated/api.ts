@@ -70,6 +70,7 @@ import type {
   MilestonesResponse,
   MovementResponse,
   OrderStatusResponse,
+  ProductionMovementResponse,
   Record,
   ReleaseBalanceResponse,
   ReportRequest,
@@ -3141,6 +3142,85 @@ export function useGetImportVelocity<TData = Awaited<ReturnType<typeof getImport
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetImportVelocityQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetImportProductionMovementUrl = (id: number,) => {
+
+
+
+
+  return `/api/imports/${id}/production-movement`
+}
+
+/**
+ * Walks backwards from the given import (up to 7 predecessors) and, for each consecutive pair, computes: (1) TLT Cutting output — mark-level balance drawdown between snapshots (marks that left C + marks still at C whose weight decreased); (2) net balance delta per activity (current minus previous import balance weight in MT). FG delta is derived from parseSummary.fgWipByJob. Only consecutive pairs are compared — gaps (elapsed days > 1) are flagged but still returned. Purely additive and advisory — never changes parsing, activity, dedup, ageing, or any warning/milestone/dispatch state.
+
+ * @summary Cutting output (mark-level) + net balance delta for consecutive imports
+ */
+export const getImportProductionMovement = async (id: number, options?: RequestInit): Promise<ProductionMovementResponse> => {
+
+  return customFetch<ProductionMovementResponse>(getGetImportProductionMovementUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetImportProductionMovementQueryKey = (id: number,) => {
+    return [
+    `/api/imports/${id}/production-movement`
+    ] as const;
+    }
+
+
+export const getGetImportProductionMovementQueryOptions = <TData = Awaited<ReturnType<typeof getImportProductionMovement>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportProductionMovement>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImportProductionMovementQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImportProductionMovement>>> = ({ signal }) => getImportProductionMovement(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImportProductionMovement>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetImportProductionMovementQueryResult = NonNullable<Awaited<ReturnType<typeof getImportProductionMovement>>>
+export type GetImportProductionMovementQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Cutting output (mark-level) + net balance delta for consecutive imports
+ */
+
+export function useGetImportProductionMovement<TData = Awaited<ReturnType<typeof getImportProductionMovement>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportProductionMovement>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetImportProductionMovementQueryOptions(id,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
