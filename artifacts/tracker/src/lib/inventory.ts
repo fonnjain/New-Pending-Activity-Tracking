@@ -295,8 +295,9 @@ export function useInventoryData(): InventoryPageData {
   };
 }
 
-export const BUCKET_LABELS: Record<"a" | "b" | "c" | "d" | "e", string> = {
+export const BUCKET_LABELS: Record<"a" | "preB" | "b" | "c" | "d" | "e", string> = {
   a: "Project to Start",
+  preB: "Awaiting Colour Assignment",
   b: "Raw Material Incomplete",
   c: "RM Complete \u2013 Material Under Production",
   d: "Dispatch Clearance Recd But Production Not Complete",

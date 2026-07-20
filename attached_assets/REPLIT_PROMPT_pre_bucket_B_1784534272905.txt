@@ -1,0 +1,110 @@
+TASK: Add a new bucket, "Pre Bucket B", that sits between Bucket A and Bucket B. It is a
+STAGING GATE: a project cannot enter Bucket B until its colour and dates have been entered.
+
+=====================================================================
+THE FLOW
+=====================================================================
+    Bucket A            ->   Pre Bucket B              ->   Bucket B
+    (no work order)          (qualifies for B, but          (colour + dates entered)
+                              colour/dates NOT yet
+                              supplied)
+
+  - A project leaves Bucket A when it qualifies for Bucket B (work order raised / release
+    progress appears / its marks appear in WIP). It lands in PRE BUCKET B, never straight
+    into Bucket B.
+  - It SITS in Pre Bucket B until the user supplies Colour, Date of Client MFC and Project
+    Start Date (the existing MFC colour-coding entry form).
+  - The moment that information exists, it moves into Bucket B automatically on the next
+    render/import. No extra button, no manual "promote" action.
+
+=====================================================================
+THE GATE IS PER (PROJECT, MFC BATCH) PAIR — NOT PER PROJECT
+=====================================================================
+*** Each (project, MFC batch) pair must be coloured SEPARATELY to move. ***
+A project with several batches moves piecemeal: its coloured pairs sit in Bucket B while its
+uncoloured pairs remain in Pre Bucket B. This is intended, not a bug.
+
+Gate condition for a pair:
+    a colour assignment record exists for (normalized project, MFC batch)
+      -> pair belongs to BUCKET B
+    otherwise
+      -> pair belongs to PRE BUCKET B
+
+The colour record is the same one created by the MFC colour-coding feature (colour, Client MFC
+date, Project Start date, keyed on project + MFC batch). Requiring the COLOUR is the gate;
+treat a record as complete only if the colour AND both dates are present.
+
+=====================================================================
+WEIGHTS ARE EXCLUDED FROM BUCKET B WHILE IN PRE BUCKET B
+=====================================================================
+A pair sitting in Pre Bucket B contributes NOTHING to Bucket B — not its structures, not its
+Release Balance, Fab, Galva or Yard, not its counts. Bucket B totals must reflect only
+coloured pairs. There is no double presence: a pair is in exactly ONE of Pre Bucket B or
+Bucket B, never both.
+
+=====================================================================
+PRE BUCKET B — behaviour and display
+=====================================================================
+- Same membership rule as Bucket B (Balance Release > 0, completed structures excluded), and
+  the same measure columns (Release Balance, Fabrication, Galvanising, Yard), so the user sees
+  exactly what is waiting to be released into B.
+- Same Project -> MFC Batch grouping and the "Group by MFC" toggle as the other buckets.
+- Show the MFC Batch column; a newly started project is typically all "Z" at first.
+- Each row needs an obvious call to action, e.g. an "Assign colour" control that pre-fills the
+  colour-coding form with that project and batch, so the user can clear the gate in one click.
+- Show a clear count, e.g. "40 pairs awaiting colour assignment".
+- Order the buckets in the UI as: A, Pre Bucket B, B, C, D, E.
+- Include Pre Bucket B in the Excel export as its own sheet, same shape as the Bucket B sheet.
+
+=====================================================================
+EXPECTED RESULT (verified, 19-Jul files)
+=====================================================================
+With no colours assigned yet, Bucket B is EMPTY and Pre Bucket B holds all of it:
+    40 (project, MFC batch) pairs across 28 projects, 204 structures
+    Release Balance 2402.197 | Fab 2904.316 | Galva 770.698 | Yard 3418.684 MT
+
+Projects with MULTIPLE pairs (these will move piecemeal — good test cases):
+    900 -> B, C, Z      912 -> B, C, Z      935 -> A, B, C
+    917 -> B, Z         920 -> C, D         926 -> A, B
+    929 -> A, B         938 -> A, Z         944 -> B, Z
+Single-pair projects include: 958 (Z), 960 (Z), 948 (Z), 937 (Z), 940 (C), 942 (A), 933 (B).
+
+Worked example: colouring (926, A) moves 2 structures (Rel Bal 7.587, Fab 23.301, Galva 4.259,
+Yard 3.064) from Pre Bucket B into Bucket B, while (926, B) — 8 structures — stays in Pre
+Bucket B until it too is coloured.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT gate Buckets C, D or E — the gate applies ONLY to entry into Bucket B.
+- Do NOT change Bucket A's data-driven rule (Col J == 0 AND Col L == 0), Bucket A's "Z" MFC
+  display, or Bucket E's manual entry and its C/D removal rule.
+- Do NOT change bucket membership rules, the completed-structure exclusion, the MFC batch
+  assignment, or the measure columns.
+- Do NOT re-add the In-House / Out-Vendor split.
+- Do NOT persist bucket membership or a "promoted" flag. Membership is DERIVED at read time
+  from (bucket rule + does a colour record exist). Recompute on every import so it is always
+  correct with no stale state.
+- Do NOT auto-assign a colour to clear the gate, and do NOT block an import because pairs are
+  waiting.
+- Do NOT forward-fill the project code.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK (19-Jul files)
+=====================================================================
+- With no colours assigned: Pre Bucket B shows 40 pairs / 28 projects / 204 structures with
+  Release Balance 2402.197 MT, and Bucket B is empty.
+- Assigning a colour + both dates to (926, A) moves ONLY that pair into Bucket B; (926, B)
+  remains in Pre Bucket B. Bucket B then shows 2 structures / Rel Bal 7.587.
+- Bucket B totals include only coloured pairs; Pre Bucket B totals only uncoloured ones; the
+  two together equal the old undivided Bucket B totals (2402.197 Rel Bal etc.) — nothing lost
+  or double counted.
+- A pair never appears in both buckets.
+- Deleting a colour assignment sends that pair back to Pre Bucket B.
+- Re-importing WIP/Order Review preserves colour records, so already-promoted pairs stay in
+  Bucket B without re-entry.
+- Bucket order in the UI is A, Pre Bucket B, B, C, D, E, and Pre Bucket B has its own export
+  sheet.
+Report: the Pre Bucket B pair count and totals, the result of colouring (926, A), and
+confirmation that Bucket B + Pre Bucket B reconcile to the full Bucket B population.

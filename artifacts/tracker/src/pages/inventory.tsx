@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useRef } from "react";
 import { useTracker, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
 import {
   useGetAuthStatus,
@@ -453,6 +453,242 @@ function AutoBucketPanel({
   );
 }
 
+// ── Pre-Bucket B components ───────────────────────────────────────────────────
+// Each (project, mfcBatch) pair shows an "Assign colour" CTA to clear the gate.
+
+function PreBProjectRow({
+  group,
+  columns,
+  onAssignColour,
+  canAssign,
+}: {
+  group: ProjectGroup;
+  columns: ColumnDef[];
+  onAssignColour: (project: string, mfcBatch: string) => void;
+  canAssign: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const mfcGroups = useMemo(() => groupByMfcBatch(group.rows), [group.rows]);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-1.5 text-sm gap-2 min-w-0 hover:bg-muted/30"
+      >
+        <span className="flex items-center gap-1.5 min-w-0">
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          )}
+          <span className="font-medium truncate">{group.project}</span>
+          <span className="text-[10px] text-muted-foreground shrink-0">{group.count} str</span>
+        </span>
+        <span className="flex items-center gap-3 shrink-0">
+          {columns.map((col) => (
+            <span key={col.key} className="text-[11px] tabular-nums text-right">
+              <span className="text-muted-foreground mr-1">{col.label}</span>
+              {mt(sumColumnOrNull(group.rows, col.get))}
+            </span>
+          ))}
+        </span>
+      </button>
+      {open && (
+        <div className="pl-6 pb-0.5">
+          {mfcGroups.map(({ mfcBatch, rows: mfcRows }) => (
+            <div
+              key={mfcBatch}
+              className="flex items-center justify-between gap-2 px-2 py-1 text-xs border-t first:border-t-0 hover:bg-muted/20"
+            >
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="shrink-0 text-[10px] font-medium px-1 py-px rounded border border-border/60 text-muted-foreground">
+                  {mfcBatch}
+                </span>
+                <span className="text-muted-foreground shrink-0">{mfcRows.length} str</span>
+              </span>
+              <span className="flex items-center gap-2 shrink-0">
+                {columns.map((col) => (
+                  <span key={col.key} className="tabular-nums text-right text-[11px]">
+                    <span className="text-muted-foreground mr-1">{col.label}</span>
+                    {mt(sumColumnOrNull(mfcRows, col.get))}
+                  </span>
+                ))}
+                {canAssign && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-[11px] px-2 shrink-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAssignColour(group.project, mfcBatch);
+                    }}
+                  >
+                    Assign colour
+                  </Button>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PreBMfcRow({
+  mfcBatch,
+  rows,
+  columns,
+  onAssignColour,
+  canAssign,
+}: {
+  mfcBatch: string;
+  rows: InventoryStructureCard[];
+  columns: ColumnDef[];
+  onAssignColour: (project: string, mfcBatch: string) => void;
+  canAssign: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const projectGroups = useMemo(() => groupByProject(rows), [rows]);
+  return (
+    <div>
+      <div className="w-full flex items-center justify-between hover:bg-muted/30 text-sm">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setOpen((v) => !v)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setOpen((v) => !v);
+            }
+          }}
+          className="flex items-center gap-1.5 min-w-0 px-3 py-1.5 cursor-pointer select-none flex-1"
+        >
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          )}
+          <span className="font-medium shrink-0">MFC {mfcBatch}</span>
+          <span className="text-[10px] text-muted-foreground shrink-0">
+            {projectGroups.length} proj &middot; {rows.length} str
+          </span>
+        </div>
+        <span className="flex items-center gap-3 shrink-0 px-3 py-1.5">
+          {columns.map((col) => (
+            <span key={col.key} className="text-[11px] tabular-nums text-right">
+              <span className="text-muted-foreground mr-1">{col.label}</span>
+              {mt(sumColumnOrNull(rows, col.get))}
+            </span>
+          ))}
+        </span>
+      </div>
+      {open && (
+        <div className="pl-6 pb-0.5">
+          {projectGroups.map((g) => (
+            <div
+              key={g.project}
+              className="flex items-center border-t first:border-t-0 hover:bg-muted/20"
+            >
+              <div className="flex-1 flex items-center justify-between gap-2 px-3 py-1 text-xs min-w-0">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-medium truncate">{g.project}</span>
+                  <span className="text-muted-foreground shrink-0">{g.count} str</span>
+                </span>
+                <span className="flex items-center gap-2 shrink-0">
+                  {columns.map((col) => (
+                    <span key={col.key} className="tabular-nums text-right">
+                      <span className="text-muted-foreground mr-1">{col.label}</span>
+                      {mt(sumColumnOrNull(g.rows, col.get))}
+                    </span>
+                  ))}
+                  {canAssign && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-[11px] px-2 shrink-0"
+                      onClick={() => onAssignColour(g.project, mfcBatch)}
+                    >
+                      Assign colour
+                    </Button>
+                  )}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PreBucketBPanel({
+  rows,
+  columns,
+  groupByMfc,
+  onAssignColour,
+  canAssign,
+}: {
+  rows: InventoryStructureCard[];
+  columns: ColumnDef[];
+  groupByMfc: boolean;
+  onAssignColour: (project: string, mfcBatch: string) => void;
+  canAssign: boolean;
+}) {
+  const groups = useMemo(() => groupByProject(rows), [rows]);
+  const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
+  const pairCount = useMemo(
+    () => new Set(rows.map((r) => `${r.project}\u0001${r.mfcBatch}`)).size,
+    [rows],
+  );
+  const summary = useMemo(() => computeBucketSummary(rows, false), [rows]);
+
+  return (
+    <div className="border rounded-md">
+      <div className="px-3 py-2 border-b bg-amber-50/40 dark:bg-amber-950/20 flex items-center justify-between gap-2">
+        <span className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          {pairCount} pair{pairCount !== 1 ? "s" : ""} awaiting colour assignment
+        </span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {rows.length} structure{rows.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+      <div className="max-h-96 overflow-auto divide-y">
+        {rows.length === 0 ? (
+          <div className="py-6 text-center text-xs text-muted-foreground">
+            No structures — all pairs have colour + dates assigned.
+          </div>
+        ) : groupByMfc ? (
+          mfcGroups.map(({ mfcBatch, rows: mfcRows }) => (
+            <PreBMfcRow
+              key={mfcBatch}
+              mfcBatch={mfcBatch}
+              rows={mfcRows}
+              columns={columns}
+              onAssignColour={onAssignColour}
+              canAssign={canAssign}
+            />
+          ))
+        ) : (
+          groups.map((g) => (
+            <PreBProjectRow
+              key={g.project}
+              group={g}
+              columns={columns}
+              onAssignColour={onAssignColour}
+              canAssign={canAssign}
+            />
+          ))
+        )}
+      </div>
+      <SummaryFooter summary={summary} />
+    </div>
+  );
+}
+
 function ManualEntryList({
   entries,
   onDelete,
@@ -653,6 +889,8 @@ function MfcBatchColorForm({
   projectMfcBatches,
   onSave,
   isPending,
+  initialProject,
+  initialBatch,
 }: {
   knownProjects: string[];
   projectMfcBatches: Map<string, string[]>;
@@ -664,9 +902,11 @@ function MfcBatchColorForm({
     projectStartDate?: string;
   }) => void;
   isPending: boolean;
+  initialProject?: string;
+  initialBatch?: string;
 }) {
-  const [project, setProject] = useState("");
-  const [mfcBatch, setMfcBatch] = useState("");
+  const [project, setProject] = useState(initialProject ?? "");
+  const [mfcBatch, setMfcBatch] = useState(initialBatch ?? "");
   const [color, setColor] = useState<MfcColorName | "">("");
   const [dateOfClientMfc, setDateOfClientMfc] = useState("");
   const [projectStartDate, setProjectStartDate] = useState("");
@@ -958,6 +1198,37 @@ export default function InventoryView() {
 
   // MFC batch colour assignments — keyed by "project\u0001mfcBatch".
   const { data: mfcBatchColors = [] } = useListInventoryMfcBatchColors();
+
+  // Pre-B gate: a pair is "complete" when colour + BOTH dates are present.
+  // Pairs without a complete record sit in Pre-B; complete pairs sit in B.
+  const colourCompleteKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of mfcBatchColors) {
+      if (c.color && c.dateOfClientMfc && c.projectStartDate) {
+        set.add(`${c.project}\u0001${c.mfcBatch}`);
+      }
+    }
+    return set;
+  }, [mfcBatchColors]);
+
+  // Prefill state for MFC form + scroll ref — populated by "Assign colour" CTA.
+  const [mfcFormPrefill, setMfcFormPrefill] = useState<{
+    project: string;
+    mfcBatch: string;
+    key: number;
+  } | null>(null);
+  const mfcSectionRef = useRef<HTMLDivElement>(null);
+
+  const handleAssignColour = useCallback((project: string, mfcBatch: string) => {
+    setMfcFormPrefill((prev) => ({
+      project,
+      mfcBatch,
+      key: (prev?.key ?? 0) + 1,
+    }));
+    setTimeout(() => {
+      mfcSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  }, []);
   const upsertMfcBatchColor = useUpsertInventoryMfcBatchColor();
   const deleteMfcBatchColor = useDeleteInventoryMfcBatchColor();
   const [deletingColorKey, setDeletingColorKey] = useState<string | null>(null);
@@ -1033,7 +1304,14 @@ export default function InventoryView() {
   );
 
   const bucketA = applyJobFilter(buckets.a);
-  const bRows = applyJobFilter(buckets.b);
+  const allBRows = applyJobFilter(buckets.b);
+  // Gate: split B rows by whether the (project, mfcBatch) pair has a complete colour record.
+  const preBRows = allBRows.filter(
+    (r) => !colourCompleteKeys.has(`${r.project}\u0001${r.mfcBatch}`),
+  );
+  const bRows = allBRows.filter((r) =>
+    colourCompleteKeys.has(`${r.project}\u0001${r.mfcBatch}`),
+  );
   const cRows = applyJobFilter(buckets.c);
   const dRows = applyJobFilter(buckets.d);
 
@@ -1277,6 +1555,13 @@ export default function InventoryView() {
         }),
       },
       autoBucketSheet(
+        "Pre-B - Awaiting Colour Assign",
+        preBRows,
+        BUCKET_B_COLUMNS,
+        false,
+        groupByMfc,
+      ),
+      autoBucketSheet(
         "B - Raw Material Incomplete",
         bRows,
         BUCKET_B_COLUMNS,
@@ -1415,43 +1700,48 @@ export default function InventoryView() {
       </Card>
 
       {/* MFC Batch Colour Management */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">MFC Batch Colour</CardTitle>
-        </CardHeader>
-        <CardContent className="px-0 pb-0">
-          {reminderProjects.length > 0 && (
-            <div className="mx-3 mb-3 flex items-start gap-2 p-3 rounded-md border border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/20 text-sm">
-              <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-medium">Reminder:</span>{" "}
-                {reminderProjects.length === 1
-                  ? "The following project has"
-                  : "The following projects have"}{" "}
-                a colour assignment but{" "}
-                {reminderProjects.length === 1 ? "is" : "are"} no longer in Bucket A:{" "}
-                <span className="font-medium">{reminderProjects.join(", ")}</span>
+      <div ref={mfcSectionRef}>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">MFC Batch Colour</CardTitle>
+          </CardHeader>
+          <CardContent className="px-0 pb-0">
+            {reminderProjects.length > 0 && (
+              <div className="mx-3 mb-3 flex items-start gap-2 p-3 rounded-md border border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/20 text-sm">
+                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-medium">Reminder:</span>{" "}
+                  {reminderProjects.length === 1
+                    ? "The following project has"
+                    : "The following projects have"}{" "}
+                  a colour assignment but{" "}
+                  {reminderProjects.length === 1 ? "is" : "are"} no longer in Bucket A:{" "}
+                  <span className="font-medium">{reminderProjects.join(", ")}</span>
+                </div>
               </div>
-            </div>
-          )}
-          {canEdit && (
-            <MfcBatchColorForm
-              knownProjects={knownProjects}
-              projectMfcBatches={projectMfcBatches}
-              onSave={saveMfcBatchColor}
-              isPending={upsertMfcBatchColor.isPending}
+            )}
+            {canEdit && (
+              <MfcBatchColorForm
+                key={mfcFormPrefill?.key ?? 0}
+                knownProjects={knownProjects}
+                projectMfcBatches={projectMfcBatches}
+                onSave={saveMfcBatchColor}
+                isPending={upsertMfcBatchColor.isPending}
+                initialProject={mfcFormPrefill?.project}
+                initialBatch={mfcFormPrefill?.mfcBatch}
+              />
+            )}
+            <MfcBatchColorTable
+              entries={mfcBatchColors}
+              canEdit={canEdit}
+              onDelete={removeMfcBatchColor}
+              deletingKey={deletingColorKey}
             />
-          )}
-          <MfcBatchColorTable
-            entries={mfcBatchColors}
-            canEdit={canEdit}
-            onDelete={removeMfcBatchColor}
-            deletingKey={deletingColorKey}
-          />
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
-      {/* Group-by toggle for Buckets B / C / D */}
+      {/* Group-by toggle for Pre-B / B / C / D */}
       <div className="flex items-center gap-2">
         <span className="text-xs text-muted-foreground">Group by</span>
         <Segmented
@@ -1462,8 +1752,28 @@ export default function InventoryView() {
             { value: "mfc", label: "MFC Batch" },
           ]}
         />
-        <span className="text-xs text-muted-foreground">(applies to B, C, D)</span>
+        <span className="text-xs text-muted-foreground">(applies to Pre-B, B, C, D)</span>
       </div>
+
+      {/* Pre-Bucket B — qualifies for B but colour + dates not yet assigned */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Pre-B — {BUCKET_LABELS.preB}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
+          ) : (
+            <PreBucketBPanel
+              rows={preBRows}
+              columns={BUCKET_B_COLUMNS}
+              groupByMfc={groupByMfc}
+              onAssignColour={handleAssignColour}
+              canAssign={canEdit}
+            />
+          )}
+        </CardContent>
+      </Card>
 
       {/* Bucket B */}
       <Card>
