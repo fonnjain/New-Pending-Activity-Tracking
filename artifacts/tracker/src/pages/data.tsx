@@ -370,6 +370,27 @@ function DataViewContent() {
                 </>
               )}
             </div>
+            {(selectedImport.summary.unclassifiedRowCount ?? 0) > 0 && (
+              <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 p-3 flex gap-2 items-start">
+                <AlertTriangle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <span className="font-semibold text-destructive">
+                    {selectedImport.summary.unclassifiedRowCount!.toLocaleString()} unclassified {selectedImport.summary.unclassifiedRowCount === 1 ? "row" : "rows"} — unexpected Type or Job Card Status value
+                  </span>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    These rows do not match the verified closed value sets for Col A ("Type") or Col G ("Job Card Status").
+                    This usually means a new file format. The rows are still counted in total balance but not bucketed into any WIP case.
+                  </p>
+                  {selectedImport.summary.unclassifiedSamples && selectedImport.summary.unclassifiedSamples.length > 0 && (
+                    <div className="mt-2 font-mono text-xs text-muted-foreground space-y-0.5">
+                      {selectedImport.summary.unclassifiedSamples.map((s, i) => (
+                        <div key={i}>Type: "{s.type}" / Status: "{s.status}"</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

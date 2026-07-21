@@ -143,6 +143,11 @@ export interface ImportUpload {
   reportDate?: string;
 }
 
+export type ParseSummaryUnclassifiedSamplesItem = {
+  type: string;
+  status: string;
+};
+
 /**
  * Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = "FG Pending For Dispatch". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.
 
@@ -175,6 +180,12 @@ export interface ParseSummary {
   /** Total Balance Wt. (MT) of the NTLT orphan marks (same rows as ntltOrphanCount). Absent when ntltOrphanCount is absent.
    */
   ntltOrphanWtMt?: number;
+  /** Rows whose Col A ("Type") or Col G ("Job Card Status") did not match the verified closed value sets. Non-zero means a new file format value was encountered. Absent (or zero) in the normal case.
+   */
+  unclassifiedRowCount?: number;
+  /** Up to 5 distinct Type+Status combos from unclassified rows, for diagnosis. Absent when unclassifiedRowCount is absent or zero.
+   */
+  unclassifiedSamples?: ParseSummaryUnclassifiedSamplesItem[];
   /** Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = "FG Pending For Dispatch". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.
    */
   fgWipByJob?: ParseSummaryFgWipByJob;

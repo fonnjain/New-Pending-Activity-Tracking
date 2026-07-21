@@ -40,6 +40,12 @@ export interface ParseSummary {
   //   { section, towerTypes: string[], marks: number }
   // Absent when all Sections are 1:1 with a Tower Type.
   ntltSectionMismatches?: Array<{ section: string; towerTypes: string[]; marks: number }>;
+  // Rows whose Col A "Type" or Col G "Job Card Status" did not match any of the
+  // verified closed value sets.  A non-zero count signals a file format change.
+  // Absent (or zero) in the normal case.  Up to 5 distinct type+status combos
+  // are captured as samples to aid diagnosis.
+  unclassifiedRowCount?: number;
+  unclassifiedSamples?: Array<{ type: string; status: string }>;
   // Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where
   // the WIP file's "Type" column (Col A, new ≥Jul-2026 format) equals
   // "FG Pending For Dispatch". Values in kg (same unit as balanceWt).

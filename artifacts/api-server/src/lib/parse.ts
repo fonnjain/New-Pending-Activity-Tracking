@@ -815,11 +815,22 @@ export function parseWorkbook(
     raw: true,
   });
 
+  // Closed value sets for Col A and Col G (verified on WIP 21-Jul, 60,594 rows).
+  const KNOWN_WIP_TYPES = new Set([
+    "JOB CARD NOT STARTED",
+    "JOB CARD WIP",
+    "FG PENDING FOR DISPATCH",
+  ]);
+  const KNOWN_JC_STATUSES = new Set(["INITIAL", "AUTHORIZED"]);
+
   let rowsRead = 0;
   let classificationConflicts = 0;
   let ntltOrphanCount = 0;
   let ntltOrphanWtMt = 0;
   let unknownOrderNatureCount = 0;
+  let unclassifiedRowCount = 0;
+  // Up to 5 distinct type+status combos captured as diagnostic samples.
+  const unclassifiedSampleMap = new Map<string, { type: string; status: string }>();
   // Per-NTLT-section: distinct Tower Types seen. Used to flag Section→TowerType
   // mismatches (a source-data quality signal, not a parse error).
   const ntltSectionTowerTypes = new Map<string, { types: Set<string>; marks: number }>();
@@ -1007,6 +1018,31 @@ export function parseWorkbook(
     base.jobCardStatus = jcStatus || null;
     base.isInitialCutting = activityUpper === "C" && jcStatus === "INITIAL";
 
+    // Detect rows that fall outside the verified closed value sets for Col A / Col G.
+    // Only applies when the "Type" column is present (new-format files); old-format
+    // files have no rowType and are skipped. A non-zero count means the file has a
+    // new value not yet handled — surface as a warning rather than silently bucketing.
+    const rowTypeUpper = rowType.trim().toUpperCase();
+    if (rowTypeUpper) {
+      const unknownType = !KNOWN_WIP_TYPES.has(rowTypeUpper);
+      // For rows with a known Type (excluding FG whose status is always blank),
+      // any non-empty Job Card Status must also be a known value.
+      const unknownStatus =
+        !unknownType &&
+        rowTypeUpper !== "FG PENDING FOR DISPATCH" &&
+        jcStatus !== "" &&
+        !KNOWN_JC_STATUSES.has(jcStatus);
+      if (unknownType || unknownStatus) {
+        unclassifiedRowCount++;
+        if (unclassifiedSampleMap.size < 5) {
+          const key = `${rowTypeUpper}|${jcStatus}`;
+          if (!unclassifiedSampleMap.has(key)) {
+            unclassifiedSampleMap.set(key, { type: rowType.trim(), status: jcStatus });
+          }
+        }
+      }
+    }
+
     rows.push({ ...base, hash: hashRow(base, rawBatch) });
   }
 
@@ -1051,6 +1087,10 @@ export function parseWorkbook(
       classificationConflicts,
       ...(ntltOrphanCount > 0 && { ntltOrphanCount, ntltOrphanWtMt }),
       ...(unknownOrderNatureCount > 0 && { unknownOrderNatureCount }),
+      ...(unclassifiedRowCount > 0 && {
+        unclassifiedRowCount,
+        unclassifiedSamples: Array.from(unclassifiedSampleMap.values()),
+      }),
       ...(() => {
         const mismatches = Array.from(ntltSectionTowerTypes.entries())
           .filter(([, v]) => v.types.size > 1)

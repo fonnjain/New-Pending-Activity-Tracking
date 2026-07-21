@@ -1,0 +1,167 @@
+TASK: Replace all ad-hoc Cutting/activity filtering with ONE definitive specification. The
+repeated back-and-forth on Cutting happened because the rule was never stated as a complete,
+mutually-exclusive case list. This document IS that specification. Implement it exactly.
+
+=====================================================================
+THE FIVE COLUMNS THAT DEFINE EVERY CASE
+=====================================================================
+Read ALL columns by HEADER NAME, never by position (the layout has changed before).
+
+  Col A  "Type"              -> the mark's production STAGE      (3 values)
+  Col C  "Order Nature"      -> TLT vs NTLT                      (4 values)
+  Col G  "Job Card Status"   -> released or not                  (2 values)
+  Col I  "Tower Sub Type"    -> descriptive attribute            (27 values)
+  Col L  "Section"           -> material spec / NTLT identity    (217 values)
+
+Verified value sets (WIP 21-Jul, 60,594 rows). These are CLOSED sets — anything else is a
+data-format change and must raise a warning, not be silently bucketed:
+
+  Col A: "Job Card Not Started" (26,708) | "Job Card WIP" (26,871) | "FG Pending For Dispatch" (7,015)
+  Col C: "Structure" (60,276) | "RSJ POLE" (266) | "EARTHING" (28) | "GENERAL" (24)
+  Col G: "Authorized" (49,141) | "Initial" (11,453)
+
+Normalise before comparing: trim whitespace, compare case-insensitively. Do not match on
+prefixes or partial strings.
+
+=====================================================================
+STEP 1 — TLT / NTLT SPLIT (Col C alone)
+=====================================================================
+        Col C == "Structure"                     -> TLT
+        Col C in {RSJ POLE, EARTHING, GENERAL}   -> NTLT
+
+Col C is the SOLE classifier. Do not infer TLT/NTLT from project code, sub type, section or
+activity. Verified: 100% of NTLT rows have a BLANK project code (Col B) and a BLANK Alias
+(Col J); 100% of TLT rows have both populated. NTLT therefore cannot join to Order Review and
+is keyed by Section (Col L) alone.
+
+All calculations below are TLT unless stated. NEVER forward-fill the project code.
+
+=====================================================================
+STEP 2 — THE FOUR CASES (Col A x Col G) — MUTUALLY EXCLUSIVE, EXHAUSTIVE
+=====================================================================
+Every mark falls into EXACTLY ONE of these four cases. There is no overlap and no fifth case.
+This matrix is the whole specification — verified on TLT rows:
+
+  #  Col A "Type"              Col G "Status"   Activity   Marks    Weight (MT)   Meaning
+  -- ------------------------- ---------------- ---------- -------- ------------- ----------------------------
+  1  Job Card Not Started      Initial          C          11,453    2,538.863    NOT RELEASED (raw material)
+  2  Job Card Not Started      Authorized       C          15,137    2,597.052    CUTTING (released, pending)
+  3  Job Card WIP              Authorized       not C      26,871    6,741.781    IN PRODUCTION (post-cutting)
+  4  FG Pending For Dispatch   Authorized       blank        6,985    1,400.577    FINISHED GOODS
+
+Structural facts that make these cases unambiguous (all verified):
+  - "Job Card Not Started" ALWAYS has Activity = C. No other activity occurs with it (TLT).
+  - "Job Card WIP" NEVER has Activity = C. It is always a post-cutting activity.
+  - "FG Pending For Dispatch" ALWAYS has a BLANK activity, and is ALWAYS Authorized.
+  - "Initial" occurs ONLY with "Job Card Not Started". Cases 3 and 4 are always Authorized.
+  => Therefore Col G only ever discriminates WITHIN "Job Card Not Started". Applying a Job
+     Card Status filter anywhere else is a no-op at best and a bug at worst.
+
+=====================================================================
+STEP 3 — THE CALCULATIONS (each maps to exactly one case)
+=====================================================================
+  RELEASE BALANCE (WIP-computed) = CASE 1 only
+        Col A == "Job Card Not Started" AND Col G == "Initial"
+        Expected: 11,453 marks / 2,538.863 MT
+        (This equals Order Review Col S "Balance Release" per structure — verified.)
+
+  CUTTING (C) = CASE 2 only
+        Col A == "Job Card Not Started" AND Col G == "Authorized"
+        Expected: 15,137 marks / 2,597.052 MT
+        *** NO OTHER CONDITION. *** Do not additionally require Assign Date, Contractor,
+        Last Production Entry Date, Job Card No, Batch No or any other field to be non-null.
+        4,243 of these marks (985.133 MT) have a BLANK Assign Date AND a BLANK Contractor —
+        they are still Authorized and MUST be counted. Requiring Assign Date wrongly drops
+        them and wipes out project 821 entirely (301 marks / 5.148 MT).
+
+  QUALITY CHECK = CASE 3, activities {HG, RFI, NH, B, HAB, W, Q, TS}
+  GALVANISING   = CASE 3, activities {G, GB, Y}
+        Per-activity expected (marks / MT):
+          Y 5,231/1,838.681 | RFI 8,234/976.753 | G 3,788/561.806 | GB 3,169/534.632
+          TS 1,724/364.114  | Q 1,764/207.160   | NH 1,725/205.022 | B 617/124.032
+          W 432/38.600      | HAB 17/5.829
+        No Job Card Status filter applies here — Case 3 is Authorized by definition.
+
+  FINISHED GOODS (FG WIP) = CASE 4 only
+        Col A == "FG Pending For Dispatch"
+        Expected: 6,985 marks / 1,400.577 MT
+        No status filter, no activity filter (activity is always blank).
+
+  TOTAL BALANCE = all four cases = every TLT mark. Nothing is excluded from Balance Wt,
+        Balance Qty or Marks. Cases only determine which BUCKET a mark is reported in.
+
+RECONCILIATION (must always hold):
+        Cutting + Quality Check + Galvanising + FG WIP + Release Balance = Total Balance
+Cases 1-4 partition the marks, so the five buckets sum to the whole with no double counting and
+no gaps. Assert this per project.
+
+=====================================================================
+STEP 4 — COLUMNS I AND L (attributes, not filters)
+=====================================================================
+  Col I "Tower Sub Type" (27 values) — a DESCRIPTIVE attribute. Identical to Order Review
+        Col D (verified 729/729 agreement). Use for grouping/bifurcation (e.g. Stub / SST /
+        Other in the fabrication report). NEVER use it to include or exclude a mark from a
+        calculation.
+
+  Col L "Section" (217 values) — the material spec. Its ONLY structural role: it is the
+        IDENTITY of NTLT rows, which have no project and no structure. Group NTLT by Section.
+        For TLT it is descriptive only. NEVER use it as a calculation filter.
+
+  Neither column may ever appear in a Cutting/Release/FG/activity filter condition.
+
+=====================================================================
+IMPLEMENTATION REQUIREMENTS
+=====================================================================
+- Implement the four cases as ONE shared function, e.g. classifyMark(row) returning
+  NOT_RELEASED | CUTTING | IN_PRODUCTION | FINISHED_GOODS. Every aggregation — every page,
+  report, export, summary and precomputed value — must call it. No inline conditions anywhere.
+- If a row matches none of the four cases (an unexpected Col A or Col G value), do NOT silently
+  drop it. Count it into an "Unclassified" bucket and surface a warning on the Data page with
+  the offending values. Silent drops are how the current bug went unnoticed.
+- Check for any PRECOMPUTED/STORED Cutting or activity totals written at import time (imports
+  summary jsonb, record_pool, cached aggregates). A stored stale value will keep showing the old
+  number no matter how the read path is fixed — this is the likely reason three consecutive
+  exports were identical. Recompute or re-run the import.
+
+=====================================================================
+DO NOT
+=====================================================================
+- Do NOT add null-checks on Assign Date, Contractor, Last Production Entry Date, Job Card No,
+  Batch No or any other field to any of these calculations.
+- Do NOT apply a Job Card Status filter outside Case 1 / Case 2.
+- Do NOT use Col I or Col L as a filter.
+- Do NOT forward-fill the project code (Col B).
+- Do NOT drop marks from Balance Wt / Balance Qty / Marks totals — cases affect bucketing only.
+- Do NOT read any column by position.
+- Do NOT change parsing identity/hash/dedup, ageing rules, Activity values, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK (WIP 21-Jul, TLT)
+=====================================================================
+App-wide, all five buckets:
+        Release Balance   11,453 marks / 2,538.863 MT
+        Cutting           15,137 marks / 2,597.052 MT   <- the one currently wrong (shows
+                                                           1,611.919 / 10,894)
+        Quality Check     14,513 marks / 1,921.510 MT   (HG+RFI+NH+B+HAB+W+Q+TS)
+        Galvanising       12,188 marks / 2,935.119 MT   (G+GB+Y)
+        FG WIP             6,985 marks / 1,400.577 MT
+
+Per-project spot checks for Cutting (currently wrong -> required):
+        821    0.000 /    0   ->    5.148 /  301   <- BEST TEST (all marks lack Assign Date)
+        922   31.421 /  615   ->   80.925 / 1097
+        900  289.975 / 1809   ->  391.227 / 2720
+        918    0.013 /    1   ->    6.488 /   83
+        920   57.160 /  298   ->  101.799 /  617
+        934   54.977 /  384   ->   91.064 /  615
+
+Also confirm:
+- The five buckets sum to Total Balance for every project (no double counting, no gaps).
+- Release Balance Computed is UNCHANGED at 2,538.863 MT.
+- FG WIP is UNCHANGED at 1,400.577 MT.
+- Zero rows land in "Unclassified".
+- The corrected Cutting figure appears on Project Wise, Activity Wise, Overview, Contractor
+  Wise, Plant Operation Wise, all Reports and every Excel export — not just one page.
+
+REPORT: the five bucket totals, the six per-project Cutting checks, confirmation the
+reconciliation holds, the list of call sites now using classifyMark(), and whether any stored
+precomputed total had to be recomputed.

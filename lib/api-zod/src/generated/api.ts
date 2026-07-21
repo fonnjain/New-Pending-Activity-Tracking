@@ -998,6 +998,11 @@ export const ListImportsResponseItem = zod.object({
   "futureProductionDate": zod.number().describe('Last Production Entry Date later than today (clamped to today for ageing).'),
   "ntltOrphanCount": zod.number().optional().describe('NTLT marks (RSJ POLE \/ EARTHING \/ GENERAL) with no project code, attributed to \"(Unassigned)\" grouped by Section. Absent when zero such rows exist.\n'),
   "ntltOrphanWtMt": zod.number().optional().describe('Total Balance Wt. (MT) of the NTLT orphan marks (same rows as ntltOrphanCount). Absent when ntltOrphanCount is absent.\n'),
+  "unclassifiedRowCount": zod.number().optional().describe('Rows whose Col A (\"Type\") or Col G (\"Job Card Status\") did not match the verified closed value sets. Non-zero means a new file format value was encountered. Absent (or zero) in the normal case.\n'),
+  "unclassifiedSamples": zod.array(zod.object({
+  "type": zod.string(),
+  "status": zod.string()
+})).optional().describe('Up to 5 distinct Type+Status combos from unclassified rows, for diagnosis. Absent when unclassifiedRowCount is absent or zero.\n'),
   "fgWipByJob": zod.record(zod.string(), zod.number()).optional().describe('Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = \"FG Pending For Dispatch\". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.\n'),
   "fgWipByStructure": zod.record(zod.string(), zod.record(zod.string(), zod.number())).optional().describe('Same as fgWipByJob but broken down by structure. Outer key = project; inner key = alias\/structure (uppercased). Values in kg (same unit as balanceWt). Absent when the file has no Type column or no FG rows.\n')
 }),
@@ -1116,6 +1121,11 @@ export const CommitStagedImportResponse = zod.union([zod.object({
   "futureProductionDate": zod.number().describe('Last Production Entry Date later than today (clamped to today for ageing).'),
   "ntltOrphanCount": zod.number().optional().describe('NTLT marks (RSJ POLE \/ EARTHING \/ GENERAL) with no project code, attributed to \"(Unassigned)\" grouped by Section. Absent when zero such rows exist.\n'),
   "ntltOrphanWtMt": zod.number().optional().describe('Total Balance Wt. (MT) of the NTLT orphan marks (same rows as ntltOrphanCount). Absent when ntltOrphanCount is absent.\n'),
+  "unclassifiedRowCount": zod.number().optional().describe('Rows whose Col A (\"Type\") or Col G (\"Job Card Status\") did not match the verified closed value sets. Non-zero means a new file format value was encountered. Absent (or zero) in the normal case.\n'),
+  "unclassifiedSamples": zod.array(zod.object({
+  "type": zod.string(),
+  "status": zod.string()
+})).optional().describe('Up to 5 distinct Type+Status combos from unclassified rows, for diagnosis. Absent when unclassifiedRowCount is absent or zero.\n'),
   "fgWipByJob": zod.record(zod.string(), zod.number()).optional().describe('Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = \"FG Pending For Dispatch\". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.\n'),
   "fgWipByStructure": zod.record(zod.string(), zod.record(zod.string(), zod.number())).optional().describe('Same as fgWipByJob but broken down by structure. Outer key = project; inner key = alias\/structure (uppercased). Values in kg (same unit as balanceWt). Absent when the file has no Type column or no FG rows.\n')
 }),
@@ -1363,6 +1373,11 @@ export const GetImportResponse = zod.object({
   "futureProductionDate": zod.number().describe('Last Production Entry Date later than today (clamped to today for ageing).'),
   "ntltOrphanCount": zod.number().optional().describe('NTLT marks (RSJ POLE \/ EARTHING \/ GENERAL) with no project code, attributed to \"(Unassigned)\" grouped by Section. Absent when zero such rows exist.\n'),
   "ntltOrphanWtMt": zod.number().optional().describe('Total Balance Wt. (MT) of the NTLT orphan marks (same rows as ntltOrphanCount). Absent when ntltOrphanCount is absent.\n'),
+  "unclassifiedRowCount": zod.number().optional().describe('Rows whose Col A (\"Type\") or Col G (\"Job Card Status\") did not match the verified closed value sets. Non-zero means a new file format value was encountered. Absent (or zero) in the normal case.\n'),
+  "unclassifiedSamples": zod.array(zod.object({
+  "type": zod.string(),
+  "status": zod.string()
+})).optional().describe('Up to 5 distinct Type+Status combos from unclassified rows, for diagnosis. Absent when unclassifiedRowCount is absent or zero.\n'),
   "fgWipByJob": zod.record(zod.string(), zod.number()).optional().describe('Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = \"FG Pending For Dispatch\". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.\n'),
   "fgWipByStructure": zod.record(zod.string(), zod.record(zod.string(), zod.number())).optional().describe('Same as fgWipByJob but broken down by structure. Outer key = project; inner key = alias\/structure (uppercased). Values in kg (same unit as balanceWt). Absent when the file has no Type column or no FG rows.\n')
 }),

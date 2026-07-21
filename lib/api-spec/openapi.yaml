@@ -2034,6 +2034,27 @@ components:
           description: >
             Total Balance Wt. (MT) of the NTLT orphan marks (same rows as
             ntltOrphanCount). Absent when ntltOrphanCount is absent.
+        unclassifiedRowCount:
+          type: integer
+          description: >
+            Rows whose Col A ("Type") or Col G ("Job Card Status") did not match
+            the verified closed value sets. Non-zero means a new file format value
+            was encountered. Absent (or zero) in the normal case.
+        unclassifiedSamples:
+          type: array
+          description: >
+            Up to 5 distinct Type+Status combos from unclassified rows, for
+            diagnosis. Absent when unclassifiedRowCount is absent or zero.
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              status:
+                type: string
+            required:
+              - type
+              - status
         fgWipByJob:
           type: object
           description: >
