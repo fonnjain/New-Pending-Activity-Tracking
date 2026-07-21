@@ -991,15 +991,17 @@ export function parseWorkbook(
     base.holeOperation = holeOp.holeOperation;
     base.holeOperationSource = holeOp.holeOperationSource;
 
-    // Additive exclusion flag: marks that are Job Card Not Started + Initial are
-    // already counted as Release Balance and must NOT contribute to any Cutting
-    // figure. NOT part of the hash; computed from "Type" (col A in new format)
-    // and "Job Card Status" (col G in new format). Defaults false for old-format
-    // rows (which lack these columns and can't have Initial status).
+    // Additive exclusion flag: for Activity=C only, a mark is "initial" when its
+    // Job Card Status is "Initial". These marks are already counted as Release
+    // Balance and must NOT contribute to any Cutting balance figure.
+    // Predicate: Activity=C AND Job Card Status="Initial" (Status-only — the
+    // "Type" column is NOT checked; its value can vary independently).
+    // Job Card Status has exactly two values (Initial / Authorized); no third
+    // case exists. Non-C marks always stay false.
+    // NOT part of the hash; defaults false for old-format rows (no status col).
     const jcStatus = cellToString(row["Job Card Status"]).trim().toUpperCase();
-    base.isInitialCutting =
-      rowType.trim().toUpperCase() === "JOB CARD NOT STARTED" &&
-      jcStatus === "INITIAL";
+    const activityUpper = (base.activity ?? "").trim().toUpperCase();
+    base.isInitialCutting = activityUpper === "C" && jcStatus === "INITIAL";
 
     rows.push({ ...base, hash: hashRow(base, rawBatch) });
   }

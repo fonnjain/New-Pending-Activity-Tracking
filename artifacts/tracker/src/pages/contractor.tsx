@@ -2,7 +2,7 @@ import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCat
 import { useGetImportRecords, getGetImportRecordsQueryKey, useGetImportContractorMovement, getGetImportContractorMovementQueryKey } from "@workspace/api-client-react";
 import { ContractorNetMovementPanel } from "@/components/ContractorNetMovementPanel";
 import { EmptyState, getAgeingColor } from "./overview";
-import { ageingCell } from "@/lib/ageing";
+import { ageingCell, isActiveCutting, isCutting } from "@/lib/ageing";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -113,7 +113,7 @@ function ContractorContent() {
         qty: recs.reduce((sum, r) => sum + r.balanceQty, 0),
         weight: recs.reduce((sum, r) => sum + r.balanceWt, 0),
         fabLoad: recs
-          .filter(r => FAB_SET.has((r.activity ?? "").toUpperCase()) && !r.isInitialCutting)
+          .filter(r => FAB_SET.has((r.activity ?? "").toUpperCase()) && (!isCutting(r.activity) || isActiveCutting(r)))
           .reduce((sum, r) => sum + r.balanceWt, 0),
         galvaLoad: recs
           .filter(r => GALVA_SET.has((r.activity ?? "").toUpperCase()))

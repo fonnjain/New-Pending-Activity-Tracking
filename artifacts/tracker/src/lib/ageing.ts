@@ -42,8 +42,9 @@ export function isCutting(activity: string | null | undefined): boolean {
 }
 
 // Active cutting: activity is "C" AND the mark is NOT an unreleased Initial mark.
-// Initial marks (Type="Job Card Not Started" + Job Card Status="Initial") are
-// already counted as Release Balance and must NOT contribute to any Cutting figure.
+// A mark is Initial when its Job Card Status is "Initial" (Status-only predicate —
+// the "Type" column is NOT checked). Initial marks are already counted as Release
+// Balance and must NOT contribute to any Cutting figure.
 // Use this predicate everywhere a Cutting BALANCE figure is computed or displayed.
 export function isActiveCutting(r: {
   activity?: string | null;

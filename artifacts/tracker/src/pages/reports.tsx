@@ -87,7 +87,7 @@ import {
   type XlsxGridBlock,
 } from "@/lib/export";
 import { formatWeight, formatWeightMT, formatDate } from "@/lib/utils";
-import { ageingCell } from "@/lib/ageing";
+import { ageingCell, isActiveCutting, isCutting } from "@/lib/ageing";
 import { getAgeingColor } from "./overview";
 import { AiTurnaroundReport } from "@/components/ai-turnaround-report";
 import PlantOperationView from "./plant-operation";
@@ -700,7 +700,7 @@ function fabLoadMatch(
 ): boolean {
   // Initial Cutting marks (unreleased, counted as Release Balance) must not
   // appear in any fabrication load figure — operational or in-hand.
-  if (r.isInitialCutting) return false;
+  if (isCutting(r.activity) && !isActiveCutting(r)) return false;
   const act = normalizeActivity(r.activity);
   const rank = activityRank(r.activity);
   const sec = r.sectionType;
@@ -2510,7 +2510,7 @@ function DailyProductionMovementReport() {
   const { activities, sortedActivities } = useMemo(() => {
     const activities = new Map<string, any[]>();
     for (const r of records) {
-      if ((r as any).isInitialCutting) continue;
+      if (isCutting(r.activity) && !isActiveCutting(r)) continue;
       const act = r.activity || "Unassigned";
       if (!activities.has(act)) activities.set(act, []);
       activities.get(act)!.push(r);

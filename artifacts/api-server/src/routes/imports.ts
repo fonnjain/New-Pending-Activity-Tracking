@@ -447,10 +447,20 @@ async function mergeImport(
     }
     const chunk = 500;
     for (let i = 0; i < toInsert.length; i += chunk) {
+      // onConflictDoUpdate instead of onConflictDoNothing: updates the derived
+      // is_initial_cutting flag on re-upload so a parse-logic fix propagates to
+      // records that were first inserted with a stale value. Identity columns
+      // (hash, qty, wt, dates, mark fields) are never touched — only the
+      // non-hashed exclusion flag is refreshed. The RETURNING clause now covers
+      // both new inserts AND updated-on-conflict rows, so the secondary SELECT
+      // below only needs to catch any truly unresolved hashes.
       const inserted = await tx
         .insert(recordPoolTable)
         .values(toInsert.slice(i, i + chunk))
-        .onConflictDoNothing({ target: recordPoolTable.hash })
+        .onConflictDoUpdate({
+          target: recordPoolTable.hash,
+          set: { isInitialCutting: sql`EXCLUDED.is_initial_cutting` },
+        })
         .returning({ id: recordPoolTable.id, hash: recordPoolTable.hash });
       for (const e of inserted) poolIdByHash.set(e.hash, e.id);
     }

@@ -7,7 +7,7 @@ import {
 } from "@workspace/api-client-react";
 import { NetBalanceMovementPanel } from "@/components/NetBalanceMovementPanel";
 import { EmptyState, getAgeingColor } from "./overview";
-import { ageingCell } from "@/lib/ageing";
+import { ageingCell, isActiveCutting, isCutting } from "@/lib/ageing";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -603,7 +603,7 @@ function ActivityContent() {
   const { activities, sortedActivities, totalWt, totalMarks, avgAge, notAgedCount, notAgedWt, agedCount } = useMemo(() => {
     const activities = new Map<string, any[]>();
     records.forEach(r => {
-      if (r.isInitialCutting) return;
+      if (isCutting(r.activity) && !isActiveCutting(r)) return;
       const act = r.activity || "Unassigned";
       if (!activities.has(act)) activities.set(act, []);
       activities.get(act)!.push(r);
