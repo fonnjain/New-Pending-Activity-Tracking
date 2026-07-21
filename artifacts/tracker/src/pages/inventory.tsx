@@ -186,17 +186,19 @@ function SummaryFooter({ summary }: { summary: BucketSummary }) {
 // Selection checklist shown inside each bucket card when delete mode is active.
 function SelectionChecklist({
   rows,
+  projects: projectsProp,
   selectedProjects,
   onToggle,
 }: {
-  rows: InventoryStructureCard[];
+  rows?: InventoryStructureCard[];
+  projects?: string[];
   selectedProjects: Set<string>;
   onToggle: (project: string) => void;
 }) {
-  const projects = useMemo(
-    () => [...new Set(rows.map((r) => r.project))].sort(),
-    [rows],
-  );
+  const projects = useMemo(() => {
+    if (projectsProp) return [...new Set(projectsProp)].sort();
+    return [...new Set((rows ?? []).map((r) => r.project))].sort();
+  }, [rows, projectsProp]);
   if (projects.length === 0) {
     return (
       <div className="px-3 py-2 text-xs text-muted-foreground italic border-b">
@@ -1494,6 +1496,8 @@ export default function InventoryView() {
   const bRows = bRows_raw.filter((r) => !deletedProjectSet.has(r.project));
   const cRows = cRows_raw.filter((r) => !deletedProjectSet.has(r.project));
   const dRows = dRows_raw.filter((r) => !deletedProjectSet.has(r.project));
+  // Bucket E is manual — filter by projectCode.
+  const manualE_display = manualE.filter((e) => !deletedProjectSet.has(e.projectCode));
 
   const confirmDelete = useCallback(() => {
     const alreadyDeleted = new Set(deletedProjects.map((d) => d.project));
@@ -1505,13 +1509,14 @@ export default function InventoryView() {
       if (bRows_raw.some((r) => r.project === project)) inBuckets.push("B");
       if (cRows_raw.some((r) => r.project === project)) inBuckets.push("C");
       if (dRows_raw.some((r) => r.project === project)) inBuckets.push("D");
+      if (manualE.some((e) => e.projectCode === project)) inBuckets.push("E");
       return { project, bucketsWhenDeleted: inBuckets };
     });
     setDeletedProjects((prev) => [...prev, ...newEntries]);
     setSelectedProjects(new Set());
     setShowDeleteConfirm(false);
     setIsDeleteMode(false);
-  }, [selectedProjects, deletedProjects, bucketA_raw, preBRows_raw, bRows_raw, cRows_raw, dRows_raw]);
+  }, [selectedProjects, deletedProjects, bucketA_raw, preBRows_raw, bRows_raw, cRows_raw, dRows_raw, manualE]);
 
   const restoreProject = useCallback(
     (project: string) => {
@@ -1522,10 +1527,11 @@ export default function InventoryView() {
       if (bRows_raw.some((r) => r.project === project)) willBe.push("B");
       if (cRows_raw.some((r) => r.project === project)) willBe.push("C");
       if (dRows_raw.some((r) => r.project === project)) willBe.push("D");
+      if (manualE.some((e) => e.projectCode === project)) willBe.push("E");
       const dest = willBe.length > 0 ? `Bucket ${willBe.join(", ")}` : "no bucket (data may have changed)";
       toast({ title: "Project restored", description: `${project} returned to ${dest}` });
     },
-    [bucketA_raw, preBRows_raw, bRows_raw, cRows_raw, dRows_raw, toast],
+    [bucketA_raw, preBRows_raw, bRows_raw, cRows_raw, dRows_raw, manualE, toast],
   );
 
   const restoreAll = useCallback(() => {
@@ -1569,20 +1575,20 @@ export default function InventoryView() {
   const manualEInHouseSummary = useMemo(
     () =>
       computeManualESummary(
-        manualE
+        manualE_display
           .filter((e) => e.side === "in_house")
           .map((e) => aggregateProjectColumns(rawRows, e.projectCode, e.mfcBatch ?? undefined)),
       ),
-    [manualE, rawRows],
+    [manualE_display, rawRows],
   );
   const manualEOutVendorSummary = useMemo(
     () =>
       computeManualESummary(
-        manualE
+        manualE_display
           .filter((e) => e.side === "out_vendor")
           .map((e) => aggregateProjectColumns(rawRows, e.projectCode, e.mfcBatch ?? undefined)),
       ),
-    [manualE, rawRows],
+    [manualE_display, rawRows],
   );
   const removeE = (id: number) => {
     setDeletingEId(id);
@@ -2166,36 +2172,47 @@ export default function InventoryView() {
         <CardHeader>
           <CardTitle className="text-base">E — {BUCKET_LABELS.e}</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          {canEdit && (
-            <ManualAddForm
-              knownProjects={knownProjects}
-              projectMfcBatches={projectMfcBatches}
-              onAdd={addE}
-              isPending={upsertE.isPending}
+        <CardContent className="px-0 pb-0">
+          {isDeleteMode && (
+            <SelectionChecklist
+              projects={manualE
+                .filter((e) => !deletedProjectSet.has(e.projectCode))
+                .map((e) => e.projectCode)}
+              selectedProjects={selectedProjects}
+              onToggle={toggleProjectSelection}
             />
           )}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <ManualBucketSide
-              side="in_house"
-              entries={manualE}
-              onDelete={removeE}
-              canEdit={canEdit}
-              deletingId={deletingEId}
-              rawRows={rawRows}
-              summary={manualEInHouseSummary}
-              projectMfcBatches={projectMfcBatches}
-            />
-            <ManualBucketSide
-              side="out_vendor"
-              entries={manualE}
-              onDelete={removeE}
-              canEdit={canEdit}
-              deletingId={deletingEId}
-              rawRows={rawRows}
-              summary={manualEOutVendorSummary}
-              projectMfcBatches={projectMfcBatches}
-            />
+          <div className="px-3 pb-3 pt-3 space-y-3">
+            {canEdit && (
+              <ManualAddForm
+                knownProjects={knownProjects}
+                projectMfcBatches={projectMfcBatches}
+                onAdd={addE}
+                isPending={upsertE.isPending}
+              />
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <ManualBucketSide
+                side="in_house"
+                entries={manualE_display}
+                onDelete={removeE}
+                canEdit={canEdit}
+                deletingId={deletingEId}
+                rawRows={rawRows}
+                summary={manualEInHouseSummary}
+                projectMfcBatches={projectMfcBatches}
+              />
+              <ManualBucketSide
+                side="out_vendor"
+                entries={manualE_display}
+                onDelete={removeE}
+                canEdit={canEdit}
+                deletingId={deletingEId}
+                rawRows={rawRows}
+                summary={manualEOutVendorSummary}
+                projectMfcBatches={projectMfcBatches}
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
