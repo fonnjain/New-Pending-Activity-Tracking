@@ -22,14 +22,16 @@ import {
 
 // Job picker with checkbox multi-select. Always rendered for the TLT job
 // dimension — clicking "All Jobs" or "Current Jobs" sets those modes; clicking
-// individual project codes toggles them in/out of a multi-selection. No
-// separate "Select Multiple Jobs" activation step is required.
+// individual project codes toggles them in/out of a multi-selection.
+// Clicking the project label (text) single-selects and closes; clicking the
+// checkbox adds/removes from multi-selection without closing the popover.
 function MultiJobPicker({
   jobs,
   filterJob,
   selectedJobs,
   onAllJobs,
   onCurrentJobs,
+  onSingleJob,
   onSelectedJobsChange,
 }: {
   jobs: string[];
@@ -37,6 +39,7 @@ function MultiJobPicker({
   selectedJobs: string[];
   onAllJobs: () => void;
   onCurrentJobs: () => void;
+  onSingleJob: (job: string) => void;
   onSelectedJobsChange: (jobs: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -55,14 +58,18 @@ function MultiJobPicker({
 
   const isCurrentJobs = filterJob === CURRENT_JOBS_FILTER_VALUE;
   const isMultiJobs = filterJob === MULTI_JOBS_FILTER_VALUE;
+  // filterJob holds a direct project code when neither sentinel applies.
+  const isSingleJob = filterJob !== null && !isCurrentJobs && !isMultiJobs;
 
   const label = isCurrentJobs
     ? "Current Jobs"
-    : isMultiJobs && selectedJobs.length === 1
-      ? selectedJobs[0]
-      : isMultiJobs && selectedJobs.length > 1
-        ? `${selectedJobs.length} Jobs`
-        : "All Jobs";
+    : isSingleJob
+      ? filterJob!
+      : isMultiJobs && selectedJobs.length === 1
+        ? selectedJobs[0]
+        : isMultiJobs && selectedJobs.length > 1
+          ? `${selectedJobs.length} Jobs`
+          : "All Jobs";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -101,28 +108,38 @@ function MultiJobPicker({
                 <button className="text-muted-foreground hover:underline" onClick={() => onSelectedJobsChange([])}>None</button>
               </div>
             </div>
+            {/* Searchable input — type a project code to narrow the list */}
             <input
               type="text"
-              placeholder="Search..."
+              placeholder="Type to search projects..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full rounded border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring bg-background"
             />
             <div className="max-h-52 overflow-y-auto space-y-0.5 pr-0.5">
               {filtered.length === 0 && (
-                <p className="text-xs text-muted-foreground text-center py-2">No jobs found</p>
+                <p className="text-xs text-muted-foreground text-center py-2">No projects found</p>
               )}
               {filtered.map((job) => (
-                <label
+                <div
                   key={job}
-                  className="flex items-center gap-2 px-1.5 py-1 rounded cursor-pointer hover:bg-accent text-sm select-none"
+                  className={`flex items-center gap-1 px-1 rounded text-sm ${isSingleJob && filterJob === job ? "bg-accent font-medium" : "hover:bg-accent"}`}
                 >
+                  {/* Checkbox — toggles multi-select without closing */}
                   <Checkbox
-                    checked={isMultiJobs ? selected.has(job) : false}
+                    checked={isMultiJobs ? selected.has(job) : isSingleJob && filterJob === job}
                     onCheckedChange={() => toggle(job)}
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    className="shrink-0"
                   />
-                  <span className="truncate">{job}</span>
-                </label>
+                  {/* Label — single-selects and closes the popover */}
+                  <button
+                    className="flex-1 text-left py-1.5 truncate cursor-pointer"
+                    onClick={() => { onSingleJob(job); setOpen(false); setSearch(""); }}
+                  >
+                    {job}
+                  </button>
+                </div>
               ))}
             </div>
           </div>
@@ -703,6 +720,7 @@ function FilterBar() {
                 selectedJobs={filters.selectedJobs}
                 onAllJobs={() => setFilter("job", null)}
                 onCurrentJobs={() => setFilter("job", CURRENT_JOBS_FILTER_VALUE)}
+                onSingleJob={(job) => setFilter("job", job)}
                 onSelectedJobsChange={setSelectedJobs}
               />
             )}
