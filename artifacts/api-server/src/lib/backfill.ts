@@ -153,28 +153,25 @@ export async function backfillHoleOperation(): Promise<number> {
 }
 
 /**
- * One-time, idempotent backfill of `is_initial_cutting` on existing record_pool
- * rows. The column was added with `NOT NULL DEFAULT false`, so legacy rows all
- * read false even if they are Initial Cutting marks. This single UPDATE stamps
- * the correct value using the reliable proxy:
- *   activity = 'C' AND assign_date IS NULL AND contractor IS NULL
- * All Initial marks satisfy this (they have no assign date and no contractor);
- * Authorized marks with no assign date always have a contractor, so the proxy
- * does not mis-classify them. After one successful run the WHERE matches zero
- * rows, making every subsequent boot a no-op.
+ * RETIRED — do not call.
+ *
+ * The proxy predicate (activity='C' AND assign_date IS NULL AND contractor IS
+ * NULL) was found to mis-classify Authorized marks that genuinely have neither
+ * field set, incorrectly excluding them from the Cutting balance. The function
+ * is kept as a no-op so the symbol remains resolvable in case of stale imports,
+ * but it must NOT be wired into the boot sequence.
+ *
+ * The correct gate is Job Card Status == "Initial", which is applied by
+ * parse.ts during every upload (isInitialCutting = activity==="C" &&
+ * jcStatus==="INITIAL"). Legacy rows stay false (the column default), meaning
+ * Initial marks uploaded before this column existed are counted as active
+ * cutting — an acceptable, conservative over-count until a fresh upload
+ * re-classifies them via the correct jcStatus path.
+ *
+ * A one-time corrective UPDATE was run directly against the DB on 2026-07-21
+ * to reset all rows incorrectly stamped true by the original backfill:
+ *   UPDATE record_pool SET is_initial_cutting = false WHERE is_initial_cutting = true;
  */
 export async function backfillInitialCutting(): Promise<number> {
-  const result = await db.execute(sql`
-    update record_pool
-    set    is_initial_cutting = true
-    where  upper(trim(activity)) = 'C'
-      and  assign_date is null
-      and  contractor  is null
-      and  is_initial_cutting = false
-  `);
-  const count = (result as unknown as { rowCount: number }).rowCount ?? 0;
-  if (count > 0) {
-    logger.info({ count }, "Backfilled record_pool is_initial_cutting");
-  }
-  return count;
+  return 0; // no-op — see comment above
 }
