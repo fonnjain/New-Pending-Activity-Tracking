@@ -964,12 +964,11 @@ function ManualAddForm({
 }: {
   knownProjects: string[];
   projectMfcBatches?: Map<string, string[]>;
-  onAdd: (projectCode: string, side: InventorySide, mfcBatch: string) => void;
+  onAdd: (projectCode: string, mfcBatch: string) => void;
   isPending: boolean;
 }) {
   const [projectCode, setProjectCode] = useState("");
   const [mfcBatch, setMfcBatch] = useState("");
-  const [side, setSide] = useState<InventorySide>("in_house");
 
   const handleProjectChange = (v: string | null) => {
     setProjectCode(v ?? "");
@@ -981,7 +980,7 @@ function ManualAddForm({
   const submit = () => {
     const code = projectCode.trim();
     if (!code || !mfcBatch) return;
-    onAdd(code, side, mfcBatch);
+    onAdd(code, mfcBatch);
     setProjectCode("");
     setMfcBatch("");
   };
@@ -1007,14 +1006,6 @@ function ManualAddForm({
           disabled={!projectCode || batchOptions.length === 0}
         />
       </div>
-      <Segmented
-        value={side}
-        onChange={(v) => setSide(v as InventorySide)}
-        options={[
-          { value: "in_house", label: "In-House" },
-          { value: "out_vendor", label: "Out-Vendor" },
-        ]}
-      />
       <Button size="sm" className="h-8" disabled={!canSubmit} onClick={submit}>
         Add
       </Button>
@@ -1562,9 +1553,9 @@ export default function InventoryView() {
   const deleteE = useDeleteInventoryManualE();
   const [deletingEId, setDeletingEId] = useState<number | null>(null);
 
-  const addE = (projectCode: string, side: InventorySide, mfcBatch: string) => {
+  const addE = (projectCode: string, mfcBatch: string) => {
     upsertE.mutate(
-      { data: { projectCode, side, mfcBatch } },
+      { data: { projectCode, side: "in_house", mfcBatch } },
       {
         onSuccess: () =>
           queryClient.invalidateQueries({ queryKey: getListInventoryManualEQueryKey() }),
@@ -1572,21 +1563,12 @@ export default function InventoryView() {
     );
   };
 
-  const manualEInHouseSummary = useMemo(
+  const manualESummary = useMemo(
     () =>
       computeManualESummary(
-        manualE_display
-          .filter((e) => e.side === "in_house")
-          .map((e) => aggregateProjectColumns(rawRows, e.projectCode, e.mfcBatch ?? undefined)),
-      ),
-    [manualE_display, rawRows],
-  );
-  const manualEOutVendorSummary = useMemo(
-    () =>
-      computeManualESummary(
-        manualE_display
-          .filter((e) => e.side === "out_vendor")
-          .map((e) => aggregateProjectColumns(rawRows, e.projectCode, e.mfcBatch ?? undefined)),
+        manualE_display.map((e) =>
+          aggregateProjectColumns(rawRows, e.projectCode, e.mfcBatch ?? undefined),
+        ),
       ),
     [manualE_display, rawRows],
   );
@@ -2191,27 +2173,22 @@ export default function InventoryView() {
                 isPending={upsertE.isPending}
               />
             )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <ManualBucketSide
-                side="in_house"
+            <div className="border rounded-md">
+              <div className="px-3 py-2 border-b bg-muted/40 flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide">Projects</span>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {manualE_display.length} project{manualE_display.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <ManualEntryList
                 entries={manualE_display}
                 onDelete={removeE}
                 canEdit={canEdit}
                 deletingId={deletingEId}
                 rawRows={rawRows}
-                summary={manualEInHouseSummary}
                 projectMfcBatches={projectMfcBatches}
               />
-              <ManualBucketSide
-                side="out_vendor"
-                entries={manualE_display}
-                onDelete={removeE}
-                canEdit={canEdit}
-                deletingId={deletingEId}
-                rawRows={rawRows}
-                summary={manualEOutVendorSummary}
-                projectMfcBatches={projectMfcBatches}
-              />
+              {manualESummary && <SummaryFooter summary={manualESummary} />}
             </div>
           </div>
         </CardContent>
