@@ -1,0 +1,153 @@
+TASK: VERIFY the join between the Order Review file and the WIP file. Prove each fact below
+with numbers from the app's own parsed data. This is a verification task — report findings
+first; do not change code unless a check fails.
+
+=====================================================================
+CHECK 1 — THE JOIN KEY
+=====================================================================
+The ONLY correct join is:
+
+        Order Review project header  ==  WIP Col B "Project Code"
+    AND Order Review Col C "Tower Type"  ==  WIP Col J "Alias"
+
+giving the composite key (Project Code, Structure Code).
+
+Normalisation on BOTH sides: trim whitespace, strip a trailing dot ("862." -> "862"), compare
+case-insensitively. The Order Review project comes from the section header row that reads
+"Project Code : <code>"; the WIP project is each row's OWN Col B.
+
+EXPECTED (files dated 21-Jul):
+        Order Review: 161 projects, 2,151 structures
+        WIP:          782 structures (TLT, with a project and an alias)
+        MATCHED:      782  = 100.0% of WIP structures
+
+Report the matched count and percentage. Anything below 100% means the normalisation or the key
+is wrong.
+
+=====================================================================
+CHECK 2 — THE FALSE FRIEND (the most important check)
+=====================================================================
+*** WIP Col H is ALSO named "Tower Type" but is a COMPLETELY DIFFERENT FIELD. ***
+
+        Order Review Col C  ->  structure CODE      e.g. "2DC3", "1DC3M", "3BPI1"
+        WIP Col H           ->  descriptive NAME    e.g. "220KV D/C TRANSMISSION LINE TOWER
+                                                          TYPE-DC (NORMAL TOWER WITH X-ARM'S)"
+
+Joining on the matching HEADER NAME instead of the matching FIELD produces ZERO matches.
+
+VERIFY: attempt the join on Order Review Col C == WIP Col H and confirm it returns 0 matches
+(expected: 0). Then confirm the production code does NOT use Col H anywhere in a join, lookup,
+grouping key or structure identifier.
+
+WIP Col H has no Order Review counterpart. It is descriptive only (it encodes voltage class
+132/220/400 KV and circuit configuration). It may be displayed; it must never be a key.
+
+=====================================================================
+CHECK 3 — FIELDS THAT ARE GENUINELY IDENTICAL
+=====================================================================
+        Order Review Col D "Tower Sub Type"  ==  WIP Col I "Tower Sub Type"
+
+EXPECTED: 782 of 782 matched structures agree — ZERO disagreements.
+
+Report the agreement count. Either source may be used; confirm the app does not treat them as
+different fields or derive one from the other.
+
+=====================================================================
+CHECK 4 — NTLT CANNOT JOIN (and that is correct)
+=====================================================================
+Rows where WIP Col C "Order Nature" != "Structure" are NTLT.
+
+EXPECTED (21-Jul):
+        NTLT rows:            318
+        with an Alias:          0
+        with a Project Code:    0
+
+Because Order Review is keyed by project + structure and NTLT has NEITHER, NTLT can never
+appear in Order Review. Order Review is a TLT-only file BY CONSTRUCTION — this is not a data
+gap and must not be "fixed".
+
+VERIFY: confirm those three counts, and confirm the app keys NTLT by WIP Col L "Section" alone
+(38 distinct sections cover all NTLT marks; no section spans more than one Order Nature).
+Confirm no NTLT row is attached to a real project by forward-fill.
+
+=====================================================================
+CHECK 5 — THE ONLY EXACT SHARED MEASURE
+=====================================================================
+Exactly ONE measure can be computed from both files and reconciles:
+
+        Order Review Col S "Balance Release"
+            ==
+        WIP: Type (Col A) = "Job Card Not Started" AND Job Card Status (Col G) = "Initial",
+             sum Balance Wt (Col Q) / 1000
+
+EXPECTED: of the 258 matched structures with Col S > 0, 245 match within 0.02 MT (95%).
+
+The ~13 that differ are EXPECTED and must not be "corrected":
+  - over-released structures where Col S is NEGATIVE (WIP cannot go below zero — it sums actual
+    Not-Started weight, so it floors at 0)
+  - structures with order-book balance but no live WIP marks in that state
+
+Report the match count. If it is far below 245, the WIP-side definition is wrong.
+
+=====================================================================
+CHECK 6 — WHAT CANNOT BE DERIVED FROM WIP (confirm the app does not try)
+=====================================================================
+These Order Review columns have NO WIP equivalent, for a structural reason: Order Review's
+Progress columns record CUMULATIVE WORK DONE, while WIP holds only WORK REMAINING. A finished
+mark disappears from WIP entirely, so WIP has no memory of completed work.
+
+        Progress Galvanising (Col N, "Yard")  — ~31,749 MT, larger than the ENTIRE WIP balance
+        Balance Fabrication  (Col T)          — WIP's per-mark balance does not decompose into
+        Balance Galvanising  (Col U)            Order Review's stage buckets
+
+VERIFY the app takes these from the Order Review file only, and never attempts to reconstruct
+them from WIP for an established project.
+
+THE ONE EXCEPTION: for a BRAND-NEW project almost nothing is finished, so nothing has dropped
+out of WIP and the reconstruction is exact. This is valid ONLY below 5% released
+(Progress Release Col L < 5% of WO Order Qty Col J). Confirm any generated-Order-Review feature
+enforces that threshold.
+
+=====================================================================
+CHECK 7 — FILE STRUCTURE RULES
+=====================================================================
+ORDER REVIEW:
+  a) A structure spans MULTIPLE BOM rows (Proto / Mass / Pre). The structure code appears ONLY
+     on the first row; continuation rows have Col C BLANK. All BOM rows must be SUMMED per
+     structure. Verify the parser does not take only the first row.
+  b) The "Grand Total" footer can appear in Col C OR Col D. Both must be excluded, or it parses
+     as a structure. Verify parsed totals reconcile to the file's own Grand Total footer.
+  c) Two-row merged header at rows 6-7; data starts at row 8.
+
+WIP:
+  d) The header row is the row where Col A == "Type". ALL columns must be read BY HEADER NAME,
+     never by position — the layout has changed historically (18 -> 19 -> 21 -> 24 columns).
+     Verify no code reads a WIP column by index.
+  e) Col B is populated on 100% of TLT rows. Verify NO forward-fill of the project code exists
+     anywhere. The only blank-project rows are the 318 NTLT rows, which belong in a
+     "(No Project)" bucket.
+
+=====================================================================
+DO NOT
+=====================================================================
+- Do NOT join, group or key on WIP Col H under any circumstances.
+- Do NOT forward-fill the project code.
+- Do NOT try to reconstruct Progress/Balance Fabrication/Galvanising/Yard from WIP for
+  established projects.
+- Do NOT treat the NTLT non-join as a bug to fix.
+- Do NOT read WIP or Order Review columns by position.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity values, or qty while verifying.
+
+=====================================================================
+REPORT
+=====================================================================
+1. Check 1: matched structures and percentage (expect 782 / 100.0%).
+2. Check 2: matches when joining on WIP Col H (expect 0), and confirmation Col H is not used as
+   a key anywhere in the code.
+3. Check 3: Sub Type agreement count (expect 782/782).
+4. Check 4: NTLT row count, aliases, project codes (expect 318 / 0 / 0), and how NTLT is keyed.
+5. Check 5: Release Balance equivalence match count (expect 245/258).
+6. Check 6: confirmation Fab/Galva/Yard come from Order Review only, plus the 5% threshold if a
+   generated Order Review exists.
+7. Check 7: BOM-row summing, Grand Total exclusion, header-name reading, and no forward-fill —
+   a verdict for each, with the code locations inspected.
