@@ -442,7 +442,6 @@ async function mergeImport(
 
     const toInsert: InsertRecordPool[] = [];
     for (const [hash, { row }] of multiset) {
-      if (poolIdByHash.has(hash)) continue;
       toInsert.push(row as InsertRecordPool);
     }
     const chunk = 500;

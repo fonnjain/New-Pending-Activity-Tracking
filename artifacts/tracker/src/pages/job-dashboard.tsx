@@ -218,8 +218,8 @@ function JobDashboardContent() {
       preFiltered.filter((r) => {
         if (filters.activity && r.activity !== filters.activity) return false;
         if (!matchesContractorSelection(r.contractor, filters.contractor ?? null, categoryMap)) return false;
-        if (dateFrom && (r.assignDate == null || String(r.assignDate) < dateFrom)) return false;
-        if (dateTo && (r.assignDate == null || String(r.assignDate) > dateTo)) return false;
+        if (dateFrom && r.assignDate != null && String(r.assignDate) < dateFrom) return false;
+        if (dateTo && r.assignDate != null && String(r.assignDate) > dateTo) return false;
         return true;
       }),
     [preFiltered, filters.activity, filters.contractor, dateFrom, dateTo, categoryMap],

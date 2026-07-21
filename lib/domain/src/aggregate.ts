@@ -181,7 +181,7 @@ export function filterRecords<T extends AggRecord>(
   return records.filter((r) => {
     if (win) {
       const k = assignDayKey(r.assignDate);
-      if (k === null || k < win.start || k >= win.end) return false;
+      if (k !== null && (k < win.start || k >= win.end)) return false;
     }
     if (filters.category !== "ALL" && (r.category || "TLT") !== filters.category)
       return false;
