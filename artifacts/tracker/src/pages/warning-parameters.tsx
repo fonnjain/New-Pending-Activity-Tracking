@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Card,
   CardHeader,
@@ -14,7 +14,8 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { Download, Upload } from "lucide-react";
+import { ChevronDown, Download, Upload } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { LoginGate, LogoutButton } from "@/components/login-gate";
 import { useSettings } from "@/lib/settings";
 import { useTracker } from "@/lib/store";
@@ -177,6 +178,8 @@ export function WarningParametersContent() {
   const { toast } = useToast();
   const [category, setCategory] = useState<SettingsCategory>("TLT");
   const [project, setProject] = useState<string>(ALL);
+  const [projOpen, setProjOpen] = useState(false);
+  const [projSearch, setProjSearch] = useState("");
   const graceFileRef = useRef<HTMLInputElement>(null);
   const preWarnFileRef = useRef<HTMLInputElement>(null);
 
@@ -190,6 +193,8 @@ export function WarningParametersContent() {
   const onCategoryChange = (c: string) => {
     setCategory(c as SettingsCategory);
     setProject(ALL);
+    setProjSearch("");
+    setProjOpen(false);
   };
 
   const { data: records } = useGetImportRecords(selectedImportId as number, {
@@ -213,6 +218,19 @@ export function WarningParametersContent() {
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [records, sub]);
+
+  // Scope keys filtered by the search term typed in the project picker.
+  const filteredScopeKeys = useMemo(() => {
+    const q = projSearch.trim().toLowerCase();
+    if (!q) return scopeKeys;
+    return scopeKeys.filter((k) => k.toLowerCase().includes(q));
+  }, [scopeKeys, projSearch]);
+
+  // Close the picker when the scope list changes (e.g. new import loaded).
+  useEffect(() => {
+    setProjOpen(false);
+    setProjSearch("");
+  }, [sub]);
 
   const isAll = project === ALL;
 
@@ -826,21 +844,77 @@ export function WarningParametersContent() {
               <label className="text-xs uppercase tracking-wider text-muted-foreground">
                 {scopeNoun}
               </label>
-              <Select value={project} onValueChange={setProject}>
-                <SelectTrigger className="h-9 w-full sm:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>
-                    {allLabel} (global default)
-                  </SelectItem>
-                  {scopeKeys.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {p}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover
+                open={projOpen}
+                onOpenChange={(o) => {
+                  setProjOpen(o);
+                  if (!o) setProjSearch("");
+                }}
+              >
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="h-9 w-full sm:w-80 flex items-center justify-between rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span className="truncate">
+                      {project === ALL
+                        ? `${allLabel} (global default)`
+                        : project}
+                    </span>
+                    <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-0" align="start">
+                  <div className="border-b border-border p-2">
+                    <input
+                      autoFocus
+                      type="text"
+                      placeholder={`Search ${scopeNoun.toLowerCase()}s...`}
+                      value={projSearch}
+                      onChange={(e) => setProjSearch(e.target.value)}
+                      className="w-full text-sm px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                  <div className="max-h-64 overflow-auto py-1">
+                    {(!projSearch.trim() ||
+                      `${allLabel} global default`
+                        .toLowerCase()
+                        .includes(projSearch.toLowerCase())) && (
+                      <button
+                        type="button"
+                        className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent ${project === ALL ? "font-medium bg-accent/40" : ""}`}
+                        onClick={() => {
+                          setProject(ALL);
+                          setProjOpen(false);
+                          setProjSearch("");
+                        }}
+                      >
+                        {allLabel} (global default)
+                      </button>
+                    )}
+                    {filteredScopeKeys.map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent ${project === k ? "font-medium bg-accent/40" : ""}`}
+                        onClick={() => {
+                          setProject(k);
+                          setProjOpen(false);
+                          setProjSearch("");
+                        }}
+                      >
+                        {k}
+                      </button>
+                    ))}
+                    {filteredScopeKeys.length === 0 &&
+                      projSearch.trim() && (
+                        <p className="text-center text-sm text-muted-foreground py-3">
+                          No results
+                        </p>
+                      )}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-2">

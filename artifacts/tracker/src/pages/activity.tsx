@@ -16,8 +16,9 @@ import { Button } from "@/components/ui/button";
 import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import { useState, useMemo, useEffect } from "react";
-import { compareActivity } from "@workspace/domain";
+import { compareActivity, DEFAULT_PRE_WARN, type LifecycleStatus } from "@workspace/domain";
 import { useSettings } from "@/lib/settings";
+import { lifecycleBgColor, LIFECYCLE_LABELS } from "@/lib/turnaround";
 
 const ROW_CAP = 300;
 
@@ -540,7 +541,8 @@ type OfficeParam = { id: string; name: string; builtin: boolean };
 
 type OfficeData = {
   params: OfficeParam[];                               // user-defined only
-  values: Record<string, Record<string, string>>;      // project → paramId → raw input
+  values: Record<string, Record<string, string>>;      // project → paramId → actual days
+  targets: Record<string, string>;                     // paramId → target days (global, not per-project)
 };
 
 const BUILTIN_PARAMS: OfficeParam[] = [
@@ -551,9 +553,28 @@ const BUILTIN_PARAMS: OfficeParam[] = [
 function loadOfficeData(): OfficeData {
   try {
     const raw = localStorage.getItem(OFFICE_STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as OfficeData;
+    if (raw) {
+      const d = JSON.parse(raw) as Partial<OfficeData>;
+      return { params: d.params ?? [], values: d.values ?? {}, targets: d.targets ?? {} };
+    }
   } catch {}
-  return { params: [], values: {} };
+  return { params: [], values: {}, targets: {} };
+}
+
+// Classify an entered actual-days value against a target using the global
+// pre-warning thresholds (pw1/pw2/pw3 are percentage-consumed cutoffs).
+function officePreWarnStatus(
+  valueDays: number | null,
+  targetDays: number | null,
+  pw: { pw1: number; pw2: number; pw3: number },
+): LifecycleStatus {
+  if (valueDays === null || targetDays === null || targetDays <= 0) return "na";
+  if (valueDays >= targetDays) return "breach1";
+  const pct = (valueDays / targetDays) * 100;
+  if (pct < pw.pw1) return "green";
+  if (pct < pw.pw2) return "prewarn1";
+  if (pct < pw.pw3) return "prewarn2";
+  return "prewarn3";
 }
 
 function saveOfficeData(data: OfficeData) {
@@ -562,6 +583,10 @@ function saveOfficeData(data: OfficeData) {
 
 function OfficeActivitiesSection({ projects }: { projects: string[] }) {
   const { filters } = useTracker();
+  // Use the global default pre-warning thresholds (70/85/95 %) for the lifecycle
+  // classification. Office activities are not tied to a specific process step, so
+  // there is no per-activity override — the canonical defaults always apply.
+  const pw = DEFAULT_PRE_WARN;
   const [data, setData] = useState<OfficeData>(() => loadOfficeData());
   const [addingParam, setAddingParam] = useState(false);
   const [newParamName, setNewParamName] = useState("");
@@ -596,6 +621,17 @@ function OfficeActivitiesSection({ projects }: { projects: string[] }) {
         ...data.values,
         [localProject]: { ...(data.values[localProject] ?? {}), [paramId]: value },
       },
+    };
+    setData(next);
+    saveOfficeData(next);
+  };
+
+  const getTarget = (paramId: string) => data.targets[paramId] ?? "";
+
+  const setTarget = (paramId: string, value: string) => {
+    const next: OfficeData = {
+      ...data,
+      targets: { ...data.targets, [paramId]: value },
     };
     setData(next);
     saveOfficeData(next);
@@ -656,35 +692,78 @@ function OfficeActivitiesSection({ projects }: { projects: string[] }) {
           </select>
         </div>
 
-        {/* Parameter inputs grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {allParams.map((param) => (
-            <div key={param.id} className="space-y-1">
-              <div className="flex items-center justify-between gap-1">
-                <span className="text-xs font-medium text-muted-foreground truncate">{param.name}</span>
-                {!param.builtin && (
-                  <button
-                    onClick={() => removeParam(param.id)}
-                    className="text-muted-foreground hover:text-destructive shrink-0"
-                    title={`Remove ${param.name}`}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
+        {/* Parameter cards: each shows Actual + Target inputs with a pre-warning dot */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {allParams.map((param) => {
+            const valStr = getValue(param.id);
+            const tgtStr = getTarget(param.id);
+            const val = valStr !== "" ? parseFloat(valStr) : null;
+            const tgt = tgtStr !== "" ? parseFloat(tgtStr) : null;
+            const status = officePreWarnStatus(val, tgt, pw);
+            return (
+              <div
+                key={param.id}
+                className="border border-border rounded-lg p-2.5 space-y-2"
+              >
+                {/* Header: name + pre-warning indicator + remove button */}
+                <div className="flex items-center justify-between gap-1 min-h-[18px]">
+                  <span className="text-xs font-medium truncate">{param.name}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {status !== "na" && (
+                      <div
+                        className={`w-2.5 h-2.5 rounded-full ${lifecycleBgColor(status)}`}
+                        title={LIFECYCLE_LABELS[status]}
+                      />
+                    )}
+                    {!param.builtin && (
+                      <button
+                        onClick={() => removeParam(param.id)}
+                        className="text-muted-foreground hover:text-destructive"
+                        title={`Remove ${param.name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {/* Actual + Target inputs side by side */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-0.5">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                      Actual
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        value={valStr}
+                        onChange={(e) => setValue(param.id, e.target.value)}
+                        placeholder="—"
+                        className="w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring tabular-nums"
+                      />
+                      <span className="text-[10px] text-muted-foreground shrink-0">d</span>
+                    </div>
+                  </div>
+                  <div className="space-y-0.5">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                      Target
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        value={tgtStr}
+                        onChange={(e) => setTarget(param.id, e.target.value)}
+                        placeholder="—"
+                        className="w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring tabular-nums"
+                      />
+                      <span className="text-[10px] text-muted-foreground shrink-0">d</span>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  min="0"
-                  value={getValue(param.id)}
-                  onChange={(e) => setValue(param.id, e.target.value)}
-                  placeholder="—"
-                  className="w-full rounded border border-border bg-background text-sm px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-ring tabular-nums"
-                />
-                <span className="text-xs text-muted-foreground shrink-0">days</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Inline add-parameter form */}
