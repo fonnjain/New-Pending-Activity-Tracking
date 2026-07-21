@@ -113,7 +113,7 @@ function ContractorContent() {
         qty: recs.reduce((sum, r) => sum + r.balanceQty, 0),
         weight: recs.reduce((sum, r) => sum + r.balanceWt, 0),
         fabLoad: recs
-          .filter(r => FAB_SET.has((r.activity ?? "").toUpperCase()))
+          .filter(r => FAB_SET.has((r.activity ?? "").toUpperCase()) && !r.isInitialCutting)
           .reduce((sum, r) => sum + r.balanceWt, 0),
         galvaLoad: recs
           .filter(r => GALVA_SET.has((r.activity ?? "").toUpperCase()))

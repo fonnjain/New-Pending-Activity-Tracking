@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, Fragment, useCallback } from "react";
+import { isActiveCutting } from "@/lib/ageing";
 import {
   compareActivity,
   sortActivities,
@@ -250,9 +251,9 @@ function JobDashboardContent() {
         const phases = emptyPhases();
         for (const r of recs) {
           const key = processPhase(r.activity);
-          // Initial Cutting marks (isInitialCutting=true) are already counted
-          // as Release Balance — exclude them from the Cutting phase bucket.
-          if (key && !(key === "cutting" && r.isInitialCutting)) {
+          // Initial Cutting marks are already counted as Release Balance —
+          // exclude them from the Cutting phase bucket via isActiveCutting.
+          if (key && (key !== "cutting" || isActiveCutting(r))) {
             phases[key].marks += 1;
             phases[key].weight += r.balanceWt;
           }
@@ -801,7 +802,7 @@ function JobDetail({
         for (const r of recs) {
           const key = processPhase(r.activity);
           // Initial Cutting marks excluded from the Cutting phase — they are Release Balance.
-          if (key && !(key === "cutting" && r.isInitialCutting)) {
+          if (key && (key !== "cutting" || isActiveCutting(r))) {
             phases[key].marks += 1;
             phases[key].weight += r.balanceWt;
           }

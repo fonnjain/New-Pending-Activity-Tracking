@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTracker, useFilteredRecords } from "@/lib/store";
 import { useGetImportRecords, getGetImportRecordsQueryKey } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
-import { ageingCell } from "@/lib/ageing";
+import { ageingCell, isActiveCutting } from "@/lib/ageing";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -113,7 +113,7 @@ function passesHoleLoad(
 ): boolean {
   const act = (r.activity ?? "").toUpperCase();
   if (group === "TLT_STANDARD_OPERATIONS") {
-    return load === "OPERATIONAL" ? act === "RFI" : act === "C" && !r.isInitialCutting;
+    return load === "OPERATIONAL" ? act === "RFI" : isActiveCutting(r);
   }
   if (group === "TLT_QUALITY") {
     return load === "OPERATIONAL"
