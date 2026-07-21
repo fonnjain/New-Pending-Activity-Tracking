@@ -151,3 +151,30 @@ export async function backfillHoleOperation(): Promise<number> {
   }
   return totalUpdated;
 }
+
+/**
+ * One-time, idempotent backfill of `is_initial_cutting` on existing record_pool
+ * rows. The column was added with `NOT NULL DEFAULT false`, so legacy rows all
+ * read false even if they are Initial Cutting marks. This single UPDATE stamps
+ * the correct value using the reliable proxy:
+ *   activity = 'C' AND assign_date IS NULL AND contractor IS NULL
+ * All Initial marks satisfy this (they have no assign date and no contractor);
+ * Authorized marks with no assign date always have a contractor, so the proxy
+ * does not mis-classify them. After one successful run the WHERE matches zero
+ * rows, making every subsequent boot a no-op.
+ */
+export async function backfillInitialCutting(): Promise<number> {
+  const result = await db.execute(sql`
+    update record_pool
+    set    is_initial_cutting = true
+    where  upper(trim(activity)) = 'C'
+      and  assign_date is null
+      and  contractor  is null
+      and  is_initial_cutting = false
+  `);
+  const count = (result as unknown as { rowCount: number }).rowCount ?? 0;
+  if (count > 0) {
+    logger.info({ count }, "Backfilled record_pool is_initial_cutting");
+  }
+  return count;
+}

@@ -1,0 +1,150 @@
+TASK: The Cutting exclusion rule is only PARTIALLY applied. Find the root cause, fix it in ONE
+shared place, and verify with the numbers below. Two exports taken after the last attempt were
+byte-identical (zero differing cells), so nothing actually changed — do not assume the previous
+fix landed.
+
+=====================================================================
+THE RULE
+=====================================================================
+The Cutting (C) balance must count ONLY marks where:
+        Col G "Job Card Status" == "Authorized"
+and must EXCLUDE marks where Col G == "Initial".
+
+Job Card Status on Cutting marks has EXACTLY TWO values in the source data — "Authorized" and
+"Initial". There is no third case, no blank, no variant spelling. So the filter is a clean
+binary and there is no data-quality excuse for a partial result.
+
+Every Cutting mark also has Col A "Type" == "Job Card Not Started", so filtering on
+Status == "Authorized" is sufficient and equivalent to excluding Type+Status = Not Started +
+Initial.
+
+=====================================================================
+CURRENT STATE — PARTIALLY APPLIED (this is the bug)
+=====================================================================
+App-wide Cutting currently reports a figure BETWEEN the correct and the old value, which is the
+signature of an inconsistent filter:
+
+        App shows        4,641.065 MT / 24,279 marks     <- WRONG
+        Correct          2,597.052 MT / 15,137 marks     <- Authorized only
+        Old (unfiltered) 5,135.915 MT / 26,590 marks
+
+Project-by-project on the same export: 41 projects match Authorized-only, 21 still match the
+unfiltered total, and 4 match NEITHER. Twenty-five projects are wrong, overstating Cutting by
+2,044.013 MT in total.
+
+*** The "matches NEITHER" cases are the important clue. *** For 824, 917, 926 and 938 the app
+value is not the filtered figure and not the unfiltered figure — so a DIFFERENT, partial filter
+is being applied somewhere. Example: project 824 shows 3.449 MT / 165 marks, while Authorized
+is 2.728 MT / 96 marks and unfiltered is 19.448 MT / 373 marks. Project 938 shows 10.830 MT /
+28 marks against 10.252 / 21 and 97.045 / 295.
+
+This strongly indicates MORE THAN ONE code path computes Cutting, with different (or partly
+applied) conditions. Do not patch a single call site — find every place Cutting is aggregated.
+
+=====================================================================
+STEP 1 — FIND THE ROOT CAUSE FIRST (do this before changing anything)
+=====================================================================
+- Grep for every place Activity == "C" (or a Cutting bucket/label) is aggregated: server
+  aggregation, per-project summaries, per-activity summaries, any summary.* jsonb built during
+  parse, report builders, Excel export builders, and any cached/precomputed value.
+- For each site, record whether it applies a Job Card Status filter, and exactly what condition.
+- Check whether any Cutting figure is PRECOMPUTED AND STORED at import time (e.g. in the
+  imports summary or record_pool). If a stored value was written before the rule existed, the
+  UI will keep showing the old number no matter how the read path is fixed — that alone would
+  explain why two consecutive exports were identical. If so, the stored value must be recomputed
+  or the import re-run.
+- Report the list of call sites and their current conditions BEFORE making edits.
+
+=====================================================================
+STEP 2 — FIX IT IN ONE PLACE
+=====================================================================
+- Implement the rule as a SINGLE shared predicate/helper, e.g. isCuttingBalance(row) =
+  activity == "C" && jobCardStatus == "Authorized".
+- Replace every call site found in Step 1 with that helper. No duplicated inline conditions.
+- Read Job Card Status by HEADER NAME, not by column position. (In the current 24-column WIP
+  layout it is Col G, but the app must not depend on position.)
+- Trim/normalise the status value before comparing, and compare case-insensitively, so a
+  trailing space or casing difference cannot silently drop a mark.
+- Apply to BOTH weight and mark count — several projects currently have the right weight logic
+  but the wrong mark count, or vice versa.
+
+=====================================================================
+STEP 3 — REGRESSION GUARDS (these currently PASS and must keep passing)
+=====================================================================
+  a) Release Balance Computed must stay 2,538.863 MT. It CORRECTLY includes the Initial marks —
+     that is its definition. If it drops by ~2,539 MT, the exclusion was wrongly applied to it.
+  b) FG WIP must stay 1,400.577 MT (verified correct in the current export).
+  c) Other activities must be untouched — no Job Card Status filter applies to them.
+  d) Balance Wt, Balance Qty and total Marks per project must NOT change. Nothing is deleted;
+     the marks simply leave the CUTTING bucket.
+  e) Row totals must still reconcile: Cutting + Quality Check + Galvanising + FG WIP = Total.
+     (Total will fall by the excluded weight — confirm it still adds up.)
+
+=====================================================================
+STEP 4 — VERIFY (report actual vs expected for every line)
+=====================================================================
+APP-WIDE:
+        Cutting must be 2,597.052 MT / 15,137 marks.
+        It must NOT be 4,641.065 (current) or 5,135.915 (unfiltered).
+
+THE 25 CURRENTLY-WRONG PROJECTS — report app value vs expected for each:
+
+    Proj   app now (wt/marks)   MUST BECOME (wt/marks)
+    940    496.164 / 1330   ->    82.960 /  370
+    944    515.310 /  648   ->   238.228 /  465
+    948    279.925 / 1151   ->     6.027 /   64
+    935    719.195 / 1512   ->   493.965 / 1146
+    912    306.139 / 3293   ->   153.046 / 1658
+    960    146.101 / 1197   ->     2.042 /    7
+    910    136.978 / 1244   ->     8.058 /  129
+    908    131.285 / 1000   ->     3.694 /  102
+    937     74.481 /  780   ->     3.190 /  150
+    942    259.389 /  168   ->   218.721 /  131
+    929    119.960 /  476   ->    79.651 /  358
+    900    423.860 / 2884   ->   391.227 / 2720
+    939    118.072 /  397   ->    85.861 /  317
+    926     79.993 /  816   ->    48.962 /  444
+    934    102.410 /  647   ->    91.064 /  615
+    933     23.646 /   81   ->    13.864 /   78
+    958     18.374 /   18   ->     8.891 /   16
+    920    109.557 /  648   ->   101.799 /  617
+    917     23.173 /  489   ->    18.911 /  424
+    890     51.733 /  425   ->    48.388 /  370
+    946    100.805 / 1347   ->    98.023 / 1346
+    848      3.813 /   46   ->     1.374 /    6
+    824      3.449 /  165   ->     2.728 /   96
+    938     10.830 /   28   ->    10.252 /   21
+    914      0.493 /   17   ->     0.194 /   15
+
+Best single tests: 960 must collapse from 146.101 to 2.042 MT, and 948 from 279.925 to 6.027 MT.
+Both are dramatic and unmistakable.
+
+COVERAGE — confirm the corrected figure appears in ALL of these, not just one:
+    Project Wise page + its Excel export
+    Activity Wise page (Activity = C) + export
+    Overview / dashboard Cutting totals
+    Contractor Wise page
+    Plant Operation Wise page
+    Reports and any other export with a Cutting column
+    Any Activity Performance / Daily Production Movement view aggregating Activity = C
+
+=====================================================================
+DO NOT
+=====================================================================
+- Do NOT change Release Balance / Release Balance Computed.
+- Do NOT delete these marks or remove them from Balance Wt / Balance Qty / Marks.
+- Do NOT apply the exclusion to any activity other than C.
+- Do NOT leave duplicated inline conditions; one shared predicate only.
+- Do NOT rely on column POSITION for Job Card Status; read by header name.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity values, or qty.
+
+=====================================================================
+REPORT
+=====================================================================
+1. Step 1 findings: every Cutting aggregation site and its condition before the fix, and
+   whether any Cutting value is precomputed/stored at import time.
+2. App-wide Cutting after the fix (must be 2,597.052 MT / 15,137 marks).
+3. The 25-project table above, actual vs expected.
+4. Confirmation of the four regression guards in Step 3.
+5. Confirmation the rule now lives in exactly ONE shared predicate, listing the call sites that
+   use it.

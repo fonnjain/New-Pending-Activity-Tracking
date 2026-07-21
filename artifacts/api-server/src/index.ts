@@ -1,6 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { backfillClassification, backfillHoleOperation } from "./lib/backfill";
+import { backfillClassification, backfillHoleOperation, backfillInitialCutting } from "./lib/backfill";
 import { seedContractorCategories } from "./lib/seedContractorCategories";
 import { seedRsjThickness } from "./lib/seedRsjThickness";
 import { seedUsersIfEmpty } from "./lib/seedUsers";
@@ -39,6 +39,15 @@ app.listen(port, (err) => {
   // data. Fire-and-forget; self-draining and idempotent. Never blocks startup.
   backfillHoleOperation().catch((err) => {
     logger.error({ err }, "Hole operation backfill failed");
+  });
+
+  // Best-effort, one-time backfill of is_initial_cutting on existing C-activity
+  // pool rows. The column was added with DEFAULT false so all rows written before
+  // the feature was live read false. Proxy: activity='C' AND assign_date IS NULL
+  // AND contractor IS NULL — all Initial marks satisfy this; Authorized marks
+  // always have a contractor. Self-draining (runs once then is a no-op).
+  backfillInitialCutting().catch((err) => {
+    logger.error({ err }, "Initial cutting backfill failed");
   });
 
   // Best-effort, one-time seed of known out-vendor contractor mappings. Fire-
