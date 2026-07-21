@@ -2025,4 +2025,60 @@ export function resolveThickness(
 }
 
 // Shared record filtering + aggregation (client + server single source of truth).
+// -----------------------------------------------------------------------
+// WIP Case Classification  (Col A × Col G → four mutually exclusive cases)
+// -----------------------------------------------------------------------
+
+/**
+ * The four mutually exclusive WIP production cases per the VTPL specification.
+ *
+ *   NOT_RELEASED   Col A="Job Card Not Started" + Col G="Initial"    → Release Balance
+ *   CUTTING        Col A="Job Card Not Started" + Col G="Authorized"  → active Cutting
+ *   IN_PRODUCTION  Col A="Job Card WIP"         + Col G="Authorized"  → post-cutting work
+ *   FINISHED_GOODS Col A="FG Pending For Dispatch"                    → blank activity
+ *   UNCLASSIFIED   unexpected Col A / Col G value (data quality alert)
+ *
+ * Every aggregation, page, report, export, summary and precomputed value must call
+ * classifyWipCase() for Cutting / Release Balance / FG decisions.
+ * Never add inline `activity === "C"` / `isInitialCutting` conditions outside this fn.
+ */
+export type WipCase =
+  | "NOT_RELEASED"
+  | "CUTTING"
+  | "IN_PRODUCTION"
+  | "FINISHED_GOODS"
+  | "UNCLASSIFIED";
+
+/**
+ * Classify a mark into one of the four mutually exclusive WIP cases.
+ *
+ * When `jobCardStatus` is stored (new-format files ≥ Jul 2026) it is used directly —
+ * no proxies needed.  Falls back to `isInitialCutting` + activity for legacy rows
+ * where jobCardStatus is null (old-format files without the Status column).
+ */
+export function classifyWipCase(r: {
+  activity?: string | null;
+  isInitialCutting?: boolean | null;
+  jobCardStatus?: string | null;
+}): WipCase {
+  const act = (r.activity ?? "").trim().toUpperCase();
+
+  if (r.jobCardStatus != null) {
+    // Job Card Status is stored — apply the spec cases directly.
+    const st = r.jobCardStatus.trim().toUpperCase();
+    if (act === "C" && st === "INITIAL") return "NOT_RELEASED";
+    if (act === "C" && st === "AUTHORIZED") return "CUTTING";
+    if (act !== "" && act !== "C") return "IN_PRODUCTION";
+    if (act === "") return "FINISHED_GOODS";
+    return "UNCLASSIFIED";
+  }
+
+  // Legacy fallback (jobCardStatus not stored).  Structural facts verified on
+  // WIP 21-Jul: "Initial" only occurs with activity=C; "FG Pending" always has
+  // blank activity.  These facts make the four cases unambiguous from stored data.
+  if (act === "C") return r.isInitialCutting ? "NOT_RELEASED" : "CUTTING";
+  if (!act) return "FINISHED_GOODS";
+  return "IN_PRODUCTION";
+}
+
 export * from "./aggregate";

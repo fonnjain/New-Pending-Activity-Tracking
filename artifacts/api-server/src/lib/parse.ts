@@ -1001,6 +1001,10 @@ export function parseWorkbook(
     // NOT part of the hash; defaults false for old-format rows (no status col).
     const jcStatus = cellToString(row["Job Card Status"]).trim().toUpperCase();
     const activityUpper = (base.activity ?? "").trim().toUpperCase();
+    // Store the raw Job Card Status so classifyWipCase() can use it directly at
+    // read time — no proxies needed. Empty string → null (old-format rows without
+    // the column). NOT part of the hash; defaults null for legacy rows.
+    base.jobCardStatus = jcStatus || null;
     base.isInitialCutting = activityUpper === "C" && jcStatus === "INITIAL";
 
     rows.push({ ...base, hash: hashRow(base, rawBatch) });

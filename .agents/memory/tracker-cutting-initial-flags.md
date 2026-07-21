@@ -1,6 +1,6 @@
 ---
-name: Cutting balance Initial mark flags and date-filter proxy bug
-description: is_initial_cutting flag mechanics, the date-filter null-assignDate bug, and how the merge code update works.
+name: WIP case classification, is_initial_cutting, and Cutting balance correctness
+description: The four mutually exclusive WIP cases (Col A x Col G), classifyWipCase() in domain, job_card_status schema column, and the date-filter null-assignDate bug history.
 ---
 
 ## The bug: assignDate null-check in date filter
@@ -21,6 +21,18 @@ Two places incorrectly excluded null-assignDate records when a date window was a
 `artifacts/api-server/src/routes/imports.ts` had `if (poolIdByHash.has(hash)) continue;` that prevented `onConflictDoUpdate` from updating `is_initial_cutting` on re-upload. Fixed by removing the pre-check so ALL rows from the current upload go through `INSERT ... ON CONFLICT DO UPDATE`.
 
 **Why:** The `onConflictDoUpdate` comment said it "updates is_initial_cutting on re-upload" but the pre-check made it a no-op for existing rows. Now any re-upload correctly refreshes the flag.
+
+## classifyWipCase() — the canonical classification function
+
+Added to `lib/domain/src/index.ts`. Returns `WipCase` = `NOT_RELEASED | CUTTING | IN_PRODUCTION | FINISHED_GOODS | UNCLASSIFIED`.
+
+Logic (two-path):
+1. **When `jobCardStatus != null` (new-format files):** uses Col G directly — no proxies.
+2. **Legacy fallback (`jobCardStatus = null`):** uses `isInitialCutting` + activity (structural facts verified: Initial always C, FG always blank activity).
+
+`isActiveCutting()` in `ageing.ts` now delegates to `classifyWipCase(r) === "CUTTING"`. All existing call sites unchanged (they all go through `isActiveCutting()`).
+
+`job_card_status TEXT` column added to `record_pool` schema. Populated by parse.ts from "Job Card Status" (Col G). Null for old-format rows. NOT part of the hash. Enables exact classification on re-upload without proxies.
 
 ## The is_initial_cutting DB state issue
 

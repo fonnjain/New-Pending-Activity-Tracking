@@ -3,6 +3,8 @@
 // when the reference date is missing). The frontend only formats it and
 // classifies the no-date rows by activity.
 
+import { classifyWipCase } from "@workspace/domain";
+
 export const AGEING_BUCKETS = ["0-30", "31-60", "60+"] as const;
 export type AgeingBucket = (typeof AGEING_BUCKETS)[number];
 
@@ -41,16 +43,16 @@ export function isCutting(activity: string | null | undefined): boolean {
   return (activity ?? "").trim().toUpperCase() === "C";
 }
 
-// Active cutting: activity is "C" AND the mark is NOT an unreleased Initial mark.
-// A mark is Initial when its Job Card Status is "Initial" (Status-only predicate —
-// the "Type" column is NOT checked). Initial marks are already counted as Release
-// Balance and must NOT contribute to any Cutting figure.
+// Active cutting: classifyWipCase returns "CUTTING" (Col A="Job Card Not Started"
+// + Col G="Authorized"). Initial marks (NOT_RELEASED) are excluded — they are
+// already counted as Release Balance and must NOT contribute to any Cutting figure.
 // Use this predicate everywhere a Cutting BALANCE figure is computed or displayed.
 export function isActiveCutting(r: {
   activity?: string | null;
-  isInitialCutting?: boolean;
+  isInitialCutting?: boolean | null;
+  jobCardStatus?: string | null;
 }): boolean {
-  return isCutting(r.activity) && !r.isInitialCutting;
+  return classifyWipCase(r) === "CUTTING";
 }
 
 // Label for a row with no ageing date:

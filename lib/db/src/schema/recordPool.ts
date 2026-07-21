@@ -86,12 +86,15 @@ export const recordPoolTable = pgTable("record_pool", {
   // ACTIVITY_BUNDLE, and it is excluded from the row hash so it never affects
   // dedup/identity. Nullable so legacy rows stay valid.
   fg: text("fg"),
-  // --- Initial Cutting exclusion (additive, NOT part of the row hash). ---
-  // True when Type (col A) = "Job Card Not Started" AND Job Card Status (col G) = "Initial".
+  // --- WIP case classification (additive, NOT part of the row hash). ---
+  // Raw "Job Card Status" (Col G) from the Excel file. Two closed values:
+  // "Initial" | "Authorized". Null for old-format rows (no Status column).
+  // Stored so classifyWipCase() can use it directly without proxies.
+  jobCardStatus: text("job_card_status"),
+  // True when Col G = "Initial" AND Activity = "C".
   // These are unreleased marks already counted as Release Balance. They carry activity = "C"
   // but must NOT contribute to any Cutting balance figure. Defaults false (safe for old-format
-  // rows that have no Type/Job Card Status columns). Backfilled for existing rows via the
-  // best-available proxy: activity='C' AND assign_date IS NULL AND contractor IS NULL.
+  // rows that have no Job Card Status column).
   isInitialCutting: boolean("is_initial_cutting").notNull().default(false),
 });
 
