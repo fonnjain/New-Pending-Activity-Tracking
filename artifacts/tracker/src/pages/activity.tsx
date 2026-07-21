@@ -1,4 +1,4 @@
-import { useTracker, useFilteredRecords, dateRangeWindow, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
+import { useTracker, useFilteredRecords, dateRangeWindow } from "@/lib/store";
 import {
   useGetImportRecords,
   getGetImportRecordsQueryKey,
@@ -11,14 +11,13 @@ import { ageingCell, isActiveCutting, isCutting } from "@/lib/ageing";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
-import { ChevronDown, FileSpreadsheet, Plus, X } from "lucide-react";
+import { ChevronDown, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
-import { useState, useMemo, useEffect } from "react";
-import { compareActivity, DEFAULT_PRE_WARN, type LifecycleStatus } from "@workspace/domain";
+import { useState, useMemo } from "react";
+import { compareActivity } from "@workspace/domain";
 import { useSettings } from "@/lib/settings";
-import { lifecycleBgColor, LIFECYCLE_LABELS } from "@/lib/turnaround";
 
 const ROW_CAP = 300;
 
@@ -529,273 +528,6 @@ function ActivityDailyMovementTable({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Office Activities — per-project time tracking (engineering, procurement, etc.)
-// Stored in localStorage; no backend required. Default params are always shown;
-// user-defined params are added/removed via the "Add Parameter" button.
-// ---------------------------------------------------------------------------
-
-const OFFICE_STORAGE_KEY = "vtpl_office_activities_v1";
-
-type OfficeParam = { id: string; name: string; builtin: boolean };
-
-type OfficeData = {
-  params: OfficeParam[];                               // user-defined only
-  values: Record<string, Record<string, string>>;      // project → paramId → actual days
-  targets: Record<string, string>;                     // paramId → target days (global, not per-project)
-};
-
-const BUILTIN_PARAMS: OfficeParam[] = [
-  { id: "engineering_time", name: "Engineering Time", builtin: true },
-  { id: "procurement_time", name: "Procurement Time", builtin: true },
-];
-
-function loadOfficeData(): OfficeData {
-  try {
-    const raw = localStorage.getItem(OFFICE_STORAGE_KEY);
-    if (raw) {
-      const d = JSON.parse(raw) as Partial<OfficeData>;
-      return { params: d.params ?? [], values: d.values ?? {}, targets: d.targets ?? {} };
-    }
-  } catch {}
-  return { params: [], values: {}, targets: {} };
-}
-
-// Classify an entered actual-days value against a target using the global
-// pre-warning thresholds (pw1/pw2/pw3 are percentage-consumed cutoffs).
-function officePreWarnStatus(
-  valueDays: number | null,
-  targetDays: number | null,
-  pw: { pw1: number; pw2: number; pw3: number },
-): LifecycleStatus {
-  if (valueDays === null || targetDays === null || targetDays <= 0) return "na";
-  if (valueDays >= targetDays) return "breach1";
-  const pct = (valueDays / targetDays) * 100;
-  if (pct < pw.pw1) return "green";
-  if (pct < pw.pw2) return "prewarn1";
-  if (pct < pw.pw3) return "prewarn2";
-  return "prewarn3";
-}
-
-function saveOfficeData(data: OfficeData) {
-  try { localStorage.setItem(OFFICE_STORAGE_KEY, JSON.stringify(data)); } catch {}
-}
-
-function OfficeActivitiesSection({ projects }: { projects: string[] }) {
-  const { filters } = useTracker();
-  // Use the global default pre-warning thresholds (70/85/95 %) for the lifecycle
-  // classification. Office activities are not tied to a specific process step, so
-  // there is no per-activity override — the canonical defaults always apply.
-  const pw = DEFAULT_PRE_WARN;
-  const [data, setData] = useState<OfficeData>(() => loadOfficeData());
-  const [addingParam, setAddingParam] = useState(false);
-  const [newParamName, setNewParamName] = useState("");
-
-  // Derive the project implied by the current filter (null = none / ambiguous).
-  const filterProject = useMemo(() => {
-    const j = filters.job;
-    if (j && j !== CURRENT_JOBS_FILTER_VALUE && j !== MULTI_JOBS_FILTER_VALUE) return j;
-    if (j === MULTI_JOBS_FILTER_VALUE && filters.selectedJobs.length === 1) return filters.selectedJobs[0];
-    return null;
-  }, [filters]);
-
-  const [localProject, setLocalProject] = useState<string>(
-    () => filterProject ?? projects[0] ?? "",
-  );
-
-  // Track the filter project across renders so the effect below can detect changes.
-  const prevFilterProject = useMemo(() => filterProject, [filterProject]);
-  useEffect(() => {
-    if (prevFilterProject) setLocalProject(prevFilterProject);
-  }, [prevFilterProject]);
-
-  const allParams = useMemo(() => [...BUILTIN_PARAMS, ...data.params], [data.params]);
-
-  const getValue = (paramId: string) =>
-    (data.values[localProject] ?? {})[paramId] ?? "";
-
-  const setValue = (paramId: string, value: string) => {
-    const next: OfficeData = {
-      ...data,
-      values: {
-        ...data.values,
-        [localProject]: { ...(data.values[localProject] ?? {}), [paramId]: value },
-      },
-    };
-    setData(next);
-    saveOfficeData(next);
-  };
-
-  const getTarget = (paramId: string) => data.targets[paramId] ?? "";
-
-  const setTarget = (paramId: string, value: string) => {
-    const next: OfficeData = {
-      ...data,
-      targets: { ...data.targets, [paramId]: value },
-    };
-    setData(next);
-    saveOfficeData(next);
-  };
-
-  const addParam = () => {
-    const trimmed = newParamName.trim();
-    if (!trimmed) return;
-    const id = `custom_${Date.now()}`;
-    const next: OfficeData = {
-      ...data,
-      params: [...data.params, { id, name: trimmed, builtin: false }],
-    };
-    setData(next);
-    saveOfficeData(next);
-    setNewParamName("");
-    setAddingParam(false);
-  };
-
-  const removeParam = (id: string) => {
-    const next: OfficeData = { ...data, params: data.params.filter((p) => p.id !== id) };
-    setData(next);
-    saveOfficeData(next);
-  };
-
-  if (projects.length === 0) return null;
-
-  return (
-    <Card className="shadow-sm">
-      <CardContent className="pt-4 pb-5">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-            Office Activities
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 text-xs"
-            onClick={() => setAddingParam(true)}
-          >
-            <Plus className="h-3 w-3" />
-            Add Parameter
-          </Button>
-        </div>
-
-        {/* Project selector */}
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-xs text-muted-foreground shrink-0">Project:</span>
-          <select
-            value={localProject}
-            onChange={(e) => setLocalProject(e.target.value)}
-            className="rounded border border-border bg-background text-sm px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            {projects.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Parameter cards: each shows Actual + Target inputs with a pre-warning dot */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {allParams.map((param) => {
-            const valStr = getValue(param.id);
-            const tgtStr = getTarget(param.id);
-            const val = valStr !== "" ? parseFloat(valStr) : null;
-            const tgt = tgtStr !== "" ? parseFloat(tgtStr) : null;
-            const status = officePreWarnStatus(val, tgt, pw);
-            return (
-              <div
-                key={param.id}
-                className="border border-border rounded-lg p-2.5 space-y-2"
-              >
-                {/* Header: name + pre-warning indicator + remove button */}
-                <div className="flex items-center justify-between gap-1 min-h-[18px]">
-                  <span className="text-xs font-medium truncate">{param.name}</span>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {status !== "na" && (
-                      <div
-                        className={`w-2.5 h-2.5 rounded-full ${lifecycleBgColor(status)}`}
-                        title={LIFECYCLE_LABELS[status]}
-                      />
-                    )}
-                    {!param.builtin && (
-                      <button
-                        onClick={() => removeParam(param.id)}
-                        className="text-muted-foreground hover:text-destructive"
-                        title={`Remove ${param.name}`}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {/* Actual + Target inputs side by side */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-0.5">
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                      Actual
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min="0"
-                        value={valStr}
-                        onChange={(e) => setValue(param.id, e.target.value)}
-                        placeholder="—"
-                        className="w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring tabular-nums"
-                      />
-                      <span className="text-[10px] text-muted-foreground shrink-0">d</span>
-                    </div>
-                  </div>
-                  <div className="space-y-0.5">
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                      Target
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min="0"
-                        value={tgtStr}
-                        onChange={(e) => setTarget(param.id, e.target.value)}
-                        placeholder="—"
-                        className="w-full rounded border border-border bg-background text-xs px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring tabular-nums"
-                      />
-                      <span className="text-[10px] text-muted-foreground shrink-0">d</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Inline add-parameter form */}
-        {addingParam && (
-          <div className="mt-4 flex items-center gap-2 border-t pt-3">
-            <input
-              autoFocus
-              type="text"
-              placeholder="Parameter name (e.g. Design Review)"
-              value={newParamName}
-              onChange={(e) => setNewParamName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") addParam();
-                if (e.key === "Escape") { setAddingParam(false); setNewParamName(""); }
-              }}
-              className="flex-1 rounded border border-border bg-background text-sm px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <Button size="sm" className="h-8" onClick={addParam}>Add</Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8"
-              onClick={() => { setAddingParam(false); setNewParamName(""); }}
-            >
-              Cancel
-            </Button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Page root
@@ -824,14 +556,6 @@ function ActivityContent() {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
   });
   const records = useFilteredRecords(allRecords);
-
-  // Full project list from all (unfiltered) records for the Office Activities picker.
-  const projects = useMemo(() => {
-    if (!allRecords) return [];
-    const seen = new Set<string>();
-    for (const r of allRecords) { if (r.job) seen.add(r.job); }
-    return Array.from(seen).sort();
-  }, [allRecords]);
 
   // Production movement: consecutive-import cutting output + net balance delta.
   const { data: productionMovement, isLoading: isMovementLoading } =
@@ -1046,8 +770,6 @@ function ActivityContent() {
           />
         </>
       )}
-
-      <OfficeActivitiesSection projects={projects} />
     </div>
   );
 }

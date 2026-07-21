@@ -1,0 +1,129 @@
+TASK: The Cutting filter is over-restrictive. It is dropping 4,243 legitimate marks
+(985.133 MT). Remove the EXTRA condition. The rule is Job Card Status only — nothing else.
+
+=====================================================================
+CURRENT STATE — the Status filter works, but an extra condition was added
+=====================================================================
+        App shows        1,611.919 MT / 10,894 marks   <- WRONG (too low)
+        Correct          2,597.052 MT / 15,137 marks
+        Missing            985.133 MT /  4,243 marks
+
+DIAGNOSIS (verified against the source file): the app is currently computing
+
+        Activity == "C"
+        AND Job Card Status == "Authorized"
+        AND Assign Date is NOT NULL          <-- THIS EXTRA CONDITION MUST GO
+        (equivalently, Contractor is NOT NULL — the two fields are perfectly correlated
+         in the data, so the code may be testing either one; remove whichever is present)
+
+Proof: the app's figure matches "Authorized AND has Assign Date" for ALL 66 projects, exactly,
+on both weight and mark count. It is not a rounding or edge-case issue — it is a systematic
+extra filter.
+
+Of the 15,137 Authorized Cutting marks:
+        10,894 have both an Assign Date and a Contractor   -> currently counted
+         4,243 have NEITHER field populated                -> currently DROPPED (985.133 MT)
+         0      have only one of the two
+Those 4,243 marks are legitimately Authorized. A blank Assign Date or blank Contractor does NOT
+disqualify a mark from the Cutting balance — it only means the job has not been handed to a
+specific fabricator or dated yet. The work is still authorized and still pending.
+
+=====================================================================
+THE CORRECT RULE — one condition, nothing more
+=====================================================================
+        Cutting balance = marks where Activity == "C"
+                          AND Job Card Status == "Authorized"
+
+That is the ENTIRE rule.
+
+Do NOT additionally require any of these to be non-null / non-blank:
+        Assign Date
+        Contractor
+        Last Production Entry Date
+        Job Card No / Job Card Date
+        Ref Job Card No
+        Batch No (MFC)
+        any other field
+A null in any of those fields is normal data, not a reason to exclude a mark.
+
+Read Job Card Status by HEADER NAME (not column position), trim it, and compare
+case-insensitively.
+
+=====================================================================
+THE FIX
+=====================================================================
+Find the Cutting predicate (it should already be a single shared helper from the previous fix)
+and DELETE the extra null-check. Nothing else about the previous fix needs to change — the
+Job Card Status filter itself is now working consistently across all projects, which is
+progress. Only the additional condition is wrong.
+
+Check every call site that uses the helper to make sure none re-adds its own null-check on top.
+
+=====================================================================
+ACCEPTANCE CHECK (WIP 21-Jul)
+=====================================================================
+APP-WIDE:
+        Cutting must be 2,597.052 MT / 15,137 marks.
+        It must NOT be 1,611.919 (current, over-filtered) and must NOT be 5,135.915
+        (unfiltered).
+
+THE 28 CURRENTLY-WRONG PROJECTS — app now vs required:
+
+    Proj    app now (wt/marks)      MUST BECOME (wt/marks)
+    821       0.000 /    0    ->      5.148 /  301     <- BEST TEST: currently shows nothing
+    922      31.421 /  615    ->     80.925 / 1097
+    900     289.975 / 1809    ->    391.227 / 2720
+    918       0.013 /    1    ->      6.488 /   83
+    920      57.160 /  298    ->    101.799 /  617
+    934      54.977 /  384    ->     91.064 /  615
+    929      72.348 /  256    ->     79.651 /  358
+    941      88.255 /  199    ->    107.064 /  268
+    917      17.834 /  415    ->     18.911 /  424
+    911       4.767 /   41    ->      6.130 /   45
+    933      13.206 /   72    ->     13.864 /   78
+    866       2.540 /   99    ->      3.030 /  101
+    903       7.312 /   27    ->      7.379 /   29
+    862       0.918 /   29    ->      1.229 /   30
+    928      13.598 /   85    ->     13.605 /   86
+    (plus the remaining projects in the 28 — all must equal their Authorized-only figure)
+
+Project 821 is the single clearest test: EVERY one of its 301 Authorized Cutting marks has a
+blank Assign Date, so the extra condition wipes the project out entirely. After the fix it must
+show 5.148 MT / 301 marks.
+
+REGRESSION GUARDS (currently passing — must stay):
+    Release Balance Computed = 2,538.863 MT  (correctly INCLUDES the Initial marks)
+    FG WIP                   = 1,400.577 MT
+    Other activities unchanged; no Job Card Status or null filter applies to them.
+    Balance Wt / Balance Qty / total Marks per project unchanged.
+    Row totals reconcile: Cutting + Quality Check + Galvanising + FG WIP = Total.
+
+COVERAGE — confirm the corrected figure in ALL of these, not just one:
+    Project Wise page + Excel export
+    Activity Wise page (Activity = C) + export
+    Overview / dashboard Cutting totals
+    Contractor Wise page
+    Plant Operation Wise page
+    Reports and any other export with a Cutting column
+    Any Activity Performance / Daily Production Movement view aggregating Activity = C
+
+=====================================================================
+DO NOT
+=====================================================================
+- Do NOT re-introduce any null/blank check on Assign Date, Contractor or any other field.
+- Do NOT change the Job Card Status filter itself — it is correct.
+- Do NOT change Release Balance / Release Balance Computed.
+- Do NOT delete marks or alter Balance Wt / Balance Qty / Marks totals.
+- Do NOT apply the exclusion to any activity other than C.
+- Do NOT rely on column position; read by header name.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity values, or qty.
+
+=====================================================================
+REPORT
+=====================================================================
+1. Which extra condition was found and removed (Assign Date null-check, Contractor null-check,
+   or both), and the file/line where it lived.
+2. App-wide Cutting after the fix (must be 2,597.052 MT / 15,137 marks).
+3. Project 821 (must be 5.148 / 301), 922 (80.925 / 1097) and 900 (391.227 / 2720).
+4. Confirmation of the regression guards.
+5. Confirmation that no call site adds its own null-check on top of the shared predicate.

@@ -14,8 +14,9 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { ChevronDown, Download, Upload } from "lucide-react";
+import { ChevronDown, Download, Plus, Upload, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { lifecycleBgColor, LIFECYCLE_LABELS } from "@/lib/turnaround";
 import { LoginGate, LogoutButton } from "@/components/login-gate";
 import { useSettings } from "@/lib/settings";
 import { useTracker } from "@/lib/store";
@@ -40,7 +41,59 @@ import {
   type SettingsCategory,
   type NtltSubtype,
   type ScopeArg,
+  type LifecycleStatus,
 } from "@workspace/domain";
+
+// ---------------------------------------------------------------------------
+// Office Activities — pre-process time tracking (engineering, procurement …)
+// Stored in localStorage alongside the existing office-data key so the user's
+// previously-entered values survive the page move.  Target (ideal days) is
+// global; actuals are per-project.
+// ---------------------------------------------------------------------------
+
+const OFFICE_STORAGE_KEY = "vtpl_office_activities_v1";
+
+type OfficeParam = { id: string; name: string; builtin: boolean };
+
+type OfficeData = {
+  params: OfficeParam[];
+  values: Record<string, Record<string, string>>;  // project → paramId → actual days
+  targets: Record<string, string>;                  // paramId → ideal days (global)
+};
+
+const BUILTIN_OFFICE_PARAMS: OfficeParam[] = [
+  { id: "engineering_time", name: "Engineering Time", builtin: true },
+  { id: "procurement_time", name: "Procurement Time", builtin: true },
+];
+
+function loadOfficeData(): OfficeData {
+  try {
+    const raw = localStorage.getItem(OFFICE_STORAGE_KEY);
+    if (raw) {
+      const d = JSON.parse(raw) as Partial<OfficeData>;
+      return { params: d.params ?? [], values: d.values ?? {}, targets: d.targets ?? {} };
+    }
+  } catch {}
+  return { params: [], values: {}, targets: {} };
+}
+
+function saveOfficeData(data: OfficeData) {
+  try { localStorage.setItem(OFFICE_STORAGE_KEY, JSON.stringify(data)); } catch {}
+}
+
+function officePreWarnStatus(
+  valueDays: number | null,
+  targetDays: number | null,
+  pw: { pw1: number; pw2: number; pw3: number },
+): LifecycleStatus {
+  if (valueDays === null || targetDays === null || targetDays <= 0) return "na";
+  if (valueDays >= targetDays) return "breach1";
+  const pct = (valueDays / targetDays) * 100;
+  if (pct < pw.pw1) return "green";
+  if (pct < pw.pw2) return "prewarn1";
+  if (pct < pw.pw3) return "prewarn2";
+  return "prewarn3";
+}
 
 const ALL = "__ALL__";
 
@@ -180,6 +233,80 @@ export function WarningParametersContent() {
   const [project, setProject] = useState<string>(ALL);
   const [projOpen, setProjOpen] = useState(false);
   const [projSearch, setProjSearch] = useState("");
+
+  // Office Activities state (localStorage, shared key with the old Activity-page location)
+  const [officeData, setOfficeData] = useState<OfficeData>(() => loadOfficeData());
+  const [addingOfficeParam, setAddingOfficeParam] = useState(false);
+  const [newOfficeParamName, setNewOfficeParamName] = useState("");
+
+  const allOfficeParams = useMemo(
+    () => [...BUILTIN_OFFICE_PARAMS, ...officeData.params],
+    [officeData.params],
+  );
+
+  // Sum of all office ideal days — added to process cumulative target display
+  const officeTotal = useMemo(
+    () =>
+      allOfficeParams.reduce(
+        (sum, p) => sum + (parseFloat(officeData.targets[p.id] ?? "0") || 0),
+        0,
+      ),
+    [allOfficeParams, officeData.targets],
+  );
+
+  // Per-project actual days (only meaningful when a specific project is selected)
+  const getOfficeActual = (paramId: string) => {
+    if (isAll) return "";
+    return (officeData.values[project] ?? {})[paramId] ?? "";
+  };
+  const setOfficeActual = (paramId: string, value: string) => {
+    if (isAll) return;
+    const next: OfficeData = {
+      ...officeData,
+      values: {
+        ...officeData.values,
+        [project]: { ...(officeData.values[project] ?? {}), [paramId]: value },
+      },
+    };
+    setOfficeData(next);
+    saveOfficeData(next);
+  };
+
+  // Global ideal days (the "target" for each office parameter)
+  const setOfficeTarget = (paramId: string, value: string) => {
+    const next: OfficeData = {
+      ...officeData,
+      targets: { ...officeData.targets, [paramId]: value },
+    };
+    setOfficeData(next);
+    saveOfficeData(next);
+  };
+
+  const addOfficeParam = () => {
+    const trimmed = newOfficeParamName.trim();
+    if (!trimmed) return;
+    const next: OfficeData = {
+      ...officeData,
+      params: [
+        ...officeData.params,
+        { id: `custom_${Date.now()}`, name: trimmed, builtin: false },
+      ],
+    };
+    setOfficeData(next);
+    saveOfficeData(next);
+    setNewOfficeParamName("");
+    setAddingOfficeParam(false);
+  };
+
+  const removeOfficeParam = (id: string) => {
+    const next: OfficeData = {
+      ...officeData,
+      params: officeData.params.filter((p) => p.id !== id),
+    };
+    setOfficeData(next);
+    saveOfficeData(next);
+  };
+
   const graceFileRef = useRef<HTMLInputElement>(null);
   const preWarnFileRef = useRef<HTMLInputElement>(null);
 
@@ -953,6 +1080,75 @@ export function WarningParametersContent() {
                 </tr>
               </thead>
               <tbody>
+                {/* Office activity rows — pre-process overhead that adds to total turnaround */}
+                {allOfficeParams.map((param, idx) => {
+                  const idealStr = officeData.targets[param.id] ?? "";
+                  const idealDays = parseFloat(idealStr) || 0;
+                  const cumOffice = allOfficeParams
+                    .slice(0, idx + 1)
+                    .reduce(
+                      (s, p) =>
+                        s + (parseFloat(officeData.targets[p.id] ?? "0") || 0),
+                      0,
+                    );
+                  return (
+                    <tr
+                      key={param.id}
+                      className="border-b border-border/40 hover:bg-muted/20 bg-muted/5 align-top"
+                    >
+                      <td className="py-1.5 pr-3">
+                        <span className="text-xs font-medium">{param.name}</span>
+                        <span className="ml-2 text-[10px] text-muted-foreground uppercase tracking-wider">
+                          office
+                        </span>
+                        {!param.builtin && (
+                          <button
+                            type="button"
+                            onClick={() => removeOfficeParam(param.id)}
+                            className="ml-2 text-muted-foreground hover:text-destructive"
+                            title={`Remove ${param.name}`}
+                          >
+                            <X className="inline h-3 w-3" />
+                          </button>
+                        )}
+                      </td>
+                      <td className="py-1.5 px-3 text-right">
+                        <NumberInput
+                          type="number"
+                          min={0}
+                          value={idealDays || ""}
+                          placeholder="0"
+                          onValueChange={(v) => setOfficeTarget(param.id, v)}
+                          className="h-7 w-16 ml-auto tabular-nums text-right"
+                          aria-label={`${param.name} ideal days`}
+                        />
+                      </td>
+                      <td className="py-1.5 px-3 text-right tabular-nums font-medium text-muted-foreground">
+                        {cumOffice}d
+                      </td>
+                      {BANDS.map((b) => (
+                        <td
+                          key={b.key}
+                          className="py-1.5 px-3 text-right text-muted-foreground/40 text-xs select-none"
+                        >
+                          —
+                        </td>
+                      ))}
+                      {!isAll && <td />}
+                    </tr>
+                  );
+                })}
+                {/* Separator row when office params are present */}
+                {allOfficeParams.length > 0 && officeTotal > 0 && (
+                  <tr className="bg-muted/10">
+                    <td
+                      colSpan={3 + BANDS.length + (isAll ? 0 : 1)}
+                      className="py-1 pr-3 text-right text-[10px] text-muted-foreground uppercase tracking-wider border-b border-border"
+                    >
+                      Office subtotal: {officeTotal}d — process sequence starts below
+                    </td>
+                  </tr>
+                )}
                 {rows.map((row) => {
                   const { step, ov, globalCfg, globalIdeal, rowHasOverride } =
                     row;
@@ -998,7 +1194,7 @@ export function WarningParametersContent() {
                         />
                       </td>
                       <td className="py-1.5 px-3 text-right tabular-nums font-medium text-muted-foreground">
-                        {cumTargets[step]}d
+                        {cumTargets[step] + officeTotal}d
                       </td>
                       {row.bands.map((b) => (
                         <td key={b.key} className="py-1.5 px-3">
@@ -1130,6 +1326,42 @@ export function WarningParametersContent() {
                 </tr>
               </thead>
               <tbody>
+                {/* Office activity rows — use global pw% thresholds (display only) */}
+                {allOfficeParams.map((param, idx) => {
+                  const cumOffice = allOfficeParams
+                    .slice(0, idx + 1)
+                    .reduce(
+                      (s, p) =>
+                        s + (parseFloat(officeData.targets[p.id] ?? "0") || 0),
+                      0,
+                    );
+                  const globalPw = DEFAULT_PRE_WARN;
+                  return (
+                    <tr
+                      key={param.id}
+                      className="border-b border-border/40 hover:bg-muted/20 bg-muted/5 align-top"
+                    >
+                      <td className="py-1.5 pr-3">
+                        <span className="text-xs font-medium">{param.name}</span>
+                        <span className="ml-2 text-[10px] text-muted-foreground uppercase tracking-wider">
+                          office
+                        </span>
+                      </td>
+                      <td className="py-1.5 px-3 text-right tabular-nums font-medium text-muted-foreground">
+                        {cumOffice > 0 ? `${cumOffice}d` : "—"}
+                      </td>
+                      <td className="py-1.5 px-3 text-right text-muted-foreground text-xs tabular-nums">
+                        {globalPw.pw1}
+                      </td>
+                      <td className="py-1.5 px-3 text-right text-muted-foreground text-xs tabular-nums">
+                        {globalPw.pw2}
+                      </td>
+                      <td className="py-1.5 px-3 text-right text-muted-foreground text-xs tabular-nums">
+                        {globalPw.pw3}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {preWarnRows.map((row) => (
                   <tr
                     key={row.step}
@@ -1240,6 +1472,126 @@ export function WarningParametersContent() {
               </span>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Office Activities card — actual days per project + add/remove params */}
+      {/* ------------------------------------------------------------------ */}
+      <Card>
+        <CardHeader className="space-y-3 pb-3">
+          <div className="flex flex-row items-center justify-between space-y-0 gap-3">
+            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+              Office Activities
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              onClick={() => setAddingOfficeParam(true)}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              Add Parameter
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground max-w-3xl">
+            Pre-process activities (engineering design, procurement, etc.) whose
+            ideal days are set in the Per-Activity Targets table above and count
+            toward the total project turnaround. Enter actual days spent per
+            project to track progress against the target.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {isAll ? (
+            <p className="text-xs text-muted-foreground py-4 text-center">
+              Select a project above to enter actual days for that project.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {allOfficeParams.map((param) => {
+                const valStr = getOfficeActual(param.id);
+                const tgtStr = officeData.targets[param.id] ?? "";
+                const val = valStr !== "" ? parseFloat(valStr) : null;
+                const tgt = tgtStr !== "" ? parseFloat(tgtStr) : null;
+                const status = officePreWarnStatus(val, tgt, DEFAULT_PRE_WARN);
+                return (
+                  <div
+                    key={param.id}
+                    className="border border-border rounded-lg p-2.5 space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-1 min-h-[18px]">
+                      <span className="text-xs font-medium truncate">{param.name}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {status !== "na" && (
+                          <div
+                            className={`w-2.5 h-2.5 rounded-full ${lifecycleBgColor(status)}`}
+                            title={LIFECYCLE_LABELS[status]}
+                          />
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 space-y-0.5">
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                          Actual for {project}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <NumberInput
+                            type="number"
+                            min={0}
+                            value={val ?? ""}
+                            placeholder="—"
+                            onValueChange={(v) => setOfficeActual(param.id, v)}
+                            className="h-7 flex-1 tabular-nums text-right"
+                            aria-label={`${param.name} actual days for ${project}`}
+                          />
+                          <span className="text-[10px] text-muted-foreground shrink-0">d</span>
+                        </div>
+                      </div>
+                      {tgt !== null && tgt > 0 && (
+                        <div className="text-xs text-muted-foreground shrink-0 mt-4">
+                          / {tgt}d target
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {addingOfficeParam && (
+            <div className="mt-4 flex items-center gap-2 border-t pt-3">
+              <input
+                autoFocus
+                type="text"
+                placeholder="Parameter name (e.g. Design Review)"
+                value={newOfficeParamName}
+                onChange={(e) => setNewOfficeParamName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addOfficeParam();
+                  if (e.key === "Escape") {
+                    setAddingOfficeParam(false);
+                    setNewOfficeParamName("");
+                  }
+                }}
+                className="flex-1 rounded border border-border bg-background text-sm px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <Button size="sm" className="h-8" onClick={addOfficeParam}>
+                Add
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8"
+                onClick={() => {
+                  setAddingOfficeParam(false);
+                  setNewOfficeParamName("");
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
