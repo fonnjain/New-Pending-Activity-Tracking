@@ -1,0 +1,116 @@
+TASK: VERIFY (with numbers) whether the Cutting exclusion rule has actually been implemented,
+and whether it was applied EVERYWHERE. Do not assume it landed — prove it, page by page.
+
+=====================================================================
+THE RULE BEING VERIFIED
+=====================================================================
+The Cutting (C) balance must include ONLY marks where:
+        Col G "Job Card Status" == "Authorized"
+and must EXCLUDE marks where:
+        Col A "Type" == "Job Card Not Started" AND Col G "Job Card Status" == "Initial"
+
+Every Cutting mark is Type = "Job Card Not Started", so the status is the only discriminator:
+"Authorized only" and "exclude Initial" are the SAME filter. There is no third case.
+
+Rationale (already established): the excluded set IS the Release Balance population — the same
+weight was being counted twice, once as Release Balance and once as Cutting. After the fix the
+two are disjoint: Release Balance = material not yet released; Cutting = work authorized and on
+the floor.
+
+=====================================================================
+STEP 1 — THE DECISIVE APP-WIDE CHECK (WIP 21-Jul, TLT)
+=====================================================================
+Report the app-wide Cutting figure and compare:
+
+        IMPLEMENTED   ->  15,137 marks / 2,597.052 MT
+        NOT IMPLEMENTED -> 26,590 marks / 5,135.915 MT
+
+        (the excluded Initial population is 11,453 marks / 2,538.863 MT — 49.4% of the old
+         Cutting weight)
+
+The two answers differ by roughly 2x, so there is no ambiguity. State plainly which one the app
+currently shows.
+
+=====================================================================
+STEP 2 — PER-PROJECT DISCRIMINATORS (the strongest evidence)
+=====================================================================
+Some projects change dramatically, which makes a partial implementation obvious. Report the
+Cutting figure for each of these projects:
+
+    Project   OLD (wrong)              NEW (correct)
+              marks / MT               marks / MT
+    956       1,304 /  352.629         0 / 0.000        <- must DISAPPEAR from Cutting entirely
+    960       1,197 /  146.101         7 / 2.042        <- must collapse to ~2 MT
+    948       1,151 /  279.925        64 / 6.027        <- must collapse to ~6 MT
+    910       1,244 /  136.978       129 / 8.058
+    940       1,330 /  496.164       370 / 82.960
+    912       3,293 /  306.139     1,658 / 153.046
+    935       1,512 /  719.195     1,146 / 493.965
+    944         648 /  515.310       465 / 238.228
+    900       2,884 /  423.860     2,720 / 391.227
+    942         168 /  259.389       131 / 218.721
+
+Project 956 is the single clearest test: ALL of its Cutting is "Initial", so after the fix it
+must show ZERO Cutting. If 956 still shows 352.629 MT, the rule is not applied.
+
+=====================================================================
+STEP 3 — REGRESSION GUARDS (things that MUST NOT have changed)
+=====================================================================
+An over-applied fix is as bad as a missing one. Confirm all of these are UNCHANGED:
+
+  a) RELEASE BALANCE still INCLUDES the excluded marks. It must remain
+        11,453 marks / 2,538.863 MT (Not Started + Initial, all activities).
+     If Release Balance also dropped by ~2,539 MT, the exclusion was wrongly applied to it.
+     Release Balance Computed must likewise be unchanged.
+
+  b) OTHER ACTIVITIES are untouched (no exclusion applies to them):
+        Y    5,231 marks / 1,838.681 MT
+        FG   6,985 marks / 1,400.577 MT   (blank activity = FG Pending)
+        RFI  8,234 marks /   976.753 MT
+        G    3,788 marks /   561.806 MT
+        GB   3,169 marks /   534.632 MT
+        TS   1,724 marks /   364.114 MT
+
+  c) Per-project Balance Wt, Balance Qty and total Marks are UNCHANGED. Nothing was deleted —
+     the marks still belong to the project's overall balance; they only leave the CUTTING
+     bucket.
+
+  d) Row totals still reconcile: Cutting + Quality Check + Galvanising + FG = Total.
+     (The Total will have fallen by the excluded weight; confirm it still adds up.)
+
+=====================================================================
+STEP 4 — COVERAGE AUDIT (where the fix must be applied)
+=====================================================================
+The recurring failure mode in this app is a fix landing in ONE code path while others keep the
+old behaviour. Check EACH of these independently and report a verdict per location:
+
+    - Project Wise page (Cutting column) and its Excel export
+    - Activity Wise page (Activity = C row) and its export
+    - Overview / dashboard Cutting totals
+    - Contractor Wise page Cutting figures
+    - Plant Operation Wise page
+    - Reports and any other Excel export containing a Cutting column
+    - Any Activity Performance / Daily Production Movement view that aggregates Activity = C
+
+Then confirm the rule lives in ONE shared predicate/helper used by all of them. If the same
+condition is written out in more than one place, consolidate it — divergent copies are how this
+kind of bug returns.
+
+=====================================================================
+DO NOT
+=====================================================================
+- Do NOT change Release Balance / Release Balance Computed; they correctly include the Initial
+  marks.
+- Do NOT drop these marks from the data, or from Balance Wt / Balance Qty / Marks totals.
+- Do NOT apply the exclusion to any activity other than C.
+- Do NOT "fix" anything else while verifying; if something is wrong, report it first.
+
+=====================================================================
+REPORT
+=====================================================================
+1. The app-wide Cutting marks/weight, and a clear statement: IMPLEMENTED or NOT IMPLEMENTED.
+2. The Cutting figure for all ten projects in Step 2 (especially 956, which must be zero).
+3. Confirmation that Release Balance is still 2,538.863 MT and the other activities are
+   unchanged.
+4. A per-location table for Step 4: page/export -> applied (yes/no).
+5. Whether the rule is implemented in one shared predicate or duplicated across code paths.
