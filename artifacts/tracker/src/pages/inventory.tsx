@@ -37,6 +37,10 @@ import {
   Trash2,
   AlertTriangle,
   FileSpreadsheet,
+  Square,
+  CheckSquare,
+  RotateCcw,
+  X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsxSheets, type XlsxSheet, type XlsxSummaryRow } from "@/lib/export";
@@ -176,6 +180,139 @@ function SummaryFooter({ summary }: { summary: BucketSummary }) {
         </div>
       ))}
     </div>
+  );
+}
+
+// Selection checklist shown inside each bucket card when delete mode is active.
+function SelectionChecklist({
+  rows,
+  selectedProjects,
+  onToggle,
+}: {
+  rows: InventoryStructureCard[];
+  selectedProjects: Set<string>;
+  onToggle: (project: string) => void;
+}) {
+  const projects = useMemo(
+    () => [...new Set(rows.map((r) => r.project))].sort(),
+    [rows],
+  );
+  if (projects.length === 0) {
+    return (
+      <div className="px-3 py-2 text-xs text-muted-foreground italic border-b">
+        No projects in this bucket.
+      </div>
+    );
+  }
+  const allSelected = projects.every((p) => selectedProjects.has(p));
+  const someSelected = projects.some((p) => selectedProjects.has(p));
+  const toggleAll = () => {
+    if (allSelected) {
+      projects.filter((p) => selectedProjects.has(p)).forEach(onToggle);
+    } else {
+      projects.filter((p) => !selectedProjects.has(p)).forEach(onToggle);
+    }
+  };
+  return (
+    <div className="px-3 pt-2 pb-3 border-b bg-destructive/5 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Select projects to delete
+        </span>
+        <button
+          type="button"
+          onClick={toggleAll}
+          className="text-xs text-muted-foreground hover:text-foreground underline"
+        >
+          {allSelected ? "Deselect all" : someSelected ? "Select all" : "Select all"}
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {projects.map((p) => {
+          const checked = selectedProjects.has(p);
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => onToggle(p)}
+              className={[
+                "flex items-center gap-1.5 px-2 py-1 rounded text-sm border transition-colors",
+                checked
+                  ? "border-destructive bg-destructive/10 text-destructive font-medium"
+                  : "border-border hover:border-muted-foreground text-foreground",
+              ].join(" ")}
+            >
+              {checked ? (
+                <CheckSquare className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <Square className="h-3.5 w-3.5 shrink-0" />
+              )}
+              {p}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Table shown at the bottom listing hidden projects with per-project restore.
+function DeletedProjectsTable({
+  entries,
+  onRestore,
+  onRestoreAll,
+}: {
+  entries: Array<{ project: string; bucketsWhenDeleted: string[] }>;
+  onRestore: (project: string) => void;
+  onRestoreAll: () => void;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <Card className="border-dashed">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base text-muted-foreground">
+            Deleted Projects ({entries.length})
+          </CardTitle>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs gap-1.5"
+            onClick={onRestoreAll}
+          >
+            <RotateCcw className="h-3 w-3" /> Restore All
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Projects hidden from the buckets above. Restore to return them to their applicable
+          bucket.
+        </p>
+      </CardHeader>
+      <CardContent className="px-0 pb-2">
+        <div className="divide-y">
+          {entries.map(({ project, bucketsWhenDeleted }) => (
+            <div key={project} className="flex items-center justify-between px-3 py-2 text-sm">
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="font-medium truncate">{project}</span>
+                {bucketsWhenDeleted.length > 0 && (
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    Bucket {bucketsWhenDeleted.join(", ")}
+                  </span>
+                )}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs gap-1.5 shrink-0"
+                onClick={() => onRestore(project)}
+              >
+                <RotateCcw className="h-3 w-3" /> Restore
+              </Button>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1303,17 +1440,98 @@ export default function InventoryView() {
     [deleteMfcBatchColor, invalidateMfcColors, toast],
   );
 
-  const bucketA = applyJobFilter(buckets.a);
-  const allBRows = applyJobFilter(buckets.b);
-  // Gate: split B rows by whether the (project, mfcBatch) pair has a complete colour record.
-  const preBRows = allBRows.filter(
+  // ── Client-side project hide/restore (no DB writes) ────────────────────────
+  const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
+  const [deletedProjects, setDeletedProjects] = useState<
+    Array<{ project: string; bucketsWhenDeleted: string[] }>
+  >([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const deletedProjectSet = useMemo(
+    () => new Set(deletedProjects.map((d) => d.project)),
+    [deletedProjects],
+  );
+
+  const toggleProjectSelection = useCallback((project: string) => {
+    setSelectedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(project)) next.delete(project);
+      else next.add(project);
+      return next;
+    });
+  }, []);
+
+  const startDeleteMode = useCallback(() => {
+    setIsDeleteMode(true);
+    setSelectedProjects(new Set());
+    setShowDeleteConfirm(false);
+  }, []);
+
+  const cancelDeleteMode = useCallback(() => {
+    setIsDeleteMode(false);
+    setSelectedProjects(new Set());
+    setShowDeleteConfirm(false);
+  }, []);
+
+  // Raw (job-filtered) arrays — not affected by deletion hide; used for
+  // determining which bucket a restored project returns to.
+  const bucketA_raw = applyJobFilter(buckets.a);
+  const allBRows_raw = applyJobFilter(buckets.b);
+  const preBRows_raw = allBRows_raw.filter(
     (r) => !colourCompleteKeys.has(`${r.project}\u0001${r.mfcBatch}`),
   );
-  const bRows = allBRows.filter((r) =>
+  const bRows_raw = allBRows_raw.filter((r) =>
     colourCompleteKeys.has(`${r.project}\u0001${r.mfcBatch}`),
   );
-  const cRows = applyJobFilter(buckets.c);
-  const dRows = applyJobFilter(buckets.d);
+  const cRows_raw = applyJobFilter(buckets.c);
+  const dRows_raw = applyJobFilter(buckets.d);
+
+  // Display arrays — hidden projects removed.
+  const bucketA = bucketA_raw.filter((r) => !deletedProjectSet.has(r.project));
+  const allBRows = allBRows_raw.filter((r) => !deletedProjectSet.has(r.project));
+  const preBRows = preBRows_raw.filter((r) => !deletedProjectSet.has(r.project));
+  const bRows = bRows_raw.filter((r) => !deletedProjectSet.has(r.project));
+  const cRows = cRows_raw.filter((r) => !deletedProjectSet.has(r.project));
+  const dRows = dRows_raw.filter((r) => !deletedProjectSet.has(r.project));
+
+  const confirmDelete = useCallback(() => {
+    const alreadyDeleted = new Set(deletedProjects.map((d) => d.project));
+    const toDelete = [...selectedProjects].filter((p) => !alreadyDeleted.has(p));
+    const newEntries = toDelete.map((project) => {
+      const inBuckets: string[] = [];
+      if (bucketA_raw.some((r) => r.project === project)) inBuckets.push("A");
+      if (preBRows_raw.some((r) => r.project === project)) inBuckets.push("Pre-B");
+      if (bRows_raw.some((r) => r.project === project)) inBuckets.push("B");
+      if (cRows_raw.some((r) => r.project === project)) inBuckets.push("C");
+      if (dRows_raw.some((r) => r.project === project)) inBuckets.push("D");
+      return { project, bucketsWhenDeleted: inBuckets };
+    });
+    setDeletedProjects((prev) => [...prev, ...newEntries]);
+    setSelectedProjects(new Set());
+    setShowDeleteConfirm(false);
+    setIsDeleteMode(false);
+  }, [selectedProjects, deletedProjects, bucketA_raw, preBRows_raw, bRows_raw, cRows_raw, dRows_raw]);
+
+  const restoreProject = useCallback(
+    (project: string) => {
+      setDeletedProjects((prev) => prev.filter((d) => d.project !== project));
+      const willBe: string[] = [];
+      if (bucketA_raw.some((r) => r.project === project)) willBe.push("A");
+      if (preBRows_raw.some((r) => r.project === project)) willBe.push("Pre-B");
+      if (bRows_raw.some((r) => r.project === project)) willBe.push("B");
+      if (cRows_raw.some((r) => r.project === project)) willBe.push("C");
+      if (dRows_raw.some((r) => r.project === project)) willBe.push("D");
+      const dest = willBe.length > 0 ? `Bucket ${willBe.join(", ")}` : "no bucket (data may have changed)";
+      toast({ title: "Project restored", description: `${project} returned to ${dest}` });
+    },
+    [bucketA_raw, preBRows_raw, bRows_raw, cRows_raw, dRows_raw, toast],
+  );
+
+  const restoreAll = useCallback(() => {
+    setDeletedProjects([]);
+    toast({ title: "All projects restored" });
+  }, [toast]);
 
   const knownProjects = useMemo(() => {
     const set = new Set<string>();
@@ -1617,17 +1835,77 @@ export default function InventoryView() {
           {asOnDate && (
             <span className="text-xs text-muted-foreground">Order Review as on {asOnDate}</span>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-2"
-            onClick={handleExport}
-            disabled={isLoading}
-          >
-            <FileSpreadsheet className="h-4 w-4" /> Export Excel
-          </Button>
+          {isDeleteMode ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-2"
+                onClick={cancelDeleteMode}
+              >
+                <X className="h-4 w-4" /> Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-8 gap-2"
+                disabled={selectedProjects.size === 0}
+                onClick={() => setShowDeleteConfirm(true)}
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete Selected ({selectedProjects.size})
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-2"
+                onClick={handleExport}
+                disabled={isLoading}
+              >
+                <FileSpreadsheet className="h-4 w-4" /> Export Excel
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-2"
+                onClick={startDeleteMode}
+              >
+                <Trash2 className="h-4 w-4" /> Start Delete
+              </Button>
+            </>
+          )}
         </div>
       </div>
+
+      {showDeleteConfirm && (
+        <Card className="border-destructive/40 bg-destructive/5">
+          <CardContent className="py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <span className="text-sm">
+              Hide{" "}
+              <span className="font-semibold">
+                {selectedProjects.size} project{selectedProjects.size === 1 ? "" : "s"}
+              </span>{" "}
+              from all buckets? They can be restored at the bottom of the page.
+            </span>
+            <div className="flex gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7"
+                onClick={() => setShowDeleteConfirm(false)}
+              >
+                Cancel
+              </Button>
+              <Button variant="destructive" size="sm" className="h-7" onClick={confirmDelete}>
+                Confirm Delete
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {isCurrentJobs && currentJobsSet.size === 0 && (
         <Card className="border-amber-500/40">
@@ -1690,12 +1968,21 @@ export default function InventoryView() {
         <CardHeader>
           <CardTitle className="text-base">A — {BUCKET_LABELS.a}</CardTitle>
         </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
-          ) : (
-            <BucketAPanel rows={bucketA} mfcBatchColorMap={mfcBatchColorMap} />
+        <CardContent className="px-0 pb-0">
+          {isDeleteMode && (
+            <SelectionChecklist
+              rows={bucketA_raw.filter((r) => !deletedProjectSet.has(r.project))}
+              selectedProjects={selectedProjects}
+              onToggle={toggleProjectSelection}
+            />
           )}
+          <div className="px-3 pb-3 pt-3">
+            {isLoading ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
+            ) : (
+              <BucketAPanel rows={bucketA} mfcBatchColorMap={mfcBatchColorMap} />
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -1762,18 +2049,27 @@ export default function InventoryView() {
           <CardHeader>
             <CardTitle className="text-base">Pre-B — {BUCKET_LABELS.preB}</CardTitle>
           </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
-            ) : (
-              <PreBucketBPanel
-                rows={preBRows}
-                columns={BUCKET_B_COLUMNS}
-                groupByMfc={groupByMfc}
-                onAssignColour={handleAssignColour}
-                canAssign={canEdit}
+          <CardContent className="px-0 pb-0">
+            {isDeleteMode && (
+              <SelectionChecklist
+                rows={preBRows_raw.filter((r) => !deletedProjectSet.has(r.project))}
+                selectedProjects={selectedProjects}
+                onToggle={toggleProjectSelection}
               />
             )}
+            <div className="px-3 pb-3 pt-3">
+              {isLoading ? (
+                <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
+              ) : (
+                <PreBucketBPanel
+                  rows={preBRows}
+                  columns={BUCKET_B_COLUMNS}
+                  groupByMfc={groupByMfc}
+                  onAssignColour={handleAssignColour}
+                  canAssign={canEdit}
+                />
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -1783,18 +2079,27 @@ export default function InventoryView() {
         <CardHeader>
           <CardTitle className="text-base">B — {BUCKET_LABELS.b}</CardTitle>
         </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
-          ) : (
-            <AutoBucketPanel
-              rows={bRows}
-              columns={BUCKET_B_COLUMNS}
-              clampRelease={false}
-              groupByMfc={groupByMfc}
-              mfcBatchColorMap={mfcBatchColorMap}
+        <CardContent className="px-0 pb-0">
+          {isDeleteMode && (
+            <SelectionChecklist
+              rows={bRows_raw.filter((r) => !deletedProjectSet.has(r.project))}
+              selectedProjects={selectedProjects}
+              onToggle={toggleProjectSelection}
             />
           )}
+          <div className="px-3 pb-3 pt-3">
+            {isLoading ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
+            ) : (
+              <AutoBucketPanel
+                rows={bRows}
+                columns={BUCKET_B_COLUMNS}
+                clampRelease={false}
+                groupByMfc={groupByMfc}
+                mfcBatchColorMap={mfcBatchColorMap}
+              />
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -1803,18 +2108,27 @@ export default function InventoryView() {
         <CardHeader>
           <CardTitle className="text-base">C — {BUCKET_LABELS.c}</CardTitle>
         </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
-          ) : (
-            <AutoBucketPanel
-              rows={cRows}
-              columns={BUCKET_CD_COLUMNS}
-              clampRelease
-              groupByMfc={groupByMfc}
-              mfcBatchColorMap={mfcBatchColorMap}
+        <CardContent className="px-0 pb-0">
+          {isDeleteMode && (
+            <SelectionChecklist
+              rows={cRows_raw.filter((r) => !deletedProjectSet.has(r.project))}
+              selectedProjects={selectedProjects}
+              onToggle={toggleProjectSelection}
             />
           )}
+          <div className="px-3 pb-3 pt-3">
+            {isLoading ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
+            ) : (
+              <AutoBucketPanel
+                rows={cRows}
+                columns={BUCKET_CD_COLUMNS}
+                clampRelease
+                groupByMfc={groupByMfc}
+                mfcBatchColorMap={mfcBatchColorMap}
+              />
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -1823,18 +2137,27 @@ export default function InventoryView() {
         <CardHeader>
           <CardTitle className="text-base">D — {BUCKET_LABELS.d}</CardTitle>
         </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
-          ) : (
-            <AutoBucketPanel
-              rows={dRows}
-              columns={BUCKET_CD_COLUMNS}
-              clampRelease
-              groupByMfc={groupByMfc}
-              mfcBatchColorMap={mfcBatchColorMap}
+        <CardContent className="px-0 pb-0">
+          {isDeleteMode && (
+            <SelectionChecklist
+              rows={dRows_raw.filter((r) => !deletedProjectSet.has(r.project))}
+              selectedProjects={selectedProjects}
+              onToggle={toggleProjectSelection}
             />
           )}
+          <div className="px-3 pb-3 pt-3">
+            {isLoading ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
+            ) : (
+              <AutoBucketPanel
+                rows={dRows}
+                columns={BUCKET_CD_COLUMNS}
+                clampRelease
+                groupByMfc={groupByMfc}
+                mfcBatchColorMap={mfcBatchColorMap}
+              />
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -1883,6 +2206,13 @@ export default function InventoryView() {
           Colours.
         </p>
       )}
+
+      {/* Deleted Projects — client-side hide only, no DB writes */}
+      <DeletedProjectsTable
+        entries={deletedProjects}
+        onRestore={restoreProject}
+        onRestoreAll={restoreAll}
+      />
     </div>
   );
 }
