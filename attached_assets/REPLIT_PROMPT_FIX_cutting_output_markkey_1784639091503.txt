@@ -1,0 +1,112 @@
+TASK: The Daily Production Movement "C" row is computing roughly 2x the correct value. The
+SPECIFICATION you documented is correct — the CODE does not implement it. Fix the
+implementation and verify against the numbers below.
+
+=====================================================================
+YOUR DOCUMENTED SPEC IS CORRECT — KEEP IT
+=====================================================================
+The described logic is exactly right and must not change:
+
+    For every TLT mark at activity C in the PREVIOUS import, look at the CURRENT import:
+        mark advanced past C (now B, RFI, NH, ...)   -> count FULL previous balanceWt
+        mark left WIP entirely                        -> count FULL previous balanceWt
+        mark still at C but lighter                   -> count ONLY the reduction (prev - curr)
+        mark still at C, same or heavier              -> count ZERO
+    cuttingOutputMt = sum of the above / 1000
+
+The reasoning you gave is also correct: lastProductionDate is unusable for C (0 of 26,590 C
+marks have one), so a snapshot delta is the only way to measure cutting throughput.
+
+=====================================================================
+THE BUG — THE MARK KEY IS TOO COARSE
+=====================================================================
+Implementing your spec EXACTLY against the source files gives:
+
+        19 -> 20 Jul :  128.635 MT      app shows 281.6 t   (+153.0 wrong)
+        20 -> 21 Jul :   94.941 MT      app shows 202.8 t   (+107.9 wrong)
+
+Diagnosis: the comparison is being keyed on (project, structure) instead of
+(project, structure, MARK NO). Test results for 20 -> 21 Jul:
+
+        key = (project, structure, mark no)  ->   94.941 MT   <- CORRECT
+        key = (project, structure)           ->  182.800 MT   <- matches the app's magnitude
+        key = (project, mark no)             ->   94.941 MT
+        key = (structure, mark no)           ->   94.941 MT
+        including NTLT rows                  ->   94.941 MT   (not the cause)
+
+Collapsing many marks onto one (project, structure) key makes a whole structure look as though
+it "advanced past C" whenever ANY of its marks moved, so the FULL structure weight is counted
+instead of just the marks that actually moved. That roughly doubles the figure.
+
+*** THE MARK KEY MUST BE (normalized project Col B, structure Col J Alias, Mark No Col K). ***
+All three parts are required. Normalise project and structure the same way as the main join
+(trim, strip trailing dots, strip leading dashes, case-insensitive).
+
+=====================================================================
+SECOND BUG — THE LATEST IMPORT MUST NOT HAVE A VALUE
+=====================================================================
+A date column can only be populated once a LATER import exists to compare against. The 21-Jul
+column currently shows 202.8 t, but 21-Jul is the most recent import — there is no subsequent
+snapshot, so its C value is undefined.
+
+The C value shown against a date must come from the pair (previous import -> THAT import).
+The FIRST import in the range has no predecessor and must show "-"; the LATEST import shows a
+value only if a later import exists. Verify which end is being mislabelled and correct it.
+
+=====================================================================
+THIRD ISSUE — THE PANEL SUBTITLE IS NOW WRONG FOR C
+=====================================================================
+The subtitle reads: "Balance weight (MT) of marks with production recorded on each date".
+That is true for the other activities but FALSE for C — cutting marks have no production date
+at all. Update the wording so the C row's different basis is explicit, e.g.:
+
+    "Other activities: balance weight of marks with production recorded on that date.
+     Cutting (C): weight that left cutting between consecutive imports (snapshot delta)."
+
+Keep the asterisk on the C row and make its tooltip state the same thing.
+
+=====================================================================
+GAPS BETWEEN IMPORTS
+=====================================================================
+Your documented behaviour is correct — keep it: a 2-day gap appears as one column labelled
+"19-21 Jul (2d)". Do NOT present a multi-day delta as a single day's output. Use the WIP file
+date (or import date) as the day key, never the upload timestamp.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change the other activity rows — they correctly use lastProductionDate.
+- Do NOT switch C to lastProductionDate or Assign Date; the snapshot delta is correct.
+- Do NOT count new marks entering C, or any weight increase, as output.
+- Do NOT include NTLT rows (Order Nature != "Structure").
+- Do NOT change the Cutting BALANCE figure (2,597.052 MT / 15,137 marks) — that is now correct
+  and is a different measure from cutting OUTPUT.
+- Do NOT forward-fill the project code.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity values, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+After the fix, the C row must show:
+
+        19 -> 20 Jul :  128.635 MT
+              advanced past C   94.723 MT (411 marks)
+              left WIP entirely 11.909 MT ( 45 marks)
+              lighter in C      22.003 MT ( 47 marks)
+
+        20 -> 21 Jul :   94.941 MT
+              advanced past C   60.036 MT (117 marks)
+              left WIP entirely  0.989 MT ( 15 marks)
+              lighter in C      33.916 MT ( 55 marks)
+
+It must NOT show 281.6 / 202.8 (current), and must NOT show 182.8 (the structure-level key).
+
+Also confirm:
+- The most recent import's C column shows "-" (no later snapshot to compare against).
+- The other activity rows are unchanged.
+- The subtitle/tooltip explains the C row's different basis.
+- A gap between imports renders as a single labelled multi-day column, not a false spike.
+
+REPORT: the C values for the last available consecutive pairs with the three-way breakdown
+(advanced / left WIP / lighter), the mark key now used, and confirmation the latest import
+shows "-".

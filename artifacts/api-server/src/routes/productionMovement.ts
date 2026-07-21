@@ -11,6 +11,14 @@ import { GetImportMovementParams } from "@workspace/api-zod";
 
 const router = Router();
 
+// Normalise a raw Excel field for mark-key comparison:
+// trim whitespace, strip trailing dots, strip leading dashes, lowercase.
+// Matches the join normalisation used everywhere else in the app.
+function normKey(s: string | null | undefined): string {
+  if (!s) return "";
+  return s.trim().replace(/\.+$/, "").replace(/^-+/, "").toLowerCase();
+}
+
 function importDayKey(reportDate: string | null, createdAt: Date | string): string {
   if (reportDate && /^\d{4}-\d{2}-\d{2}$/.test(reportDate)) return reportDate;
   const d = createdAt instanceof Date ? createdAt : new Date(createdAt);
@@ -34,6 +42,7 @@ type MarkRow = {
   activity: string | null;
   balanceWt: number;
   orderNature: string | null;
+  isInitialCutting: boolean | null;
 };
 
 // GET /imports/:id/contractor-movement
@@ -275,6 +284,7 @@ router.get("/imports/:id/production-movement", async (req, res): Promise<void> =
       activity: recordPoolTable.activity,
       balanceWt: recordPoolTable.balanceWt,
       orderNature: recordPoolTable.orderNature,
+      isInitialCutting: recordPoolTable.isInitialCutting,
     })
     .from(importRowsTable)
     .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
@@ -307,56 +317,54 @@ router.get("/imports/:id/production-movement", async (req, res): Promise<void> =
     const prevRows = byImport.get(prev.id) ?? [];
 
     // -----------------------------------------------------------------------
-    // Cutting output: TLT marks only (orderNature === "Structure")
-    // Key each mark as job + \x00 + alias + \x00 + markNo (prompt spec).
+    // Cutting output: TLT marks only (orderNature === "Structure"),
+    // excluding is_initial_cutting marks throughout.
+    //
+    // Algorithm: compare the C-activity balance per normalised mark key between
+    // the two imports.  A mark key can appear at BOTH C and a further activity
+    // in the same import (split work-orders / batches), so we must not infer
+    // "mark left C" from the presence of a non-C row — we only look at how much
+    // C-balance the key shed between imports.
+    //
+    // output per key = max(0, prevCWt − currCWt)
+    //   where currCWt = 0 when the key has no C rows at all (advanced or left WIP).
     // -----------------------------------------------------------------------
 
-    // Build curr TLT state: key → { activity (uppercase), balanceWt (summed for copies) }
-    const currState = new Map<string, { activity: string; balanceWt: number }>();
-    for (const r of currRows) {
-      if (r.orderNature !== "Structure") continue;
-      const act = (r.activity ?? "").trim().toUpperCase();
-      const key = `${r.job}\x00${r.alias ?? ""}\x00${r.markNo}`;
-      const ex = currState.get(key);
-      if (!ex) {
-        currState.set(key, { activity: act, balanceWt: r.balanceWt });
-      } else if (act === ex.activity) {
-        // Same activity: sum weights (copies in the same import)
-        currState.set(key, { activity: act, balanceWt: ex.balanceWt + r.balanceWt });
-      } else if (ex.activity === "C") {
-        // Current entry is C but another row has a further activity → no longer at C
-        currState.set(key, { activity: act, balanceWt: r.balanceWt });
-      }
-      // Otherwise: existing entry already beyond C, keep it.
-    }
-
-    // Build prev TLT C-marks: key → total balanceWt (sum copies)
-    const prevCMarks = new Map<string, number>();
+    // Build prev C-balance: normalised key → total C-activity balanceWt for prev import.
+    const prevCBalance = new Map<string, number>();
     for (const r of prevRows) {
       if (r.orderNature !== "Structure") continue;
+      if (r.isInitialCutting) continue;
       if ((r.activity ?? "").trim().toUpperCase() !== "C") continue;
-      const key = `${r.job}\x00${r.alias ?? ""}\x00${r.markNo}`;
-      prevCMarks.set(key, (prevCMarks.get(key) ?? 0) + r.balanceWt);
+      const key = `${normKey(r.job)}\x00${normKey(r.alias)}\x00${normKey(r.markNo)}`;
+      prevCBalance.set(key, (prevCBalance.get(key) ?? 0) + r.balanceWt);
+    }
+
+    // Build curr C-balance: normalised key → total C-activity balanceWt for curr import.
+    const currCBalance = new Map<string, number>();
+    for (const r of currRows) {
+      if (r.orderNature !== "Structure") continue;
+      if (r.isInitialCutting) continue;
+      if ((r.activity ?? "").trim().toUpperCase() !== "C") continue;
+      const key = `${normKey(r.job)}\x00${normKey(r.alias)}\x00${normKey(r.markNo)}`;
+      currCBalance.set(key, (currCBalance.get(key) ?? 0) + r.balanceWt);
     }
 
     let cuttingOutputKg = 0;
     let cuttingMarksLeft = 0;
     let cuttingMarksReduced = 0;
 
-    for (const [key, prevWtKg] of prevCMarks) {
-      const cs = currState.get(key);
-      if (!cs || cs.activity !== "C") {
-        // Mark left C entirely (advanced or left WIP) → full previous balance is output.
-        cuttingOutputKg += prevWtKg;
+    for (const [key, prevWtKg] of prevCBalance) {
+      const currWtKg = currCBalance.get(key) ?? 0;
+      const diffKg = prevWtKg - currWtKg;
+      if (diffKg <= 0) continue; // weight unchanged or increased → no output
+      cuttingOutputKg += diffKg;
+      if (currWtKg === 0) {
+        // No C-balance remaining → mark left C entirely (advanced or left WIP).
         cuttingMarksLeft++;
       } else {
-        // Still at C — only weight REDUCTION counts as output.
-        const diffKg = prevWtKg - cs.balanceWt;
-        if (diffKg > 0) {
-          cuttingOutputKg += diffKg;
-          cuttingMarksReduced++;
-        }
-        // Weight unchanged or increased (intake / correction) → excluded.
+        // Still has C-balance but lighter → partial output from this mark.
+        cuttingMarksReduced++;
       }
     }
 

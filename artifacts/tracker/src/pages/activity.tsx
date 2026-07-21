@@ -463,7 +463,11 @@ function ActivityDailyMovementTable({
       <div className="px-4 pt-4 pb-1">
         <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Daily Production Movement</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Balance weight (MT) of marks with production recorded on each date — last {moveDates.length} production days
+          Other activities: balance weight of marks with production recorded on that date.
+          {cuttingByDayKey && (
+            <> Cutting (C*): weight that left cutting between consecutive imports (snapshot delta) — latest import shows{" "}
+            <span className="font-mono">-</span> (no later snapshot yet).</>
+          )}
         </p>
       </div>
       <div className="overflow-x-auto">
@@ -490,18 +494,24 @@ function ActivityDailyMovementTable({
                     {act}
                     {act === "C" && cuttingByDayKey && (
                       <span
-                        title="Mark-level cutting output: marks that left C + weight reduction of marks still at C, compared between consecutive imports."
+                        title="Snapshot delta: weight that left the C bucket between the previous import and this one. Attributed to the PREVIOUS import's date — the latest import shows '-' because no later snapshot exists yet."
                         className="ml-1 text-[10px] text-muted-foreground cursor-help align-super"
                       >*</span>
                     )}
                   </TableCell>
-                  {row.map((wt, i) => (
-                    <TableCell key={moveDates[i]} className="text-right tabular-nums whitespace-nowrap">
-                      {wt > 0
-                        ? <span className="text-primary font-semibold">{formatWeight(wt)}</span>
-                        : <span className="text-muted-foreground text-xs">-</span>}
-                    </TableCell>
-                  ))}
+                  {row.map((wt, i) => {
+                    const d = moveDates[i];
+                    const isCNoData = act === "C" && cuttingByDayKey && !cuttingByDayKey.has(d);
+                    return (
+                      <TableCell key={d} className="text-right tabular-nums whitespace-nowrap">
+                        {isCNoData
+                          ? <span className="text-muted-foreground text-xs">-</span>
+                          : wt > 0
+                            ? <span className="text-primary font-semibold">{formatWeight(wt)}</span>
+                            : <span className="text-muted-foreground text-xs">-</span>}
+                      </TableCell>
+                    );
+                  })}
                   <TableCell className="text-right tabular-nums font-semibold whitespace-nowrap">
                     {rowTotal > 0 ? formatWeight(rowTotal) : <span className="text-muted-foreground text-xs">-</span>}
                   </TableCell>
@@ -583,12 +593,15 @@ function ActivityContent() {
     };
   }, [filters.dateRange]);
 
-  // dayKey (import date) → cutting output in kg, consistent with balanceWt units.
+  // prevDayKey → cutting output in kg.
+  // Attributed to the PREVIOUS import's date: marks that were at C on that date,
+  // measured by how many moved by the next upload.
+  // The most recent import has no later snapshot, so its date never appears as a key → shows "-".
   const cuttingByDayKey = useMemo(() => {
     const map = new Map<string, number>();
     for (const day of productionMovement?.days ?? []) {
       if (day.cuttingOutputMt > 0) {
-        map.set(day.dayKey, day.cuttingOutputMt * 1000);
+        map.set(day.prevDayKey, day.cuttingOutputMt * 1000);
       }
     }
     return map;
