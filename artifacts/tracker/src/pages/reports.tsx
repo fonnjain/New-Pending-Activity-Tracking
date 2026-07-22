@@ -892,16 +892,15 @@ function FabricationLoadReport() {
       const { blocks } = buildSectionGrid(s.value);
       const gridBlocks: XlsxGridBlock[] = blocks.map(({ c, cell, rows: rs }) => ({
         title: c.label,
-        headers: ["Project", "Avg Thick. (mm)", "Wt (t)", "Priority"],
-        numeric: [false, true, true, false],
+        headers: ["Project", "Wt (t)", "Priority"],
+        numeric: [false, true, false],
         decimals: 2,
         rows: rs.map((r) => [
           r.project,
-          r.avgThicknessMm != null ? Math.round(r.avgThicknessMm * 100) / 100 : "",
           toTonnes(r.weightKg),
           priorityMap.get(priKey(s.value, c.value, r.project)) ?? "",
         ]),
-        totals: ["G. Total", "", toTonnes(cell.totalKg), ""],
+        totals: ["G. Total", toTonnes(cell.totalKg), ""],
       }));
       return { name: s.label, blocks: gridBlocks };
     });
@@ -989,9 +988,6 @@ function FabricationLoadReport() {
                                 Project
                               </TableCell>
                               <TableCell className="px-1.5 py-1.5 text-right font-medium">
-                                Thick. (mm)
-                              </TableCell>
-                              <TableCell className="px-1.5 py-1.5 text-right font-medium">
                                 Weight
                               </TableCell>
                               <TableCell className="px-1.5 py-1.5 font-medium">
@@ -1006,9 +1002,6 @@ function FabricationLoadReport() {
                                 <TableRow key={r.project}>
                                   <TableCell className="font-medium py-1.5 px-1.5 text-xs">
                                     {r.project}
-                                  </TableCell>
-                                  <TableCell className="text-right tabular-nums py-1.5 px-1.5 text-xs text-muted-foreground">
-                                    {r.avgThicknessMm != null ? `${(Math.round(r.avgThicknessMm * 10) / 10).toFixed(1)}` : "-"}
                                   </TableCell>
                                   <TableCell className="text-right tabular-nums py-1.5 px-1.5 text-xs">
                                     {fmtTonnes(r.weightKg)}
