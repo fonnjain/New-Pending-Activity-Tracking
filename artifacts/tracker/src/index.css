@@ -147,15 +147,22 @@
 }
 
 @layer base {
+  html {
+    font-size: 13px;
+  }
+
   * {
     @apply border-border;
     font-variant-numeric: tabular-nums;
   }
   
-  /* Apply tabular nums globally to improve scanning of figures */
   body {
     @apply font-sans antialiased bg-background text-foreground;
     font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    letter-spacing: -0.01em;
   }
 }
 

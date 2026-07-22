@@ -423,7 +423,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Top Nav (Desktop) */}
-      <header className="hidden md:flex sticky top-0 z-40 min-h-14 bg-sidebar border-b border-sidebar-border items-center flex-wrap gap-x-3 gap-y-1 px-4 py-1.5">
+      <header className="hidden md:flex sticky top-0 z-40 min-h-11 bg-sidebar border-b border-sidebar-border items-center flex-wrap gap-x-3 gap-y-1 px-4 py-1">
         <Link href="~/" title="VTPL Master Tracker" className="shrink-0 flex items-baseline gap-2">
           <span className="font-bold text-lg text-primary tracking-tight">VTPL</span>
           <span className="text-xs text-sidebar-foreground/60 hidden lg:inline">Production Activity Tracker</span>
@@ -473,7 +473,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       {showFilters && <FilterBar />}
 
       {/* Main Content */}
-      <main className="flex-1 w-full max-w-7xl mx-auto p-4 md:p-6 overflow-x-hidden">
+      <main className="flex-1 w-full max-w-7xl mx-auto p-3 md:p-4 overflow-x-hidden">
         {children}
       </main>
 
@@ -674,7 +674,7 @@ function FilterBar() {
   }).length;
 
   return (
-    <div className="sticky top-0 md:top-14 z-30 bg-card border-b shadow-sm">
+    <div className="sticky top-0 md:top-11 z-30 bg-card border-b shadow-sm">
       <Collapsible open={isOpen} onOpenChange={setIsOpen} className="w-full">
         <div className="flex items-center gap-2 p-3 md:px-6 flex-wrap">
           <span className="text-xs font-semibold text-muted-foreground uppercase mr-1">
