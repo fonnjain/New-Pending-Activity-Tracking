@@ -945,6 +945,15 @@ export function WarningParametersContent() {
                   Reset this {scopeNoun.toLowerCase()}
                 </Button>
               )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => setAddingOfficeParam(true)}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                Add Parameter
+              </Button>
             </div>
           </div>
 
@@ -1251,6 +1260,103 @@ export function WarningParametersContent() {
               </p>
             )}
           </div>
+
+          {/* Office Activities — actual days per project */}
+          <div className="mt-4 pt-4 border-t border-border/50 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Pre-process activities (engineering design, procurement, etc.) ideal days are set in the table above and count toward the total project turnaround. Enter actual days spent per project below.
+            </p>
+            {isAll ? (
+              <p className="text-xs text-muted-foreground py-2 text-center">
+                Select a project above to enter actual days for that project.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {allOfficeParams.map((param) => {
+                  const valStr = getOfficeActual(param.id);
+                  const tgtStr = officeData.targets[param.id] ?? "";
+                  const val = valStr !== "" ? parseFloat(valStr) : null;
+                  const tgt = tgtStr !== "" ? parseFloat(tgtStr) : null;
+                  const status = officePreWarnStatus(val, tgt, DEFAULT_PRE_WARN);
+                  return (
+                    <div
+                      key={param.id}
+                      className="border border-border rounded-lg p-2.5 space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-1 min-h-[18px]">
+                        <span className="text-xs font-medium truncate">{param.name}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {status !== "na" && (
+                            <div
+                              className={`w-2.5 h-2.5 rounded-full ${lifecycleBgColor(status)}`}
+                              title={LIFECYCLE_LABELS[status]}
+                            />
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 space-y-0.5">
+                          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                            Actual for {project}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <NumberInput
+                              type="number"
+                              min={0}
+                              value={val ?? ""}
+                              placeholder="—"
+                              onValueChange={(v) => setOfficeActual(param.id, v)}
+                              className="h-7 flex-1 tabular-nums text-right"
+                              aria-label={`${param.name} actual days for ${project}`}
+                            />
+                            <span className="text-[10px] text-muted-foreground shrink-0">d</span>
+                          </div>
+                        </div>
+                        {tgt !== null && tgt > 0 && (
+                          <div className="text-xs text-muted-foreground shrink-0 mt-4">
+                            / {tgt}d target
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {addingOfficeParam && (
+              <div className="mt-3 flex items-center gap-2 border-t pt-3">
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Parameter name (e.g. Design Review)"
+                  value={newOfficeParamName}
+                  onChange={(e) => setNewOfficeParamName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") addOfficeParam();
+                    if (e.key === "Escape") {
+                      setAddingOfficeParam(false);
+                      setNewOfficeParamName("");
+                    }
+                  }}
+                  className="flex-1 rounded border border-border bg-background text-sm px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+                <Button size="sm" className="h-8" onClick={addOfficeParam}>
+                  Add
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8"
+                  onClick={() => {
+                    setAddingOfficeParam(false);
+                    setNewOfficeParamName("");
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -1475,125 +1581,6 @@ export function WarningParametersContent() {
         </CardContent>
       </Card>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Office Activities card — actual days per project + add/remove params */}
-      {/* ------------------------------------------------------------------ */}
-      <Card>
-        <CardHeader className="space-y-3 pb-3">
-          <div className="flex flex-row items-center justify-between space-y-0 gap-3">
-            <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
-              Office Activities
-            </CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8"
-              onClick={() => setAddingOfficeParam(true)}
-            >
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              Add Parameter
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground max-w-3xl">
-            Pre-process activities (engineering design, procurement, etc.) whose
-            ideal days are set in the Per-Activity Targets table above and count
-            toward the total project turnaround. Enter actual days spent per
-            project to track progress against the target.
-          </p>
-        </CardHeader>
-        <CardContent>
-          {isAll ? (
-            <p className="text-xs text-muted-foreground py-4 text-center">
-              Select a project above to enter actual days for that project.
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {allOfficeParams.map((param) => {
-                const valStr = getOfficeActual(param.id);
-                const tgtStr = officeData.targets[param.id] ?? "";
-                const val = valStr !== "" ? parseFloat(valStr) : null;
-                const tgt = tgtStr !== "" ? parseFloat(tgtStr) : null;
-                const status = officePreWarnStatus(val, tgt, DEFAULT_PRE_WARN);
-                return (
-                  <div
-                    key={param.id}
-                    className="border border-border rounded-lg p-2.5 space-y-2"
-                  >
-                    <div className="flex items-center justify-between gap-1 min-h-[18px]">
-                      <span className="text-xs font-medium truncate">{param.name}</span>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {status !== "na" && (
-                          <div
-                            className={`w-2.5 h-2.5 rounded-full ${lifecycleBgColor(status)}`}
-                            title={LIFECYCLE_LABELS[status]}
-                          />
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 space-y-0.5">
-                        <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                          Actual for {project}
-                        </span>
-                        <div className="flex items-center gap-1">
-                          <NumberInput
-                            type="number"
-                            min={0}
-                            value={val ?? ""}
-                            placeholder="—"
-                            onValueChange={(v) => setOfficeActual(param.id, v)}
-                            className="h-7 flex-1 tabular-nums text-right"
-                            aria-label={`${param.name} actual days for ${project}`}
-                          />
-                          <span className="text-[10px] text-muted-foreground shrink-0">d</span>
-                        </div>
-                      </div>
-                      {tgt !== null && tgt > 0 && (
-                        <div className="text-xs text-muted-foreground shrink-0 mt-4">
-                          / {tgt}d target
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {addingOfficeParam && (
-            <div className="mt-4 flex items-center gap-2 border-t pt-3">
-              <input
-                autoFocus
-                type="text"
-                placeholder="Parameter name (e.g. Design Review)"
-                value={newOfficeParamName}
-                onChange={(e) => setNewOfficeParamName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") addOfficeParam();
-                  if (e.key === "Escape") {
-                    setAddingOfficeParam(false);
-                    setNewOfficeParamName("");
-                  }
-                }}
-                className="flex-1 rounded border border-border bg-background text-sm px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-              <Button size="sm" className="h-8" onClick={addOfficeParam}>
-                Add
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8"
-                onClick={() => {
-                  setAddingOfficeParam(false);
-                  setNewOfficeParamName("");
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }
