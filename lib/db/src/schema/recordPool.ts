@@ -91,10 +91,12 @@ export const recordPoolTable = pgTable("record_pool", {
   // "Initial" | "Authorized". Null for old-format rows (no Status column).
   // Stored so classifyWipCase() can use it directly without proxies.
   jobCardStatus: text("job_card_status"),
-  // True when Col G = "Initial" AND Activity = "C".
-  // These are unreleased marks already counted as Release Balance. They carry activity = "C"
-  // but must NOT contribute to any Cutting balance figure. Defaults false (safe for old-format
-  // rows that have no Job Card Status column).
+  // True when Col G (Job Card Status) = "Initial", regardless of Activity.
+  // In the newer WIP format the Activity column holds the PLANNED activity for
+  // scheduling, NOT the current production stage — a mark at Activity=RFI with
+  // Status=Initial has NOT started RFI; it is unreleased raw material counted in
+  // Release Balance. Only Status="Authorized" marks have been physically released.
+  // Defaults false (safe for old-format rows that have no Job Card Status column).
   isInitialCutting: boolean("is_initial_cutting").notNull().default(false),
 });
 

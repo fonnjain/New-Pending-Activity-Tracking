@@ -953,7 +953,7 @@ function GeneratedOrderReviewContent() {
         const T = toMt(sum(nonInit.filter((r) => GEN_FAB_BAL.has(actOf(r)))));
         const N = toMt(sum(nonInit.filter((r) => actOf(r) === "Y")));
         const U = toMt(sum(nonInit.filter((r) => GEN_GALV_BAL.has(actOf(r)))));
-        const V = toMt(sum(marks.filter((r) => actOf(r) !== "Y")));
+        const V = toMt(sum(nonInit.filter((r) => actOf(r) !== "Y")));
 
         const orRow = orByKey.get(`${proj}|${struct}`);
         const orL   = orRow?.releaseMt       ?? null;

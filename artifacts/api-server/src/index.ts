@@ -1,6 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { backfillClassification, backfillHoleOperation } from "./lib/backfill";
+import { backfillClassification, backfillHoleOperation, backfillInitialCutting } from "./lib/backfill";
 import { seedContractorCategories } from "./lib/seedContractorCategories";
 import { seedRsjThickness } from "./lib/seedRsjThickness";
 import { seedUsersIfEmpty } from "./lib/seedUsers";
@@ -32,6 +32,13 @@ app.listen(port, (err) => {
   // fails startup (a no-op once there are no unclassified known-nature rows).
   backfillClassification().catch((err) => {
     logger.error({ err }, "Classification backfill failed");
+  });
+
+  // Best-effort backfill: stamp is_initial_cutting = true for all rows whose
+  // job_card_status = 'INITIAL' but flag is still false (covers non-C-activity
+  // not-released marks missed by the old Activity=C predicate). Self-draining.
+  backfillInitialCutting().catch((err) => {
+    logger.error({ err }, "Initial-cutting backfill failed");
   });
 
   // Best-effort, one-time backfill of the derived hole-operation columns on

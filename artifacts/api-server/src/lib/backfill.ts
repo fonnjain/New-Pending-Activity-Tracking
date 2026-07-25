@@ -153,25 +153,41 @@ export async function backfillHoleOperation(): Promise<number> {
 }
 
 /**
- * RETIRED — do not call.
+ * Idempotent backfill: set is_initial_cutting = true for every record_pool row
+ * whose job_card_status = 'INITIAL' but whose is_initial_cutting is currently
+ * false.  This corrects rows that were parsed before the definition of
+ * is_initial_cutting was broadened to cover ALL Status=Initial marks regardless
+ * of activity (the old predicate was activity='C' AND status='INITIAL', which
+ * missed non-C marks whose Activity column holds a PLANNED, not current, stage).
  *
- * The proxy predicate (activity='C' AND assign_date IS NULL AND contractor IS
- * NULL) was found to mis-classify Authorized marks that genuinely have neither
- * field set, incorrectly excluding them from the Cutting balance. The function
- * is kept as a no-op so the symbol remains resolvable in case of stale imports,
- * but it must NOT be wired into the boot sequence.
+ * Also resets any rows where is_initial_cutting = true but job_card_status !=
+ * 'INITIAL' (shouldn't exist after the 2026-07-21 corrective run, but keeps
+ * the invariant tight).
  *
- * The correct gate is Job Card Status == "Initial", which is applied by
- * parse.ts during every upload (isInitialCutting = activity==="C" &&
- * jcStatus==="INITIAL"). Legacy rows stay false (the column default), meaning
- * Initial marks uploaded before this column existed are counted as active
- * cutting — an acceptable, conservative over-count until a fresh upload
- * re-classifies them via the correct jcStatus path.
- *
- * A one-time corrective UPDATE was run directly against the DB on 2026-07-21
- * to reset all rows incorrectly stamped true by the original backfill:
- *   UPDATE record_pool SET is_initial_cutting = false WHERE is_initial_cutting = true;
+ * Safe: is_initial_cutting is NOT part of the row hash; old-format rows (null
+ * job_card_status) are never touched.  Self-draining: after the first run the
+ * WHERE clause matches no rows and the function becomes a no-op on every boot.
  */
 export async function backfillInitialCutting(): Promise<number> {
-  return 0; // no-op — see comment above
+  const [r1, r2] = await Promise.all([
+    // Stamp true where status says Initial but flag is still false.
+    db.execute(sql`
+      UPDATE record_pool
+         SET is_initial_cutting = true
+       WHERE job_card_status = 'INITIAL'
+         AND is_initial_cutting = false
+    `),
+    // Clear any stale trues where status is no longer Initial (safety net).
+    db.execute(sql`
+      UPDATE record_pool
+         SET is_initial_cutting = false
+       WHERE job_card_status IS NOT NULL
+         AND job_card_status != 'INITIAL'
+         AND is_initial_cutting = true
+    `),
+  ]);
+  const updated =
+    Number((r1 as { rowCount?: number }).rowCount ?? 0) +
+    Number((r2 as { rowCount?: number }).rowCount ?? 0);
+  return updated;
 }

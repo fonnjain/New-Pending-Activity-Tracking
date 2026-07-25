@@ -1002,13 +1002,14 @@ export function parseWorkbook(
     base.holeOperation = holeOp.holeOperation;
     base.holeOperationSource = holeOp.holeOperationSource;
 
-    // Additive exclusion flag: for Activity=C only, a mark is "initial" when its
-    // Job Card Status is "Initial". These marks are already counted as Release
-    // Balance and must NOT contribute to any Cutting balance figure.
-    // Predicate: Activity=C AND Job Card Status="Initial" (Status-only — the
-    // "Type" column is NOT checked; its value can vary independently).
-    // Job Card Status has exactly two values (Initial / Authorized); no third
-    // case exists. Non-C marks always stay false.
+    // Additive exclusion flag: a mark is "not released" (still in the Release
+    // Balance stage) when its Job Card Status is "Initial", regardless of its
+    // Activity column value. In the newer WIP format the Activity column holds
+    // the PLANNED activity for scheduling, not the current production stage —
+    // so a mark with Activity=RFI + Status=Initial has NOT started RFI; it is
+    // unreleased raw material. Only marks with Status="Authorized" (or no status
+    // column at all) have been physically released to the shop floor.
+    // Predicate: Job Card Status == "INITIAL" (activity-independent).
     // NOT part of the hash; defaults false for old-format rows (no status col).
     const jcStatus = cellToString(row["Job Card Status"]).trim().toUpperCase();
     const activityUpper = (base.activity ?? "").trim().toUpperCase();
@@ -1016,7 +1017,8 @@ export function parseWorkbook(
     // read time — no proxies needed. Empty string → null (old-format rows without
     // the column). NOT part of the hash; defaults null for legacy rows.
     base.jobCardStatus = jcStatus || null;
-    base.isInitialCutting = activityUpper === "C" && jcStatus === "INITIAL";
+    base.isInitialCutting = jcStatus === "INITIAL";
+    void activityUpper; // retained for future use
 
     // Detect rows that fall outside the verified closed value sets for Col A / Col G.
     // Only applies when the "Type" column is present (new-format files); old-format

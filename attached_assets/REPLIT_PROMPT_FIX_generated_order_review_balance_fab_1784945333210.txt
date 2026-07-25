@@ -1,0 +1,98 @@
+TASK: The generated Order Review (Data page) computes Balance Fabrication wrongly — it counts
+UNRELEASED marks as pending fabrication, inflating the figure massively. Fix it so the released
+/ not-released split is applied BEFORE the stage mapping.
+
+=====================================================================
+THE SYMPTOM
+=====================================================================
+For newly-started projects the generated Balance Fabrication is far too large — it equals the
+whole work order instead of just the released portion:
+
+    Project   Generated Balance Fab   Actual Order Review   should be
+    948            279.925                   6.028            6.028   (46x too high)
+    960            146.101                   2.043            2.043
+    937             74.481                   3.190            3.190
+    958             18.374                   8.891            8.891
+
+The Release columns are ALREADY correct (Progress Release and Balance Release reconstruct
+exactly). Only the Fabrication / Galvanising / Yard stage split is wrong.
+
+=====================================================================
+THE ROOT CAUSE
+=====================================================================
+The generator currently maps a mark to a stage bucket by its ACTIVITY alone (C, RFI, ... ->
+fabrication). But a mark sitting at activity C in the "Job Card Not Started + Initial" state is
+NOT in fabrication — it has not been released yet. It is unreleased raw material and belongs to
+Balance RELEASE, not Balance FABRICATION.
+
+Order Review is a WATERFALL: a mark cannot have "balance to fabricate" until it has been
+released. So the released/not-released split must be applied FIRST, and only RELEASED marks are
+then distributed across the fabrication/galvanising/yard stages.
+
+=====================================================================
+THE CORRECT GENERATION LOGIC (per project + structure, TLT only)
+=====================================================================
+For each mark, first classify RELEASED vs NOT RELEASED:
+        NOT RELEASED = Type (Col A) == "Job Card Not Started" AND Status (Col G) == "Initial"
+        RELEASED     = every other mark
+
+Then:
+    Balance Release (S)   = sum Balance Wt of NOT-RELEASED marks
+    Progress Release (L)  = sum Balance Wt of RELEASED marks
+                            (everything that has been released, whatever stage it is now at)
+
+    *** All remaining stage buckets use RELEASED marks ONLY. ***
+    Balance Fabrication (T)  = sum Balance Wt of RELEASED marks still in fabrication activities
+                               {C, HG, RFI, NH, B, HAB, W, Q, TS}
+    Balance Galvanising (U)  = sum Balance Wt of RELEASED marks not yet galvanised
+    Progress Fabrication (M) = released marks that have passed fabrication (galvanising / FG)
+    Progress Galvanising (N) = released marks at yard / FG (galvanised)
+    Balance Inspection (V)   = released marks not yet inspected (all except FG Pending)
+
+A NOT-RELEASED mark contributes ONLY to Balance Release. It must never appear in any
+fabrication, galvanising, yard or inspection bucket.
+
+=====================================================================
+VERIFIED — corrected values match actual Order Review
+=====================================================================
+With the released-only rule applied to Balance Fabrication:
+
+    Project   Progress Release   Balance Release   Balance Fabrication
+    958            8.891              9.483              8.891
+    948            6.027            273.898              6.027
+    937            3.190             71.291              3.190
+    960            2.042            144.058              2.042
+
+These match the actual Order Review file (948 Balance Fab 6.028, etc.) to the kilogram.
+
+Note the important sanity property this restores: for a newly-started project, BALANCE
+(remaining) is much larger than PROGRESS (done) — e.g. 948 has 273.9 MT still to release vs
+6.0 MT released. That is correct for a project that has barely begun. (Progress exceeds Balance
+only for mature projects, which are NOT eligible for the generated Order Review — the 5%
+threshold excludes them.)
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change the Release columns (Progress Release / Balance Release) — they are correct.
+- Do NOT change the eligibility rule (Progress Release < 5% of WO Qty; project present in WIP).
+- Do NOT change which projects appear in the generated Order Review.
+- Do NOT let any NOT-RELEASED mark contribute to Fabrication / Galvanising / Yard / Inspection.
+- Do NOT include NTLT rows.
+- Do NOT overwrite the imported Order Review with generated values — this tab stays read-only.
+- Do NOT forward-fill the project code; do not change parsing identity/hash/dedup or qty.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- Project 948: Progress Release 6.027, Balance Release 273.898, Balance Fabrication 6.027
+  (NOT 279.925). 958, 937, 960 as tabulated above.
+- Every generated column matches the actual Order Review file for these projects (flag any
+  difference > 0.5 MT).
+- No NOT-RELEASED mark appears in any stage bucket other than Balance Release.
+- For every generated project, Balance Release is the largest column (they are all <5%
+  released, so remaining dominates).
+- The generated values still do not touch the imported Order Review data.
+
+REPORT: the corrected Progress Release / Balance Release / Balance Fabrication for 948, 958,
+937 and 960, and confirmation each matches the actual Order Review file.
