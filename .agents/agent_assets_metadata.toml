@@ -66,3 +66,15 @@ id = "GgdXolA5IRU_7FdwDgBtZ"
 uri = "file://Thickness_Calculation_Logic.docx"
 type = "word_document"
 title = "Thickness Calculation Logic — Reference Document"
+
+[[outputs]]
+id = "ae8mGD1NIRD-UZLNfDawv"
+uri = "file://Balance_Activity_Tracker_Architecture.xlsx"
+type = "table"
+title = "Architecture & Database (Excel)"
+
+[[outputs]]
+id = "m60wDECr9-9fciwEuKCVe"
+uri = "file://Balance_Activity_Tracker_Logic_and_Formulas.md"
+type = "text"
+title = "Logic & Formulas Reference (Markdown)"
