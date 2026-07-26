@@ -1,0 +1,111 @@
+TASK: The `release_balance_wip` table is a global singleton with no import scoping. It is
+deleted and rebuilt on every upload, so viewing any OLDER import shows the LATEST file's Release
+Balance instead of that import's own. This silently produces wrong numbers and breaks the
+five-bucket reconciliation. Scope it per import.
+
+=====================================================================
+THE BUG (verified against the code)
+=====================================================================
+Table `release_balance_wip` has columns: project, structure, release_balance_computed_mt,
+updated_at. Primary key (project, structure). There is NO import_id.
+
+`recomputeReleaseBalance()` runs on every upload and DELETES THE WHOLE TABLE, then reinserts
+rows from the file just uploaded.
+
+The Job Wise / Project Wise report joins Release Balance from this table, while taking every
+OTHER figure (Cutting, Quality Check, Galvanising, FG WIP, Total) from the SELECTED import.
+
+Consequence: after uploading a newer file, opening an older import shows that import's
+Cutting/QC/Galvanising/FG next to the NEWEST import's Release Balance. The five-bucket
+reconciliation (Cutting + QC + Galvanising + FG + Release Balance = Total) then fails by the
+difference, with no explanation on screen.
+
+Release Balance moves materially day to day, so this is not a rounding issue:
+
+        19-Jul :  2,046.302 MT  ( 8,717 marks)
+        20-Jul :  2,060.852 MT  ( 9,167 marks)
+        21-Jul :  2,538.863 MT  (11,453 marks)
+
+A user reviewing the 19-Jul import after uploading 21-Jul currently sees 2,538.863 where the
+19-Jul file actually says 2,046.302 — a silent ~492 MT error, and the reconciliation is off by
+that amount. Re-uploading files out of chronological order makes it arbitrary.
+
+Also: `recomputeReleaseBalance()` is wrapped in try/catch and only logs a warning on failure.
+A failed recompute silently leaves the PREVIOUS file's values in place indefinitely.
+
+=====================================================================
+THE FIX — scope the table by import
+=====================================================================
+1. ADD an `import_id` column to `release_balance_wip`.
+   - Change the primary key from (project, structure) to (import_id, project, structure).
+   - Add an index on import_id for fast per-import lookup.
+
+2. CHANGE `recomputeReleaseBalance()` so it NO LONGER deletes the whole table.
+   - It computes Release Balance for the import being processed and inserts those rows tagged
+     with that import_id.
+   - Use upsert keyed on (import_id, project, structure) so re-processing the SAME import
+     replaces only that import's rows, never another import's.
+   - Never `DELETE FROM release_balance_wip` unconditionally. If you must clear before reinsert,
+     scope it: `DELETE ... WHERE import_id = :thisImport`.
+
+3. CHANGE the report query so it joins Release Balance for the SAME import_id it is showing:
+        release_balance_wip.import_id = <the import being viewed>
+   Not "the latest", not "all". The Release Balance must come from the same import as every
+   other figure on the row.
+
+4. BACKFILL existing imports. After adding the column, existing rows have no import_id and only
+   the latest file's data is present. Recompute Release Balance for every stored import from its
+   own record_pool rows so historical views are correct. If a historical import cannot be
+   recomputed, that import's Release Balance must read as "unavailable" — never silently borrow
+   another import's value.
+
+5. FAILURE HANDLING: if the recompute for an import fails, that import's Release Balance must be
+   marked missing/zero-with-warning, NOT left showing a different import's numbers. Surface the
+   failure (see reconciliation check below) rather than only logging it.
+
+=====================================================================
+DEFINITION (unchanged — do not alter the rule itself)
+=====================================================================
+Release Balance for an import = sum of Balance Wt (WIP Col Q) / 1000, over marks where
+        Type (Col A) == "Job Card Not Started" AND Job Card Status (Col G) == "Initial",
+TLT only (Order Nature == "Structure"), keyed by each row's own project (no forward-fill).
+This is the SAME rule already in use; only its STORAGE and RETRIEVAL scope change.
+
+=====================================================================
+RECONCILIATION GUARD (add this — it would have caught the bug)
+=====================================================================
+On the Project Wise / Overview page, assert per import:
+        Cutting + Quality Check + Galvanising + FG WIP + Release Balance == Total Balance
+If it does not hold (which is exactly what a cross-import Release Balance causes), show a visible
+warning naming the shortfall, rather than displaying silently inconsistent buckets. This makes
+any future scoping regression self-announcing.
+
+=====================================================================
+DO NOT CHANGE
+=====================================================================
+- Do NOT change the Release Balance DEFINITION (Not Started + Initial). Only storage/retrieval
+  scope changes.
+- Do NOT change Cutting, QC, Galvanising or FG logic.
+- Do NOT leave any unconditional DELETE of the whole table.
+- Do NOT let any import display another import's Release Balance, including on failure.
+- Do NOT forward-fill the project code.
+- Do NOT change parsing identity/hash/dedup, ageing, Activity values, or qty.
+
+=====================================================================
+ACCEPTANCE CHECK
+=====================================================================
+- `release_balance_wip` has an import_id column; PK is (import_id, project, structure).
+- After uploading 21-Jul, opening the 19-Jul import shows Release Balance 2,046.302 MT
+  (8,717 marks) — its OWN value — and the 20-Jul import shows 2,060.852 MT (9,167 marks).
+- The 21-Jul import shows 2,538.863 MT (11,453 marks).
+- For EVERY import, Cutting + QC + Galvanising + FG WIP + Release Balance == Total Balance
+  (the reconciliation guard passes). On 21-Jul that is
+  2,597.052 + 1,921.510 + 2,935.120 + 1,400.577 + 2,538.863 = 11,393.122 MT.
+- Re-processing the same import replaces only its own rows; other imports are untouched.
+- Uploading files out of order does not change any earlier import's Release Balance.
+- A forced recompute failure marks that import's Release Balance as unavailable with a warning;
+  it never shows another import's number.
+
+REPORT: the Release Balance shown for the 19, 20 and 21-Jul imports after all three are
+uploaded (must be 2,046.302 / 2,060.852 / 2,538.863), and confirmation the reconciliation guard
+passes for each.
