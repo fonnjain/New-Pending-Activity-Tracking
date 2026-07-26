@@ -27,8 +27,12 @@ const router: IRouter = Router();
 // ---------------------------------------------------------------------------
 
 router.get("/order-status", async (_req, res): Promise<void> => {
-  const latest = await loadLatestOrderReview();
-  const dispatchRows = await db.select().from(orderDispatchTable);
+  // Fire both reads in parallel — Order Review rows and dispatch table are
+  // independent data sources with no read/write dependency.
+  const [latest, dispatchRows] = await Promise.all([
+    loadLatestOrderReview(),
+    db.select().from(orderDispatchTable),
+  ]);
 
   if (!latest) {
     res.json({

@@ -7,6 +7,7 @@ import {
 } from "@workspace/db";
 import { UpsertRsjThicknessBody, UpsertManualThicknessBody } from "@workspace/api-zod";
 import { requireAuth } from "./auth";
+import { clearThicknessCache } from "./imports";
 
 const router: IRouter = Router();
 
@@ -39,6 +40,7 @@ router.put("/rsj-thickness", requireAuth, async (req, res): Promise<void> => {
       set: { thicknessMm: parsed.data.thicknessMm, updatedAt: new Date() },
     })
     .returning();
+  clearThicknessCache();
   res.json(row);
 });
 
@@ -51,6 +53,7 @@ router.delete("/rsj-thickness", requireAuth, async (req, res): Promise<void> => 
   await db
     .delete(rsjThicknessTable)
     .where(eq(rsjThicknessTable.groupKey, groupKey));
+  clearThicknessCache();
   res.status(204).end();
 });
 
@@ -83,6 +86,7 @@ router.put("/manual-thickness", requireAuth, async (req, res): Promise<void> => 
       set: { thicknessMm: parsed.data.thicknessMm, updatedAt: new Date() },
     })
     .returning();
+  clearThicknessCache();
   res.json(row);
 });
 
@@ -98,6 +102,7 @@ router.delete(
     await db
       .delete(manualThicknessTable)
       .where(eq(manualThicknessTable.markId, markId));
+    clearThicknessCache();
     res.status(204).end();
   },
 );

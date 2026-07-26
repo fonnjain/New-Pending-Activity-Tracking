@@ -360,19 +360,31 @@ function serializeRecord(
 
 // Load the two thickness config maps (RSJ lookup by group key + manual pins by
 // mark_id) so records can be resolved live, exactly like ageing. Read-only.
+// In-process cache for thickness lookups. RSJ/manual thickness tables change
+// rarely (only when an admin pins a thickness). Caching eliminates two DB
+// round-trips on every /records and /summary request. Invalidated by calling
+// clearThicknessCache(), which thickness.ts calls after any PUT/DELETE.
+let _thicknessCache: ThicknessLookups | null = null;
+
+export function clearThicknessCache(): void {
+  _thicknessCache = null;
+}
+
 async function loadThicknessLookups(): Promise<ThicknessLookups> {
+  if (_thicknessCache) return _thicknessCache;
   const [rsjRows, manualRows] = await Promise.all([
     db.select().from(rsjThicknessTable),
     db.select().from(manualThicknessTable),
   ]);
   const rsjByKey = new Map(rsjRows.map((r) => [r.groupKey, r.thicknessMm]));
   const { rsjBaseByKey, ambiguousRsjBases } = buildRsjBaseIndex(rsjByKey);
-  return {
+  _thicknessCache = {
     rsjByKey,
     manualByMarkId: new Map(manualRows.map((r) => [r.markId, r.thicknessMm])),
     rsjBaseByKey,
     ambiguousRsjBases,
   };
+  return _thicknessCache;
 }
 
 interface MergeLogger {
@@ -1553,10 +1565,13 @@ router.get("/imports/:id/records", async (req, res): Promise<void> => {
     return;
   }
 
-  const rows = await loadMembership(db, params.data.id);
+  // Fire both reads in parallel — membership join and thickness lookups are
+  // independent data sources.
+  const [rows, thicknessLookups] = await Promise.all([
+    loadMembership(db, params.data.id),
+    loadThicknessLookups(),
+  ]);
   rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
-
-  const thicknessLookups = await loadThicknessLookups();
 
   const out: ReturnType<typeof serializeRecord>[] = [];
   let nextId = 1;
@@ -1598,9 +1613,12 @@ router.post("/imports/:id/summary", async (req, res): Promise<void> => {
 
   // Serialize the full record set EXACTLY as /records does, then apply the same
   // shared filter + aggregators the client uses (byte-identical by construction).
-  const rows = await loadMembership(db, params.data.id);
+  // Fire both reads in parallel — independent data sources.
+  const [rows, thicknessLookups] = await Promise.all([
+    loadMembership(db, params.data.id),
+    loadThicknessLookups(),
+  ]);
   rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
-  const thicknessLookups = await loadThicknessLookups();
   const serialized: ReturnType<typeof serializeRecord>[] = [];
   let nextId = 1;
   for (const { pool, copies } of rows) {

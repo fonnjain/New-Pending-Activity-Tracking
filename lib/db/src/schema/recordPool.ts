@@ -5,6 +5,7 @@ import {
   date,
   doublePrecision,
   boolean,
+  index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -98,7 +99,14 @@ export const recordPoolTable = pgTable("record_pool", {
   // Release Balance. Only Status="Authorized" marks have been physically released.
   // Defaults false (safe for old-format rows that have no Job Card Status column).
   isInitialCutting: boolean("is_initial_cutting").notNull().default(false),
-});
+},
+(t) => [
+  // Speeds up startup backfills that scan by category / is_initial_cutting, and
+  // any request-path queries that filter the pool by category or job.
+  index("record_pool_category_idx").on(t.category),
+  index("record_pool_is_initial_cutting_idx").on(t.isInitialCutting),
+  index("record_pool_job_idx").on(t.job),
+]);
 
 export const insertRecordPoolSchema = createInsertSchema(recordPoolTable).omit({
   id: true,

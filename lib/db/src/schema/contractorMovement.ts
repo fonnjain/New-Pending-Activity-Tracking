@@ -6,6 +6,7 @@ import {
   integer,
   doublePrecision,
   timestamp,
+  index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -46,7 +47,13 @@ export const contractorMovementTable = pgTable("contractor_movement", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
-});
+},
+(t) => [
+  // Speeds up contractor-movement reads filtered by date, contractor, or import.
+  index("contractor_movement_entry_date_idx").on(t.entryDate),
+  index("contractor_movement_contractor_idx").on(t.contractor),
+  index("contractor_movement_import_id_idx").on(t.importId),
+]);
 
 export const insertContractorMovementSchema = createInsertSchema(
   contractorMovementTable,

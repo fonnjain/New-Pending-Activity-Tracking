@@ -567,13 +567,18 @@ export async function loadLatestOrderReview(): Promise<{
   import: typeof orderReviewImportsTable.$inferSelect;
   rows: (typeof orderReviewRowsTable.$inferSelect)[];
 } | null> {
-  const [latest] = await db
-    .select()
-    .from(orderReviewImportsTable)
-    .orderBy(desc(orderReviewImportsTable.id))
-    .limit(1);
+  // Run both queries in parallel — the import header and the full row set are
+  // independent reads.  If no import exists the row scan is wasted work, but
+  // it is cheap when the table is empty and saves a full round-trip otherwise.
+  const [[latest], rows] = await Promise.all([
+    db
+      .select()
+      .from(orderReviewImportsTable)
+      .orderBy(desc(orderReviewImportsTable.id))
+      .limit(1),
+    db.select().from(orderReviewRowsTable),
+  ]);
   if (!latest) return null;
-  const rows = await db.select().from(orderReviewRowsTable);
   return { import: latest, rows };
 }
 
