@@ -183,6 +183,9 @@ export interface ParseSummary {
   /** Rows whose Col A ("Type") or Col G ("Job Card Status") did not match the verified closed value sets. Non-zero means a new file format value was encountered. Absent (or zero) in the normal case.
    */
   unclassifiedRowCount?: number;
+  /** Total Balance Wt. (kg) of unclassified rows — same population as unclassifiedRowCount. Absent when unclassifiedRowCount is absent or zero.
+   */
+  unclassifiedWtKg?: number;
   /** Up to 5 distinct Type+Status combos from unclassified rows, for diagnosis. Absent when unclassifiedRowCount is absent or zero.
    */
   unclassifiedSamples?: ParseSummaryUnclassifiedSamplesItem[];
@@ -332,6 +335,8 @@ export interface OrderReviewSummary {
   totalFileDespatchMt: number;
   skippedTotals: number;
   missingStructure: number;
+  /** Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added. */
+  missingStructureWtMt?: number;
   /** File structures that match a structure in the newest WIP import. */
   matchedToWip: number;
   /** File structures with no matching structure in the newest WIP import. */

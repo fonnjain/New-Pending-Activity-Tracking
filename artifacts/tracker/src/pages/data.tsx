@@ -369,13 +369,23 @@ function DataViewContent() {
                   </div>
                 </>
               )}
+              <div>
+                <span className="block text-muted-foreground text-xs uppercase mb-1">Unclassified Rows</span>
+                <span className={`font-bold text-lg tabular-nums ${(selectedImport.summary.unclassifiedRowCount ?? 0) > 0 ? "text-destructive" : ""}`}>
+                  {(selectedImport.summary.unclassifiedRowCount ?? 0).toLocaleString()}
+                </span>
+                {selectedImport.summary.unclassifiedWtKg != null
+                  ? <span className="block text-xs text-muted-foreground">{(selectedImport.summary.unclassifiedWtKg / 1000).toFixed(3)} MT</span>
+                  : <span className="block text-xs text-muted-foreground">Unknown Type or Job Card Status</span>
+                }
+              </div>
             </div>
             {(selectedImport.summary.unclassifiedRowCount ?? 0) > 0 && (
               <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 p-3 flex gap-2 items-start">
                 <AlertTriangle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
                 <div className="text-sm">
                   <span className="font-semibold text-destructive">
-                    {selectedImport.summary.unclassifiedRowCount!.toLocaleString()} unclassified {selectedImport.summary.unclassifiedRowCount === 1 ? "row" : "rows"} — unexpected Type or Job Card Status value
+                    {selectedImport.summary.unclassifiedRowCount!.toLocaleString()} unclassified {selectedImport.summary.unclassifiedRowCount === 1 ? "row" : "rows"}{selectedImport.summary.unclassifiedWtKg != null ? ` · ${(selectedImport.summary.unclassifiedWtKg / 1000).toFixed(3)} MT` : ""} — unexpected Type or Job Card Status value
                   </span>
                   <p className="text-xs text-muted-foreground mt-1">
                     These rows do not match the verified closed value sets for Col A ("Type") or Col G ("Job Card Status").
@@ -471,6 +481,10 @@ function DataViewContent() {
                           <span>{o.changeLog.unchanged.toLocaleString()} unchanged</span>
                         </>
                       )}
+                      {o.summary.missingStructure > 0
+                        ? <span className="text-destructive font-medium">{o.summary.missingStructure} orphaned row{o.summary.missingStructure === 1 ? "" : "s"}{o.summary.missingStructureWtMt != null ? ` · ${o.summary.missingStructureWtMt.toFixed(3)} MT` : ""} missing structure</span>
+                        : <span>0 missing structure</span>
+                      }
                     </div>
                   </div>
                   <div className="flex gap-2 shrink-0">

@@ -262,10 +262,15 @@ function JobDashboardContent() {
           if (key && (key !== "cutting" || isActiveCutting(r))) {
             phases[key].marks += 1;
             phases[key].weight += r.balanceWt;
+          } else if (!r.activity) {
+            // Blank activity = "FG Pending For Dispatch" → dispatch bucket.
+            // Populates phases.dispatch.weight so allPhasesWt in the
+            // reconciliation covers the same population as totalWt (which
+            // includes FG record rows from record_pool). The UI FG column
+            // still reads fgWipForJob() from parseSummary — unchanged.
+            phases.dispatch.marks += 1;
+            phases.dispatch.weight += r.balanceWt;
           }
-          // Ready for Dispatch (FG) is NOT an activity-based bucket: it's
-          // filled in below from `fgWipByJob` (Finished Good WIP Computed),
-          // the same figure shown on the Order Status / Data pages.
         }
         return {
         job,
@@ -524,7 +529,7 @@ function JobDashboardContent() {
             <span className="font-mono">{reconciliationWarning.totalMt.toFixed(3)} MT</span>{" "}
             — shortfall{" "}
             <span className="font-mono">{Math.abs(reconciliationWarning.shortfallMt).toFixed(3)} MT</span>.
-            This usually means Release Balance figures are from a different import than the rest. Re-upload the WIP file to correct it.
+            Some marks may have an unrecognised activity code and are not counted in any bucket.
           </p>
         </div>
       )}

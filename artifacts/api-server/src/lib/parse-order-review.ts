@@ -453,6 +453,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
   let rowsRead = 0;
   let skippedTotals = 0;
   let missingStructure = 0;
+  let missingStructureWtMt = 0;
   let totalWeightMt = 0;
   let totalReleaseMt = 0;
   let totalFileDespatchMt = 0;
@@ -550,7 +551,10 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     if (!currentStructure) {
       // No structure yet in this project group — genuinely orphaned row.
       const anyValue = cells.some((c) => cellStr(c as Cell) !== "");
-      if (anyValue) missingStructure++;
+      if (anyValue) {
+        missingStructure++;
+        missingStructureWtMt += toNumber(cells[cols.weightMt] as Cell) ?? 0;
+      }
       continue;
     }
     const structure = currentStructure;
@@ -602,6 +606,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     totalFileDespatchMt,
     skippedTotals,
     missingStructure,
+    ...(missingStructureWtMt > 0 && { missingStructureWtMt }),
     // WIP join coverage needs DB context; enriched by computeWipCoverage at
     // stage/ingest time. A bare parse reports 0/0.
     matchedToWip: 0,

@@ -45,6 +45,9 @@ export interface ParseSummary {
   // Absent (or zero) in the normal case.  Up to 5 distinct type+status combos
   // are captured as samples to aid diagnosis.
   unclassifiedRowCount?: number;
+  // Total Balance Wt. (kg) of unclassified rows — same population as
+  // unclassifiedRowCount. Absent when zero such rows exist (normal case).
+  unclassifiedWtKg?: number;
   unclassifiedSamples?: Array<{ type: string; status: string }>;
   // Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where
   // the WIP file's "Type" column (Col A, new ≥Jul-2026 format) equals

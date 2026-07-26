@@ -18,6 +18,8 @@ export interface OrderReviewSummary {
   totalFileDespatchMt: number;
   skippedTotals: number;
   missingStructure: number;
+  /** Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added. */
+  missingStructureWtMt?: number;
   /** File structures that match a structure in the newest WIP import. */
   matchedToWip: number;
   /** File structures with no matching structure in the newest WIP import. */

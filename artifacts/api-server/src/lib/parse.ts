@@ -829,6 +829,7 @@ export function parseWorkbook(
   let ntltOrphanWtMt = 0;
   let unknownOrderNatureCount = 0;
   let unclassifiedRowCount = 0;
+  let unclassifiedWtKg = 0;
   // Up to 5 distinct type+status combos captured as diagnostic samples.
   const unclassifiedSampleMap = new Map<string, { type: string; status: string }>();
   // Per-NTLT-section: distinct Tower Types seen. Used to flag Section→TowerType
@@ -1036,6 +1037,7 @@ export function parseWorkbook(
         !KNOWN_JC_STATUSES.has(jcStatus);
       if (unknownType || unknownStatus) {
         unclassifiedRowCount++;
+        unclassifiedWtKg += base.balanceWt ?? 0;
         if (unclassifiedSampleMap.size < 5) {
           const key = `${rowTypeUpper}|${jcStatus}`;
           if (!unclassifiedSampleMap.has(key)) {
@@ -1091,6 +1093,7 @@ export function parseWorkbook(
       ...(unknownOrderNatureCount > 0 && { unknownOrderNatureCount }),
       ...(unclassifiedRowCount > 0 && {
         unclassifiedRowCount,
+        unclassifiedWtKg,
         unclassifiedSamples: Array.from(unclassifiedSampleMap.values()),
       }),
       ...(() => {
