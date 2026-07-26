@@ -56,6 +56,8 @@ function MultiJobPicker({
     const base = isSingleJob ? new Set([filterJob!]) : new Set(selected);
     if (base.has(job)) base.delete(job); else base.add(job);
     onSelectedJobsChange(Array.from(base).sort());
+    // Clear the search so the full project list reappears for the next pick.
+    setSearch("");
   };
 
   const isCurrentJobs = filterJob === CURRENT_JOBS_FILTER_VALUE;
