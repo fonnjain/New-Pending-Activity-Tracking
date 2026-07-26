@@ -463,26 +463,13 @@ function JobDashboardContent() {
     }
   }, [exporting, isAll, isNtlt, sortedProjects, orderByJob, relBalComputedByJob, byActivity, toast]);
 
-  if (selectedJob) {
-    const rawJob = selectedJob.replace(/^(?:TLT|NTLT): /, "");
-    return (
-      <JobDetail
-        job={selectedJob}
-        label={primaryLabel}
-        records={records.filter((r) => primaryOf(r) === selectedJob)}
-        onBack={() => setSelectedJob(null)}
-        headerPhases={headerPhases}
-        orderEntry={orderByJob.get(selectedJob)}
-        orderRows={order?.rows?.filter((r) => r.project === rawJob) ?? []}
-      />
-    );
-  }
-
   // Reconciliation guard: all marks must be accounted for in exactly one bucket.
   // Sum of (all phases' weight) + release balance (initial cutting, in kg)
   // must equal totalWt (all marks' balance weight).
   // A large shortfall indicates that release balance came from a different import
   // (the cross-import scoping bug), or some marks have no known phase mapping.
+  // IMPORTANT: this hook must stay BEFORE the selectedJob early-return below to
+  // satisfy React's Rules of Hooks (hooks must run on every render unconditionally).
   const reconciliationWarning = useMemo(() => {
     if (byProject.length === 0 || !relBalData?.rows) return null;
     const allPhasesWt = byProject.reduce(
@@ -507,6 +494,21 @@ function JobDashboardContent() {
       totalMt: totalWt / 1000,
     };
   }, [byProject, relBalComputedByJob, relBalData, totalWt]);
+
+  if (selectedJob) {
+    const rawJob = selectedJob.replace(/^(?:TLT|NTLT): /, "");
+    return (
+      <JobDetail
+        job={selectedJob}
+        label={primaryLabel}
+        records={records.filter((r) => primaryOf(r) === selectedJob)}
+        onBack={() => setSelectedJob(null)}
+        headerPhases={headerPhases}
+        orderEntry={orderByJob.get(selectedJob)}
+        orderRows={order?.rows?.filter((r) => r.project === rawJob) ?? []}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
