@@ -4,7 +4,7 @@ import {
   doublePrecision,
   timestamp,
   integer,
-  primaryKey,
+  uniqueIndex,
   index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -26,7 +26,13 @@ import { z } from "zod/v4";
 export const releaseBalanceWipTable = pgTable(
   "release_balance_wip",
   {
-    importId: integer("import_id").notNull(),
+    // default(0) exists solely for the production publish migration: existing
+    // rows in prod (stale global-snapshot data from before the per-import fix)
+    // receive import_id = 0 so the NOT NULL ADD COLUMN succeeds without
+    // truncation. 0 is never a real import ID, so those rows are never matched
+    // by any scoped WHERE import_id = <realId> query and are harmlessly ignored
+    // until the next WIP upload overwrites them with correct per-import rows.
+    importId: integer("import_id").notNull().default(0),
     project: text("project").notNull(),
     structure: text("structure").notNull(),
     releaseBalanceComputedMt: doublePrecision("release_balance_computed_mt")
@@ -37,7 +43,14 @@ export const releaseBalanceWipTable = pgTable(
       .defaultNow(),
   },
   (t) => [
-    primaryKey({ columns: [t.importId, t.project, t.structure] }),
+    // uniqueIndex instead of primaryKey: drizzle-kit emits CREATE UNIQUE INDEX
+    // *after* ADD COLUMN, whereas ADD CONSTRAINT PRIMARY KEY is emitted *before*
+    // ADD COLUMN — which caused the production publish migration to fail (the PK
+    // referenced import_id before the column existed). Using uniqueIndex gives
+    // the same uniqueness guarantee with a safe migration ordering.
+    uniqueIndex("release_balance_wip_import_id_project_structure_uq").on(
+      t.importId, t.project, t.structure,
+    ),
     index("release_balance_wip_import_id_idx").on(t.importId),
   ],
 );
