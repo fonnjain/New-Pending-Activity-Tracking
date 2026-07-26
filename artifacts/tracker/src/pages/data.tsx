@@ -939,7 +939,7 @@ function GeneratedOrderReviewContent() {
       const projWoQty   = orS?.woQtyMt   ?? 0;
       const projRelease = orS?.releaseMt  ?? 0;
       const releasePct  = projWoQty > 0 ? (projRelease / projWoQty) * 100 : 0;
-      // Skip projects that are beyond the trust boundary (> 5% released)
+      // Skip projects that are beyond the trust boundary (>= 5% released)
       if (projWoQty > 0 && releasePct >= 5) continue;
 
       const structures: GenStructRow[] = [];
