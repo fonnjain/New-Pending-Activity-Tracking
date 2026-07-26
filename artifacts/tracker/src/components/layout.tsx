@@ -51,9 +51,11 @@ function MultiJobPicker({
   );
 
   const toggle = (job: string) => {
-    const next = new Set(selected);
-    if (next.has(job)) next.delete(job); else next.add(job);
-    onSelectedJobsChange(Array.from(next).sort());
+    // When in single-job mode, carry the existing selection forward so that
+    // transitioning to multi-select doesn't silently drop the previous job.
+    const base = isSingleJob ? new Set([filterJob!]) : new Set(selected);
+    if (base.has(job)) base.delete(job); else base.add(job);
+    onSelectedJobsChange(Array.from(base).sort());
   };
 
   const isCurrentJobs = filterJob === CURRENT_JOBS_FILTER_VALUE;
@@ -132,10 +134,12 @@ function MultiJobPicker({
                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
                     className="shrink-0"
                   />
-                  {/* Label — single-selects and closes the popover */}
+                  {/* Label — toggles the job in/out of multi-select (same as checkbox).
+                      Clicking the row text adds it to the selection and keeps
+                      the popover open so more projects can be picked. */}
                   <button
                     className="flex-1 text-left py-1.5 truncate cursor-pointer"
-                    onClick={() => { onSingleJob(job); setOpen(false); setSearch(""); }}
+                    onClick={() => toggle(job)}
                   >
                     {job}
                   </button>
