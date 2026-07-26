@@ -635,10 +635,11 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
     req.log.warn({ err }, "Contractor movement recompute failed after import");
   }
   // Refresh Release Balance Computed snapshot (Not Started + Initial rows; best-effort).
+  // Scoped to this import only — never touches other imports' rows.
   try {
-    await recomputeReleaseBalance(file.buffer);
+    await recomputeReleaseBalance(file.buffer, result.import.id);
   } catch (err) {
-    req.log.warn({ err }, "Release balance recompute failed after import");
+    req.log.warn({ err, importId: result.import.id }, "Release balance recompute failed after import");
   }
   // Refresh Assignment Balance snapshot (Not Started + blank contractor; best-effort).
   try {
@@ -1384,10 +1385,11 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     req.log.warn({ err }, "Contractor movement recompute failed after commit");
   }
   // Refresh Release Balance Computed snapshot (Not Started + Initial rows; best-effort).
+  // Scoped to this import only — never touches other imports' rows.
   try {
-    await recomputeReleaseBalance(staged.fileData);
+    await recomputeReleaseBalance(staged.fileData, result.import.id);
   } catch (err) {
-    req.log.warn({ err }, "Release balance recompute failed after commit");
+    req.log.warn({ err, importId: result.import.id }, "Release balance recompute failed after commit");
   }
   // Refresh Assignment Balance snapshot (Not Started + blank contractor; best-effort).
   try {

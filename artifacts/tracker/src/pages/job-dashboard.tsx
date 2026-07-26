@@ -117,10 +117,16 @@ function JobDashboardContent() {
   }, [order, isAll]);
 
   // Release Balance Computed (from WIP file) aggregated per project.
-  // The API returns per-structure rows keyed by plain project code. Map to the
-  // same job key used by orderByJob (with "TLT: " prefix in ALL mode).
-  const { data: relBalData } = useGetReleaseBalance({
-    query: { queryKey: getGetReleaseBalanceQueryKey() },
+  // Scoped to the SAME import as all other figures so cross-import contamination
+  // is impossible — the importId param was added to fix the global-singleton bug.
+  const releaseBalanceParams = selectedImportId
+    ? { importId: selectedImportId }
+    : undefined;
+  const { data: relBalData } = useGetReleaseBalance(releaseBalanceParams, {
+    query: {
+      queryKey: getGetReleaseBalanceQueryKey(releaseBalanceParams),
+      enabled: !!selectedImportId,
+    },
   });
   const relBalComputedByJob = useMemo(() => {
     const m = new Map<string, number>();
@@ -472,8 +478,54 @@ function JobDashboardContent() {
     );
   }
 
+  // Reconciliation guard: all marks must be accounted for in exactly one bucket.
+  // Sum of (all phases' weight) + release balance (initial cutting, in kg)
+  // must equal totalWt (all marks' balance weight).
+  // A large shortfall indicates that release balance came from a different import
+  // (the cross-import scoping bug), or some marks have no known phase mapping.
+  const reconciliationWarning = useMemo(() => {
+    if (byProject.length === 0 || !relBalData?.rows) return null;
+    const allPhasesWt = byProject.reduce(
+      (s, p) =>
+        s +
+        Object.values(p.phases).reduce((ps, ph) => ps + ph.weight, 0),
+      0,
+    );
+    const relBalKg = byProject.reduce(
+      (s, p) => s + (relBalComputedByJob.get(p.job) ?? 0) * 1000,
+      0,
+    );
+    const bucketTotal = allPhasesWt + relBalKg;
+    const shortfall = totalWt - bucketTotal;
+    const absMt = Math.abs(shortfall) / 1000;
+    // Only warn when shortfall is > 1 MT and > 0.5% of total — small gaps are
+    // rounding / unknown-activity marks, not a scoping regression.
+    if (absMt < 1 || totalWt === 0 || absMt / (totalWt / 1000) < 0.005) return null;
+    return {
+      shortfallMt: shortfall / 1000,
+      bucketTotalMt: bucketTotal / 1000,
+      totalMt: totalWt / 1000,
+    };
+  }, [byProject, relBalComputedByJob, relBalData, totalWt]);
+
   return (
     <div className="space-y-6">
+      {reconciliationWarning && (
+        <div className="rounded-md border border-yellow-400 bg-yellow-50 dark:bg-yellow-950/30 dark:border-yellow-600 px-4 py-3 text-sm">
+          <p className="font-semibold text-yellow-800 dark:text-yellow-300">
+            Bucket reconciliation mismatch
+          </p>
+          <p className="mt-1 text-yellow-700 dark:text-yellow-400">
+            Phase buckets total{" "}
+            <span className="font-mono">{reconciliationWarning.bucketTotalMt.toFixed(3)} MT</span>{" "}
+            but Total Balance is{" "}
+            <span className="font-mono">{reconciliationWarning.totalMt.toFixed(3)} MT</span>{" "}
+            — shortfall{" "}
+            <span className="font-mono">{Math.abs(reconciliationWarning.shortfallMt).toFixed(3)} MT</span>.
+            This usually means Release Balance figures are from a different import than the rest. Re-upload the WIP file to correct it.
+          </p>
+        </div>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <KpiTile title={`${primaryLabel}s`} value={totalProjects} />
         <KpiTile title="Pending Marks" value={totalMarks} />

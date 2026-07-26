@@ -108,7 +108,7 @@ export interface Record {
      * @nullable
      */
   fg?: string | null;
-  /** True when Type="Job Card Not Started" AND Job Card Status="Initial". These marks are already counted as Release Balance and must NOT contribute to any Cutting (C) balance figure. Additive, not hashed. Backfilled for existing rows via the proxy activity='C' AND assign_date IS NULL AND contractor IS NULL.
+  /** True when Job Card Status (Col G) = "Initial", regardless of Activity. In the newer WIP format the Activity column holds the PLANNED activity for scheduling, not the current production stage — a mark at Activity=RFI with Status=Initial has NOT started RFI; it is unreleased raw material that belongs in Balance Release, not Balance Fabrication. Only Status="Authorized" marks have been physically released to the shop floor. Additive, not hashed. Defaults false for old-format rows without a Job Card Status column.
    */
   isInitialCutting: boolean;
 }

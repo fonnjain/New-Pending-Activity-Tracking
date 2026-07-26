@@ -693,7 +693,9 @@ function CurrentJobsCard() {
 }
 
 function ReleaseBalanceContent() {
-  const { data, isLoading } = useGetReleaseBalance({
+  // No importId param — defaults to the latest import on the server side,
+  // which is what the comparison page needs (it is not import-selector-scoped).
+  const { data, isLoading } = useGetReleaseBalance(undefined, {
     query: { queryKey: getGetReleaseBalanceQueryKey() },
   });
   const { filters } = useTracker();

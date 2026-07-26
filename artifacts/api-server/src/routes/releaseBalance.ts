@@ -1,6 +1,8 @@
 import { Router, type IRouter } from "express";
-import { db, releaseBalanceWipTable } from "@workspace/db";
+import { db, releaseBalanceWipTable, importsTable } from "@workspace/db";
 import { loadLatestOrderReview } from "../lib/dispatch";
+import { desc, eq } from "drizzle-orm";
+import { GetReleaseBalanceQueryParams } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
@@ -14,14 +16,56 @@ function stripLeadingDash(structure: string): string {
   return stripped;
 }
 
-// GET /release-balance — per-(project, structure) Release Balance Computed from
-// the latest WIP file (Not Started + Initial rows, Col Q ÷ 1000 MT), joined to
-// the Order Review's stated Release Balance (fileBalReleaseMt). Full outer join:
-// OR-only structures appear with null computed; WIP-only structures appear with
-// null OR value. Purely additive read: never mutates any state.
-router.get("/release-balance", async (_req, res): Promise<void> => {
+// GET /release-balance — per-(project, structure) Release Balance Computed,
+// optionally scoped to a specific import by ?importId=<id>.  When importId is
+// omitted, falls back to the most recently committed WIP import so the
+// Release Balance comparison page always shows up-to-date figures.
+//
+// Joined to the Order Review's stated Release Balance (fileBalReleaseMt) for
+// cross-checking. Full outer join: OR-only structures appear with null
+// computed; WIP-only structures appear with null OR value.
+// Purely additive read: never mutates any state.
+router.get("/release-balance", async (req, res): Promise<void> => {
+  const parsed = GetReleaseBalanceQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: "importId must be a positive integer" });
+    return;
+  }
+  const { importId: requestedImportId } = parsed.data;
+
+  // Resolve the target import: use the requested one when provided, otherwise
+  // the latest committed WIP import.
+  let targetImportId: number | null = requestedImportId ?? null;
+  if (targetImportId == null) {
+    const [latest] = await db
+      .select({ id: importsTable.id })
+      .from(importsTable)
+      .orderBy(desc(importsTable.id))
+      .limit(1);
+    targetImportId = latest?.id ?? null;
+  }
+
+  // If there's no import at all yet, return empty.
+  if (targetImportId == null) {
+    res.json({
+      available: false,
+      orderReviewAsOnDate: null,
+      importId: null,
+      rows: [],
+      totals: {
+        releaseBalanceComputedMt: 0,
+        releaseBalanceOrderReviewMt: 0,
+        rowCount: 0,
+      },
+    });
+    return;
+  }
+
   const [wipRows, orderReview] = await Promise.all([
-    db.select().from(releaseBalanceWipTable),
+    db
+      .select()
+      .from(releaseBalanceWipTable)
+      .where(eq(releaseBalanceWipTable.importId, targetImportId)),
     loadLatestOrderReview(),
   ]);
 
@@ -85,6 +129,7 @@ router.get("/release-balance", async (_req, res): Promise<void> => {
     res.json({
       available: false,
       orderReviewAsOnDate: null,
+      importId: targetImportId,
       rows: [],
       totals: {
         releaseBalanceComputedMt: 0,
@@ -158,6 +203,7 @@ router.get("/release-balance", async (_req, res): Promise<void> => {
   res.json({
     available: true,
     orderReviewAsOnDate: orderReview?.import.asOnDate ?? null,
+    importId: targetImportId,
     rows,
     totals,
   });

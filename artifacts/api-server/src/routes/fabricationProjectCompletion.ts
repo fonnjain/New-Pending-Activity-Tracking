@@ -211,8 +211,12 @@ router.get(
         )
         .groupBy(recordPoolTable.job, recordPoolTable.structure),
 
-      // Release balance (JCNS + Initial) — pre-computed, whole-file.
-      db.select().from(releaseBalanceWipTable),
+      // Release balance (JCNS + Initial) — scoped to the same import as every
+      // other figure so cross-import contamination is impossible.
+      db
+        .select()
+        .from(releaseBalanceWipTable)
+        .where(eq(releaseBalanceWipTable.importId, latestImport.id)),
 
       // Assignment balance (JCNS + blank contractor) — pre-computed, whole-file.
       db.select().from(assignmentBalanceWipTable),

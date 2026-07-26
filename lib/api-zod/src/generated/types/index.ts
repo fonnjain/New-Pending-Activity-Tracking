@@ -76,6 +76,7 @@ export * from './fabricationPrioritySection';
 export * from './fabricationProjectCompletionResponse';
 export * from './fabricationProjectCompletionRow';
 export * from './fabricationProjectCompletionTotals';
+export * from './getReleaseBalanceParams';
 export * from './graceCell';
 export * from './graceCellMode';
 export * from './healthStatus';

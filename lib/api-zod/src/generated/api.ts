@@ -1455,7 +1455,7 @@ export const GetImportRecordsResponseItem = zod.object({
   "sectionType": zod.union([zod.literal('ANGLE'),zod.literal('PLATE'),zod.literal('CHANNEL'),zod.literal('BEAM'),zod.literal('RSJ'),zod.literal('FLAT'),zod.literal('PIPE'),zod.literal('ROUND'),zod.literal('GRATING'),zod.literal('OTHER'),zod.literal(null)]).nullish().describe('Derived section family from the Section string. Null only on legacy rows pending backfill.'),
   "holeOperation": zod.union([zod.literal('PUNCHING'),zod.literal('DRILLING'),zod.literal('NOT_SET'),zod.literal(null)]).nullish().describe('Derived hole operation. Channel\/Beam\/RSJ always DRILLING; Angle\/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.'),
   "fg": zod.string().nullish().describe('Finished Goods placeholder. Blank (null) everywhere for now — not in any process sequence\/bundle and not in the row hash. Reserved for future use.'),
-  "isInitialCutting": zod.boolean().describe('True when Type=\"Job Card Not Started\" AND Job Card Status=\"Initial\". These marks are already counted as Release Balance and must NOT contribute to any Cutting (C) balance figure. Additive, not hashed. Backfilled for existing rows via the proxy activity=\'C\' AND assign_date IS NULL AND contractor IS NULL.\n')
+  "isInitialCutting": zod.boolean().describe('True when Job Card Status (Col G) = \"Initial\", regardless of Activity. In the newer WIP format the Activity column holds the PLANNED activity for scheduling, not the current production stage — a mark at Activity=RFI with Status=Initial has NOT started RFI; it is unreleased raw material that belongs in Balance Release, not Balance Fabrication. Only Status=\"Authorized\" marks have been physically released to the shop floor. Additive, not hashed. Defaults false for old-format rows without a Job Card Status column.\n')
 })
 export const GetImportRecordsResponse = zod.array(GetImportRecordsResponseItem)
 
@@ -1712,10 +1712,14 @@ export const GetContractorMovementResponse = zod.object({
 
 
 /**
- * Returns the Release Balance Computed (MT) — the sum of Balance Wt. (Col Q) ÷ 1000 for rows where Type (Col A) = "Job Card Not Started" AND Job Card Status (Col G) = "Initial" — grouped by (project, structure) from the most recently committed WIP file, joined to the Order Review file's own stated Release Balance (fileBalReleaseMt) for cross-checking. Purely additive — never changes parsing, activity values, dedup, ageing, warning, milestone, or dispatch state.
+ * Returns the Release Balance Computed (MT) — the sum of Balance Wt. (Col Q) ÷ 1000 for rows where Type (Col A) = "Job Card Not Started" AND Job Card Status (Col G) = "Initial" — grouped by (project, structure) for the specified import (or the most recently committed WIP import when importId is omitted), joined to the Order Review file's own stated Release Balance (fileBalReleaseMt) for cross-checking. Purely additive — never changes parsing, activity values, dedup, ageing, warning, milestone, or dispatch state.
 
- * @summary Get per-structure Release Balance Computed from the latest WIP file
+ * @summary Get per-structure Release Balance Computed, optionally scoped to a specific import
  */
+export const GetReleaseBalanceQueryParams = zod.object({
+  "importId": zod.coerce.number().optional().describe('WIP import to scope the Release Balance figures to. When omitted, falls back to the most recently committed WIP import.\n')
+})
+
 export const GetReleaseBalanceResponse = zod.object({
   "available": zod.boolean().describe('False when no WIP file with Not Started + Initial rows has been uploaded.'),
   "orderReviewAsOnDate": zod.string().nullable().describe('\"As on\" date of the latest Order Review import; null if none.'),

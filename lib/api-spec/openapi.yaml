@@ -1231,15 +1231,25 @@ paths:
     get:
       operationId: getReleaseBalance
       tags: [imports]
-      summary: Get per-structure Release Balance Computed from the latest WIP file
+      summary: Get per-structure Release Balance Computed, optionally scoped to a specific import
       description: >
         Returns the Release Balance Computed (MT) — the sum of Balance Wt.
         (Col Q) ÷ 1000 for rows where Type (Col A) = "Job Card Not Started"
         AND Job Card Status (Col G) = "Initial" — grouped by (project,
-        structure) from the most recently committed WIP file, joined to the
-        Order Review file's own stated Release Balance (fileBalReleaseMt) for
-        cross-checking. Purely additive — never changes parsing, activity
-        values, dedup, ageing, warning, milestone, or dispatch state.
+        structure) for the specified import (or the most recently committed WIP
+        import when importId is omitted), joined to the Order Review file's own
+        stated Release Balance (fileBalReleaseMt) for cross-checking. Purely
+        additive — never changes parsing, activity values, dedup, ageing,
+        warning, milestone, or dispatch state.
+      parameters:
+        - in: query
+          name: importId
+          schema:
+            type: integer
+          required: false
+          description: >
+            WIP import to scope the Release Balance figures to. When omitted,
+            falls back to the most recently committed WIP import.
       responses:
         "200":
           description: Release Balance Computed rows and totals

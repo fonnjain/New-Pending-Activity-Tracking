@@ -4,6 +4,7 @@ import { recomputeMilestones } from "../lib/milestones";
 import { recomputeDispatch } from "../lib/dispatch";
 import { recomputeContractorMovement } from "../lib/contractorMovement";
 import { backfillClassification, backfillHoleOperation } from "../lib/backfill";
+import { backfillReleaseBalanceFromPool } from "../lib/parseWipReleaseBalance";
 
 const router: IRouter = Router();
 
@@ -20,11 +21,13 @@ router.post("/admin/recompute", requireAuth, async (_req, res): Promise<void> =>
     holeOperationBackfilled,
     milestones,
     contractorMovement,
+    releaseBalanceBackfilled,
   ] = await Promise.all([
     backfillClassification(),
     backfillHoleOperation(),
     recomputeMilestones(),
     recomputeContractorMovement(),
+    backfillReleaseBalanceFromPool(),
   ]);
   await recomputeDispatch();
 
@@ -33,6 +36,7 @@ router.post("/admin/recompute", requireAuth, async (_req, res): Promise<void> =>
     holeOperationBackfilled,
     milestonesCount: milestones.length,
     contractorMovementEntries: contractorMovement.length,
+    releaseBalanceBackfilled,
     generatedAt: new Date().toISOString(),
   });
 });

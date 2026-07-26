@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { backfillClassification, backfillHoleOperation, backfillInitialCutting } from "./lib/backfill";
+import { backfillReleaseBalanceFromPool } from "./lib/parseWipReleaseBalance";
 import { seedContractorCategories } from "./lib/seedContractorCategories";
 import { seedRsjThickness } from "./lib/seedRsjThickness";
 import { seedUsersIfEmpty } from "./lib/seedUsers";
@@ -46,6 +47,14 @@ app.listen(port, (err) => {
   // data. Fire-and-forget; self-draining and idempotent. Never blocks startup.
   backfillHoleOperation().catch((err) => {
     logger.error({ err }, "Hole operation backfill failed");
+  });
+
+  // Best-effort backfill of release_balance_wip for historical imports that
+  // have no stored file bytes. Derives figures from record_pool
+  // (is_initial_cutting = true AND category = TLT) grouped by import. Safe to
+  // run every boot — skips imports that already have rows, so it is idempotent.
+  backfillReleaseBalanceFromPool().catch((err) => {
+    logger.error({ err }, "Release balance pool backfill failed");
   });
 
   // Best-effort, one-time seed of known out-vendor contractor mappings. Fire-

@@ -6,9 +6,21 @@
 // Filters: Col A "Type" == "Job Card Not Started" AND Col G "Job Card Status"
 // == "Initial". Sums Col Q "Balance Wt." (kg) ÷ 1000 → MT, grouped by
 // (normalizedProject, structure).
+//
+// Storage is scoped per import_id: recomputeReleaseBalance() deletes only the
+// rows for the given import before reinserting, so historical imports are never
+// overwritten by a newer upload.
 import * as XLSX from "xlsx";
 import { normalizeProject, detectHeaderRow } from "./parse";
-import { db, releaseBalanceWipTable, assignmentBalanceWipTable } from "@workspace/db";
+import {
+  db,
+  releaseBalanceWipTable,
+  assignmentBalanceWipTable,
+  importRowsTable,
+  recordPoolTable,
+  importsTable,
+} from "@workspace/db";
+import { eq, and, sql } from "drizzle-orm";
 
 type Cell = string | number | boolean | null | undefined;
 
@@ -85,13 +97,22 @@ export function parseWipReleaseBalance(
   });
 }
 
-export async function recomputeReleaseBalance(buffer: Buffer): Promise<void> {
+// Recompute Release Balance for one specific import from its WIP file buffer.
+// Only touches rows WHERE import_id = importId — never deletes another import's data.
+export async function recomputeReleaseBalance(
+  buffer: Buffer,
+  importId: number,
+): Promise<void> {
   const rows = parseWipReleaseBalance(buffer);
   await db.transaction(async (tx) => {
-    await tx.delete(releaseBalanceWipTable);
+    // Scoped delete — only this import's rows, never the whole table.
+    await tx
+      .delete(releaseBalanceWipTable)
+      .where(eq(releaseBalanceWipTable.importId, importId));
     if (rows.length > 0) {
       await tx.insert(releaseBalanceWipTable).values(
         rows.map((r) => ({
+          importId,
           project: r.project,
           structure: r.structure,
           releaseBalanceComputedMt: r.releaseBalanceComputedMt,
@@ -99,6 +120,77 @@ export async function recomputeReleaseBalance(buffer: Buffer): Promise<void> {
       );
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Pool-based backfill — computes Release Balance for every import directly from
+// the record_pool using the is_initial_cutting flag (which captures the same
+// "JCNS + Initial" condition as the file-based parser).  Used at boot and via
+// the admin recompute endpoint to populate historical imports whose file bytes
+// are no longer available.
+// ---------------------------------------------------------------------------
+export async function backfillReleaseBalanceFromPool(): Promise<number> {
+  // 1. Find all imports that already have release_balance_wip rows so we can
+  //    skip them (they were populated by the file-based recompute and are already
+  //    correct).
+  const existingImportIds = new Set<number>(
+    (
+      await db
+        .selectDistinct({ importId: releaseBalanceWipTable.importId })
+        .from(releaseBalanceWipTable)
+    ).map((r) => r.importId),
+  );
+
+  // 2. Get all import IDs.
+  const allImports = await db
+    .select({ id: importsTable.id })
+    .from(importsTable)
+    .orderBy(importsTable.id);
+
+  const toBackfill = allImports.filter((i) => !existingImportIds.has(i.id));
+  if (toBackfill.length === 0) return 0;
+
+  // 3. For each import without rows, compute from the pool.
+  //    Release Balance = sum of balance_wt / 1000 for rows where
+  //    is_initial_cutting = true AND category = 'TLT', grouped by (job, structure).
+  let totalInserted = 0;
+  for (const { id: importId } of toBackfill) {
+    const computed = await db
+      .select({
+        project: recordPoolTable.job,
+        structure: recordPoolTable.structure,
+        releaseBalanceComputedMt: sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
+      })
+      .from(importRowsTable)
+      .innerJoin(
+        recordPoolTable,
+        eq(importRowsTable.poolId, recordPoolTable.id),
+      )
+      .where(
+        and(
+          eq(importRowsTable.importId, importId),
+          eq(recordPoolTable.isInitialCutting, true),
+          eq(recordPoolTable.category, "TLT"),
+        ),
+      )
+      .groupBy(recordPoolTable.job, recordPoolTable.structure);
+
+    if (computed.length > 0) {
+      await db
+        .insert(releaseBalanceWipTable)
+        .values(
+          computed.map((r) => ({
+            importId,
+            project: r.project,
+            structure: r.structure,
+            releaseBalanceComputedMt: r.releaseBalanceComputedMt,
+          })),
+        )
+        .onConflictDoNothing();
+      totalInserted += computed.length;
+    }
+  }
+  return totalInserted;
 }
 
 // ---------------------------------------------------------------------------
