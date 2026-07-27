@@ -1,5 +1,5 @@
 import { useMemo, useState, Fragment } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
@@ -8,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, ListChecks, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield } from "lucide-react";
+import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, ListChecks, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx, exportToJson, type XlsxColumn } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
@@ -84,6 +84,7 @@ function DataViewContent() {
   const { data: imports = [], refetch } = useListImports();
   const { data: orderStatus } = useGetOrderStatus({ query: { queryKey: getGetOrderStatusQueryKey() } });
   const orderImports = orderStatus?.imports ?? [];
+  const { data: deletionLog = [] } = useListDeletionLog();
 
   // Strict per-date pairing: an Order Review can only be uploaded for a date that
   // already has a committed WIP / Balance & Activity import. The pairing key is the
@@ -96,6 +97,15 @@ function DataViewContent() {
   const orderReviewLocked = wipAsOnDates.size === 0;
   const orderReviewLockedMessage =
     "Upload a WIP / Balance & Activity report and accept its checks first. An Order Review can only be uploaded for a date that already has a committed WIP report.";
+
+  // Dates already taken (one import per date rule). Used by uploaders to gate file
+  // selection before staging so the user learns about the conflict immediately.
+  const takenWipDates = new Set(
+    imports.map((i) => i.asOnDate).filter((d): d is string => !!d),
+  );
+  const takenOrDates = new Set(
+    orderImports.map((o) => o.asOnDate).filter((d): d is string => !!d),
+  );
   const { selectedImportId, setSelectedImportId } = useTracker();
   const deleteImport = useDeleteImport();
   const deleteAll = useDeleteAllImports();
@@ -161,6 +171,7 @@ function DataViewContent() {
         refetch();
         if (selectedImportId === id) setSelectedImportId(null);
         queryClient.invalidateQueries({ queryKey: getListImportsQueryKey() });
+        queryClient.invalidateQueries({ queryKey: ["/api/imports/deletion-log"] });
       }
     });
   };
@@ -171,6 +182,7 @@ function DataViewContent() {
       onSuccess: () => {
         toast({ title: "Order Review file deleted" });
         queryClient.invalidateQueries({ queryKey: getGetOrderStatusQueryKey() });
+        queryClient.invalidateQueries({ queryKey: ["/api/imports/deletion-log"] });
       },
     });
   };
@@ -271,13 +283,18 @@ function DataViewContent() {
       <CutoffCard />
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <StagedUploadPanel expectedType="wip" onCommitted={handleCommitted} />
+        <StagedUploadPanel
+          expectedType="wip"
+          onCommitted={handleCommitted}
+          takenDates={takenWipDates}
+        />
         <StagedUploadPanel
           expectedType="order-review"
           onCommitted={handleCommitted}
           locked={orderReviewLocked}
           lockedMessage={orderReviewLockedMessage}
           allowedDates={wipAsOnDates}
+          takenDates={takenOrDates}
         />
       </div>
 
@@ -498,6 +515,58 @@ function DataViewContent() {
             {orderImports.length === 0 && <div className="text-center p-8 text-sm text-muted-foreground border rounded-lg border-dashed">No Order Review files uploaded yet.</div>}
           </div>
         </div>
+      </div>
+
+      {/* Deletion audit log */}
+      <div className="space-y-2">
+        <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <History className="w-4 h-4" />
+          Deletion Log
+        </h3>
+        {deletionLog.length === 0 ? (
+          <div className="text-center p-6 text-sm text-muted-foreground border rounded-lg border-dashed">
+            No files have been deleted yet.
+          </div>
+        ) : (
+          <div className="rounded-lg border overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">When</th>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Deleted by</th>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Type</th>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">File</th>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Report date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deletionLog.map((entry, i) => (
+                  <tr key={entry.id} className={i % 2 === 0 ? "bg-background" : "bg-muted/20"}>
+                    <td className="px-3 py-2 tabular-nums text-muted-foreground whitespace-nowrap">
+                      {formatDate(entry.deletedAt)}
+                    </td>
+                    <td className="px-3 py-2 font-medium">{entry.deletedBy}</td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${
+                        entry.fileType === "wip"
+                          ? "bg-primary/10 text-primary"
+                          : "bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                      }`}>
+                        {entry.fileType === "wip" ? "WIP" : "Order Review"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground truncate max-w-[200px]" title={entry.sourceFilename}>
+                      {entry.sourceFilename}
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">
+                      {entry.reportDate ? formatDate(entry.reportDate) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -16,6 +16,8 @@ import {
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Upload,
   ShieldCheck,
@@ -24,6 +26,7 @@ import {
   ClipboardList,
   Lock,
   Info,
+  CalendarDays,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -45,6 +48,10 @@ function mismatchMessage(detected: StageResult["fileType"]): string {
   return "This doesn't look like a valid WIP or Order Review file.";
 }
 
+function todayYmd(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 interface Props {
   expectedType: SlotType;
   onCommitted: (res: CommitResult) => void;
@@ -58,6 +65,11 @@ interface Props {
    * undefined, this client-side gate is skipped (the server still enforces it).
    */
   allowedDates?: Set<string>;
+  /**
+   * Dates that already have an import of this type committed. If the user selects
+   * one of these, they must delete the existing import first.
+   */
+  takenDates?: Set<string>;
 }
 
 export function StagedUploadPanel({
@@ -66,6 +78,7 @@ export function StagedUploadPanel({
   locked = false,
   lockedMessage,
   allowedDates,
+  takenDates,
 }: Props) {
   const stage = useStageImport();
   const validate = useValidateStagedImport();
@@ -78,6 +91,8 @@ export function StagedUploadPanel({
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [accepted, setAccepted] = useState<Set<number>>(new Set());
   const [formatAcknowledged, setFormatAcknowledged] = useState(false);
+  // User-selected date for this upload (YYYY-MM-DD). Defaults to today.
+  const [selectedDate, setSelectedDate] = useState<string>(todayYmd);
 
   const busy =
     stage.isPending ||
@@ -91,6 +106,7 @@ export function StagedUploadPanel({
     setValidation(null);
     setAccepted(new Set());
     setFormatAcknowledged(false);
+    // Keep selectedDate — user likely wants to re-upload for the same date.
   };
 
   // Format check gate: null wipFormatCheck (non-WIP or unreadable) = pass through.
@@ -116,11 +132,14 @@ export function StagedUploadPanel({
       ? "Could not read this Order Review's 'As on' date, so it can't be matched to a WIP report."
       : `No committed WIP / Balance & Activity report for ${stagedOrderDate}. Upload and accept that WIP report first.`;
 
+  // Date conflict gate: user selected a date that already has an import of this type.
+  const dateTaken = selectedDate !== "" && (takenDates?.has(selectedDate) ?? false);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     stage.mutate(
-      { data: { file } },
+      { data: { file, reportDate: selectedDate || undefined } },
       {
         onSuccess: (res) => {
           setStaged(res);
@@ -234,6 +253,13 @@ export function StagedUploadPanel({
         chip: "bg-primary/10 text-primary",
       };
 
+  // Format a YYYY-MM-DD for display.
+  const formatDisplayDate = (d: string) => {
+    if (!d) return "";
+    const [y, m, day] = d.split("-");
+    return `${day}-${m}-${y}`;
+  };
+
   return (
     <div className="space-y-4">
       <Card className={`border-dashed border-2 ${accent.card}`}>
@@ -245,6 +271,42 @@ export function StagedUploadPanel({
           </div>
           <h3 className="text-lg font-bold mb-2">{heading}</h3>
           <p className="text-sm text-muted-foreground mb-6 max-w-md">{helper}</p>
+
+          {/* Date picker — always visible; file selection gated on a valid non-taken date */}
+          <div className="w-full max-w-xs mb-5 text-left">
+            <Label htmlFor={`date-${expectedType}`} className="flex items-center gap-1.5 text-sm font-semibold mb-1.5">
+              <CalendarDays className="w-4 h-4" />
+              Report date
+            </Label>
+            <Input
+              id={`date-${expectedType}`}
+              type="date"
+              value={selectedDate}
+              onChange={(e) => {
+                setSelectedDate(e.target.value);
+                // If a file is already staged, discard it so the date is consistent.
+                if (staged) doDiscard();
+              }}
+              className="w-full"
+              disabled={busy}
+            />
+            {selectedDate && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {formatDisplayDate(selectedDate)}
+              </p>
+            )}
+            {dateTaken && (
+              <div className="mt-2 flex items-start gap-1.5 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>
+                  {isOrderReview ? "An Order Review" : "A WIP report"} for{" "}
+                  <strong>{formatDisplayDate(selectedDate)}</strong> already exists.
+                  Delete it first to upload a new one for this date.
+                </span>
+              </div>
+            )}
+          </div>
+
           {locked ? (
             <div className="flex flex-col items-center gap-3 max-w-md">
               <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-700 dark:text-amber-300">
@@ -264,11 +326,11 @@ export function StagedUploadPanel({
                 type="file"
                 accept=".xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 onChange={handleFileChange}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                disabled={busy}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                disabled={busy || !selectedDate || dateTaken}
               />
               <Button
-                disabled={busy}
+                disabled={busy || !selectedDate || dateTaken}
                 className="px-8 font-bold text-primary-foreground"
               >
                 {stage.isPending ? "STAGING..." : "SELECT FILE"}
@@ -287,7 +349,7 @@ export function StagedUploadPanel({
                   {staged.sourceFilename}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  Staged. Not yet imported.
+                  Staged for <strong>{formatDisplayDate(selectedDate)}</strong>. Not yet imported.
                 </div>
               </div>
               <Button
@@ -822,20 +884,21 @@ function OrAiAdvisoryView({
     <div className="space-y-3">
       {validation.aiAdvisory ? (
         <div className="rounded-md border border-sky-300/50 bg-sky-50/50 dark:border-sky-700/30 dark:bg-sky-950/20 p-3 text-sm space-y-2">
-          <div className="flex items-center gap-2 font-bold text-sky-800 dark:text-sky-300">
-            <Info className="w-4 h-4 shrink-0" />
-            AI advisory (read-only — import decision is yours)
+          <div className="flex items-center gap-2 font-bold text-sky-700 dark:text-sky-300">
+            <ShieldCheck className="w-4 h-4" />
+            AI advisory review
           </div>
-          <p className="text-foreground/90 leading-relaxed">{validation.aiAdvisory}</p>
+          <p className="text-sm text-foreground/90 whitespace-pre-wrap">
+            {validation.aiAdvisory}
+          </p>
         </div>
       ) : (
-        <div className="rounded-md border border-muted bg-muted/20 p-3 text-sm text-muted-foreground">
-          {validation.available
-            ? "AI review completed but returned no output."
-            : "AI advisory is unavailable (ANTHROPIC_API_KEY not set). You can still import the file — the deterministic checks above are the authoritative guide."}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Info className="w-3.5 h-3.5 shrink-0" />
+          AI review not available — proceeding with deterministic checks only.
         </div>
       )}
-      <div className="flex gap-2">
+      <div className="flex flex-col sm:flex-row gap-2">
         <Button
           onClick={onCommit}
           disabled={busy}
@@ -848,17 +911,6 @@ function OrAiAdvisoryView({
           Discard
         </Button>
       </div>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <span className="block text-muted-foreground text-xs uppercase mb-0.5">
-        {label}
-      </span>
-      <span className="font-bold tabular-nums">{value}</span>
     </div>
   );
 }
@@ -880,112 +932,81 @@ function ValidationView({
   busy: boolean;
   committing: boolean;
 }) {
-  // No key configured: offer import as-is.
-  if (!validation.available) {
-    return (
-      <div className="space-y-3">
-        <div className="rounded-md border border-muted bg-muted/20 p-3 text-sm text-muted-foreground">
-          AI check is unavailable. Set ANTHROPIC_API_KEY to enable the Claude
-          gatekeeper. You can still import the file as-is — the deterministic
-          engine remains the source of truth.
-        </div>
-        <div className="flex gap-2">
-          <Button
-            onClick={onCommit}
-            disabled={busy}
-            className="text-primary-foreground"
-          >
-            {committing ? "Importing..." : "Import as-is"}
-          </Button>
-          <Button variant="outline" onClick={onDiscard} disabled={busy}>
-            Discard
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // Rejected: the file is not a valid report.
-  if (validation.verdict === "reject") {
-    return (
-      <div className="space-y-3">
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm space-y-2">
+  const rejected = validation.verdict === "reject";
+  return (
+    <div className="space-y-3">
+      {rejected && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm space-y-1">
           <div className="flex items-center gap-2 font-bold text-destructive">
             <AlertTriangle className="w-4 h-4" />
-            This does not look like a valid balance/activity report
+            Claude flagged this file
           </div>
           {validation.reason && (
             <p className="text-foreground/90">{validation.reason}</p>
           )}
           {validation.expectedShape && (
-            <p className="text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Expected: {validation.expectedShape}
             </p>
           )}
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={onDiscard} disabled={busy}>
-            Discard
-          </Button>
-          <Button
-            variant="outline"
-            onClick={onCommit}
-            disabled={busy}
-            className="text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
-          >
-            {committing ? "Importing..." : "Import anyway"}
-          </Button>
+      )}
+
+      {!rejected && (
+        <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400 font-medium">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          Claude approved this file.
         </div>
-      </div>
-    );
-  }
+      )}
 
-  // Accepted: optionally apply descriptive cleanups, then commit.
-  return (
-    <div className="space-y-3">
-      <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm flex items-center gap-2 font-bold text-emerald-700 dark:text-emerald-400">
-        <CheckCircle2 className="w-4 h-4" />
-        Looks like a valid report
-      </div>
-
-      {validation.sanitize.length > 0 ? (
+      {validation.sanitize.length > 0 && (
         <div className="space-y-2">
-          <div className="text-sm font-bold">
+          <div className="text-xs font-bold uppercase text-muted-foreground">
             Suggested cleanups ({validation.sanitize.length})
           </div>
-          <p className="text-xs text-muted-foreground">
-            These only touch descriptive fields and are applied before import.
-            They never change mark identity, quantities, weights, activity, or
-            operation. Untick any you do not want.
-          </p>
-          <div className="grid gap-2">
-            {validation.sanitize.map((s, i) => (
-              <SuggestionRow
+          <div className="space-y-1">
+            {validation.sanitize.map((s: StagedSanitizeSuggestion, i: number) => (
+              <label
                 key={i}
-                s={s}
-                checked={accepted.has(i)}
-                onToggle={() => onToggle(i)}
-              />
+                className="flex items-start gap-2.5 rounded-md border p-2.5 text-xs cursor-pointer hover:bg-muted/40"
+              >
+                <input
+                  type="checkbox"
+                  checked={accepted.has(i)}
+                  onChange={() => onToggle(i)}
+                  className="mt-0.5 shrink-0"
+                />
+                <div className="space-y-0.5">
+                  <div className="font-medium">{s.field}</div>
+                  <div className="text-muted-foreground">
+                    {s.from == null ? <em>blank</em> : <span className="font-mono">{s.from}</span>}
+                    {" → "}
+                    {s.to == null ? <em>blank</em> : <span className="font-mono">{s.to}</span>}
+                  </div>
+                  {s.reason && (
+                    <div className="text-muted-foreground/80">{s.reason}</div>
+                  )}
+                </div>
+              </label>
             ))}
           </div>
         </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          No descriptive cleanups suggested.
-        </p>
       )}
 
-      <div className="flex gap-2 pt-1">
+      <div className="flex flex-col sm:flex-row gap-2">
         <Button
           onClick={onCommit}
           disabled={busy}
-          className="text-primary-foreground"
+          className="gap-2 text-primary-foreground"
         >
+          <CheckCircle2 className="w-4 h-4" />
           {committing
             ? "Importing..."
-            : accepted.size > 0
-              ? `Accept ${accepted.size} & import`
-              : "Import"}
+            : rejected
+              ? "Import anyway"
+              : accepted.size > 0
+                ? `Import with ${accepted.size} cleanup${accepted.size > 1 ? "s" : ""}`
+                : "Import as-is"}
         </Button>
         <Button variant="outline" onClick={onDiscard} disabled={busy}>
           Discard
@@ -995,39 +1016,11 @@ function ValidationView({
   );
 }
 
-function SuggestionRow({
-  s,
-  checked,
-  onToggle,
-}: {
-  s: StagedSanitizeSuggestion;
-  checked: boolean;
-  onToggle: () => void;
-}) {
+function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <label className="flex items-start gap-3 rounded-md border p-3 text-sm cursor-pointer hover:bg-muted/30">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onToggle}
-        className="mt-1"
-      />
-      <div className="min-w-0 space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-xs uppercase rounded bg-muted px-1.5 py-0.5">
-            {s.field}
-          </span>
-          <span className="text-muted-foreground line-through">
-            {s.from ?? "(empty)"}
-          </span>
-          <span className="text-muted-foreground">to</span>
-          <span className="font-bold">{s.to ?? "(empty)"}</span>
-          <span className="text-xs text-muted-foreground">
-            · {s.count.toLocaleString()} row{s.count === 1 ? "" : "s"}
-          </span>
-        </div>
-        <div className="text-xs text-muted-foreground">{s.reason}</div>
-      </div>
-    </label>
+    <div>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="font-semibold text-sm tabular-nums">{value}</div>
+    </div>
   );
 }

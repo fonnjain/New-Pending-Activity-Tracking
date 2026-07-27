@@ -10,6 +10,7 @@ import {
   importRowsTable,
   uploadStagingTable,
   orderReviewImportsTable,
+  importDeletionLogTable,
   settingsTable,
   contractorCategoriesTable,
   rsjThicknessTable,
@@ -1185,12 +1186,11 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
 
     // Strict per-date pairing: an Order Review may only be committed for a date
     // that already has a committed WIP / Balance & Activity import. The pairing key
-    // is the "As on" banner date or the filename date (matching how WIP imports
-    // derive theirs). This is the authoritative guard; the uploader UI mirrors it.
-    const orderAsOnDate = detectReportAsOnDate(
-      staged.fileData,
-      staged.sourceFilename,
-    );
+    // is the user-selected date (staged.reportDate) OR the "As on" banner/filename
+    // date. The user-selected date takes priority.
+    const orderAsOnDate =
+      staged.reportDate ??
+      detectReportAsOnDate(staged.fileData, staged.sourceFilename);
     if (!orderAsOnDate) {
       res.status(400).json({
         error:
@@ -1206,6 +1206,18 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     if (!wipMatch) {
       res.status(409).json({
         error: `Upload and accept the WIP / Balance & Activity report for ${orderAsOnDate} before its Order Review.`,
+      });
+      return;
+    }
+    // Uniqueness: only one Order Review per date.
+    const [existingOr] = await db
+      .select({ id: orderReviewImportsTable.id })
+      .from(orderReviewImportsTable)
+      .where(eq(orderReviewImportsTable.asOnDate, orderAsOnDate))
+      .limit(1);
+    if (existingOr) {
+      res.status(409).json({
+        error: `An Order Review for ${orderAsOnDate} already exists. Delete it first before uploading a new one.`,
       });
       return;
     }
@@ -1247,6 +1259,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
         const ingest = await ingestOrderReview(staged.fileData, {
           sourceFilename: staged.sourceFilename,
           label: staged.label,
+          asOnDate: orderAsOnDate,
         });
         await tx
           .update(uploadStagingTable)
@@ -1293,6 +1306,28 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     // The committed import was later deleted; fall through and re-commit.
   }
 
+  // Resolve the "as on" date for this WIP file: prefer the user-selected date
+  // (stored as staged.reportDate when the file was staged), then the banner/
+  // filename auto-detect, then today as last resort.
+  const wipAsOnDate =
+    staged.reportDate ??
+    detectReportAsOnDate(staged.fileData, staged.sourceFilename) ??
+    todayYmd();
+
+  // Uniqueness: only one WIP per date. The uniqueness key is asOnDate so it
+  // aligns with the Order Review pairing gate.
+  const [existingWip] = await db
+    .select({ id: importsTable.id })
+    .from(importsTable)
+    .where(eq(importsTable.asOnDate, wipAsOnDate))
+    .limit(1);
+  if (existingWip) {
+    res.status(409).json({
+      error: `A WIP report for ${wipAsOnDate} already exists. Delete it first before uploading a new one for this date.`,
+    });
+    return;
+  }
+
   let parsed;
   try {
     parsed = parseWorkbook(staged.fileData, accepted);
@@ -1317,9 +1352,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     {
       label: staged.label,
       reportDate: staged.reportDate,
-      asOnDate:
-        detectReportAsOnDate(staged.fileData, staged.sourceFilename) ??
-        todayYmd(),
+      asOnDate: wipAsOnDate,
       sourceFilename: staged.sourceFilename,
     },
     req.log,
@@ -1419,6 +1452,16 @@ router.delete("/imports/stage/:id", requireAuth, async (req, res): Promise<void>
   res.status(204).end();
 });
 
+// GET /imports/deletion-log — returns all import deletion audit log entries,
+// newest first. Admin-only context: the frontend shows this on the Data page.
+router.get("/imports/deletion-log", requireAuth, async (_req, res): Promise<void> => {
+  const rows = await db
+    .select()
+    .from(importDeletionLogTable)
+    .orderBy(desc(importDeletionLogTable.deletedAt));
+  res.json(rows);
+});
+
 router.get("/imports/compare", async (req, res): Promise<void> => {
   const params = CompareImportsQueryParams.safeParse(req.query);
   if (!params.success) {
@@ -1512,6 +1555,36 @@ router.delete("/imports/:id", requireAuth, async (req, res): Promise<void> => {
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
+  }
+
+  // Fetch metadata before deleting so we can write the deletion log.
+  const [target] = await db
+    .select({
+      id: importsTable.id,
+      sourceFilename: importsTable.sourceFilename,
+      asOnDate: importsTable.asOnDate,
+    })
+    .from(importsTable)
+    .where(eq(importsTable.id, params.data.id));
+
+  if (!target) {
+    res.status(404).json({ error: "Import not found" });
+    return;
+  }
+
+  // Write audit log entry before deletion (if the delete fails, the log entry
+  // is harmless; if the log write fails, the delete still proceeds).
+  try {
+    const actor = req.user?.displayName || req.user?.email || "unknown";
+    await db.insert(importDeletionLogTable).values({
+      importId: target.id,
+      fileType: "wip",
+      sourceFilename: target.sourceFilename,
+      reportDate: target.asOnDate ?? null,
+      deletedBy: actor,
+    });
+  } catch (err) {
+    req.log.warn({ err, importId: target.id }, "Could not write deletion log");
   }
 
   const [deleted] = await db

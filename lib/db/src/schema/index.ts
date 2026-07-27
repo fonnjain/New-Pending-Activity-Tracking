@@ -18,3 +18,4 @@ export * from "./currentJobs";
 export * from "./assignmentBalanceWip";
 export * from "./users";
 export * from "./userSessionLog";
+export * from "./importDeletionLog";

@@ -881,6 +881,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /imports/deletion-log:
+    get:
+      operationId: listDeletionLog
+      tags: [imports]
+      summary: List import deletion log
+      description: >
+        Returns all deletion audit log entries (WIP and Order Review),
+        newest first. Each entry records who deleted which file and when.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Deletion log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ImportDeletionLogEntry"
   /imports/stage/{id}:
     delete:
       operationId: discardStagedImport
@@ -4938,6 +4957,35 @@ components:
         - released
         - newIntake
         - netChange
+    ImportDeletionLogEntry:
+      type: object
+      description: One entry in the import deletion audit log.
+      properties:
+        id:
+          type: integer
+        importId:
+          type: ["integer", "null"]
+          description: Original import id at time of deletion.
+        fileType:
+          type: string
+          description: '"wip" or "order-review"'
+        sourceFilename:
+          type: string
+        reportDate:
+          type: ["string", "null"]
+          description: The as-on / report date of the file (YYYY-MM-DD).
+        deletedAt:
+          type: string
+          description: ISO timestamp of when the deletion occurred.
+        deletedBy:
+          type: string
+          description: Display name or email of the user who deleted the file.
+      required:
+        - id
+        - fileType
+        - sourceFilename
+        - deletedAt
+        - deletedBy
     ContractorBalanceMovementDay:
       type: object
       description: One consecutive import pair's per-contractor movement measures.

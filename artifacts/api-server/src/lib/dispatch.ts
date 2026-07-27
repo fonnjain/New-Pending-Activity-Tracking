@@ -678,7 +678,7 @@ function diffOrderValues(
 // logic (it is rebuilt from WIP yard-departures, unaffected by order-book edits).
 export async function ingestOrderReview(
   buffer: Buffer,
-  meta: { sourceFilename: string; label: string | null },
+  meta: { sourceFilename: string; label: string | null; asOnDate?: string | null },
 ): Promise<IngestOrderReviewResult> {
   const parsed = parseOrderReview(buffer);
   const coverage = await computeWipCoverage(parsed.rows);
@@ -689,7 +689,8 @@ export async function ingestOrderReview(
     .values({
       label: meta.label,
       sourceFilename: meta.sourceFilename,
-      asOnDate: parsed.asOnDate,
+      // Prefer caller-supplied date (user-selected), else fall back to file banner.
+      asOnDate: meta.asOnDate ?? parsed.asOnDate,
       summary,
     })
     .returning({ id: orderReviewImportsTable.id });

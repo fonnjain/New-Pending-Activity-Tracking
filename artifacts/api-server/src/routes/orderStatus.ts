@@ -6,6 +6,7 @@ import {
   orderReviewRowsTable,
   orderDispatchTable,
   dispatchLedgerTable,
+  importDeletionLogTable,
 } from "@workspace/db";
 import {
   loadLatestOrderReview,
@@ -160,6 +161,16 @@ router.delete("/order-imports/:id", requireAuth, async (req, res): Promise<void>
     return;
   }
 
+  // Fetch metadata before the transaction for the audit log.
+  const [auditTarget] = await db
+    .select({
+      id: orderReviewImportsTable.id,
+      sourceFilename: orderReviewImportsTable.sourceFilename,
+      asOnDate: orderReviewImportsTable.asOnDate,
+    })
+    .from(orderReviewImportsTable)
+    .where(eq(orderReviewImportsTable.id, id));
+
   const deleted = await db.transaction(async (tx) => {
     // Serialize with the shared Order Review / WIP commit lock so concurrent
     // deletes can't each read a stale "remaining" snapshot and both skip cleanup.
@@ -203,6 +214,23 @@ router.delete("/order-imports/:id", requireAuth, async (req, res): Promise<void>
   if (!deleted) {
     res.status(404).json({ error: "Order Review import not found" });
     return;
+  }
+
+  // Write audit log after successful deletion.
+  if (auditTarget) {
+    try {
+      const actor = req.user?.displayName || req.user?.email || "unknown";
+      await db.insert(importDeletionLogTable).values({
+        importId: auditTarget.id,
+        fileType: "order-review",
+        sourceFilename: auditTarget.sourceFilename,
+        reportDate: auditTarget.asOnDate ?? null,
+        deletedBy: actor,
+      });
+    } catch (err) {
+      // Non-fatal; log and continue.
+      console.warn("Could not write OR deletion log:", err);
+    }
   }
 
   res.sendStatus(204);

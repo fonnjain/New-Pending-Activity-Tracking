@@ -143,6 +143,16 @@ export interface ImportUpload {
   reportDate?: string;
 }
 
+export interface ImportDeletionLogEntry {
+  id: number;
+  importId?: number | null;
+  fileType: string;
+  sourceFilename: string;
+  reportDate?: string | null;
+  deletedAt: string;
+  deletedBy: string;
+}
+
 export type ParseSummaryUnclassifiedSamplesItem = {
   type: string;
   status: string;

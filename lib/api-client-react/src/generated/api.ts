@@ -56,6 +56,7 @@ import type {
   GetReleaseBalanceParams,
   HealthStatus,
   Import,
+  ImportDeletionLogEntry,
   ImportSummary,
   ImportUpload,
   InventoryBucketsResponse,
@@ -1642,6 +1643,42 @@ export const getListUsersUrl = () => {
  * Admin only. Returns all registered users.
  * @summary List all users
  */
+export const getListDeletionLogUrl = () => {
+  return `/api/imports/deletion-log`;
+};
+
+export const listDeletionLog = async (options?: RequestInit): Promise<ImportDeletionLogEntry[]> => {
+  return customFetch<ImportDeletionLogEntry[]>(getListDeletionLogUrl(), {
+    ...options,
+    method: 'GET',
+  });
+};
+
+export const getListDeletionLogQueryKey = () => {
+  return ['/api/imports/deletion-log'] as const;
+};
+
+export const getListDeletionLogQueryOptions = <TData = Awaited<ReturnType<typeof listDeletionLog>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?: UseQueryOptions<Awaited<ReturnType<typeof listDeletionLog>>, TError, TData>, request?: SecondParameter<typeof customFetch> }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+  const queryKey = queryOptions?.queryKey ?? getListDeletionLogQueryKey();
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listDeletionLog>>> = ({ signal }) =>
+    listDeletionLog({ signal, ...requestOptions });
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<Awaited<ReturnType<typeof listDeletionLog>>, TError, TData> & { queryKey: QueryKey };
+};
+
+export type ListDeletionLogQueryResult = NonNullable<Awaited<ReturnType<typeof listDeletionLog>>>;
+export type ListDeletionLogQueryError = ErrorType<ErrorResponse>;
+
+export function useListDeletionLog<TData = Awaited<ReturnType<typeof listDeletionLog>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?: UseQueryOptions<Awaited<ReturnType<typeof listDeletionLog>>, TError, TData>, request?: SecondParameter<typeof customFetch> }
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListDeletionLogQueryOptions(options);
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & { queryKey: QueryKey };
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
 export const listUsers = async ( options?: RequestInit): Promise<ListUsers200> => {
 
   return customFetch<ListUsers200>(getListUsersUrl(),
