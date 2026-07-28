@@ -2081,6 +2081,9 @@ function FabCompletionReport() {
   // Checkbox refinement on top of the global filter. null = all selected.
   const [selectedProjects, setSelectedProjects] = useState<Set<string> | null>(null);
 
+  // B / HAB / W can be collapsed into one "Special Operations" column.
+  const [specOpsExpanded, setSpecOpsExpanded] = useState(false);
+
   // Reset checkbox selection whenever the global job scope changes.
   useEffect(() => {
     setSelectedProjects(null);
@@ -2278,6 +2281,14 @@ function FabCompletionReport() {
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-auto">
+          {/* specOps(s) = collapsed B+HAB+W combined weight */}
+          {(() => {
+            const specOps = (b: number, hab: number, w: number) => b + hab + w;
+            // total column count varies: 11 collapsed, 13 expanded
+            const totalCols = specOpsExpanded ? 13 : 11;
+            const fabGroupSpan = specOpsExpanded ? 8 : 6;
+
+            return (
           <table className="w-full text-xs border-collapse">
             <thead>
               {/* Row 1: group spans */}
@@ -2294,8 +2305,8 @@ function FabCompletionReport() {
                 <th className="text-center px-2 py-1.5 font-semibold border-r border-border/30 text-indigo-700 dark:text-indigo-400" colSpan={2}>
                   Pre-Production (MT)
                 </th>
-                <th className="text-center px-2 py-1.5 font-semibold text-amber-700 dark:text-amber-400" colSpan={8}>
-                  Fabrication Stage Balance (MT) — C → HG → RFI → NH → B → HAB → W → Q/TS
+                <th className="text-center px-2 py-1.5 font-semibold text-amber-700 dark:text-amber-400" colSpan={fabGroupSpan}>
+                  Fabrication Stage Balance (MT) — C → HG → RFI → NH → {specOpsExpanded ? "B → HAB → W" : "Spec. Ops"} → Q/TS
                 </th>
               </tr>
               {/* Row 2: individual column labels */}
@@ -2312,9 +2323,29 @@ function FabCompletionReport() {
                 <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">HG</th>
                 <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">RFI</th>
                 <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">NH</th>
-                <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">B</th>
-                <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">HAB</th>
-                <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">W</th>
+                {specOpsExpanded ? (
+                  <>
+                    <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">
+                      <button
+                        onClick={() => setSpecOpsExpanded(false)}
+                        className="inline-flex items-center gap-0.5 hover:text-amber-900 dark:hover:text-amber-200 transition-colors"
+                        title="Collapse B / HAB / W into Special Operations"
+                      >B <span className="text-[10px]">◀</span></button>
+                    </th>
+                    <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">HAB</th>
+                    <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">W</th>
+                  </>
+                ) : (
+                  <th
+                    className="text-right px-2 py-1.5 font-medium min-w-[80px] leading-tight text-amber-700 dark:text-amber-400 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-950/30 select-none transition-colors"
+                    onClick={() => setSpecOpsExpanded(true)}
+                    title="Expand into B / HAB / W columns"
+                  >
+                    <span className="inline-flex items-center justify-end gap-0.5 w-full">
+                      Special<br />Ops <span className="text-[10px]">▶</span>
+                    </span>
+                  </th>
+                )}
                 <th className="text-right px-2 py-1.5 font-medium min-w-[56px] leading-tight text-amber-700 dark:text-amber-400">
                   Quality<br />(Q/TS)
                 </th>
@@ -2330,11 +2361,9 @@ function FabCompletionReport() {
                           key={`${row.bomLabel}-${row.subTypeGroup}-${row.project}`}
                           className="border-b border-border/40 hover:bg-muted/30"
                         >
-                          {/* BOM Label only in first cell of the whole BOM group */}
                           <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
                             {sgIdx === 0 && rowIdx === 0 ? row.bomLabel : ""}
                           </td>
-                          {/* Sub-Type only in first row of each sub-group */}
                           <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
                             {rowIdx === 0 ? row.subTypeGroup : ""}
                           </td>
@@ -2349,9 +2378,17 @@ function FabCompletionReport() {
                           <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.hgBalanceMt)}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.rfiBalanceMt)}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.nhBalanceMt)}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.bBalanceMt)}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.habBalanceMt)}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.wBalanceMt)}</td>
+                          {specOpsExpanded ? (
+                            <>
+                              <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.bBalanceMt)}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.habBalanceMt)}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.wBalanceMt)}</td>
+                            </>
+                          ) : (
+                            <td className="px-2 py-1.5 text-right tabular-nums bg-amber-50/40 dark:bg-amber-950/10">
+                              {fmt(specOps(row.bBalanceMt, row.habBalanceMt, row.wBalanceMt))}
+                            </td>
+                          )}
                           <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.qualityCheckBalanceMt)}</td>
                         </tr>
                       ))}
@@ -2375,9 +2412,17 @@ function FabCompletionReport() {
                         <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.hgBalanceMt)}</td>
                         <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.rfiBalanceMt)}</td>
                         <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.nhBalanceMt)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.bBalanceMt)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.habBalanceMt)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.wBalanceMt)}</td>
+                        {specOpsExpanded ? (
+                          <>
+                            <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.bBalanceMt)}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.habBalanceMt)}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.wBalanceMt)}</td>
+                          </>
+                        ) : (
+                          <td className="px-2 py-1.5 text-right tabular-nums bg-amber-50/40 dark:bg-amber-950/10">
+                            {fmt(specOps(sg.subtotal.bBalanceMt, sg.subtotal.habBalanceMt, sg.subtotal.wBalanceMt))}
+                          </td>
+                        )}
                         <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.qualityCheckBalanceMt)}</td>
                       </tr>
                     </>
@@ -2400,16 +2445,24 @@ function FabCompletionReport() {
                     <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.hgBalanceMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.rfiBalanceMt)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.nhBalanceMt)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.bBalanceMt)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.habBalanceMt)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.wBalanceMt)}</td>
+                    {specOpsExpanded ? (
+                      <>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.bBalanceMt)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.habBalanceMt)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.wBalanceMt)}</td>
+                      </>
+                    ) : (
+                      <td className="px-2 py-1.5 text-right tabular-nums bg-amber-50/40 dark:bg-amber-950/10">
+                        {fmt(specOps(bom.subtotal.bBalanceMt, bom.subtotal.habBalanceMt, bom.subtotal.wBalanceMt))}
+                      </td>
+                    )}
                     <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.qualityCheckBalanceMt)}</td>
                   </tr>
                   {/* Cause footer — only for the Unknown group when visible */}
                   {bom.label === "Unknown" && unknownCauseFooter && (
                     <tr key="unknown-cause-footer">
                       <td
-                        colSpan={13}
+                        colSpan={totalCols}
                         className="px-3 py-2 text-xs text-muted-foreground border-b border-border bg-muted/10"
                       >
                         <span className="font-medium text-foreground">
@@ -2452,13 +2505,23 @@ function FabCompletionReport() {
                 <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.hgBalanceMt)}</td>
                 <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.rfiBalanceMt)}</td>
                 <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.nhBalanceMt)}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.bBalanceMt)}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.habBalanceMt)}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.wBalanceMt)}</td>
+                {specOpsExpanded ? (
+                  <>
+                    <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.bBalanceMt)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.habBalanceMt)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.wBalanceMt)}</td>
+                  </>
+                ) : (
+                  <td className="px-2 py-2 text-right tabular-nums bg-amber-50/40 dark:bg-amber-950/10">
+                    {fmt(specOps(grandTotal.bBalanceMt, grandTotal.habBalanceMt, grandTotal.wBalanceMt))}
+                  </td>
+                )}
                 <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.qualityCheckBalanceMt)}</td>
               </tr>
             </tfoot>
           </table>
+            );
+          })()}
         </div>
       </CardContent>
     </Card>
