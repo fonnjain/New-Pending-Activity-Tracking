@@ -1,0 +1,44 @@
+On the Fabrication Report – Project Completion (TLT), please add a Total column as the
+last column, covering Cols D through M.
+
+Important: the total must NOT be a plain sum of D through M, because column E
+(Assignment Balance) overlaps other columns and would be double counted.
+
+Assignment Balance is not a production stage. It is "Job Card Not Started AND Contractor
+is blank", which is a cross-cutting lens on marks already counted elsewhere:
+  - its Initial portion is already in D (Release Balance)
+  - its Authorized portion is already in F (Cutting)
+
+Verified on the 28-Jul file: 100% of Release Balance marks have a blank contractor, so all
+of D sits inside E, and E splits exactly into 2,277.436 MT Initial (all of D) plus
+1,033.439 MT Authorized (inside F). E adds no new weight at all.
+
+So the formula is:
+
+    Total = D + F + G + H + I + J + K + L + M      (skip E)
+
+All the other columns are mutually exclusive: D and F split Not Started by Job Card Status,
+G through M are Job Card WIP with one activity per mark, and Not Started never overlaps
+Job Card WIP. E is the only overlapping column.
+
+Please also:
+
+1. Label the column so the exclusion is visible, e.g. "Total Fabrication Balance
+   (excl. Assignment)", with a tooltip or footnote explaining that Assignment Balance is
+   omitted because it double counts Release Balance and Cutting.
+
+2. Make sure it is correct whether Special Ops is collapsed or expanded — J, K and L must
+   be counted once in total, not once collapsed and again expanded.
+
+3. Include the new column in the Excel export, and add it to the Sub-Type subtotal, BOM
+   Label total and Grand Total rows using the same formula, not by summing the D:M totals.
+
+On the 28-Jul data the Grand Total of the new column should be about 6,416 MT. A plain
+D:M sum would give about 9,724 MT, which is roughly 34% too high — that gap is the check
+that the exclusion is working.
+
+Do not change any existing column or any underlying calculation. This is an added display
+column only.
+
+When done, paste the total-column expression and the subtotal/grand-total handling
+verbatim.

@@ -1899,10 +1899,41 @@ type FabSums = {
   habBalanceMt: number;
   wBalanceMt: number;
   qualityCheckBalanceMt: number;
+  /** Release + Cutting + HG + RFI + NH + B + HAB + W + Quality.
+   *  Assignment Balance is deliberately excluded: it overlaps Release Balance
+   *  (Initial marks) and Cutting Balance (Authorized-JCNS marks) and adding it
+   *  would double-count those weights. */
+  totalFabBalanceMt: number;
 };
 
+/** Compute the non-double-counting total:
+ *  Release + Cutting + HG + RFI + NH + B + HAB + W + Quality (skip Assignment). */
+function fabTotal(s: {
+  releaseBalanceCalcMt: number;
+  cuttingBalanceMt: number;
+  hgBalanceMt: number;
+  rfiBalanceMt: number;
+  nhBalanceMt: number;
+  bBalanceMt: number;
+  habBalanceMt: number;
+  wBalanceMt: number;
+  qualityCheckBalanceMt: number;
+}): number {
+  return (
+    s.releaseBalanceCalcMt +
+    s.cuttingBalanceMt +
+    s.hgBalanceMt +
+    s.rfiBalanceMt +
+    s.nhBalanceMt +
+    s.bBalanceMt +
+    s.habBalanceMt +
+    s.wBalanceMt +
+    s.qualityCheckBalanceMt
+  );
+}
+
 function sumRows(rs: FabricationProjectCompletionRow[]): FabSums {
-  return {
+  const sums = {
     releaseBalanceCalcMt:    rs.reduce((s, r) => s + r.releaseBalanceCalcMt,    0),
     assignmentBalanceCalcMt: rs.reduce((s, r) => s + r.assignmentBalanceCalcMt, 0),
     cuttingBalanceMt:        rs.reduce((s, r) => s + r.cuttingBalanceMt,        0),
@@ -1914,6 +1945,7 @@ function sumRows(rs: FabricationProjectCompletionRow[]): FabSums {
     wBalanceMt:              rs.reduce((s, r) => s + r.wBalanceMt,              0),
     qualityCheckBalanceMt:   rs.reduce((s, r) => s + r.qualityCheckBalanceMt,   0),
   };
+  return { ...sums, totalFabBalanceMt: fabTotal(sums) };
 }
 
 // Build the 3-level structure: BOM Label → Sub-Type Group → Project rows.
@@ -2041,19 +2073,22 @@ function FabProjectCheckboxFilter({
 
 // Excel columns include Sub-Type Group between BOM Label and Project.
 const FAB_COMP_COLUMNS: XlsxColumn[] = [
-  { label: "BOM Label",                       field: "bomLabel" },
-  { label: "Sub-Type Group",                  field: "subTypeGroup" },
-  { label: "Project",                         field: "project" },
-  { label: "Release Balance Calc (MT)",        field: "releaseBalanceCalcMt",    numeric: true, decimals: 3, total: true },
-  { label: "Assignment Balance Calc (MT)",     field: "assignmentBalanceCalcMt", numeric: true, decimals: 3, total: true },
-  { label: "Cutting Balance — C (MT)",         field: "cuttingBalanceMt",        numeric: true, decimals: 3, total: true },
-  { label: "HG Balance (MT)",                  field: "hgBalanceMt",             numeric: true, decimals: 3, total: true },
-  { label: "RFI Balance (MT)",                 field: "rfiBalanceMt",            numeric: true, decimals: 3, total: true },
-  { label: "NH Balance (MT)",                  field: "nhBalanceMt",             numeric: true, decimals: 3, total: true },
-  { label: "B Balance (MT)",                   field: "bBalanceMt",              numeric: true, decimals: 3, total: true },
-  { label: "HAB Balance (MT)",                 field: "habBalanceMt",            numeric: true, decimals: 3, total: true },
-  { label: "W Balance (MT)",                   field: "wBalanceMt",              numeric: true, decimals: 3, total: true },
-  { label: "Quality Check — Q+TS (MT)",        field: "qualityCheckBalanceMt",   numeric: true, decimals: 3, total: true },
+  { label: "BOM Label",                                   field: "bomLabel" },
+  { label: "Sub-Type Group",                              field: "subTypeGroup" },
+  { label: "Project",                                     field: "project" },
+  { label: "Release Balance Calc (MT)",                   field: "releaseBalanceCalcMt",    numeric: true, decimals: 3, total: true },
+  { label: "Assignment Balance Calc (MT)",                field: "assignmentBalanceCalcMt", numeric: true, decimals: 3, total: true },
+  { label: "Cutting Balance — C (MT)",                    field: "cuttingBalanceMt",        numeric: true, decimals: 3, total: true },
+  { label: "HG Balance (MT)",                             field: "hgBalanceMt",             numeric: true, decimals: 3, total: true },
+  { label: "RFI Balance (MT)",                            field: "rfiBalanceMt",            numeric: true, decimals: 3, total: true },
+  { label: "NH Balance (MT)",                             field: "nhBalanceMt",             numeric: true, decimals: 3, total: true },
+  { label: "B Balance (MT)",                              field: "bBalanceMt",              numeric: true, decimals: 3, total: true },
+  { label: "HAB Balance (MT)",                            field: "habBalanceMt",            numeric: true, decimals: 3, total: true },
+  { label: "W Balance (MT)",                              field: "wBalanceMt",              numeric: true, decimals: 3, total: true },
+  { label: "Quality Check — Q+TS (MT)",                   field: "qualityCheckBalanceMt",   numeric: true, decimals: 3, total: true },
+  // Total = Release + Cutting + HG + RFI + NH + B + HAB + W + Quality.
+  // Assignment Balance is EXCLUDED — it overlaps Release (Initial) and Cutting (Authorized-JCNS).
+  { label: "Total Fabrication Balance (excl. Assignment)", field: "totalFabBalanceMt",       numeric: true, decimals: 3, total: true },
 ];
 
 function FabCompletionReport() {
@@ -2180,6 +2215,8 @@ function FabCompletionReport() {
       habBalanceMt:            s.habBalanceMt,
       wBalanceMt:              s.wBalanceMt,
       qualityCheckBalanceMt:   s.qualityCheckBalanceMt,
+      // Assignment excluded (double-counts Release + Cutting).
+      totalFabBalanceMt:       s.totalFabBalanceMt,
     });
 
     // Summary sheet: one section per sub-group. Each section's summaryRows
@@ -2284,9 +2321,12 @@ function FabCompletionReport() {
           {/* specOps(s) = collapsed B+HAB+W combined weight */}
           {(() => {
             const specOps = (b: number, hab: number, w: number) => b + hab + w;
-            // total column count varies: 11 collapsed, 13 expanded
-            const totalCols = specOpsExpanded ? 13 : 11;
+            // total column count: +1 for the Total Fab Balance column (12 collapsed, 14 expanded)
+            const totalCols = specOpsExpanded ? 14 : 12;
             const fabGroupSpan = specOpsExpanded ? 8 : 6;
+            const TOTAL_COL_TOOLTIP =
+              "Total Fabrication Balance = Release + Cutting + HG + RFI + NH + B + HAB + W + Quality (Q/TS).\n" +
+              "Assignment Balance is excluded because it overlaps Release Balance (Initial marks) and Cutting Balance (Authorized-JCNS marks) — including it would double-count those weights.";
 
             return (
           <table className="w-full text-xs border-collapse">
@@ -2307,6 +2347,14 @@ function FabCompletionReport() {
                 </th>
                 <th className="text-center px-2 py-1.5 font-semibold text-amber-700 dark:text-amber-400" colSpan={fabGroupSpan}>
                   Fabrication Stage Balance (MT) — C → HG → RFI → NH → {specOpsExpanded ? "B → HAB → W" : "Spec. Ops"} → Q/TS
+                </th>
+                {/* Total column — rowSpan=2 so it spans both header rows */}
+                <th
+                  className="text-right px-2 py-1.5 font-semibold min-w-[72px] leading-tight border-l-2 border-border/50 bg-emerald-50/60 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300 cursor-help"
+                  rowSpan={2}
+                  title={TOTAL_COL_TOOLTIP}
+                >
+                  Total Fab<br />Balance ⓘ<br /><span className="font-normal text-[10px] opacity-70">(excl. Assign.)</span>
                 </th>
               </tr>
               {/* Row 2: individual column labels */}
@@ -2390,6 +2438,9 @@ function FabCompletionReport() {
                             </td>
                           )}
                           <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.qualityCheckBalanceMt)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums font-medium border-l-2 border-border/50 bg-emerald-50/40 dark:bg-emerald-950/10 text-emerald-900 dark:text-emerald-200">
+                            {fmt(fabTotal(row))}
+                          </td>
                         </tr>
                       ))}
                       {/* Sub-type subtotal row */}
@@ -2424,6 +2475,9 @@ function FabCompletionReport() {
                           </td>
                         )}
                         <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.qualityCheckBalanceMt)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums font-semibold border-l-2 border-border/50 bg-emerald-50/40 dark:bg-emerald-950/10 text-emerald-900 dark:text-emerald-200">
+                          {fmt(sg.subtotal.totalFabBalanceMt)}
+                        </td>
                       </tr>
                     </>
                   ))}
@@ -2457,6 +2511,9 @@ function FabCompletionReport() {
                       </td>
                     )}
                     <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.qualityCheckBalanceMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums font-bold border-l-2 border-border/50 bg-emerald-50/60 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-200">
+                      {fmt(bom.subtotal.totalFabBalanceMt)}
+                    </td>
                   </tr>
                   {/* Cause footer — only for the Unknown group when visible */}
                   {bom.label === "Unknown" && unknownCauseFooter && (
@@ -2517,6 +2574,9 @@ function FabCompletionReport() {
                   </td>
                 )}
                 <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.qualityCheckBalanceMt)}</td>
+                <td className="px-2 py-2 text-right tabular-nums border-l-2 border-border/60 bg-emerald-100/60 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200">
+                  {fmt(grandTotal.totalFabBalanceMt)}
+                </td>
               </tr>
             </tfoot>
           </table>
