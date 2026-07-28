@@ -1,5 +1,5 @@
 import { useMemo, useState, Fragment } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
@@ -517,6 +517,15 @@ function DataViewContent() {
         </div>
       </div>
 
+      {/* OR Self-Consistency Panel */}
+      <div className="space-y-2">
+        <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4" />
+          Order Review — Cascade Identity Checks
+        </h3>
+        <OrderReviewConsistencyPanel />
+      </div>
+
       {/* Deletion audit log */}
       <div className="space-y-2">
         <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
@@ -949,20 +958,53 @@ function ReleaseBalanceContent() {
   );
 }
 
-// ─── Generated Order Review ──────────────────────────────────────────────────
+// ─── Generated Order Review (per-stage validation) ────────────────────────────
+// Activity sets for chain computation (per spec)
+const GEN_FAB_ACTS  = new Set(["C","HG","RFI","NH","B","HAB","W","Q","TS"]);
+const GEN_GALV_ACTS = new Set(["G","GB","Y"]);
 
-const GEN_FAB_PROG = new Set(["G", "GB", "Y"]);
-const GEN_FAB_BAL  = new Set(["C", "HG", "RFI", "NH", "B", "HAB", "W", "Q", "TS"]);
-const GEN_GALV_BAL = new Set(["C", "HG", "RFI", "NH", "B", "HAB", "W", "Q", "TS", "G", "GB"]);
-
-type GenStructRow = {
-  structure: string; subType: string | null; mfcBatch: string; markCount: number;
-  L: number; M: number; N: number; S: number; T: number; U: number; V: number;
-  orL: number | null; orS: number | null; hasDiff: boolean;
+type ConfTier = "high" | "medium" | "low";
+interface GenStageSpec {
+  key: string; label: string; shortLabel: string;
+  genField: keyof GenStructRowData;
+  orField: "releaseMt"|"fileFabMt"|"fileGalvMt"|"inspectionMt"|"fileDespatchMt"|null;
+  tier: ConfTier;
+}
+const GEN_STAGES: GenStageSpec[] = [
+  { key:"rel",  label:"Progress Release",     shortLabel:"Rel",  genField:"genProgRelease", orField:"releaseMt",     tier:"high"   },
+  { key:"fab",  label:"Progress Fabrication", shortLabel:"Fab",  genField:"genProgFab",    orField:"fileFabMt",     tier:"high"   },
+  { key:"galv", label:"Progress Galvanising", shortLabel:"Galv", genField:"genProgGalv",   orField:"fileGalvMt",    tier:"medium" },
+  { key:"insp", label:"Progress Inspection",  shortLabel:"Insp", genField:"genProgInsp",   orField:"inspectionMt",  tier:"low"    },
+  { key:"desp", label:"Progress Despatch",    shortLabel:"Desp", genField:"genProgDesp",   orField:"fileDespatchMt",tier:"low"    },
+];
+const TIER_CLS: Record<ConfTier,{badge:string;flag:string}> = {
+  high:   { badge:"bg-emerald-500/15 text-emerald-700 dark:text-emerald-400", flag:"text-red-600 dark:text-red-400 font-semibold" },
+  medium: { badge:"bg-amber-500/15 text-amber-700 dark:text-amber-400",       flag:"text-orange-600 dark:text-orange-400 font-semibold" },
+  low:    { badge:"bg-slate-200/60 text-slate-600 dark:bg-slate-700/40 dark:text-slate-400", flag:"text-slate-600 dark:text-slate-400 font-semibold" },
 };
+
+interface GenStructRowData {
+  structure: string; subType: string | null; mfcBatch: string; markCount: number;
+  isNew: boolean;            // releasePct < 5%
+  woOrderQtyMt: number | null;
+  genBalRelease: number;     // isInitialCutting marks weight (MT)
+  genProgRelease: number;    // woQty - genBalRelease (or sum(released) if no OR)
+  genBalFab: number;         // released marks in fab activities (MT)
+  genProgFab: number;        // genProgRelease - genBalFab
+  genBalGalv: number;        // released marks in galv activities (MT)
+  genProgGalv: number;       // genProgFab - genBalGalv
+  fgWt: number;              // blank-activity (FG Pending) marks weight (MT)
+  genProgInsp: number;       // genProgGalv - fgWt
+  totalWt: number;           // all marks weight (MT)
+  genProgDesp: number | null;// woQty - totalWt (null if no woQty)
+  // OR file comparison values
+  orProgRelease: number | null; orProgFab: number | null;
+  orProgGalv: number | null;    orProgInsp: number | null;
+  orProgDesp: number | null;
+}
 type GenProjGroup = {
-  project: string; releasePct: number; structures: GenStructRow[];
-  totals: { L: number; M: number; N: number; S: number; T: number; U: number; V: number };
+  project: string; releasePct: number; structures: GenStructRowData[];
+  totals: Record<string, number>;
 };
 
 function GeneratedOrderReviewContent() {
@@ -982,7 +1024,7 @@ function GeneratedOrderReviewContent() {
     return new Map(rows.map((r) => [`${r.project}|${r.structure}`, r]));
   }, [orderStatus]);
 
-  // Project-level OR summary: project → { releaseMt, woQtyMt }
+  // Project-level OR summary for release %
   const orProjSummary = useMemo(() => {
     const m = new Map<string, { releaseMt: number; woQtyMt: number }>();
     for (const r of orderStatus?.rows ?? []) {
@@ -997,117 +1039,146 @@ function GeneratedOrderReviewContent() {
 
   const projectGroups = useMemo((): GenProjGroup[] => {
     const records = allRecordsRaw ?? [];
-    // TLT / Structure marks only, with a real project code and a structure
+    // TLT / Structure marks only with a real project code and a structure
     const tlt = records.filter(
       (r) =>
         (r.category === "TLT" || (r.orderNature ?? "").trim().toUpperCase() === "STRUCTURE") &&
         r.job && r.job !== "(Unassigned)",
     );
 
-    // Group: project → structure → marks[]
     type Rec = typeof tlt[number];
     const byProj = new Map<string, Map<string, Rec[]>>();
     for (const r of tlt) {
       const struct = (r.structure ?? "").trim();
       if (!struct) continue;
-      if (!byProj.has(r.job)) byProj.set(r.job, new Map());
-      const sm = byProj.get(r.job)!;
+      if (!byProj.has(r.job!)) byProj.set(r.job!, new Map());
+      const sm = byProj.get(r.job!)!;
       if (!sm.has(struct)) sm.set(struct, []);
       sm.get(struct)!.push(r);
     }
 
     const groups: GenProjGroup[] = [];
     for (const [proj, structMap] of byProj) {
-      const orS      = orProjSummary.get(proj);
-      const projWoQty   = orS?.woQtyMt   ?? 0;
-      const projRelease = orS?.releaseMt  ?? 0;
+      const orS = orProjSummary.get(proj);
+      const projWoQty   = orS?.woQtyMt  ?? 0;
+      const projRelease = orS?.releaseMt ?? 0;
       const releasePct  = projWoQty > 0 ? (projRelease / projWoQty) * 100 : 0;
-      // Skip projects that are beyond the trust boundary (>= 5% released)
-      if (projWoQty > 0 && releasePct >= 5) continue;
+      // No longer filtering by 5% — include ALL structures present in WIP.
+      // releasePct is preserved as a "New project" badge only.
 
-      const structures: GenStructRow[] = [];
+      const structures: GenStructRowData[] = [];
       for (const [struct, marks] of structMap) {
         const actOf   = (r: Rec) => (r.activity ?? "").toUpperCase().trim();
         const sum     = (arr: Rec[]) => arr.reduce((s, r) => s + (r.balanceWt ?? 0), 0);
         const toMt    = (kg: number) => kg / 1000;
-        const nonInit = marks.filter((r) => !r.isInitialCutting);
 
-        const L = toMt(sum(nonInit));
-        const S = toMt(sum(marks.filter((r) =>  r.isInitialCutting)));
-        const M = toMt(sum(nonInit.filter((r) => GEN_FAB_PROG.has(actOf(r)))));
-        const T = toMt(sum(nonInit.filter((r) => GEN_FAB_BAL.has(actOf(r)))));
-        const N = toMt(sum(nonInit.filter((r) => actOf(r) === "Y")));
-        const U = toMt(sum(nonInit.filter((r) => GEN_GALV_BAL.has(actOf(r)))));
-        const V = toMt(sum(nonInit.filter((r) => actOf(r) !== "Y")));
+        const initCut  = marks.filter((r) => r.isInitialCutting);
+        const released = marks.filter((r) => !r.isInitialCutting);
+        // FG = released marks with blank activity ("FG Pending For Dispatch")
+        const fg       = released.filter((r) => !actOf(r));
 
-        const orRow = orByKey.get(`${proj}|${struct}`);
-        const orL   = orRow?.releaseMt       ?? null;
-        const orSv  = orRow?.fileBalReleaseMt ?? null;
-        const diffL = orL  != null ? Math.abs(L - orL)  : null;
-        const diffS = orSv != null ? Math.abs(S - orSv) : null;
+        const genBalRelease  = toMt(sum(initCut));
+        const orRow          = orByKey.get(`${proj}|${struct}`);
+        const woQty          = orRow?.woOrderQtyMt ?? null;
+        // genProgRelease requires woOrderQtyMt from OR file (per spec).
+        // Fall back to sum(released) when OR is unavailable.
+        const genProgRelease = woQty != null ? woQty - genBalRelease : toMt(sum(released));
+        const genBalFab      = toMt(sum(released.filter((r) => GEN_FAB_ACTS.has(actOf(r)))));
+        const genProgFab     = genProgRelease - genBalFab;
+        const genBalGalv     = toMt(sum(released.filter((r) => GEN_GALV_ACTS.has(actOf(r)))));
+        const genProgGalv    = genProgFab - genBalGalv;
+        const fgWt           = toMt(sum(fg));
+        const genProgInsp    = genProgGalv - fgWt;
+        const totalWt        = toMt(sum(marks));
+        const genProgDesp    = woQty != null ? woQty - totalWt : null;
 
         structures.push({
           structure: struct,
           subType: marks[0]?.towerSubType ?? null,
           mfcBatch: marks[0]?.mfcBatch ?? "Z",
           markCount: marks.length,
-          L, M, N, S, T, U, V,
-          orL, orS: orSv,
-          hasDiff: (diffL != null && diffL > 0.5) || (diffS != null && diffS > 0.5),
+          isNew: projWoQty > 0 && releasePct < 5,
+          woOrderQtyMt: woQty,
+          genBalRelease, genProgRelease,
+          genBalFab, genProgFab,
+          genBalGalv, genProgGalv,
+          fgWt, genProgInsp,
+          totalWt, genProgDesp,
+          orProgRelease: orRow?.releaseMt      ?? null,
+          orProgFab:     orRow?.fileFabMt      ?? null,
+          orProgGalv:    orRow?.fileGalvMt     ?? null,
+          orProgInsp:    orRow?.inspectionMt   ?? null,
+          orProgDesp:    orRow?.fileDespatchMt ?? null,
         });
       }
       structures.sort((a, b) => a.structure.localeCompare(b.structure));
 
-      const sf = (f: keyof Pick<GenStructRow, "L"|"M"|"N"|"S"|"T"|"U"|"V">) =>
-        structures.reduce((s, r) => s + r[f], 0);
+      const sf = (f: keyof GenStructRowData) =>
+        structures.reduce((s, r) => s + (typeof r[f] === "number" ? (r[f] as number) : 0), 0);
       groups.push({
         project: proj, releasePct, structures,
-        totals: { L: sf("L"), M: sf("M"), N: sf("N"), S: sf("S"), T: sf("T"), U: sf("U"), V: sf("V") },
+        totals: {
+          genProgRelease: sf("genProgRelease"), genProgFab: sf("genProgFab"),
+          genProgGalv: sf("genProgGalv"), genProgInsp: sf("genProgInsp"),
+          genProgDesp: structures.reduce((s, r) => s + (r.genProgDesp ?? 0), 0),
+        },
       });
     }
     groups.sort((a, b) => a.project.localeCompare(b.project));
     return groups;
   }, [allRecordsRaw, orByKey, orProjSummary]);
 
-  const grand = useMemo(() => ({
-    L: projectGroups.reduce((s, g) => s + g.totals.L, 0),
-    M: projectGroups.reduce((s, g) => s + g.totals.M, 0),
-    N: projectGroups.reduce((s, g) => s + g.totals.N, 0),
-    S: projectGroups.reduce((s, g) => s + g.totals.S, 0),
-    T: projectGroups.reduce((s, g) => s + g.totals.T, 0),
-    U: projectGroups.reduce((s, g) => s + g.totals.U, 0),
-    V: projectGroups.reduce((s, g) => s + g.totals.V, 0),
-  }), [projectGroups]);
+  // Per-stage match % summary (structures where |gen - or| <= 0.5 MT and OR is present)
+  const stageStats = useMemo(() => {
+    const allStructs = projectGroups.flatMap((g) => g.structures);
+    return GEN_STAGES.map((stage) => {
+      const withOr = allStructs.filter((s) => {
+        const or = s[stage.orField as keyof GenStructRowData];
+        return typeof or === "number" && or !== null;
+      });
+      const matching = withOr.filter((s) => {
+        const gen = s[stage.genField] as number | null;
+        const or  = s[stage.orField as keyof GenStructRowData] as number | null;
+        return gen != null && or != null && Math.abs(gen - or) <= 0.5;
+      });
+      return { key: stage.key, total: withOr.length, matching: matching.length };
+    });
+  }, [projectGroups]);
 
   const handleExport = () => {
     const rows = projectGroups.flatMap((pg) =>
       pg.structures.map((s) => ({
         project: pg.project, structure: s.structure,
         subType: s.subType ?? "", mfcBatch: s.mfcBatch, marks: s.markCount,
-        L: s.L, M: s.M, N: s.N, S: s.S, T: s.T, U: s.U, V: s.V,
-        orL: s.orL, orS: s.orS,
+        genProgRelease: s.genProgRelease, genProgFab: s.genProgFab,
+        genProgGalv: s.genProgGalv, genProgInsp: s.genProgInsp,
+        genProgDesp: s.genProgDesp,
+        orProgRelease: s.orProgRelease, orProgFab: s.orProgFab,
+        orProgGalv: s.orProgGalv, orProgInsp: s.orProgInsp,
+        orProgDesp: s.orProgDesp,
       })),
     );
     exportToXlsx(
       `generated_order_review_${new Date().toISOString().slice(0, 10)}.xlsx`,
       [
-        { label: "Project",                           field: "project"  },
-        { label: "Structure",                         field: "structure" },
-        { label: "Sub Type",                          field: "subType"  },
-        { label: "MFC Batch",                         field: "mfcBatch" },
-        { label: "Marks",                             field: "marks",   numeric: true },
-        { label: "Progress Release L [Gen] (MT)",     field: "L", numeric: true, decimals: 3, total: true },
-        { label: "Progress Fab M [Gen] (MT)",         field: "M", numeric: true, decimals: 3, total: true },
-        { label: "Progress Galv N [Gen] (MT)",        field: "N", numeric: true, decimals: 3, total: true },
-        { label: "Balance Release S [Gen] (MT)",      field: "S", numeric: true, decimals: 3, total: true },
-        { label: "Balance Fab T [Gen] (MT)",          field: "T", numeric: true, decimals: 3, total: true },
-        { label: "Balance Galv U [Gen] (MT)",         field: "U", numeric: true, decimals: 3, total: true },
-        { label: "Balance Insp V [Gen] (MT)",         field: "V", numeric: true, decimals: 3, total: true },
-        { label: "OR File – Progress Release L (MT)", field: "orL", numeric: true, decimals: 3 },
-        { label: "OR File – Balance Release S (MT)",  field: "orS", numeric: true, decimals: 3 },
+        { label: "Project",                                    field: "project"  },
+        { label: "Structure",                                  field: "structure" },
+        { label: "Sub Type",                                   field: "subType"  },
+        { label: "MFC Batch",                                  field: "mfcBatch" },
+        { label: "Marks",                                      field: "marks",   numeric: true },
+        { label: "Gen Progress Release (MT)",                  field: "genProgRelease", numeric: true, decimals: 3, total: true },
+        { label: "Gen Progress Fabrication (MT)",              field: "genProgFab",    numeric: true, decimals: 3, total: true },
+        { label: "Gen Progress Galvanising (MT)",              field: "genProgGalv",   numeric: true, decimals: 3, total: true },
+        { label: "Gen Progress Inspection (MT)",               field: "genProgInsp",   numeric: true, decimals: 3, total: true },
+        { label: "Gen Progress Despatch (MT)",                 field: "genProgDesp",   numeric: true, decimals: 3, total: true },
+        { label: "OR Progress Release (MT)",                   field: "orProgRelease", numeric: true, decimals: 3 },
+        { label: "OR Progress Fabrication (MT)",               field: "orProgFab",     numeric: true, decimals: 3 },
+        { label: "OR Progress Galvanising (MT)",               field: "orProgGalv",    numeric: true, decimals: 3 },
+        { label: "OR Progress Inspection (MT)",                field: "orProgInsp",    numeric: true, decimals: 3 },
+        { label: "OR Progress Despatch (MT)",                  field: "orProgDesp",    numeric: true, decimals: 3 },
       ] as XlsxColumn[],
       rows,
-      { sheetName: "Generated Order Review" },
+      { sheetName: "Generated OR" },
     );
   };
 
@@ -1142,11 +1213,10 @@ function GeneratedOrderReviewContent() {
             <span className="font-semibold uppercase tracking-wide text-xs text-amber-600">
               Generated — not imported data.
             </span>{" "}
-            Reconstructed from WIP for newly started projects (Progress Release &lt; 5% of WO Qty).
-            Accurate only while a project is new; beyond 5% released, completed marks have left WIP and
-            the figures would be wrong. This view is read-only and does not affect the imported Order
-            Review anywhere in the app. Where OR file values are available, differences &gt; 0.5 MT are
-            flagged.
+            Chain reconstructed from WIP for every structure present in both WIP and the Order Review.
+            Confidence varies by stage: Release and Fabrication reconstruct well across all projects;
+            Inspection and Despatch are indicative only (low confidence — completed marks have left WIP).
+            This view is strictly read-only and never affects imported data.
           </p>
         </div>
         {projectGroups.length > 0 && (
@@ -1157,17 +1227,54 @@ function GeneratedOrderReviewContent() {
         )}
       </div>
 
+      {/* Per-stage match % summary strip */}
+      {structCount > 0 && (
+        <div className="rounded-lg border bg-muted/20 p-4">
+          <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">
+            Match rate vs OR file (±0.5 MT tolerance, structures with OR data)
+          </div>
+          <div className="grid grid-cols-5 gap-3">
+            {GEN_STAGES.map((stage) => {
+              const stat = stageStats.find((s) => s.key === stage.key)!;
+              const pct  = stat.total > 0 ? (stat.matching / stat.total) * 100 : null;
+              const tierMeta = TIER_CLS[stage.tier];
+              return (
+                <div key={stage.key} className="space-y-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-semibold">{stage.shortLabel}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${tierMeta.badge}`}>
+                      {stage.tier}
+                    </span>
+                  </div>
+                  <div className="text-lg font-bold tabular-nums">
+                    {pct != null ? `${pct.toFixed(1)}%` : "—"}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {stat.matching}/{stat.total} structures
+                  </div>
+                  {/* Progress bar */}
+                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${pct != null && pct >= 90 ? "bg-emerald-500" : pct != null && pct >= 80 ? "bg-amber-500" : "bg-red-500"}`}
+                      style={{ width: `${pct ?? 0}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {projectGroups.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-muted-foreground text-sm">
-            No newly started projects — this view populates when a project's marks first appear in WIP
-            (Progress Release &lt; 5% of WO Qty).
+            No structures found. Select a WIP import with TLT records.
           </CardContent>
         </Card>
       ) : (
         <>
-          {/* Summary chips */}
-          <div className="flex gap-3 flex-wrap text-sm">
+          <div className="flex gap-3 flex-wrap text-sm items-center">
             <span className="rounded-md bg-muted px-3 py-1 font-medium">
               {projectGroups.length} project{projectGroups.length !== 1 ? "s" : ""}
             </span>
@@ -1176,6 +1283,15 @@ function GeneratedOrderReviewContent() {
             </span>
             <span className="rounded-md bg-muted px-3 py-1 font-medium">
               {markCount.toLocaleString()} marks
+            </span>
+            {/* Confidence legend */}
+            <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+              Confidence:
+              {(["high","medium","low"] as ConfTier[]).map((t) => (
+                <span key={t} className={`px-1.5 py-0.5 rounded font-medium ${TIER_CLS[t].badge}`}>
+                  {t}
+                </span>
+              ))}
             </span>
           </div>
 
@@ -1187,104 +1303,93 @@ function GeneratedOrderReviewContent() {
                     <tr className="bg-muted/60 border-b">
                       <th className="px-3 py-2 text-left font-semibold min-w-[80px]" rowSpan={2}>Project</th>
                       <th className="px-3 py-2 text-left font-semibold min-w-[90px]" rowSpan={2}>Structure</th>
-                      <th className="px-3 py-2 text-left font-semibold min-w-[70px]" rowSpan={2}>Sub Type</th>
-                      <th className="px-3 py-2 text-left font-semibold min-w-[55px]" rowSpan={2}>MFC</th>
-                      <th className="px-3 py-2 text-right font-semibold min-w-[50px]" rowSpan={2}>Marks</th>
-                      <th className="px-3 py-2 text-center font-semibold border-l text-blue-700 dark:text-blue-400" colSpan={3}>
-                        Progress (MT)
-                      </th>
-                      <th className="px-3 py-2 text-center font-semibold border-l text-orange-700 dark:text-orange-400" colSpan={4}>
-                        Balance (MT)
-                      </th>
+                      <th className="px-3 py-2 text-left font-semibold min-w-[50px]" rowSpan={2}>MFC</th>
+                      <th className="px-3 py-2 text-right font-semibold min-w-[45px]" rowSpan={2}>Marks</th>
+                      {GEN_STAGES.map((stage) => (
+                        <th key={stage.key} className="px-3 py-1.5 text-center font-semibold border-l min-w-[90px]">
+                          <div>{stage.shortLabel}</div>
+                          <div className={`text-[10px] font-normal px-1 py-0.5 rounded mt-0.5 inline-block ${TIER_CLS[stage.tier].badge}`}>
+                            {stage.tier}
+                          </div>
+                        </th>
+                      ))}
                     </tr>
-                    <tr className="bg-muted/60 border-b text-[11px]">
-                      <th className="px-3 py-1.5 text-right font-medium border-l min-w-[95px] text-blue-700 dark:text-blue-400">
-                        Release L
-                      </th>
-                      <th className="px-3 py-1.5 text-right font-medium min-w-[65px]">Fab M</th>
-                      <th className="px-3 py-1.5 text-right font-medium min-w-[65px]">Galv N</th>
-                      <th className="px-3 py-1.5 text-right font-medium border-l min-w-[95px] text-orange-700 dark:text-orange-400">
-                        Release S
-                      </th>
-                      <th className="px-3 py-1.5 text-right font-medium min-w-[65px]">Fab T</th>
-                      <th className="px-3 py-1.5 text-right font-medium min-w-[65px]">Galv U</th>
-                      <th className="px-3 py-1.5 text-right font-medium min-w-[65px]">Insp V</th>
+                    <tr className="bg-muted/40 border-b text-[10px] text-muted-foreground">
+                      {/* spacer cells for fixed cols */}
+                      <td colSpan={4} />
+                      {GEN_STAGES.map((stage) => (
+                        <td key={stage.key} className="px-3 py-1 border-l">
+                          <span className="text-foreground/60">gen / OR (MT)</span>
+                        </td>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {projectGroups.map((pg) => (
                       <Fragment key={pg.project}>
-                        {pg.structures.map((s, si) => (
-                          <tr
-                            key={s.structure}
-                            className={`hover:bg-muted/20 ${s.hasDiff ? "bg-amber-50/60 dark:bg-amber-950/20" : ""}`}
-                          >
-                            {si === 0 && (
-                              <td
-                                className="px-3 py-2 font-bold align-top border-r bg-muted/10"
-                                rowSpan={pg.structures.length + 1}
-                              >
-                                <span className="font-mono text-sm">{pg.project}</span>
-                                <br />
-                                <span className="text-muted-foreground font-normal text-[10px]">
-                                  {pg.structures.length} structure{pg.structures.length !== 1 ? "s" : ""}
-                                  {" · "}
-                                  {pct1(pg.releasePct)} released
-                                </span>
-                              </td>
-                            )}
-                            <td className="px-3 py-1.5 font-mono">{s.structure}</td>
-                            <td className="px-3 py-1.5 text-muted-foreground">{s.subType ?? "-"}</td>
-                            <td className="px-3 py-1.5 text-muted-foreground">{s.mfcBatch}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{s.markCount}</td>
-                            {/* Progress Release L — with OR comparison */}
-                            <td className="px-3 py-1.5 text-right tabular-nums border-l">
-                              <span className={s.orL != null && Math.abs(s.L - s.orL) > 0.5 ? "text-amber-600 font-semibold" : ""}>
-                                {mt3(s.L)}
-                              </span>
-                              {s.orL != null && (
-                                <span className="block text-[10px] text-muted-foreground leading-tight">
-                                  OR: {mt3(s.orL)}
-                                  {Math.abs(s.L - s.orL) > 0.5 && (
-                                    <AlertTriangle className="inline h-2.5 w-2.5 ml-0.5 text-amber-500" />
+                        {pg.structures.map((s, si) => {
+                          const anyDiff = GEN_STAGES.some((stage) => {
+                            const gen = s[stage.genField] as number | null;
+                            const or  = s[stage.orField as keyof GenStructRowData] as number | null;
+                            return gen != null && or != null && Math.abs(gen - or) > 0.5;
+                          });
+                          return (
+                            <tr key={s.structure} className={`hover:bg-muted/20 ${anyDiff ? "bg-amber-50/40 dark:bg-amber-950/15" : ""}`}>
+                              {si === 0 && (
+                                <td
+                                  className="px-3 py-2 font-bold align-top border-r bg-muted/10"
+                                  rowSpan={pg.structures.length + 1}
+                                >
+                                  <span className="font-mono text-sm">{pg.project}</span>
+                                  <br />
+                                  <span className="text-muted-foreground font-normal text-[10px]">
+                                    {pg.structures.length} struct{pg.structures.length !== 1 ? "s" : ""}
+                                    {" · "}{pct1(pg.releasePct)} rel.
+                                  </span>
+                                  {s.isNew && (
+                                    <span className="block mt-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">
+                                      NEW &lt;5%
+                                    </span>
                                   )}
-                                </span>
+                                </td>
                               )}
-                            </td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{mt3(s.M)}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{mt3(s.N)}</td>
-                            {/* Balance Release S — with OR comparison */}
-                            <td className="px-3 py-1.5 text-right tabular-nums border-l">
-                              <span className={s.orS != null && Math.abs(s.S - s.orS) > 0.5 ? "text-amber-600 font-semibold" : ""}>
-                                {mt3(s.S)}
-                              </span>
-                              {s.orS != null && (
-                                <span className="block text-[10px] text-muted-foreground leading-tight">
-                                  OR: {mt3(s.orS)}
-                                  {Math.abs(s.S - s.orS) > 0.5 && (
-                                    <AlertTriangle className="inline h-2.5 w-2.5 ml-0.5 text-amber-500" />
-                                  )}
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{mt3(s.T)}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{mt3(s.U)}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{mt3(s.V)}</td>
-                          </tr>
-                        ))}
+                              <td className="px-3 py-1.5 font-mono text-[11px]">{s.structure}</td>
+                              <td className="px-3 py-1.5 text-muted-foreground text-[10px]">{s.mfcBatch}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{s.markCount}</td>
+                              {GEN_STAGES.map((stage) => {
+                                const gen = s[stage.genField] as number | null;
+                                const or  = s[stage.orField as keyof GenStructRowData] as number | null;
+                                const diff = gen != null && or != null ? Math.abs(gen - or) : null;
+                                const flagged = diff != null && diff > 0.5;
+                                return (
+                                  <td key={stage.key} className="px-3 py-1.5 text-right tabular-nums border-l">
+                                    <span className={flagged ? TIER_CLS[stage.tier].flag : ""}>
+                                      {mt3(gen)}
+                                    </span>
+                                    {or != null && (
+                                      <span className="block text-[10px] text-muted-foreground leading-tight">
+                                        OR: {mt3(or)}
+                                        {flagged && (
+                                          <AlertTriangle className="inline h-2.5 w-2.5 ml-0.5 text-amber-500" />
+                                        )}
+                                      </span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
                         {/* Per-project subtotal */}
                         <tr className="bg-muted/40 font-semibold border-t border-b-2 text-[11px]">
-                          {/* project col already spanned */}
-                          <td className="px-3 py-1.5 text-muted-foreground uppercase tracking-wide" colSpan={4}>
+                          <td className="px-3 py-1.5 text-muted-foreground uppercase tracking-wide" colSpan={3}>
                             Subtotal
                           </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums border-l">{mt3(pg.totals.L)}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{mt3(pg.totals.M)}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{mt3(pg.totals.N)}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums border-l">{mt3(pg.totals.S)}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{mt3(pg.totals.T)}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{mt3(pg.totals.U)}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{mt3(pg.totals.V)}</td>
+                          {GEN_STAGES.map((stage) => (
+                            <td key={stage.key} className="px-3 py-1.5 text-right tabular-nums border-l">
+                              {mt3(pg.totals[stage.genField as string])}
+                            </td>
+                          ))}
                         </tr>
                       </Fragment>
                     ))}
@@ -1292,16 +1397,14 @@ function GeneratedOrderReviewContent() {
                   <tfoot>
                     <tr className="bg-muted/60 font-bold border-t-2 text-[11px]">
                       <td className="px-3 py-2 uppercase tracking-wide">Grand Total</td>
-                      <td colSpan={4} className="px-3 py-2 text-muted-foreground">
+                      <td colSpan={3} className="px-3 py-2 text-muted-foreground">
                         {projectGroups.length} projects · {structCount} structures · {markCount.toLocaleString()} marks
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums border-l">{mt3(grand.L)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{mt3(grand.M)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{mt3(grand.N)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums border-l">{mt3(grand.S)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{mt3(grand.T)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{mt3(grand.U)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{mt3(grand.V)}</td>
+                      {GEN_STAGES.map((stage) => (
+                        <td key={stage.key} className="px-3 py-2 text-right tabular-nums border-l">
+                          {mt3(projectGroups.reduce((s, g) => s + (g.totals[stage.genField as string] ?? 0), 0))}
+                        </td>
+                      ))}
                     </tr>
                   </tfoot>
                 </table>
@@ -1310,6 +1413,197 @@ function GeneratedOrderReviewContent() {
           </Card>
         </>
       )}
+    </div>
+  );
+}
+
+// ─── Order Review Self-Consistency Panel ─────────────────────────────────────
+// Checks the five cascade identities in the uploaded OR file per structure.
+// Read-only: never modifies any imported value.
+
+interface OrIdentitySpec {
+  key: string;
+  label: string;
+  lhsA: keyof import("@workspace/api-client-react").OrderStatusRow;
+  lhsB: keyof import("@workspace/api-client-react").OrderStatusRow;
+  rhs: keyof import("@workspace/api-client-react").OrderStatusRow;
+  informational?: boolean; // over-release is expected, label as info not error
+}
+// We can't use the import() trick in interface position — inline type instead
+const OR_IDENTITIES: Array<{
+  key: string; label: string;
+  a: keyof OrderStatusRow; b: keyof OrderStatusRow; c: keyof OrderStatusRow;
+  info?: boolean;
+}> = [
+  { key:"rel",  label:"ProgRelease + BalRelease = WO Order Qty",
+    a:"releaseMt",    b:"fileBalReleaseMt", c:"woOrderQtyMt", info:true },
+  { key:"fab",  label:"ProgFab + BalFab = ProgRelease",
+    a:"fileFabMt",   b:"balFabMt",         c:"releaseMt" },
+  { key:"galv", label:"ProgGalv + BalGalv = ProgFab",
+    a:"fileGalvMt",  b:"balGalvMt",        c:"fileFabMt" },
+  { key:"insp", label:"ProgInsp + implied BalInsp = ProgGalv",
+    a:"inspectionMt", b:"fileBalDespatchMt", c:"fileGalvMt" },
+  { key:"desp", label:"ProgDesp + BalDesp = ProgInsp",
+    a:"fileDespatchMt", b:"fileBalDespatchMt", c:"inspectionMt" },
+];
+
+function OrderReviewConsistencyPanel() {
+  const { data: orderStatus } = useGetOrderStatus({ query: { queryKey: getGetOrderStatusQueryKey() } });
+  const rows = orderStatus?.rows ?? [];
+
+  const checks = useMemo(() => {
+    // Identity 4 (insp): ProgInsp + BalInsp = ProgGalv — but BalInsp isn't stored.
+    // Instead we report structures where inspectionMt > fileGalvMt (implied BalInsp < 0).
+    const results = OR_IDENTITIES.map((id) => {
+      const TOL = 0.002;
+      type Offender = { project: string; structure: string; lhs: number; rhs: number; diff: number };
+      const offenders: Offender[] = [];
+      let satisfied = 0;
+      let withData  = 0;
+      let negBal    = 0;
+
+      for (const r of rows) {
+        const a = r[id.a] as number | null;
+        const c = r[id.c] as number | null;
+
+        // For identity "insp", we check: inspectionMt > fileGalvMt (implied negative balance)
+        if (id.key === "insp") {
+          const insp = r.inspectionMt;
+          const galv = r.fileGalvMt;
+          if (insp == null || galv == null) continue;
+          withData++;
+          const implied_lhs = insp; // ProgInsp
+          const implied_rhs = galv; // ProgGalv (should be >= ProgInsp)
+          const diff = implied_lhs - implied_rhs; // positive = BalInsp is negative
+          if (diff <= TOL) { satisfied++; } else {
+            negBal++;
+            offenders.push({ project: r.project, structure: r.structure, lhs: insp, rhs: galv, diff });
+          }
+          continue;
+        }
+
+        const b = r[id.b] as number | null;
+        if (a == null || c == null) continue;
+        const lhsVal = (a ?? 0) + (id.key !== "insp" ? (b ?? 0) : 0);
+        withData++;
+        const diff = Math.abs(lhsVal - (c ?? 0));
+        if (diff <= TOL) { satisfied++; }
+        else { offenders.push({ project: r.project, structure: r.structure, lhs: lhsVal, rhs: c ?? 0, diff }); }
+      }
+
+      offenders.sort((x, y) => y.diff - x.diff);
+      return { id, satisfied, withData, offenders: offenders.slice(0, 10), negBal };
+    });
+
+    // Negative balance flags (across all non-release columns)
+    const NEG_COLS: Array<{ key: keyof OrderStatusRow; label: string }> = [
+      { key:"balFabMt",          label:"Balance Fabrication" },
+      { key:"balGalvMt",         label:"Balance Galvanising" },
+      { key:"fileBalReleaseMt",  label:"Balance Release" },
+      { key:"fileBalDespatchMt", label:"Balance Despatch" },
+    ];
+    const negFlags: Array<{ col: string; count: number; worstStructure: string; worstVal: number }> = [];
+    for (const { key, label } of NEG_COLS) {
+      const getVal = (r: OrderStatusRow) => r[key] as number | null;
+      const neg = rows.filter((r) => getVal(r) != null && (getVal(r) as number) < 0);
+      if (neg.length > 0) {
+        const worst = neg.sort((a, b) => (getVal(a) as number) - (getVal(b) as number))[0];
+        negFlags.push({ col: label, count: neg.length, worstStructure: `${worst.project}/${worst.structure}`, worstVal: getVal(worst) as number });
+      }
+    }
+
+    return { results, negFlags };
+  }, [rows]);
+
+  if (rows.length === 0) {
+    return (
+      <div className="text-center p-8 text-sm text-muted-foreground border rounded-lg border-dashed">
+        No Order Review data loaded. Upload an Order Review file to see consistency checks.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Negative balance flags */}
+      {checks.negFlags.length > 0 && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-1">
+          <div className="flex items-center gap-2 text-sm font-bold text-destructive">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            Negative balance values (not physically possible)
+          </div>
+          {checks.negFlags.map((f) => (
+            <div key={f.col} className="text-xs text-muted-foreground ml-6">
+              <span className="font-medium text-foreground">{f.col}</span>: {f.count} structure{f.count !== 1 ? "s" : ""} — worst: {f.worstStructure} ({f.worstVal.toFixed(3)} MT)
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Identity check table */}
+      <div className="rounded-lg border overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/50">
+            <tr>
+              <th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider min-w-[280px]">Identity</th>
+              <th className="text-center px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Satisfied</th>
+              <th className="text-center px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Total</th>
+              <th className="text-center px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Rate</th>
+              <th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Worst offenders (top 3)</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {checks.results.map((check, i) => {
+              const rate = check.withData > 0 ? (check.satisfied / check.withData) * 100 : null;
+              const isGood = rate != null && rate >= 99;
+              const isInfo = check.id.info;
+              return (
+                <tr key={check.id.key} className={i % 2 === 0 ? "bg-background" : "bg-muted/20"}>
+                  <td className="px-3 py-2">
+                    <div className="font-medium">{check.id.label}</div>
+                    {isInfo && (
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        Over-release is expected — treat as informational.
+                      </div>
+                    )}
+                    {check.id.key === "insp" && (
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        Balance Inspection not stored — showing structures where ProgInsp &gt; ProgGalv.
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-center tabular-nums font-semibold">
+                    {check.satisfied}
+                  </td>
+                  <td className="px-3 py-2 text-center tabular-nums text-muted-foreground">
+                    {check.withData}
+                  </td>
+                  <td className="px-3 py-2 text-center tabular-nums">
+                    <span className={`font-bold ${isInfo ? "text-sky-600 dark:text-sky-400" : isGood ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}`}>
+                      {rate != null ? `${rate.toFixed(1)}%` : "—"}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground">
+                    {check.offenders.slice(0, 3).map((o) => (
+                      <div key={`${o.project}|${o.structure}`} className="text-[11px]">
+                        <span className="font-mono font-medium text-foreground">{o.project}/{o.structure}</span>
+                        {" "}Δ{o.diff.toFixed(3)} MT
+                      </div>
+                    ))}
+                    {check.offenders.length === 0 && check.withData > 0 && (
+                      <span className="text-emerald-600 dark:text-emerald-400">✓ All pass</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Tolerance: ±0.002 MT. Read-only — no imported values are changed.
+        {rows.length > 0 && ` Covering ${rows.length} structures from the latest Order Review.`}
+      </p>
     </div>
   );
 }

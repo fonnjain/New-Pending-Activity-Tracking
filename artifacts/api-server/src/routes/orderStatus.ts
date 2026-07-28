@@ -75,6 +75,7 @@ router.get("/order-status", async (_req, res): Promise<void> => {
       releaseMt: r.releaseMt,
       fileFabMt: r.fabMt,
       fileGalvMt: r.galvMt,
+      inspectionMt: r.inspectionMt,
       fileDespatchMt: r.fileDespatchMt,
       fileBalReleaseMt: r.fileBalReleaseMt,
       fileBalDespatchMt: r.fileBalDespatchMt,

@@ -127,7 +127,7 @@ const REPORT_TYPES: { id: ReportType; name: string; description: string }[] = [
     id: "fabcompletion",
     name: "Fabrication Report – Project Completion - TLT",
     description:
-      "TLT-only completion breakdown by Project and BOM Label: Release Balance, Assignment Balance, Cutting, and Quality Check weights in MT.",
+      "TLT-only completion breakdown by Project and BOM Label: Release, Assignment, and per-activity Fabrication Stage balances (C, HG, RFI, NH, B, HAB, W, Q/TS) in MT.",
   },
   {
     id: "dailymov",
@@ -1892,18 +1892,27 @@ type FabSums = {
   releaseBalanceCalcMt: number;
   assignmentBalanceCalcMt: number;
   cuttingBalanceMt: number;
+  hgBalanceMt: number;
+  rfiBalanceMt: number;
+  nhBalanceMt: number;
+  bBalanceMt: number;
+  habBalanceMt: number;
+  wBalanceMt: number;
   qualityCheckBalanceMt: number;
 };
 
 function sumRows(rs: FabricationProjectCompletionRow[]): FabSums {
   return {
-    releaseBalanceCalcMt: rs.reduce((s, r) => s + r.releaseBalanceCalcMt, 0),
-    assignmentBalanceCalcMt: rs.reduce(
-      (s, r) => s + r.assignmentBalanceCalcMt,
-      0,
-    ),
-    cuttingBalanceMt: rs.reduce((s, r) => s + r.cuttingBalanceMt, 0),
-    qualityCheckBalanceMt: rs.reduce((s, r) => s + r.qualityCheckBalanceMt, 0),
+    releaseBalanceCalcMt:    rs.reduce((s, r) => s + r.releaseBalanceCalcMt,    0),
+    assignmentBalanceCalcMt: rs.reduce((s, r) => s + r.assignmentBalanceCalcMt, 0),
+    cuttingBalanceMt:        rs.reduce((s, r) => s + r.cuttingBalanceMt,        0),
+    hgBalanceMt:             rs.reduce((s, r) => s + r.hgBalanceMt,             0),
+    rfiBalanceMt:            rs.reduce((s, r) => s + r.rfiBalanceMt,            0),
+    nhBalanceMt:             rs.reduce((s, r) => s + r.nhBalanceMt,             0),
+    bBalanceMt:              rs.reduce((s, r) => s + r.bBalanceMt,              0),
+    habBalanceMt:            rs.reduce((s, r) => s + r.habBalanceMt,            0),
+    wBalanceMt:              rs.reduce((s, r) => s + r.wBalanceMt,              0),
+    qualityCheckBalanceMt:   rs.reduce((s, r) => s + r.qualityCheckBalanceMt,   0),
   };
 }
 
@@ -2032,13 +2041,19 @@ function FabProjectCheckboxFilter({
 
 // Excel columns include Sub-Type Group between BOM Label and Project.
 const FAB_COMP_COLUMNS: XlsxColumn[] = [
-  { label: "BOM Label", field: "bomLabel" },
-  { label: "Sub-Type Group", field: "subTypeGroup" },
-  { label: "Project", field: "project" },
-  { label: "Release Balance Calc (MT)", field: "releaseBalanceCalcMt", numeric: true, decimals: 3, total: true },
-  { label: "Assignment Balance Calc (MT)", field: "assignmentBalanceCalcMt", numeric: true, decimals: 3, total: true },
-  { label: "Cutting Balance (MT)", field: "cuttingBalanceMt", numeric: true, decimals: 3, total: true },
-  { label: "Quality Check Balance (MT)", field: "qualityCheckBalanceMt", numeric: true, decimals: 3, total: true },
+  { label: "BOM Label",                       field: "bomLabel" },
+  { label: "Sub-Type Group",                  field: "subTypeGroup" },
+  { label: "Project",                         field: "project" },
+  { label: "Release Balance Calc (MT)",        field: "releaseBalanceCalcMt",    numeric: true, decimals: 3, total: true },
+  { label: "Assignment Balance Calc (MT)",     field: "assignmentBalanceCalcMt", numeric: true, decimals: 3, total: true },
+  { label: "Cutting Balance — C (MT)",         field: "cuttingBalanceMt",        numeric: true, decimals: 3, total: true },
+  { label: "HG Balance (MT)",                  field: "hgBalanceMt",             numeric: true, decimals: 3, total: true },
+  { label: "RFI Balance (MT)",                 field: "rfiBalanceMt",            numeric: true, decimals: 3, total: true },
+  { label: "NH Balance (MT)",                  field: "nhBalanceMt",             numeric: true, decimals: 3, total: true },
+  { label: "B Balance (MT)",                   field: "bBalanceMt",              numeric: true, decimals: 3, total: true },
+  { label: "HAB Balance (MT)",                 field: "habBalanceMt",            numeric: true, decimals: 3, total: true },
+  { label: "W Balance (MT)",                   field: "wBalanceMt",              numeric: true, decimals: 3, total: true },
+  { label: "Quality Check — Q+TS (MT)",        field: "qualityCheckBalanceMt",   numeric: true, decimals: 3, total: true },
 ];
 
 function FabCompletionReport() {
@@ -2080,7 +2095,7 @@ function FabCompletionReport() {
     [jobFilteredRows, selectedProjects],
   );
 
-  // Per-project Unknown combined total (sum of all 4 measures).
+  // Per-project Unknown combined total (sum of all measures).
   // Threshold: < 1.0 MT → hide that project's Unknown rows entirely;
   // >= 1.0 MT → show. If ALL projects are < 1 MT the Unknown group disappears.
   const UNKNOWN_THRESHOLD_MT = 1.0;
@@ -2093,6 +2108,12 @@ function FabCompletionReport() {
         r.releaseBalanceCalcMt +
         r.assignmentBalanceCalcMt +
         r.cuttingBalanceMt +
+        r.hgBalanceMt +
+        r.rfiBalanceMt +
+        r.nhBalanceMt +
+        r.bBalanceMt +
+        r.habBalanceMt +
+        r.wBalanceMt +
         r.qualityCheckBalanceMt;
       unknownCombined.set(r.project, (unknownCombined.get(r.project) ?? 0) + combined);
     }
@@ -2145,11 +2166,17 @@ function FabCompletionReport() {
   function handleExportExcel() {
     const date = new Date().toISOString().slice(0, 10);
 
-    const subtotalValues = (s: { releaseBalanceCalcMt: number; assignmentBalanceCalcMt: number; cuttingBalanceMt: number; qualityCheckBalanceMt: number }) => ({
-      releaseBalanceCalcMt: s.releaseBalanceCalcMt,
+    const subtotalValues = (s: FabSums) => ({
+      releaseBalanceCalcMt:    s.releaseBalanceCalcMt,
       assignmentBalanceCalcMt: s.assignmentBalanceCalcMt,
-      cuttingBalanceMt: s.cuttingBalanceMt,
-      qualityCheckBalanceMt: s.qualityCheckBalanceMt,
+      cuttingBalanceMt:        s.cuttingBalanceMt,
+      hgBalanceMt:             s.hgBalanceMt,
+      rfiBalanceMt:            s.rfiBalanceMt,
+      nhBalanceMt:             s.nhBalanceMt,
+      bBalanceMt:              s.bBalanceMt,
+      habBalanceMt:            s.habBalanceMt,
+      wBalanceMt:              s.wBalanceMt,
+      qualityCheckBalanceMt:   s.qualityCheckBalanceMt,
     });
 
     // Summary sheet: one section per sub-group. Each section's summaryRows
@@ -2253,27 +2280,43 @@ function FabCompletionReport() {
         <div className="overflow-auto">
           <table className="w-full text-xs border-collapse">
             <thead>
-              <tr className="border-b border-border bg-muted/50">
-                <th className="text-left px-3 py-2 font-semibold whitespace-nowrap">
+              {/* Row 1: group spans */}
+              <tr className="border-b border-border/50 bg-muted/60">
+                <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
                   BOM Label
                 </th>
-                <th className="text-left px-3 py-2 font-semibold whitespace-nowrap">
+                <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
                   Sub-Type
                 </th>
-                <th className="text-left px-3 py-2 font-semibold whitespace-nowrap">
+                <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
                   Project
                 </th>
-                <th className="text-right px-3 py-2 font-semibold whitespace-nowrap">
-                  Release Balance Calc (MT)
+                <th className="text-center px-2 py-1.5 font-semibold border-r border-border/30 text-indigo-700 dark:text-indigo-400" colSpan={2}>
+                  Pre-Production (MT)
                 </th>
-                <th className="text-right px-3 py-2 font-semibold whitespace-nowrap">
-                  Assignment Balance Calc (MT)
+                <th className="text-center px-2 py-1.5 font-semibold text-amber-700 dark:text-amber-400" colSpan={8}>
+                  Fabrication Stage Balance (MT) — C → HG → RFI → NH → B → HAB → W → Q/TS
                 </th>
-                <th className="text-right px-3 py-2 font-semibold whitespace-nowrap">
-                  Cutting Balance (MT)
+              </tr>
+              {/* Row 2: individual column labels */}
+              <tr className="border-b-2 border-border bg-muted/40">
+                <th className="text-right px-2 py-1.5 font-medium min-w-[72px] leading-tight text-indigo-700 dark:text-indigo-400">
+                  Release<br />Bal. Calc
                 </th>
-                <th className="text-right px-3 py-2 font-semibold whitespace-nowrap">
-                  Quality Check Balance (MT)
+                <th className="text-right px-2 py-1.5 font-medium min-w-[72px] leading-tight border-r border-border/30 text-indigo-700 dark:text-indigo-400">
+                  Assign.<br />Bal. Calc
+                </th>
+                <th className="text-right px-2 py-1.5 font-medium min-w-[52px] leading-tight text-amber-700 dark:text-amber-400">
+                  Cutting<br />(C)
+                </th>
+                <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">HG</th>
+                <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">RFI</th>
+                <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">NH</th>
+                <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">B</th>
+                <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">HAB</th>
+                <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">W</th>
+                <th className="text-right px-2 py-1.5 font-medium min-w-[56px] leading-tight text-amber-700 dark:text-amber-400">
+                  Quality<br />(Q/TS)
                 </th>
               </tr>
             </thead>
@@ -2285,29 +2328,31 @@ function FabCompletionReport() {
                       {sg.rows.map((row, rowIdx) => (
                         <tr
                           key={`${row.bomLabel}-${row.subTypeGroup}-${row.project}`}
-                          className="border-b border-border/50 hover:bg-muted/30"
+                          className="border-b border-border/40 hover:bg-muted/30"
                         >
                           {/* BOM Label only in first cell of the whole BOM group */}
-                          <td className="px-3 py-1.5 text-muted-foreground">
+                          <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
                             {sgIdx === 0 && rowIdx === 0 ? row.bomLabel : ""}
                           </td>
                           {/* Sub-Type only in first row of each sub-group */}
-                          <td className="px-3 py-1.5 text-muted-foreground">
+                          <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
                             {rowIdx === 0 ? row.subTypeGroup : ""}
                           </td>
-                          <td className="px-3 py-1.5">{row.project}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">
+                          <td className="px-3 py-1.5 font-medium border-r border-border/20">{row.project}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums text-indigo-800 dark:text-indigo-300">
                             {fmt(row.releaseBalanceCalcMt)}
                           </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">
+                          <td className="px-2 py-1.5 text-right tabular-nums border-r border-border/20 text-indigo-800 dark:text-indigo-300">
                             {fmt(row.assignmentBalanceCalcMt)}
                           </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">
-                            {fmt(row.cuttingBalanceMt)}
-                          </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">
-                            {fmt(row.qualityCheckBalanceMt)}
-                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.cuttingBalanceMt)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.hgBalanceMt)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.rfiBalanceMt)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.nhBalanceMt)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.bBalanceMt)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.habBalanceMt)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.wBalanceMt)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.qualityCheckBalanceMt)}</td>
                         </tr>
                       ))}
                       {/* Sub-type subtotal row */}
@@ -2315,23 +2360,25 @@ function FabCompletionReport() {
                         key={`${bom.label}-${sg.subType}-subtotal`}
                         className="border-b border-border bg-muted/25 font-medium"
                       >
-                        <td className="px-3 py-1.5" />
-                        <td className="px-3 py-1.5 text-muted-foreground italic">
+                        <td className="px-3 py-1.5 border-r border-border/20" />
+                        <td className="px-3 py-1.5 text-muted-foreground italic border-r border-border/20">
                           {sg.subType} Subtotal
                         </td>
-                        <td className="px-3 py-1.5" />
-                        <td className="px-3 py-1.5 text-right tabular-nums">
+                        <td className="px-3 py-1.5 border-r border-border/20" />
+                        <td className="px-2 py-1.5 text-right tabular-nums text-indigo-800 dark:text-indigo-300">
                           {fmt(sg.subtotal.releaseBalanceCalcMt)}
                         </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">
+                        <td className="px-2 py-1.5 text-right tabular-nums border-r border-border/20 text-indigo-800 dark:text-indigo-300">
                           {fmt(sg.subtotal.assignmentBalanceCalcMt)}
                         </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">
-                          {fmt(sg.subtotal.cuttingBalanceMt)}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">
-                          {fmt(sg.subtotal.qualityCheckBalanceMt)}
-                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.cuttingBalanceMt)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.hgBalanceMt)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.rfiBalanceMt)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.nhBalanceMt)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.bBalanceMt)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.habBalanceMt)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.wBalanceMt)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.qualityCheckBalanceMt)}</td>
                       </tr>
                     </>
                   ))}
@@ -2340,29 +2387,29 @@ function FabCompletionReport() {
                     key={`${bom.label}-total`}
                     className="border-b-2 border-border bg-muted/40 font-semibold"
                   >
-                    <td className="px-3 py-1.5">{bom.label}</td>
-                    <td className="px-3 py-1.5 text-muted-foreground">
-                      Total
-                    </td>
-                    <td className="px-3 py-1.5" />
-                    <td className="px-3 py-1.5 text-right tabular-nums">
+                    <td className="px-3 py-1.5 border-r border-border/20">{bom.label}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">Total</td>
+                    <td className="px-3 py-1.5 border-r border-border/20" />
+                    <td className="px-2 py-1.5 text-right tabular-nums text-indigo-800 dark:text-indigo-300">
                       {fmt(bom.subtotal.releaseBalanceCalcMt)}
                     </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">
+                    <td className="px-2 py-1.5 text-right tabular-nums border-r border-border/20 text-indigo-800 dark:text-indigo-300">
                       {fmt(bom.subtotal.assignmentBalanceCalcMt)}
                     </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">
-                      {fmt(bom.subtotal.cuttingBalanceMt)}
-                    </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">
-                      {fmt(bom.subtotal.qualityCheckBalanceMt)}
-                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.cuttingBalanceMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.hgBalanceMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.rfiBalanceMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.nhBalanceMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.bBalanceMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.habBalanceMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.wBalanceMt)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.qualityCheckBalanceMt)}</td>
                   </tr>
                   {/* Cause footer — only for the Unknown group when visible */}
                   {bom.label === "Unknown" && unknownCauseFooter && (
                     <tr key="unknown-cause-footer">
                       <td
-                        colSpan={7}
+                        colSpan={13}
                         className="px-3 py-2 text-xs text-muted-foreground border-b border-border bg-muted/10"
                       >
                         <span className="font-medium text-foreground">
@@ -2392,21 +2439,23 @@ function FabCompletionReport() {
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-border bg-muted font-bold">
-                <td className="px-3 py-2" colSpan={3}>
+                <td className="px-3 py-2 border-r border-border/20" colSpan={3}>
                   Grand Total
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td className="px-2 py-2 text-right tabular-nums text-indigo-800 dark:text-indigo-300">
                   {fmt(grandTotal.releaseBalanceCalcMt)}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">
+                <td className="px-2 py-2 text-right tabular-nums border-r border-border/20 text-indigo-800 dark:text-indigo-300">
                   {fmt(grandTotal.assignmentBalanceCalcMt)}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {fmt(grandTotal.cuttingBalanceMt)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {fmt(grandTotal.qualityCheckBalanceMt)}
-                </td>
+                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.cuttingBalanceMt)}</td>
+                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.hgBalanceMt)}</td>
+                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.rfiBalanceMt)}</td>
+                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.nhBalanceMt)}</td>
+                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.bBalanceMt)}</td>
+                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.habBalanceMt)}</td>
+                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.wBalanceMt)}</td>
+                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.qualityCheckBalanceMt)}</td>
               </tr>
             </tfoot>
           </table>

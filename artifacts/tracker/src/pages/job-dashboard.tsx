@@ -527,9 +527,11 @@ function JobDashboardContent() {
             <span className="font-mono">{reconciliationWarning.bucketTotalMt.toFixed(3)} MT</span>{" "}
             but Total Balance is{" "}
             <span className="font-mono">{reconciliationWarning.totalMt.toFixed(3)} MT</span>{" "}
-            — shortfall{" "}
-            <span className="font-mono">{Math.abs(reconciliationWarning.shortfallMt).toFixed(3)} MT</span>.
-            Some marks may have an unrecognised activity code and are not counted in any bucket.
+            — difference{" "}
+            <span className="font-mono">{Math.abs(reconciliationWarning.shortfallMt).toFixed(3)} MT</span>.{" "}
+            {reconciliationWarning.shortfallMt > 0
+              ? "Some marks are counted in Total Balance but not in any phase bucket."
+              : "Phase buckets exceed Total Balance."}
           </p>
         </div>
       )}

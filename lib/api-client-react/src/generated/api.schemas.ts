@@ -1778,6 +1778,11 @@ export interface OrderStatusRow {
      */
   fileGalvMt: number | null;
   /**
+     * Progress Inspection MT from the Order Review file (col O).
+     * @nullable
+     */
+  inspectionMt: number | null;
+  /**
      * Despatch MT as stated in the Order Review file.
      * @nullable
      */
@@ -2201,9 +2206,21 @@ export interface FabricationProjectCompletionRow {
   releaseBalanceCalcMt: number;
   /** Assignment Balance Calculated (JCNS + blank contractor), in MT. */
   assignmentBalanceCalcMt: number;
-  /** Cutting Balance (activity C), in MT. */
+  /** Cutting Balance (activity C, non-initial), in MT. */
   cuttingBalanceMt: number;
-  /** Quality Check Balance (RFI,NH,B,HAB,W,Q,TS), in MT. */
+  /** Hot-Dip Galvanising / Hole-Galv balance (activity HG), in MT. */
+  hgBalanceMt: number;
+  /** RFI balance (activity RFI), in MT. */
+  rfiBalanceMt: number;
+  /** NH balance (activity NH), in MT. */
+  nhBalanceMt: number;
+  /** Bending balance (activity B), in MT. */
+  bBalanceMt: number;
+  /** HAB balance (activity HAB), in MT. */
+  habBalanceMt: number;
+  /** Welding balance (activity W), in MT. */
+  wBalanceMt: number;
+  /** Quality Check balance (Q + TS only), in MT. */
   qualityCheckBalanceMt: number;
 }
 
@@ -2211,6 +2228,12 @@ export interface FabricationProjectCompletionTotals {
   releaseBalanceCalcMt: number;
   assignmentBalanceCalcMt: number;
   cuttingBalanceMt: number;
+  hgBalanceMt: number;
+  rfiBalanceMt: number;
+  nhBalanceMt: number;
+  bBalanceMt: number;
+  habBalanceMt: number;
+  wBalanceMt: number;
   qualityCheckBalanceMt: number;
 }
 

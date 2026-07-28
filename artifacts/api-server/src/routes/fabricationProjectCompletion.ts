@@ -11,11 +11,11 @@ import { desc, eq, and, sql, or } from "drizzle-orm";
 import { bundleActivitySet } from "@workspace/domain";
 import { loadLatestOrderReview } from "../lib/dispatch";
 
-// Quality Check activities = TLT_FAB_PENDING_QUALITY bundle (RFI…TS).
-// This is the sub-bundle that EXCLUDES the cutting-prep steps C and HG.
-// TLT_FABRICATION = slice(0,GALV) = C+HG+RFI…TS; TLT_FAB_PENDING_QUALITY = slice(RFI,GALV).
-// Reuses the canonical bundle definition — do NOT redefine a local list.
-const QC_ACTS = [...(bundleActivitySet("TLT_FAB_PENDING_QUALITY") ?? [])]; // uppercased
+// Individual fab activities tracked between Cutting and Quality Check.
+// Order mirrors the TLT process sequence: C → HG → RFI → NH → B → HAB → W → Q → TS
+// Quality Check = Q + TS only (the final quality/test step).
+const FAB_MID_ACTS = ["HG", "RFI", "NH", "B", "HAB", "W", "Q", "TS"] as const;
+type FabMidAct = (typeof FAB_MID_ACTS)[number];
 
 // BOM label canonical display order for sorting.
 const BOM_ORDER = ["Proto", "Mass", "Pre", "Mixed", "Unknown"];
@@ -114,7 +114,13 @@ router.get(
       releaseBalanceCalcMt: 0,
       assignmentBalanceCalcMt: 0,
       cuttingBalanceMt: 0,
-      qualityCheckBalanceMt: 0,
+      hgBalanceMt: 0,
+      rfiBalanceMt: 0,
+      nhBalanceMt: 0,
+      bBalanceMt: 0,
+      habBalanceMt: 0,
+      wBalanceMt: 0,
+      qualityCheckBalanceMt: 0, // Q + TS only
     };
 
     // 1. Find the latest WIP import.
@@ -130,21 +136,20 @@ router.get(
     }
 
     // 2. Run all data queries in parallel.
-    const qualityFilter = or(
-      ...QC_ACTS.map((a) => eq(sql`upper(${recordPoolTable.activity})`, a)),
+    // Per-activity balance for HG, RFI, NH, B, HAB, W, Q, TS (one query, grouped by activity).
+    const fabMidFilter = or(
+      ...FAB_MID_ACTS.map((a) => eq(sql`upper(${recordPoolTable.activity})`, a)),
     );
 
     const [
       tltStructures,
       cuttingAgg,
-      qualityAgg,
+      fabMidAgg,
       releaseRows,
       assignmentRows,
       orderReview,
     ] = await Promise.all([
       // TLT (project, structure) pairs + dominant tower sub type for the latest import.
-      // max() picks one value per structure; in practice all marks in a structure share
-      // the same tower sub type so any pick is correct.
       db
         .select({
           project: recordPoolTable.job,
@@ -165,8 +170,7 @@ router.get(
         )
         .groupBy(recordPoolTable.job, recordPoolTable.structure),
 
-      // Cutting balance (activity = C, excluding Initial marks which are counted
-      // as Release Balance) per (project, structure).
+      // Cutting balance (activity = C, excluding Initial marks).
       db
         .select({
           project: recordPoolTable.job,
@@ -189,11 +193,13 @@ router.get(
         )
         .groupBy(recordPoolTable.job, recordPoolTable.structure),
 
-      // Quality check balance (RFI,NH,B,HAB,W,Q,TS) per (project, structure).
+      // Per-activity balance for HG, RFI, NH, B, HAB, W, Q, TS — one row per
+      // (project, structure, activity). Split into individual maps after.
       db
         .select({
           project: recordPoolTable.job,
           structure: recordPoolTable.structure,
+          activity: sql<string>`upper(${recordPoolTable.activity})`,
           balanceMt:
             sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
         })
@@ -206,13 +212,16 @@ router.get(
           and(
             eq(importRowsTable.importId, latestImport.id),
             eq(recordPoolTable.category, "TLT"),
-            qualityFilter,
+            fabMidFilter,
           ),
         )
-        .groupBy(recordPoolTable.job, recordPoolTable.structure),
+        .groupBy(
+          recordPoolTable.job,
+          recordPoolTable.structure,
+          sql`upper(${recordPoolTable.activity})`,
+        ),
 
-      // Release balance (JCNS + Initial) — scoped to the same import as every
-      // other figure so cross-import contamination is impossible.
+      // Release balance (JCNS + Initial) — scoped to this import.
       db
         .select()
         .from(releaseBalanceWipTable)
@@ -244,12 +253,17 @@ router.get(
         r.balanceMt,
       ]),
     );
-    const qualityMap = new Map<string, number>(
-      qualityAgg.map((r) => [
-        structureKey(r.project, r.structure),
-        r.balanceMt,
-      ]),
+    // Per-activity maps for HG, RFI, NH, B, HAB, W, Q, TS.
+    const actMaps = new Map<FabMidAct, Map<string, number>>(
+      FAB_MID_ACTS.map((a) => [a, new Map<string, number>()]),
     );
+    for (const r of fabMidAgg) {
+      const act = r.activity as FabMidAct;
+      if (actMaps.has(act)) {
+        actMaps.get(act)!.set(structureKey(r.project, r.structure), r.balanceMt);
+      }
+    }
+    const actMap = (a: FabMidAct, key: string) => actMaps.get(a)?.get(key) ?? 0;
 
     // 4. Build BOM label map from Order Review rows.
     // For each (project, structure), collect the set of distinct non-null bomType
@@ -276,7 +290,7 @@ router.get(
       return "Mixed";
     }
 
-    // 5. Group by (bomLabel, subTypeGroup, project), summing all 4 measures.
+    // 5. Group by (bomLabel, subTypeGroup, project), summing all measures.
     // Also track Unknown structures per project for cause classification.
     const grouped = new Map<
       string,
@@ -287,7 +301,13 @@ router.get(
         releaseBalanceCalcMt: number;
         assignmentBalanceCalcMt: number;
         cuttingBalanceMt: number;
-        qualityCheckBalanceMt: number;
+        hgBalanceMt: number;
+        rfiBalanceMt: number;
+        nhBalanceMt: number;
+        bBalanceMt: number;
+        habBalanceMt: number;
+        wBalanceMt: number;
+        qualityCheckBalanceMt: number; // Q + TS only
       }
     >();
     // unknownByProject: project → deduplicated list of WIP structure codes with no OR match
@@ -298,26 +318,43 @@ router.get(
       const subTypeGroup = classifySubType(towerSubType);
       const gKey = `${project}\u0001${bomLabel}\u0001${subTypeGroup}`;
 
-      const relMt = releaseMap.get(structureKey(project, structure)) ?? 0;
-      const assignMt = assignmentMap.get(structureKey(project, structure)) ?? 0;
-      const cutMt = cuttingMap.get(structureKey(project, structure)) ?? 0;
-      const qcMt = qualityMap.get(structureKey(project, structure)) ?? 0;
+      const key = structureKey(project, structure);
+      const relMt    = releaseMap.get(key) ?? 0;
+      const assignMt = assignmentMap.get(key) ?? 0;
+      const cutMt    = cuttingMap.get(key) ?? 0;
+      const hgMt     = actMap("HG",  key);
+      const rfiMt    = actMap("RFI", key);
+      const nhMt     = actMap("NH",  key);
+      const bMt      = actMap("B",   key);
+      const habMt    = actMap("HAB", key);
+      const wMt      = actMap("W",   key);
+      const qcMt     = actMap("Q",   key) + actMap("TS", key); // Quality Check = Q + TS
 
       const existing = grouped.get(gKey);
       if (!existing) {
         grouped.set(gKey, {
-          project,
-          bomLabel,
-          subTypeGroup,
+          project, bomLabel, subTypeGroup,
           releaseBalanceCalcMt: relMt,
           assignmentBalanceCalcMt: assignMt,
           cuttingBalanceMt: cutMt,
+          hgBalanceMt: hgMt,
+          rfiBalanceMt: rfiMt,
+          nhBalanceMt: nhMt,
+          bBalanceMt: bMt,
+          habBalanceMt: habMt,
+          wBalanceMt: wMt,
           qualityCheckBalanceMt: qcMt,
         });
       } else {
         existing.releaseBalanceCalcMt += relMt;
         existing.assignmentBalanceCalcMt += assignMt;
         existing.cuttingBalanceMt += cutMt;
+        existing.hgBalanceMt += hgMt;
+        existing.rfiBalanceMt += rfiMt;
+        existing.nhBalanceMt += nhMt;
+        existing.bBalanceMt += bMt;
+        existing.habBalanceMt += habMt;
+        existing.wBalanceMt += wMt;
         existing.qualityCheckBalanceMt += qcMt;
       }
 
@@ -340,12 +377,16 @@ router.get(
     // 7. Compute grand totals.
     const totals = rows.reduce(
       (acc, r) => ({
-        releaseBalanceCalcMt: acc.releaseBalanceCalcMt + r.releaseBalanceCalcMt,
-        assignmentBalanceCalcMt:
-          acc.assignmentBalanceCalcMt + r.assignmentBalanceCalcMt,
-        cuttingBalanceMt: acc.cuttingBalanceMt + r.cuttingBalanceMt,
-        qualityCheckBalanceMt:
-          acc.qualityCheckBalanceMt + r.qualityCheckBalanceMt,
+        releaseBalanceCalcMt:   acc.releaseBalanceCalcMt   + r.releaseBalanceCalcMt,
+        assignmentBalanceCalcMt:acc.assignmentBalanceCalcMt+ r.assignmentBalanceCalcMt,
+        cuttingBalanceMt:       acc.cuttingBalanceMt       + r.cuttingBalanceMt,
+        hgBalanceMt:            acc.hgBalanceMt            + r.hgBalanceMt,
+        rfiBalanceMt:           acc.rfiBalanceMt           + r.rfiBalanceMt,
+        nhBalanceMt:            acc.nhBalanceMt            + r.nhBalanceMt,
+        bBalanceMt:             acc.bBalanceMt             + r.bBalanceMt,
+        habBalanceMt:           acc.habBalanceMt           + r.habBalanceMt,
+        wBalanceMt:             acc.wBalanceMt             + r.wBalanceMt,
+        qualityCheckBalanceMt:  acc.qualityCheckBalanceMt  + r.qualityCheckBalanceMt,
       }),
       ZERO_TOTALS,
     );
