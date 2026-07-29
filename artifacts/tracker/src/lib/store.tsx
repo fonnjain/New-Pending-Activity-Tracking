@@ -36,6 +36,13 @@ export function isNamedJobSetFilter(v: string | null | undefined): boolean {
   return v === CURRENT_JOBS_FILTER_VALUE || isTemplateFilter(v);
 }
 
+/** Global view mode controlling how MFC Batch relates to Project in all grouping tables.
+ *  - "project-with-mfc"  (default): Project is primary, MFC Batch is a sub-level under it.
+ *  - "view-by-mfc":                 MFC Batch is primary within BOM/SubType; Projects nested below.
+ *  - "project-then-mfc":            Flat combined key "{project}-{mfcBatch}" (no separate columns).
+ */
+export type MfcViewMode = "project-with-mfc" | "view-by-mfc" | "project-then-mfc";
+
 export interface JobTemplate {
   id: number;
   name: string;
@@ -71,6 +78,8 @@ interface TrackerContextType {
   setFilter: (key: keyof Filters, value: string | null) => void;
   setSelectedJobs: (jobs: string[]) => void;
   clearFilters: () => void;
+  mfcViewMode: MfcViewMode;
+  setMfcViewMode: (mode: MfcViewMode) => void;
 }
 
 const defaultFilters: Filters = {
@@ -96,6 +105,7 @@ const TrackerContext = createContext<TrackerContextType | undefined>(undefined);
 export function TrackerProvider({ children }: { children: ReactNode }) {
   const [selectedImportId, setSelectedImportId] = useState<number | null>(null);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
+  const [mfcViewMode, setMfcViewMode] = useState<MfcViewMode>("project-with-mfc");
   const { data: imports } = useListImports();
 
   // Default to the newest import, and recover if the selected one is removed.
@@ -181,7 +191,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
     setFilters((prev) => ({ ...defaultFilters, category: prev.category }));
 
   return (
-    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, clearFilters }}>
+    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, clearFilters, mfcViewMode, setMfcViewMode }}>
       {children}
     </TrackerContext.Provider>
   );

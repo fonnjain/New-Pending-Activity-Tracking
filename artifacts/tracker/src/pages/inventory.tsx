@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useRef } from "react";
-import { useTracker, useActiveJobSet, isNamedJobSetFilter } from "@/lib/store";
+import { useTracker, useActiveJobSet, isNamedJobSetFilter, type MfcViewMode } from "@/lib/store";
 import {
   useGetAuthStatus,
   useListInventoryManualE,
@@ -117,6 +117,21 @@ function groupByMfcBatch(
       return a.localeCompare(b);
     })
     .map(([mfcBatch, bRows]) => ({ mfcBatch, rows: bRows }));
+}
+
+/** Flat grouping: each unique {project}-{mfcBatch} pair becomes one top-level entry. */
+function groupByProjectMfc(
+  rows: InventoryStructureCard[],
+): { key: string; project: string; mfcBatch: string; rows: InventoryStructureCard[] }[] {
+  const map = new Map<string, { project: string; mfcBatch: string; rows: InventoryStructureCard[] }>();
+  for (const r of rows) {
+    const key = `${r.project}-${r.mfcBatch}`;
+    if (!map.has(key)) map.set(key, { project: r.project, mfcBatch: r.mfcBatch, rows: [] });
+    map.get(key)!.rows.push(r);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, v]) => ({ key, ...v }));
 }
 
 interface ColumnDef {
@@ -453,6 +468,45 @@ function ProjectRow({
   );
 }
 
+/** Flat row for "Project Then MFC" view: shows "{project}-{mfcBatch}" as a single label. */
+function ProjectMfcFlatRow({
+  project,
+  mfcBatch,
+  rows,
+  columns,
+  mfcBatchColorMap,
+}: {
+  project: string;
+  mfcBatch: string;
+  rows: InventoryStructureCard[];
+  columns: ColumnDef[];
+  mfcBatchColorMap: Map<string, InventoryMfcBatchColor>;
+}) {
+  const colorEntry = mfcBatchColorMap.get(`${project}\u0001${mfcBatch}`);
+  const colorName = colorEntry?.color as MfcColorName | undefined;
+  return (
+    <div className="flex items-center justify-between px-3 py-1.5 text-sm gap-2 min-w-0 hover:bg-muted/30">
+      <span className="flex items-center gap-1.5 min-w-0">
+        {colorName && colorName in MFC_COLOR_CSS && <ColorDot color={colorName} />}
+        <span className="font-medium truncate">
+          {project}
+          <span className="text-muted-foreground">-</span>
+          {mfcBatch}
+        </span>
+        <span className="text-[10px] text-muted-foreground shrink-0">{rows.length} str</span>
+      </span>
+      <span className="flex items-center gap-3 shrink-0">
+        {columns.map((col) => (
+          <span key={col.key} className="text-[11px] tabular-nums text-right">
+            <span className="text-muted-foreground mr-1">{col.label}</span>
+            {mt(sumColumnOrNull(rows, col.get))}
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
 function MfcTopRow({
   mfcBatch,
   rows,
@@ -541,17 +595,18 @@ function AutoBucketPanel({
   rows,
   columns,
   clampRelease,
-  groupByMfc,
+  mfcViewMode,
   mfcBatchColorMap,
 }: {
   rows: InventoryStructureCard[];
   columns: ColumnDef[];
   clampRelease: boolean;
-  groupByMfc: boolean;
+  mfcViewMode: MfcViewMode;
   mfcBatchColorMap: Map<string, InventoryMfcBatchColor>;
 }) {
   const groups = useMemo(() => groupByProject(rows), [rows]);
   const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
+  const flatGroups = useMemo(() => groupByProjectMfc(rows), [rows]);
   const totalWeight = groups.reduce((s, g) => s + g.weightMt, 0);
   const totalCount = groups.reduce((s, g) => s + g.count, 0);
   const summary = useMemo(() => computeBucketSummary(rows, clampRelease), [rows, clampRelease]);
@@ -566,12 +621,23 @@ function AutoBucketPanel({
       <div className="max-h-96 overflow-auto divide-y">
         {rows.length === 0 ? (
           <div className="py-6 text-center text-xs text-muted-foreground">No structures.</div>
-        ) : groupByMfc ? (
+        ) : mfcViewMode === "view-by-mfc" ? (
           mfcGroups.map(({ mfcBatch, rows: mfcRows }) => (
             <MfcTopRow
               key={mfcBatch}
               mfcBatch={mfcBatch}
               rows={mfcRows}
+              columns={columns}
+              mfcBatchColorMap={mfcBatchColorMap}
+            />
+          ))
+        ) : mfcViewMode === "project-then-mfc" ? (
+          flatGroups.map(({ key, project, mfcBatch, rows: fRows }) => (
+            <ProjectMfcFlatRow
+              key={key}
+              project={project}
+              mfcBatch={mfcBatch}
+              rows={fRows}
               columns={columns}
               mfcBatchColorMap={mfcBatchColorMap}
             />
@@ -766,18 +832,19 @@ function PreBMfcRow({
 function PreBucketBPanel({
   rows,
   columns,
-  groupByMfc,
+  mfcViewMode,
   onAssignColour,
   canAssign,
 }: {
   rows: InventoryStructureCard[];
   columns: ColumnDef[];
-  groupByMfc: boolean;
+  mfcViewMode: MfcViewMode;
   onAssignColour: (project: string, mfcBatch: string) => void;
   canAssign: boolean;
 }) {
   const groups = useMemo(() => groupByProject(rows), [rows]);
   const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
+  const flatGroups = useMemo(() => groupByProjectMfc(rows), [rows]);
   const pairCount = useMemo(
     () => new Set(rows.map((r) => `${r.project}\u0001${r.mfcBatch}`)).size,
     [rows],
@@ -800,7 +867,7 @@ function PreBucketBPanel({
           <div className="py-6 text-center text-xs text-muted-foreground">
             No structures — all pairs have colour + dates assigned.
           </div>
-        ) : groupByMfc ? (
+        ) : mfcViewMode === "view-by-mfc" ? (
           mfcGroups.map(({ mfcBatch, rows: mfcRows }) => (
             <PreBMfcRow
               key={mfcBatch}
@@ -810,6 +877,39 @@ function PreBucketBPanel({
               onAssignColour={onAssignColour}
               canAssign={canAssign}
             />
+          ))
+        ) : mfcViewMode === "project-then-mfc" ? (
+          // Flat: each pair is already the unit awaiting assignment — show directly.
+          flatGroups.map(({ key, project, mfcBatch, rows: fRows }) => (
+            <div
+              key={key}
+              className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm hover:bg-muted/30 min-w-0"
+            >
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="font-medium truncate">
+                  {project}<span className="text-muted-foreground">-</span>{mfcBatch}
+                </span>
+                <span className="text-[10px] text-muted-foreground shrink-0">{fRows.length} str</span>
+              </span>
+              <span className="flex items-center gap-2 shrink-0">
+                {columns.map((col) => (
+                  <span key={col.key} className="tabular-nums text-right text-[11px]">
+                    <span className="text-muted-foreground mr-1">{col.label}</span>
+                    {mt(sumColumnOrNull(fRows, col.get))}
+                  </span>
+                ))}
+                {canAssign && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-[11px] px-2 shrink-0"
+                    onClick={() => onAssignColour(project, mfcBatch)}
+                  >
+                    Assign colour
+                  </Button>
+                )}
+              </span>
+            </div>
           ))
         ) : (
           groups.map((g) => (
@@ -1305,15 +1405,13 @@ function MfcBatchColorTable({
 }
 
 export default function InventoryView() {
-  const { filters } = useTracker();
+  const { filters, mfcViewMode, setMfcViewMode } = useTracker();
   const queryClient = useQueryClient();
   const { available, asOnDate, isLoading, rawRows, buckets, manualE, projectMfcBatches } =
     useInventoryData();
   const { data: authStatus } = useGetAuthStatus();
   const canEdit = !!authStatus?.authenticated;
   const { toast } = useToast();
-
-  const [groupByMfc, setGroupByMfc] = useState(false);
 
   const jobFilter = filters.job;
   const isCurrentJobs = isNamedJobSetFilter(jobFilter);
@@ -1765,17 +1863,17 @@ export default function InventoryView() {
         preBRows,
         BUCKET_B_COLUMNS,
         false,
-        groupByMfc,
+        mfcViewMode === "view-by-mfc",
       ),
       autoBucketSheet(
         "B - Raw Material Incomplete",
         bRows,
         BUCKET_B_COLUMNS,
         false,
-        groupByMfc,
+        mfcViewMode === "view-by-mfc",
       ),
-      autoBucketSheet("C - RM Complete", cRows, BUCKET_CD_COLUMNS, true, groupByMfc),
-      autoBucketSheet("D - Dispatch Clearance", dRows, BUCKET_CD_COLUMNS, true, groupByMfc),
+      autoBucketSheet("C - RM Complete", cRows, BUCKET_CD_COLUMNS, true, mfcViewMode === "view-by-mfc"),
+      autoBucketSheet("D - Dispatch Clearance", dRows, BUCKET_CD_COLUMNS, true, mfcViewMode === "view-by-mfc"),
       {
         name: "E - Ready Not Dispatched",
         columns: [
@@ -1973,18 +2071,19 @@ export default function InventoryView() {
         </CardContent>
       </Card>
 
-      {/* Group-by toggle for Pre-B / B / C / D */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground">Group by</span>
+      {/* MFC view mode toggle — global, applies to Pre-B / B / C / D and Fab Report */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-muted-foreground">MFC View</span>
         <Segmented
-          value={groupByMfc ? "mfc" : "project"}
-          onChange={(v) => setGroupByMfc(v === "mfc")}
+          value={mfcViewMode}
+          onChange={(v) => setMfcViewMode(v as typeof mfcViewMode)}
           options={[
-            { value: "project", label: "Project" },
-            { value: "mfc", label: "MFC Batch" },
+            { value: "project-with-mfc", label: "Project with MFC" },
+            { value: "view-by-mfc",       label: "View by MFC" },
+            { value: "project-then-mfc",  label: "Project Then MFC" },
           ]}
         />
-        <span className="text-xs text-muted-foreground">(applies to Pre-B, B, C, D)</span>
+        <span className="text-xs text-muted-foreground">(applies to Pre-B, B, C, D &amp; Fab Report)</span>
       </div>
 
       {/* MFC Batch Colour + Pre-B side by side */}
@@ -2051,7 +2150,7 @@ export default function InventoryView() {
                 <PreBucketBPanel
                   rows={preBRows}
                   columns={BUCKET_B_COLUMNS}
-                  groupByMfc={groupByMfc}
+                  mfcViewMode={mfcViewMode}
                   onAssignColour={handleAssignColour}
                   canAssign={canEdit}
                 />
@@ -2082,7 +2181,7 @@ export default function InventoryView() {
                 rows={bRows}
                 columns={BUCKET_B_COLUMNS}
                 clampRelease={false}
-                groupByMfc={groupByMfc}
+                mfcViewMode={mfcViewMode}
                 mfcBatchColorMap={mfcBatchColorMap}
               />
             )}
@@ -2111,7 +2210,7 @@ export default function InventoryView() {
                 rows={cRows}
                 columns={BUCKET_CD_COLUMNS}
                 clampRelease
-                groupByMfc={groupByMfc}
+                mfcViewMode={mfcViewMode}
                 mfcBatchColorMap={mfcBatchColorMap}
               />
             )}
@@ -2140,7 +2239,7 @@ export default function InventoryView() {
                 rows={dRows}
                 columns={BUCKET_CD_COLUMNS}
                 clampRelease
-                groupByMfc={groupByMfc}
+                mfcViewMode={mfcViewMode}
                 mfcBatchColorMap={mfcBatchColorMap}
               />
             )}

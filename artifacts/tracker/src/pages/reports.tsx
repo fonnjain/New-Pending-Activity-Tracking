@@ -53,6 +53,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useTracker,
+  type MfcViewMode,
   useFilteredRecords,
   useContractorCategoryMap,
   contractorCategoryFor,
@@ -93,6 +94,7 @@ import { AiTurnaroundReport } from "@/components/ai-turnaround-report";
 import PlantOperationView from "./plant-operation";
 import { FileSpreadsheet, Check, Eye, EyeOff } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Segmented } from "@/components/ui/segmented";
 
 type SortKey = "activity" | "ageing" | "contractor";
 
@@ -1989,6 +1991,66 @@ function buildBomGroups(rows: FabricationProjectCompletionRow[]): BomGroup[] {
     });
 }
 
+// Build the 4-level structure for "View by MFC": BOM Label → Sub-Type Group → MFC Batch → Project rows.
+type MfcGroupInSt = {
+  mfcBatch: string;
+  rows: FabricationProjectCompletionRow[];
+  subtotal: FabSums;
+};
+type SubTypeGroupByMfc = {
+  subType: string;
+  mfcGroups: MfcGroupInSt[];
+  subtotal: FabSums;
+};
+type BomGroupByMfc = {
+  label: string;
+  subGroups: SubTypeGroupByMfc[];
+  subtotal: FabSums;
+};
+
+function buildBomGroupsByMfc(rows: FabricationProjectCompletionRow[]): BomGroupByMfc[] {
+  const bomMap = new Map<string, FabricationProjectCompletionRow[]>();
+  for (const row of rows) {
+    const list = bomMap.get(row.bomLabel) ?? [];
+    list.push(row);
+    bomMap.set(row.bomLabel, list);
+  }
+  return [...bomMap.entries()]
+    .sort(([a], [b]) => bomLabelIndex(a) - bomLabelIndex(b))
+    .map(([label, bomRows]) => {
+      const stMap = new Map<string, FabricationProjectCompletionRow[]>();
+      for (const row of bomRows) {
+        const list = stMap.get(row.subTypeGroup) ?? [];
+        list.push(row);
+        stMap.set(row.subTypeGroup, list);
+      }
+      const subGroups: SubTypeGroupByMfc[] = [...stMap.entries()]
+        .sort(([a], [b]) => subTypeIndex(a) - subTypeIndex(b))
+        .map(([subType, stRows]) => {
+          const mfcMap = new Map<string, FabricationProjectCompletionRow[]>();
+          for (const row of stRows) {
+            const key = row.mfcBatch ?? "";
+            const list = mfcMap.get(key) ?? [];
+            list.push(row);
+            mfcMap.set(key, list);
+          }
+          const mfcGroups: MfcGroupInSt[] = [...mfcMap.entries()]
+            .sort(([a], [b]) => {
+              if (a === "Z") return 1;
+              if (b === "Z") return -1;
+              return a.localeCompare(b);
+            })
+            .map(([mfcBatch, mfcRows]) => ({
+              mfcBatch,
+              rows: [...mfcRows].sort((a, b) => a.project.localeCompare(b.project)),
+              subtotal: sumRows(mfcRows),
+            }));
+          return { subType, mfcGroups, subtotal: sumRows(stRows) };
+        });
+      return { label, subGroups, subtotal: sumRows(bomRows) };
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Checkbox multi-project selector — same pattern as the Bucket List page.
 // `selected = null` means "all"; a Set means those specific projects.
@@ -2094,7 +2156,7 @@ const FAB_COMP_COLUMNS: XlsxColumn[] = [
 
 function FabCompletionReport() {
   const { data, isLoading } = useGetFabricationProjectCompletionTlt();
-  const { filters } = useTracker();
+  const { filters, mfcViewMode, setMfcViewMode } = useTracker();
   const activeJobSet = useActiveJobSet();
 
   // Rows after the global job filter (All / single project / named template set).
@@ -2168,6 +2230,8 @@ function FabCompletionReport() {
 
   // 3-level grouping: BOM Label → Sub-Type Group → Project.
   const bomGroups = useMemo(() => buildBomGroups(visibleRows), [visibleRows]);
+  // 4-level grouping for "View by MFC": BOM Label → Sub-Type Group → MFC Batch → Project.
+  const bomGroupsByMfc = useMemo(() => buildBomGroupsByMfc(visibleRows), [visibleRows]);
 
   const grandTotal = useMemo(() => sumRows(visibleRows), [visibleRows]);
 
@@ -2305,287 +2369,387 @@ function FabCompletionReport() {
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex flex-wrap items-center justify-between gap-3">
           Fabrication Report – Project Completion - TLT
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1.5"
-            disabled={!rows.length}
-            onClick={handleExportExcel}
-          >
-            <FileSpreadsheet className="w-4 h-4" /> Export Excel
-          </Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Segmented
+              value={mfcViewMode}
+              onChange={(v) => setMfcViewMode(v as typeof mfcViewMode)}
+              options={[
+                { value: "project-with-mfc", label: "Project with MFC" },
+                { value: "view-by-mfc",       label: "View by MFC" },
+                { value: "project-then-mfc",  label: "Project Then MFC" },
+              ]}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5"
+              disabled={!rows.length}
+              onClick={handleExportExcel}
+            >
+              <FileSpreadsheet className="w-4 h-4" /> Export Excel
+            </Button>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-auto">
-          {/* specOps(s) = collapsed B+HAB+W combined weight */}
           {(() => {
             const specOps = (b: number, hab: number, w: number) => b + hab + w;
-            // total column count: +1 for MFC Batch, +1 for Total Fab Balance (13 collapsed, 15 expanded)
-            const totalCols = specOpsExpanded ? 15 : 13;
+            const isFlat    = mfcViewMode === "project-then-mfc";
+            const isMfcFirst = mfcViewMode === "view-by-mfc";
+            // Flat mode has one fewer dim column (merged Project-MFC instead of Project + MFC).
+            const dimCols   = isFlat ? 3 : 4;
+            const totalCols = dimCols + 2 + (specOpsExpanded ? 5 : 3) + 1; // pre-prod+fab+total
             const fabGroupSpan = specOpsExpanded ? 8 : 6;
             const TOTAL_COL_TOOLTIP =
               "Total Fabrication Balance = Release + Cutting + HG + RFI + NH + B + HAB + W + Quality (Q/TS).\n" +
               "Assignment Balance is excluded because it overlaps Release Balance (Initial marks) and Cutting Balance (Authorized-JCNS marks) — including it would double-count those weights.";
 
-            return (
-          <table className="w-full text-xs border-collapse">
-            <thead>
-              {/* Row 1: group spans */}
-              <tr className="border-b border-border/50 bg-muted/60">
-                <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
-                  BOM Label
-                </th>
-                <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
-                  Sub-Type
-                </th>
-                <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
-                  Project
-                </th>
-                <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
-                  MFC Batch
-                </th>
-                <th className="text-center px-2 py-1.5 font-semibold border-r border-border/30 text-indigo-700 dark:text-indigo-400" colSpan={2}>
-                  Pre-Production (MT)
-                </th>
-                <th className="text-center px-2 py-1.5 font-semibold text-amber-700 dark:text-amber-400" colSpan={fabGroupSpan}>
-                  Fabrication Stage Balance (MT) — C → HG → RFI → NH → {specOpsExpanded ? "B → HAB → W" : "Spec. Ops"} → Q/TS
-                </th>
-                {/* Total column — rowSpan=2 so it spans both header rows */}
-                <th
-                  className="text-right px-2 py-1.5 font-semibold min-w-[72px] leading-tight border-l-2 border-border/50 bg-emerald-50/60 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300 cursor-help"
-                  rowSpan={2}
-                  title={TOTAL_COL_TOOLTIP}
-                >
-                  Total Fab<br />Balance ⓘ<br /><span className="font-normal text-[10px] opacity-70">(excl. Assign.)</span>
-                </th>
-              </tr>
-              {/* Row 2: individual column labels */}
-              <tr className="border-b-2 border-border bg-muted/40">
-                <th className="text-right px-2 py-1.5 font-medium min-w-[72px] leading-tight text-indigo-700 dark:text-indigo-400">
-                  Release<br />Bal. Calc
-                </th>
-                <th className="text-right px-2 py-1.5 font-medium min-w-[72px] leading-tight border-r border-border/30 text-indigo-700 dark:text-indigo-400">
-                  Assign.<br />Bal. Calc
-                </th>
-                <th className="text-right px-2 py-1.5 font-medium min-w-[52px] leading-tight text-amber-700 dark:text-amber-400">
-                  Cutting<br />(C)
-                </th>
-                <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">HG</th>
-                <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">RFI</th>
-                <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">NH</th>
+            // ── Shared helpers ────────────────────────────────────────────────
+            /** Numeric data cells shared by every row/subtotal/total.
+             *  Accepts either a pre-computed FabSums (subtotals/totals) or a raw
+             *  FabricationProjectCompletionRow (data rows); totalFabBalance is
+             *  derived via fabTotal() when the pre-computed field is absent. */
+            const numCells = (
+              s: FabSums | Omit<FabricationProjectCompletionRow, "totalFabBalanceMt"> & { totalFabBalanceMt?: number },
+              py = "py-1.5",
+            ) => {
+              const total = s.totalFabBalanceMt ?? fabTotal(s as Parameters<typeof fabTotal>[0]);
+              return (
+              <>
+                <td className={`px-2 ${py} text-right tabular-nums text-indigo-800 dark:text-indigo-300`}>
+                  {fmt(s.releaseBalanceCalcMt)}
+                </td>
+                <td className={`px-2 ${py} text-right tabular-nums border-r border-border/20 text-indigo-800 dark:text-indigo-300`}>
+                  {fmt(s.assignmentBalanceCalcMt)}
+                </td>
+                <td className={`px-2 ${py} text-right tabular-nums`}>{fmt(s.cuttingBalanceMt)}</td>
+                <td className={`px-2 ${py} text-right tabular-nums`}>{fmt(s.hgBalanceMt)}</td>
+                <td className={`px-2 ${py} text-right tabular-nums`}>{fmt(s.rfiBalanceMt)}</td>
+                <td className={`px-2 ${py} text-right tabular-nums`}>{fmt(s.nhBalanceMt)}</td>
                 {specOpsExpanded ? (
                   <>
-                    <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">
-                      <button
-                        onClick={() => setSpecOpsExpanded(false)}
-                        className="inline-flex items-center gap-0.5 hover:text-amber-900 dark:hover:text-amber-200 transition-colors"
-                        title="Collapse B / HAB / W into Special Operations"
-                      >B <span className="text-[10px]">◀</span></button>
-                    </th>
-                    <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">HAB</th>
-                    <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">W</th>
+                    <td className={`px-2 ${py} text-right tabular-nums`}>{fmt(s.bBalanceMt)}</td>
+                    <td className={`px-2 ${py} text-right tabular-nums`}>{fmt(s.habBalanceMt)}</td>
+                    <td className={`px-2 ${py} text-right tabular-nums`}>{fmt(s.wBalanceMt)}</td>
                   </>
                 ) : (
-                  <th
-                    className="text-right px-2 py-1.5 font-medium min-w-[80px] leading-tight text-amber-700 dark:text-amber-400 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-950/30 select-none transition-colors"
-                    onClick={() => setSpecOpsExpanded(true)}
-                    title="Expand into B / HAB / W columns"
-                  >
-                    <span className="inline-flex items-center justify-end gap-0.5 w-full">
-                      Special<br />Ops <span className="text-[10px]">▶</span>
-                    </span>
-                  </th>
-                )}
-                <th className="text-right px-2 py-1.5 font-medium min-w-[56px] leading-tight text-amber-700 dark:text-amber-400">
-                  Quality<br />(Q/TS)
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {bomGroups.map((bom, bomIdx) => (
-                <>
-                  {bom.subGroups.map((sg, sgIdx) => (
-                    <>
-                      {sg.rows.map((row, rowIdx) => (
-                        <tr
-                          key={`${row.bomLabel}-${row.subTypeGroup}-${row.project}-${row.mfcBatch ?? ""}`}
-                          className="border-b border-border/40 hover:bg-muted/30"
-                        >
-                          <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
-                            {sgIdx === 0 && rowIdx === 0 ? row.bomLabel : ""}
-                          </td>
-                          <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
-                            {rowIdx === 0 ? row.subTypeGroup : ""}
-                          </td>
-                          <td className="px-3 py-1.5 font-medium border-r border-border/20">{row.project}</td>
-                          <td className="px-3 py-1.5 border-r border-border/20 text-muted-foreground">{row.mfcBatch ?? ""}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums text-indigo-800 dark:text-indigo-300">
-                            {fmt(row.releaseBalanceCalcMt)}
-                          </td>
-                          <td className="px-2 py-1.5 text-right tabular-nums border-r border-border/20 text-indigo-800 dark:text-indigo-300">
-                            {fmt(row.assignmentBalanceCalcMt)}
-                          </td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.cuttingBalanceMt)}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.hgBalanceMt)}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.rfiBalanceMt)}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.nhBalanceMt)}</td>
-                          {specOpsExpanded ? (
-                            <>
-                              <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.bBalanceMt)}</td>
-                              <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.habBalanceMt)}</td>
-                              <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.wBalanceMt)}</td>
-                            </>
-                          ) : (
-                            <td className="px-2 py-1.5 text-right tabular-nums bg-amber-50/40 dark:bg-amber-950/10">
-                              {fmt(specOps(row.bBalanceMt, row.habBalanceMt, row.wBalanceMt))}
-                            </td>
-                          )}
-                          <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.qualityCheckBalanceMt)}</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums font-medium border-l-2 border-border/50 bg-emerald-50/40 dark:bg-emerald-950/10 text-emerald-900 dark:text-emerald-200">
-                            {fmt(fabTotal(row))}
-                          </td>
-                        </tr>
-                      ))}
-                      {/* Sub-type subtotal row */}
-                      <tr
-                        key={`${bom.label}-${sg.subType}-subtotal`}
-                        className="border-b border-border bg-muted/25 font-medium"
-                      >
-                        <td className="px-3 py-1.5 border-r border-border/20" />
-                        <td className="px-3 py-1.5 text-muted-foreground italic border-r border-border/20">
-                          {sg.subType} Subtotal
-                        </td>
-                        <td className="px-3 py-1.5 border-r border-border/20" />
-                        <td className="px-3 py-1.5 border-r border-border/20" />
-                        <td className="px-2 py-1.5 text-right tabular-nums text-indigo-800 dark:text-indigo-300">
-                          {fmt(sg.subtotal.releaseBalanceCalcMt)}
-                        </td>
-                        <td className="px-2 py-1.5 text-right tabular-nums border-r border-border/20 text-indigo-800 dark:text-indigo-300">
-                          {fmt(sg.subtotal.assignmentBalanceCalcMt)}
-                        </td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.cuttingBalanceMt)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.hgBalanceMt)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.rfiBalanceMt)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.nhBalanceMt)}</td>
-                        {specOpsExpanded ? (
-                          <>
-                            <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.bBalanceMt)}</td>
-                            <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.habBalanceMt)}</td>
-                            <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.wBalanceMt)}</td>
-                          </>
-                        ) : (
-                          <td className="px-2 py-1.5 text-right tabular-nums bg-amber-50/40 dark:bg-amber-950/10">
-                            {fmt(specOps(sg.subtotal.bBalanceMt, sg.subtotal.habBalanceMt, sg.subtotal.wBalanceMt))}
-                          </td>
-                        )}
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(sg.subtotal.qualityCheckBalanceMt)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums font-semibold border-l-2 border-border/50 bg-emerald-50/40 dark:bg-emerald-950/10 text-emerald-900 dark:text-emerald-200">
-                          {fmt(sg.subtotal.totalFabBalanceMt)}
-                        </td>
-                      </tr>
-                    </>
-                  ))}
-                  {/* BOM label total row */}
-                  <tr
-                    key={`${bom.label}-total`}
-                    className="border-b-2 border-border bg-muted/40 font-semibold"
-                  >
-                    <td className="px-3 py-1.5 border-r border-border/20">{bom.label}</td>
-                    <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">Total</td>
-                    <td className="px-3 py-1.5 border-r border-border/20" />
-                    <td className="px-3 py-1.5 border-r border-border/20" />
-                    <td className="px-2 py-1.5 text-right tabular-nums text-indigo-800 dark:text-indigo-300">
-                      {fmt(bom.subtotal.releaseBalanceCalcMt)}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums border-r border-border/20 text-indigo-800 dark:text-indigo-300">
-                      {fmt(bom.subtotal.assignmentBalanceCalcMt)}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.cuttingBalanceMt)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.hgBalanceMt)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.rfiBalanceMt)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.nhBalanceMt)}</td>
-                    {specOpsExpanded ? (
-                      <>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.bBalanceMt)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.habBalanceMt)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.wBalanceMt)}</td>
-                      </>
-                    ) : (
-                      <td className="px-2 py-1.5 text-right tabular-nums bg-amber-50/40 dark:bg-amber-950/10">
-                        {fmt(specOps(bom.subtotal.bBalanceMt, bom.subtotal.habBalanceMt, bom.subtotal.wBalanceMt))}
-                      </td>
-                    )}
-                    <td className="px-2 py-1.5 text-right tabular-nums">{fmt(bom.subtotal.qualityCheckBalanceMt)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums font-bold border-l-2 border-border/50 bg-emerald-50/60 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-200">
-                      {fmt(bom.subtotal.totalFabBalanceMt)}
-                    </td>
-                  </tr>
-                  {/* Cause footer — only for the Unknown group when visible */}
-                  {bom.label === "Unknown" && unknownCauseFooter && (
-                    <tr key="unknown-cause-footer">
-                      <td
-                        colSpan={totalCols}
-                        className="px-3 py-2 text-xs text-muted-foreground border-b border-border bg-muted/10"
-                      >
-                        <span className="font-medium text-foreground">
-                          Unknown structures (cause):
-                        </span>
-                        {unknownCauseFooter.mismatches.length > 0 && (
-                          <div className="mt-0.5">
-                            <span className="font-medium">
-                              Code mismatch (in OR under a different code):{" "}
-                            </span>
-                            {unknownCauseFooter.mismatches.join("; ")}
-                          </div>
-                        )}
-                        {unknownCauseFooter.absents.length > 0 && (
-                          <div className="mt-0.5">
-                            <span className="font-medium">
-                              Absent from Order Review:{" "}
-                            </span>
-                            {unknownCauseFooter.absents.join("; ")}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  )}
-                </>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t-2 border-border bg-muted font-bold">
-                <td className="px-3 py-2 border-r border-border/20" colSpan={4}>
-                  Grand Total
-                </td>
-                <td className="px-2 py-2 text-right tabular-nums text-indigo-800 dark:text-indigo-300">
-                  {fmt(grandTotal.releaseBalanceCalcMt)}
-                </td>
-                <td className="px-2 py-2 text-right tabular-nums border-r border-border/20 text-indigo-800 dark:text-indigo-300">
-                  {fmt(grandTotal.assignmentBalanceCalcMt)}
-                </td>
-                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.cuttingBalanceMt)}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.hgBalanceMt)}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.rfiBalanceMt)}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.nhBalanceMt)}</td>
-                {specOpsExpanded ? (
-                  <>
-                    <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.bBalanceMt)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.habBalanceMt)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.wBalanceMt)}</td>
-                  </>
-                ) : (
-                  <td className="px-2 py-2 text-right tabular-nums bg-amber-50/40 dark:bg-amber-950/10">
-                    {fmt(specOps(grandTotal.bBalanceMt, grandTotal.habBalanceMt, grandTotal.wBalanceMt))}
+                  <td className={`px-2 ${py} text-right tabular-nums bg-amber-50/40 dark:bg-amber-950/10`}>
+                    {fmt(specOps(s.bBalanceMt, s.habBalanceMt, s.wBalanceMt))}
                   </td>
                 )}
-                <td className="px-2 py-2 text-right tabular-nums">{fmt(grandTotal.qualityCheckBalanceMt)}</td>
-                <td className="px-2 py-2 text-right tabular-nums border-l-2 border-border/60 bg-emerald-100/60 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200">
-                  {fmt(grandTotal.totalFabBalanceMt)}
+                <td className={`px-2 ${py} text-right tabular-nums`}>{fmt(s.qualityCheckBalanceMt)}</td>
+                <td className={`px-2 ${py} text-right tabular-nums font-semibold border-l-2 border-border/50 bg-emerald-50/40 dark:bg-emerald-950/10 text-emerald-900 dark:text-emerald-200`}>
+                  {fmt(total)}
                 </td>
-              </tr>
-            </tfoot>
-          </table>
+              </>
+              );
+            };
+
+            // ── Header (shared: only dim cols differ) ─────────────────────────
+            const thead = (
+              <thead>
+                <tr className="border-b border-border/50 bg-muted/60">
+                  <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
+                    BOM Label
+                  </th>
+                  <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
+                    Sub-Type
+                  </th>
+                  {isFlat ? (
+                    <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
+                      Project–MFC
+                    </th>
+                  ) : isMfcFirst ? (
+                    <>
+                      <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
+                        MFC Batch
+                      </th>
+                      <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
+                        Project
+                      </th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
+                        Project
+                      </th>
+                      <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
+                        MFC Batch
+                      </th>
+                    </>
+                  )}
+                  <th className="text-center px-2 py-1.5 font-semibold border-r border-border/30 text-indigo-700 dark:text-indigo-400" colSpan={2}>
+                    Pre-Production (MT)
+                  </th>
+                  <th className="text-center px-2 py-1.5 font-semibold text-amber-700 dark:text-amber-400" colSpan={fabGroupSpan}>
+                    Fabrication Stage Balance (MT) — C → HG → RFI → NH → {specOpsExpanded ? "B → HAB → W" : "Spec. Ops"} → Q/TS
+                  </th>
+                  <th
+                    className="text-right px-2 py-1.5 font-semibold min-w-[72px] leading-tight border-l-2 border-border/50 bg-emerald-50/60 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300 cursor-help"
+                    rowSpan={2}
+                    title={TOTAL_COL_TOOLTIP}
+                  >
+                    Total Fab<br />Balance ⓘ<br /><span className="font-normal text-[10px] opacity-70">(excl. Assign.)</span>
+                  </th>
+                </tr>
+                <tr className="border-b-2 border-border bg-muted/40">
+                  <th className="text-right px-2 py-1.5 font-medium min-w-[72px] leading-tight text-indigo-700 dark:text-indigo-400">
+                    Release<br />Bal. Calc
+                  </th>
+                  <th className="text-right px-2 py-1.5 font-medium min-w-[72px] leading-tight border-r border-border/30 text-indigo-700 dark:text-indigo-400">
+                    Assign.<br />Bal. Calc
+                  </th>
+                  <th className="text-right px-2 py-1.5 font-medium min-w-[52px] leading-tight text-amber-700 dark:text-amber-400">
+                    Cutting<br />(C)
+                  </th>
+                  <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">HG</th>
+                  <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">RFI</th>
+                  <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">NH</th>
+                  {specOpsExpanded ? (
+                    <>
+                      <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">
+                        <button
+                          onClick={() => setSpecOpsExpanded(false)}
+                          className="inline-flex items-center gap-0.5 hover:text-amber-900 dark:hover:text-amber-200 transition-colors"
+                          title="Collapse B / HAB / W into Special Operations"
+                        >B <span className="text-[10px]">◀</span></button>
+                      </th>
+                      <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">HAB</th>
+                      <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-amber-700 dark:text-amber-400">W</th>
+                    </>
+                  ) : (
+                    <th
+                      className="text-right px-2 py-1.5 font-medium min-w-[80px] leading-tight text-amber-700 dark:text-amber-400 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-950/30 select-none transition-colors"
+                      onClick={() => setSpecOpsExpanded(true)}
+                      title="Expand into B / HAB / W columns"
+                    >
+                      <span className="inline-flex items-center justify-end gap-0.5 w-full">
+                        Special<br />Ops <span className="text-[10px]">▶</span>
+                      </span>
+                    </th>
+                  )}
+                  <th className="text-right px-2 py-1.5 font-medium min-w-[56px] leading-tight text-amber-700 dark:text-amber-400">
+                    Quality<br />(Q/TS)
+                  </th>
+                </tr>
+              </thead>
+            );
+
+            // ── Cause footer helper ───────────────────────────────────────────
+            const causeFooter = (bomLabel: string) =>
+              bomLabel === "Unknown" && unknownCauseFooter ? (
+                <tr key="unknown-cause-footer">
+                  <td
+                    colSpan={totalCols}
+                    className="px-3 py-2 text-xs text-muted-foreground border-b border-border bg-muted/10"
+                  >
+                    <span className="font-medium text-foreground">Unknown structures (cause):</span>
+                    {unknownCauseFooter.mismatches.length > 0 && (
+                      <div className="mt-0.5">
+                        <span className="font-medium">Code mismatch (in OR under a different code): </span>
+                        {unknownCauseFooter.mismatches.join("; ")}
+                      </div>
+                    )}
+                    {unknownCauseFooter.absents.length > 0 && (
+                      <div className="mt-0.5">
+                        <span className="font-medium">Absent from Order Review: </span>
+                        {unknownCauseFooter.absents.join("; ")}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ) : null;
+
+            // ── Grand total footer (shared) ───────────────────────────────────
+            const tfoot = (
+              <tfoot>
+                <tr className="border-t-2 border-border bg-muted font-bold">
+                  <td className="px-3 py-2 border-r border-border/20" colSpan={dimCols}>
+                    Grand Total
+                  </td>
+                  {numCells(grandTotal, "py-2")}
+                </tr>
+              </tfoot>
+            );
+
+            // ── MODE: "project-with-mfc" (default) ───────────────────────────
+            if (mfcViewMode === "project-with-mfc") {
+              return (
+                <table className="w-full text-xs border-collapse">
+                  {thead}
+                  <tbody>
+                    {bomGroups.map((bom, _bomIdx) => (
+                      <>
+                        {bom.subGroups.map((sg, sgIdx) => (
+                          <>
+                            {sg.rows.map((row, rowIdx) => (
+                              <tr
+                                key={`${row.bomLabel}-${row.subTypeGroup}-${row.project}-${row.mfcBatch ?? ""}`}
+                                className="border-b border-border/40 hover:bg-muted/30"
+                              >
+                                <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
+                                  {sgIdx === 0 && rowIdx === 0 ? row.bomLabel : ""}
+                                </td>
+                                <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
+                                  {rowIdx === 0 ? row.subTypeGroup : ""}
+                                </td>
+                                <td className="px-3 py-1.5 font-medium border-r border-border/20">{row.project}</td>
+                                <td className="px-3 py-1.5 border-r border-border/20 text-muted-foreground">{row.mfcBatch ?? ""}</td>
+                                {numCells(row)}
+                              </tr>
+                            ))}
+                            {/* Sub-type subtotal */}
+                            <tr key={`${bom.label}-${sg.subType}-subtotal`} className="border-b border-border bg-muted/25 font-medium">
+                              <td className="px-3 py-1.5 border-r border-border/20" />
+                              <td className="px-3 py-1.5 text-muted-foreground italic border-r border-border/20">{sg.subType} Subtotal</td>
+                              <td className="px-3 py-1.5 border-r border-border/20" />
+                              <td className="px-3 py-1.5 border-r border-border/20" />
+                              {numCells(sg.subtotal)}
+                            </tr>
+                          </>
+                        ))}
+                        {/* BOM total */}
+                        <tr key={`${bom.label}-total`} className="border-b-2 border-border bg-muted/40 font-semibold">
+                          <td className="px-3 py-1.5 border-r border-border/20">{bom.label}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">Total</td>
+                          <td className="px-3 py-1.5 border-r border-border/20" />
+                          <td className="px-3 py-1.5 border-r border-border/20" />
+                          {numCells(bom.subtotal)}
+                        </tr>
+                        {causeFooter(bom.label)}
+                      </>
+                    ))}
+                  </tbody>
+                  {tfoot}
+                </table>
+              );
+            }
+
+            // ── MODE: "view-by-mfc" (MFC primary within SubType) ─────────────
+            if (mfcViewMode === "view-by-mfc") {
+              return (
+                <table className="w-full text-xs border-collapse">
+                  {thead}
+                  <tbody>
+                    {bomGroupsByMfc.map((bom) => (
+                      <>
+                        {bom.subGroups.map((sg, sgIdx) => (
+                          <>
+                            {sg.mfcGroups.map((mg, mfcIdx) => (
+                              <>
+                                {mg.rows.map((row, rowIdx) => (
+                                  <tr
+                                    key={`${row.bomLabel}-${row.subTypeGroup}-${row.mfcBatch ?? ""}-${row.project}`}
+                                    className="border-b border-border/40 hover:bg-muted/30"
+                                  >
+                                    <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
+                                      {sgIdx === 0 && mfcIdx === 0 && rowIdx === 0 ? row.bomLabel : ""}
+                                    </td>
+                                    <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
+                                      {mfcIdx === 0 && rowIdx === 0 ? row.subTypeGroup : ""}
+                                    </td>
+                                    {/* MFC Batch: shown only on first row of each batch */}
+                                    <td className="px-3 py-1.5 border-r border-border/20 text-muted-foreground">
+                                      {rowIdx === 0 ? (mg.mfcBatch || "—") : ""}
+                                    </td>
+                                    <td className="px-3 py-1.5 font-medium border-r border-border/20">{row.project}</td>
+                                    {numCells(row)}
+                                  </tr>
+                                ))}
+                                {/* MFC batch subtotal (only when >1 project in batch) */}
+                                {mg.rows.length > 1 && (
+                                  <tr key={`${bom.label}-${sg.subType}-${mg.mfcBatch}-mfc-subtotal`} className="border-b border-border/30 bg-sky-50/20 dark:bg-sky-950/10 font-medium">
+                                    <td className="px-3 py-1.5 border-r border-border/20" />
+                                    <td className="px-3 py-1.5 border-r border-border/20" />
+                                    <td className="px-3 py-1.5 text-muted-foreground italic border-r border-border/20">
+                                      {mg.mfcBatch || "—"} Subtotal
+                                    </td>
+                                    <td className="px-3 py-1.5 border-r border-border/20" />
+                                    {numCells(mg.subtotal)}
+                                  </tr>
+                                )}
+                              </>
+                            ))}
+                            {/* Sub-type subtotal */}
+                            <tr key={`${bom.label}-${sg.subType}-subtotal`} className="border-b border-border bg-muted/25 font-medium">
+                              <td className="px-3 py-1.5 border-r border-border/20" />
+                              <td className="px-3 py-1.5 text-muted-foreground italic border-r border-border/20">{sg.subType} Subtotal</td>
+                              <td className="px-3 py-1.5 border-r border-border/20" />
+                              <td className="px-3 py-1.5 border-r border-border/20" />
+                              {numCells(sg.subtotal)}
+                            </tr>
+                          </>
+                        ))}
+                        {/* BOM total */}
+                        <tr key={`${bom.label}-total`} className="border-b-2 border-border bg-muted/40 font-semibold">
+                          <td className="px-3 py-1.5 border-r border-border/20">{bom.label}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">Total</td>
+                          <td className="px-3 py-1.5 border-r border-border/20" />
+                          <td className="px-3 py-1.5 border-r border-border/20" />
+                          {numCells(bom.subtotal)}
+                        </tr>
+                        {causeFooter(bom.label)}
+                      </>
+                    ))}
+                  </tbody>
+                  {tfoot}
+                </table>
+              );
+            }
+
+            // ── MODE: "project-then-mfc" (flat combined key) ─────────────────
+            return (
+              <table className="w-full text-xs border-collapse">
+                {thead}
+                <tbody>
+                  {bomGroups.map((bom) => (
+                    <>
+                      {bom.subGroups.map((sg, sgIdx) => (
+                        <>
+                          {sg.rows.map((row, rowIdx) => (
+                            <tr
+                              key={`${row.bomLabel}-${row.subTypeGroup}-${row.project}-${row.mfcBatch ?? ""}`}
+                              className="border-b border-border/40 hover:bg-muted/30"
+                            >
+                              <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
+                                {sgIdx === 0 && rowIdx === 0 ? row.bomLabel : ""}
+                              </td>
+                              <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
+                                {rowIdx === 0 ? row.subTypeGroup : ""}
+                              </td>
+                              {/* Flat combined Project–MFC column */}
+                              <td className="px-3 py-1.5 font-medium border-r border-border/20">
+                                {row.project}
+                                {row.mfcBatch ? (
+                                  <span className="text-muted-foreground">-{row.mfcBatch}</span>
+                                ) : null}
+                              </td>
+                              {numCells(row)}
+                            </tr>
+                          ))}
+                          {/* Sub-type subtotal (3 dim cols) */}
+                          <tr key={`${bom.label}-${sg.subType}-subtotal`} className="border-b border-border bg-muted/25 font-medium">
+                            <td className="px-3 py-1.5 border-r border-border/20" />
+                            <td className="px-3 py-1.5 text-muted-foreground italic border-r border-border/20">{sg.subType} Subtotal</td>
+                            <td className="px-3 py-1.5 border-r border-border/20" />
+                            {numCells(sg.subtotal)}
+                          </tr>
+                        </>
+                      ))}
+                      {/* BOM total (3 dim cols) */}
+                      <tr key={`${bom.label}-total`} className="border-b-2 border-border bg-muted/40 font-semibold">
+                        <td className="px-3 py-1.5 border-r border-border/20">{bom.label}</td>
+                        <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">Total</td>
+                        <td className="px-3 py-1.5 border-r border-border/20" />
+                        {numCells(bom.subtotal)}
+                      </tr>
+                      {causeFooter(bom.label)}
+                    </>
+                  ))}
+                </tbody>
+                {tfoot}
+              </table>
             );
           })()}
         </div>
