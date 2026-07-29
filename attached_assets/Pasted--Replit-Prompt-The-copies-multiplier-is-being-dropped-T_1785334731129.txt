@@ -1,0 +1,129 @@
+# Replit Prompt — The `copies` multiplier is being dropped
+### This is the answer to the 21 MT gap, and it is systemic
+
+**Solved.** The 21 MT is not a definitional difference. Every pool-reading query that sums
+`balance_wt` without multiplying by `import_rows.copies` under-counts by exactly its
+duplicate weight.
+
+| Bucket | File (expanded) | Deduped | Delta | App reports |
+|---|---|---|---|---|
+| Cutting | 2,524.695 | **2,503.421** | 21.274 | **2,503.421** |
+| Release Balance | 2,148.912 | **2,142.364** | 6.548 | **2,142.364** |
+| Assignment | 1,077.668 | 1,071.293 | 6.375 | — |
+
+Both reported figures match the deduped totals **to the milligram**. And the Agent's own
+earlier analysis gives the same number independently: *"is_initial_cutting false: 47,934
+pool rows → 48,545 expanded, extra from copies **611**"* — exactly the 611 duplicate
+Cutting instances carrying 21.274 MT.
+
+---
+
+## The prompt
+
+```
+The 21 MT cutting gap is solved, and it is not a definitional difference. It is the copies
+multiplier being dropped.
+
+EVIDENCE
+
+Deduplicating the WIP file's Cutting rows on the identifying column set gives exactly the
+figure your query returns:
+
+  Cutting, file rows as they appear (expanded) : 14,233 marks   2,524.695 MT
+  Cutting, unique rows only (deduped)          : 13,622 marks   2,503.421 MT
+  difference                                   :    611 marks      21.274 MT
+
+  Your reported DB cutting total               :                2,503.421 MT
+
+That matches the deduped total to the milligram. The same holds for Release Balance:
+
+  Release, expanded : 2,148.912 MT
+  Release, deduped  : 2,142.364 MT   <- your reported figure, exactly
+  difference        :     6.548 MT
+
+And Assignment Balance would be short 6.375 MT by the same mechanism.
+
+Your own earlier analysis produced the same number from the other direction: you reported
+"is_initial_cutting false: 47,934 pool rows -> 48,545 expanded, extra from copies 611".
+That 611 is exactly the count of duplicate Cutting instances I find in the file.
+
+THE CAUSE
+
+record_pool stores each distinct row once, hash-deduplicated. import_rows.copies records
+how many identical rows appeared in the sheet. getImportRecords expands copies explicitly
+when building the client payload — which is why Job Wise, reading that payload, shows the
+full 58,844 rows and matches the file exactly.
+
+But the server-side aggregate queries join import_rows to record_pool and sum
+rp.balance_wt directly, without multiplying by ir.copies. So every one of them under-counts
+by its duplicate weight.
+
+WHAT I NEED
+
+1. Find EVERY query that reads record_pool via import_rows and aggregates balance_wt or
+   balance_qty or counts marks. List them before changing anything — I expect this affects
+   far more than the three buckets above, including the Fabrication Report, the
+   release_balance_wip and assignment_balance_wip pre-computations, contractor movement,
+   ageing, plant operation and the reports.
+
+2. For each, apply the copies multiplier: SUM(rp.balance_wt * ir.copies) for weight,
+   SUM(rp.balance_qty * ir.copies) for quantity, SUM(ir.copies) for mark counts.
+
+3. Tell me which queries were already correct, if any. If some already multiply and others
+   do not, that is worth knowing — it means figures across pages have been silently
+   disagreeing.
+
+4. Re-run the pre-computations after fixing, since release_balance_wip and
+   assignment_balance_wip store the wrong totals right now.
+
+EXPECTED RESULTS after the fix, on the 29-Jul import (id=32), TLT:
+
+  Release Balance   2,148.912 MT   (currently 2,142.364)
+  Cutting           2,524.695 MT   (currently 2,503.421)
+  Assignment        1,077.668 MT   (currently 1,071.293)
+
+These are measured directly from WIP_29-07-2026.xls and should match exactly, not
+approximately.
+
+SEPARATE — your 4QMD3 figures still do not reconcile
+
+You have now quoted three different values for project 900 structure 4QMD3: first 796
+marks / 205.177 MT, then 2,326 marks / 657.420 MT. Neither matches any scoping of the file:
+
+  all marks      4,108 / 823.161      Job Card WIP   1,842 / 388.581
+  non-Initial    3,951 / 799.061      Cutting        1,811 / 273.235
+
+Deduplication does not bridge it either — all marks dedupe to 4,095 / 818.966. Since Fix B
+was designed off those numbers, please re-run that query and tell me what it is actually
+selecting.
+
+ALSO — Fix D is still unverified
+
+Your reply describes an OpenAPI schema change and says the Total column "will be populated
+in the next export". That is a prediction. Please generate an actual export and tell me the
+value in the grand TOTAL row. This has now been reported fixed twice while the export
+showed 0 of 146 data rows populated both times.
+
+One correction on that: you attributed my 6,238.058 figure to an active job-set filter. It
+was not filtered — 6,238.058 is the sum of the export's own three BOM Label subtotal rows
+(Proto 2,180.827 + Mass 3,930.761 + Pre 126.470), read from the file you generated. Your
+new 6,566.128 differs because the row count went 146 to 161 and the copies fix has not been
+applied, not because of filtering.
+
+When done, paste the full list of affected queries, the corrected aggregation for each, and
+the three bucket totals from a fresh run.
+```
+
+---
+
+## What to check in the reply
+
+- **The length of the query list.** If it comes back with only the three buckets, push
+  back. Anything reading `record_pool` through `import_rows` is a candidate, and the
+  pre-computed tables store the wrong values right now.
+- **Whether any query already multiplied by `copies`.** If some did and some did not, then
+  pages have been disagreeing with each other, and any page that looked "correct" against
+  the file was correct by accident.
+- **Exact matches, not close ones.** 2,524.695 / 2,148.912 / 1,077.668 are measured from
+  the source file. A near miss means something else is still wrong.
+- **A real exported TOTAL figure** for Fix D, not a code reading.

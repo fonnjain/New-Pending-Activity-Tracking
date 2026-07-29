@@ -74,6 +74,7 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
         orderNature: recordPoolTable.orderNature,
         mfcBatch: recordPoolTable.mfcBatch,
         balanceWt: recordPoolTable.balanceWt,
+        copies: importRowsTable.copies,
       })
       .from(importRowsTable)
       .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
@@ -96,7 +97,7 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
             bmap = new Map();
             mfcBatchWt.set(key, bmap);
           }
-          bmap.set(batch, (bmap.get(batch) ?? 0) + (m.balanceWt ?? 0));
+          bmap.set(batch, (bmap.get(batch) ?? 0) + (m.balanceWt ?? 0) * (m.copies ?? 1));
         }
       }
     }

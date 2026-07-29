@@ -202,7 +202,7 @@ router.get(
           structure: recordPoolTable.structure,
           mfcBatch: recordPoolTable.mfcBatch,
           balanceMt:
-            sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
+            sql<number>`coalesce(sum(${recordPoolTable.balanceWt} * ${importRowsTable.copies}) / 1000.0, 0)`,
         })
         .from(importRowsTable)
         .innerJoin(
@@ -238,7 +238,7 @@ router.get(
           mfcBatch: recordPoolTable.mfcBatch,
           activity: sql<string>`upper(${recordPoolTable.activity})`,
           balanceMt:
-            sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
+            sql<number>`coalesce(sum(${recordPoolTable.balanceWt} * ${importRowsTable.copies}) / 1000.0, 0)`,
         })
         .from(importRowsTable)
         .innerJoin(
@@ -269,7 +269,7 @@ router.get(
           structure: recordPoolTable.structure,
           mfcBatch: recordPoolTable.mfcBatch,
           balanceMt:
-            sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
+            sql<number>`coalesce(sum(${recordPoolTable.balanceWt} * ${importRowsTable.copies}) / 1000.0, 0)`,
         })
         .from(importRowsTable)
         .innerJoin(
@@ -299,7 +299,7 @@ router.get(
           structure: recordPoolTable.structure,
           mfcBatch: recordPoolTable.mfcBatch,
           balanceMt:
-            sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
+            sql<number>`coalesce(sum(${recordPoolTable.balanceWt} * ${importRowsTable.copies}) / 1000.0, 0)`,
         })
         .from(importRowsTable)
         .innerJoin(

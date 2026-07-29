@@ -17,7 +17,7 @@ All five pool queries in `fabricationProjectCompletion.ts` (tltStructures, relea
 Primary key stays `(project, structure)` — no import_id column.  Reason: the fabricationProjectCompletion route computes assignment balance INLINE from record_pool per (project, structure, mfcBatch) so the pre-computed table is vestigial; adding import_id to the PK causes a non-trivial production migration that Replit's auto-diff handles in the wrong statement order (ADD CONSTRAINT before ADD COLUMN).  Keep this table as latest-import-snapshot only.
 
 ## Grand total interpretation
-The unfiltered API grand total (all TLT, latest import) is ~6,566 MT.  The user's on-screen totals are always smaller because a job-set filter is active.  The export sums whatever rows it renders — the filtered total and the API unfiltered total are both correct; they are not the same number.
+After the copies fix the unfiltered API grand total (all TLT, latest 29-Jul import) is 6,593.950 MT (Release 2,148.912 + Cutting 2,524.695 + Fab-Mid 1,920.343). The export sums whatever rows it renders; with no filter all 161 rows contribute 6,593.950 MT.
 
 ## Pre-existing TS errors
 `data.tsx` has pre-existing errors: `ErpRulesResponse`, `ErpRuleResult`, `inspectionMt` missing from generated types.  These are not caused by fab-completion changes.  Vite/esbuild transpiles past them; they do not block the build.

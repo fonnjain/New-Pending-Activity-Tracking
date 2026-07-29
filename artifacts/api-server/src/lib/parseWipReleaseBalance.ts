@@ -159,7 +159,7 @@ export async function backfillReleaseBalanceFromPool(): Promise<number> {
       .select({
         project: recordPoolTable.job,
         structure: recordPoolTable.structure,
-        releaseBalanceComputedMt: sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
+        releaseBalanceComputedMt: sql<number>`coalesce(sum(${recordPoolTable.balanceWt} * ${importRowsTable.copies}) / 1000.0, 0)`,
       })
       .from(importRowsTable)
       .innerJoin(
@@ -300,7 +300,7 @@ export async function backfillAssignmentBalanceFromPool(): Promise<number> {
     .select({
       project: recordPoolTable.job,
       structure: recordPoolTable.structure,
-      assignmentBalanceComputedMt: sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
+      assignmentBalanceComputedMt: sql<number>`coalesce(sum(${recordPoolTable.balanceWt} * ${importRowsTable.copies}) / 1000.0, 0)`,
     })
     .from(importRowsTable)
     .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))

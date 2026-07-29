@@ -54,6 +54,7 @@ interface PoolRow {
   contractor: string | null;
   activity: string | null;
   balanceWt: number;
+  copies: number | null;
   lastProductionDate: string | null;
   category: string | null;
   orderNature: string | null;
@@ -73,7 +74,7 @@ function ruleResult(
     scope,
     pass,
     violatingRowCount: violators.length,
-    violatingWeightMt: violators.reduce((s, v) => s + (v.row.balanceWt ?? 0), 0) / 1000,
+    violatingWeightMt: violators.reduce((s, v) => s + (v.row.balanceWt ?? 0) * (v.row.copies ?? 1), 0) / 1000,
     sampleRows: violators.slice(0, 10).map((v) => ({
       project: v.row.project ?? "",
       structure: v.row.structure,
@@ -128,6 +129,7 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
       contractor: recordPoolTable.contractor,
       activity: recordPoolTable.activity,
       balanceWt: recordPoolTable.balanceWt,
+      copies: importRowsTable.copies,
       lastProductionDate: recordPoolTable.lastProductionDate,
       category: recordPoolTable.category,
       orderNature: recordPoolTable.orderNature,

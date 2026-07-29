@@ -41,6 +41,7 @@ type MarkRow = {
   markNo: string;
   activity: string | null;
   balanceWt: number;
+  copies: number | null;
   orderNature: string | null;
   isInitialCutting: boolean | null;
 };
@@ -94,6 +95,7 @@ router.get("/imports/:id/contractor-movement", async (req, res): Promise<void> =
     markNo: string;
     contractor: string | null;
     balanceWt: number;
+    copies: number | null;
     orderNature: string | null;
   };
 
@@ -105,6 +107,7 @@ router.get("/imports/:id/contractor-movement", async (req, res): Promise<void> =
       markNo: recordPoolTable.markNo,
       contractor: recordPoolTable.contractor,
       balanceWt: recordPoolTable.balanceWt,
+      copies: importRowsTable.copies,
       orderNature: recordPoolTable.orderNature,
     })
     .from(importRowsTable)
@@ -123,11 +126,12 @@ router.get("/imports/:id/contractor-movement", async (req, res): Promise<void> =
     if (!byImportCon.has(r.importId)) byImportCon.set(r.importId, new Map());
     const stateMap = byImportCon.get(r.importId)!;
     const ex = stateMap.get(markKey);
+    const wt = r.balanceWt * (r.copies ?? 1);
     if (!ex) {
-      stateMap.set(markKey, { contractor: con, balanceWt: r.balanceWt });
+      stateMap.set(markKey, { contractor: con, balanceWt: wt });
     } else {
       // Same mark-key, multiple copies: same contractor, sum weights.
-      stateMap.set(markKey, { contractor: ex.contractor, balanceWt: ex.balanceWt + r.balanceWt });
+      stateMap.set(markKey, { contractor: ex.contractor, balanceWt: ex.balanceWt + wt });
     }
   }
 
@@ -283,6 +287,7 @@ router.get("/imports/:id/production-movement", async (req, res): Promise<void> =
       markNo: recordPoolTable.markNo,
       activity: recordPoolTable.activity,
       balanceWt: recordPoolTable.balanceWt,
+      copies: importRowsTable.copies,
       orderNature: recordPoolTable.orderNature,
       isInitialCutting: recordPoolTable.isInitialCutting,
     })
@@ -337,7 +342,7 @@ router.get("/imports/:id/production-movement", async (req, res): Promise<void> =
       if (r.isInitialCutting) continue;
       if ((r.activity ?? "").trim().toUpperCase() !== "C") continue;
       const key = `${normKey(r.job)}\x00${normKey(r.alias)}\x00${normKey(r.markNo)}`;
-      prevCBalance.set(key, (prevCBalance.get(key) ?? 0) + r.balanceWt);
+      prevCBalance.set(key, (prevCBalance.get(key) ?? 0) + r.balanceWt * (r.copies ?? 1));
     }
 
     // Build curr C-balance: normalised key → total C-activity balanceWt for curr import.
@@ -347,7 +352,7 @@ router.get("/imports/:id/production-movement", async (req, res): Promise<void> =
       if (r.isInitialCutting) continue;
       if ((r.activity ?? "").trim().toUpperCase() !== "C") continue;
       const key = `${normKey(r.job)}\x00${normKey(r.alias)}\x00${normKey(r.markNo)}`;
-      currCBalance.set(key, (currCBalance.get(key) ?? 0) + r.balanceWt);
+      currCBalance.set(key, (currCBalance.get(key) ?? 0) + r.balanceWt * (r.copies ?? 1));
     }
 
     let cuttingOutputKg = 0;
@@ -374,12 +379,12 @@ router.get("/imports/:id/production-movement", async (req, res): Promise<void> =
     const prevBal = new Map<string, number>();
     for (const r of prevRows) {
       const act = (r.activity ?? "Unassigned").trim();
-      prevBal.set(act, (prevBal.get(act) ?? 0) + r.balanceWt);
+      prevBal.set(act, (prevBal.get(act) ?? 0) + r.balanceWt * (r.copies ?? 1));
     }
     const currBal = new Map<string, number>();
     for (const r of currRows) {
       const act = (r.activity ?? "Unassigned").trim();
-      currBal.set(act, (currBal.get(act) ?? 0) + r.balanceWt);
+      currBal.set(act, (currBal.get(act) ?? 0) + r.balanceWt * (r.copies ?? 1));
     }
 
     const allActs = new Set([...prevBal.keys(), ...currBal.keys()]);
