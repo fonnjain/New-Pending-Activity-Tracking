@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes, ChevronsUpDown } from "lucide-react";
-import { useTracker, dateRangeWindow, useActiveJobSet, useJobTemplates, MULTI_JOBS_FILTER_VALUE, isTemplateFilter, extractTemplateId, templateFilterValue, isNamedJobSetFilter, type JobTemplate } from "@/lib/store";
+import { useTracker, dateRangeWindow, useActiveJobSet, useJobTemplates, MULTI_JOBS_FILTER_VALUE, isTemplateFilter, extractTemplateId, templateFilterValue, isNamedJobSetFilter, type JobTemplate, type MfcViewMode } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useGetImportRecords, useGetAuthStatus, getGetImportRecordsQueryKey, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
 import { LoginForm, ChangePasswordForm, LogoutButton } from "@/components/login-gate";
@@ -539,8 +539,12 @@ function CutoffBanner() {
   );
 }
 
+// Pages where the MFC view-mode toggle is applicable.
+const MFC_PAGES = new Set(["/inventory", "/reports"]);
+
 function FilterBar() {
-  const { filters, setFilter, setSelectedJobs, clearFilters, selectedImportId } = useTracker();
+  const [location] = useLocation();
+  const { filters, setFilter, setSelectedJobs, clearFilters, selectedImportId, mfcViewMode, setMfcViewMode } = useTracker();
   const [isOpen, setIsOpen] = useState(false);
   const { data: records = [] } = useGetImportRecords(selectedImportId as number, {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
@@ -894,6 +898,21 @@ function FilterBar() {
           <span>
             This job template contains no projects yet — it matches nothing. Add projects on the Job Templates page, or switch the Job filter back to All.
           </span>
+        </div>
+      )}
+
+      {/* MFC View mode — shown on Bucket List and Reports pages only */}
+      {MFC_PAGES.has(location) && (
+        <div className="flex items-center gap-3 px-3 md:px-6 py-2 border-t bg-muted/20">
+          <Segmented
+            value={mfcViewMode}
+            onChange={(v) => setMfcViewMode(v as MfcViewMode)}
+            options={[
+              { value: "project-with-mfc", label: "Project with MFC" },
+              { value: "view-by-mfc",       label: "View by MFC" },
+              { value: "project-then-mfc",  label: "Project Then MFC" },
+            ]}
+          />
         </div>
       )}
     </div>

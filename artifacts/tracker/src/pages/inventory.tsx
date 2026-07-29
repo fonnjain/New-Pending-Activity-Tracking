@@ -2071,21 +2071,6 @@ export default function InventoryView() {
         </CardContent>
       </Card>
 
-      {/* MFC view mode toggle — global, applies to Pre-B / B / C / D and Fab Report */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs text-muted-foreground">MFC View</span>
-        <Segmented
-          value={mfcViewMode}
-          onChange={(v) => setMfcViewMode(v as typeof mfcViewMode)}
-          options={[
-            { value: "project-with-mfc", label: "Project with MFC" },
-            { value: "view-by-mfc",       label: "View by MFC" },
-            { value: "project-then-mfc",  label: "Project Then MFC" },
-          ]}
-        />
-        <span className="text-xs text-muted-foreground">(applies to Pre-B, B, C, D &amp; Fab Report)</span>
-      </div>
-
       {/* MFC Batch Colour + Pre-B side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         {/* MFC Batch Colour Management */}

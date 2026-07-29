@@ -2370,15 +2370,6 @@ function FabCompletionReport() {
         <CardTitle className="text-base flex flex-wrap items-center justify-between gap-3">
           Fabrication Report – Project Completion - TLT
           <div className="flex items-center gap-2 flex-wrap">
-            <Segmented
-              value={mfcViewMode}
-              onChange={(v) => setMfcViewMode(v as typeof mfcViewMode)}
-              options={[
-                { value: "project-with-mfc", label: "Project with MFC" },
-                { value: "view-by-mfc",       label: "View by MFC" },
-                { value: "project-then-mfc",  label: "Project Then MFC" },
-              ]}
-            />
             <Button
               variant="outline"
               size="sm"
