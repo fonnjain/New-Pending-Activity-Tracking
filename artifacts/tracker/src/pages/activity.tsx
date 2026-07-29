@@ -166,7 +166,7 @@ function ActPerfMfcGroup({
         <div className="flex items-center justify-between py-2 px-4 pl-10 hover:bg-muted/30 transition-colors gap-2">
           <div className="flex items-center gap-2 text-left min-w-0">
             <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
-            <span className="text-[11px] bg-muted px-1.5 py-0.5 rounded font-mono font-semibold">{mfc === "Z" ? "No Batch" : `Batch ${mfc}`}</span>
+            <span className="text-[11px] bg-muted px-1.5 py-0.5 rounded font-mono font-semibold">{`Batch ${mfc}`}</span>
           </div>
           <div className="flex items-center gap-3 shrink-0 text-xs">
             <span className="font-semibold">{formatWeight(stats.weightMt)}</span>
@@ -334,7 +334,7 @@ function ActivityDrillRow({
     for (const r of records) {
       const proj = r.job || "(Unassigned)";
       const mfcRaw = r.mfcBatch || "Z";
-      const mfcLabel = mfcRaw === "Z" ? "No Batch" : `Batch ${mfcRaw}`;
+      const mfcLabel = `Batch ${mfcRaw}`;
       const topKey = mfcViewMode === "view-by-mfc" ? mfcLabel : `${proj} / ${mfcLabel}`;
       const con = r.contractor || "Unassigned";
       if (!fm.has(topKey)) fm.set(topKey, new Map());

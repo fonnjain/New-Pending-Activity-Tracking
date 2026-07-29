@@ -480,7 +480,7 @@ function ContractorStructureGroup({ structure, records }: { structure: string; r
 function ContractorMfcGroup({ mfcRaw, records }: { mfcRaw: string; records: any[] }) {
   const [open, setOpen] = useState(false);
 
-  const label = mfcRaw === "Z" ? "No Batch" : `Batch ${mfcRaw}`;
+  const label = `Batch ${mfcRaw}`;
   const wt = records.reduce((s, r) => s + r.balanceWt, 0);
   const structureCount = new Set(records.map(r => r.structure).filter(Boolean)).size;
 

@@ -176,7 +176,7 @@ function JobDashboardContent() {
     if (!isAll && !rowIsNtlt(r)) {
       if (mfcViewMode === "view-by-mfc") return mfcOf(r);
       if (mfcViewMode === "project-then-mfc")
-        return `${r.job || "Unknown"} / ${mfcOf(r) === "Z" ? "No Batch" : `Batch ${mfcOf(r)}`}`;
+        return `${r.job || "Unknown"} / Batch ${mfcOf(r)}`;
     }
     const base = (rowIsNtlt(r) ? r.groupKey : r.job) || "Unknown";
     return isAll ? `${rowIsNtlt(r) ? "NTLT" : "TLT"}: ${base}` : base;
