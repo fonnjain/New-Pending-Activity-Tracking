@@ -1,0 +1,99 @@
+# Replit Prompt — The 353-mark Activity Wise gap, re-opened
+### The `active = false` explanation is contradicted by two other pages
+
+The labelling work is accepted — nine sites consolidated into one `activityDisplayKey`
+helper, per-nature checking preserved, null-category falling back to the combined set.
+No follow-up needed there.
+
+**Item 4 needs re-answering.** Two parts of the explanation are contradicted by the data.
+
+---
+
+## Evidence
+
+**Claim: "The gap is the same on every page, not just Activity Wise."**
+
+| Page | Screen | Full TLT in file |
+|---|---|---|
+| Job Wise Report | 58,844 rows / 1,057,632 pcs / 10,770.8 t | **58,844 / 1,057,632 / 10,770.770** |
+| Project Wise (project 920) | 2,108 marks / 213.732 MT / 64,793 qty | **2,108 / 213.732 / 64,793** |
+
+Both exact. Zero rows excluded on either. If `filterRecords` dropped 353 records app-wide,
+Job Wise would read 58,491.
+
+**Claim: "marks whose balance resolved to zero during ingestion."**
+
+- Zero TLT rows have `Balance Wt <= 0` — this is ERP rule U8, passing on all eight files
+  from 21 to 29 July.
+- 353 marks carrying 330.258 MT averages **0.936 MT per mark**. These are substantial
+  pieces, not zero-balance remnants.
+
+No single-attribute group (contractor, batch, sub type) matches 353 marks or 330.258 MT
+either, so it is not a simple category being filtered out.
+
+---
+
+## The prompt
+
+```
+Thanks — the activityDisplayKey helper and the nine-site consolidation are good, and the
+null-category fallback to the combined set is the right call. No changes needed there.
+
+But your answer on the 353-mark Activity Wise gap does not hold up, on two points.
+
+FIRST, "the gap is the same on every page" is not correct. On the 29-Jul import:
+
+  Job Wise Report screen:        58,844 rows / 1,057,632 pcs / 10,770.8 t
+  Full TLT population in file:   58,844 rows / 1,057,632 pcs / 10,770.770 MT
+  -> exact match, zero rows excluded
+
+  Project Wise, project 920:     2,108 marks / 213.732 MT / 64,793 qty
+  Same figures from the file:    2,108 marks / 213.732 MT / 64,793 qty
+  -> exact match, zero rows excluded
+
+If filterRecords excluded 353 records everywhere, Job Wise would read 58,491. It does not.
+So whatever is being dropped is specific to Activity Wise.
+
+SECOND, "marks whose balance resolved to zero" is inconsistent with the weight. Zero TLT
+rows have Balance Wt <= 0 in any file from 21 to 29 July. And 353 marks carrying 330.258 MT
+averages 0.936 MT per mark — these are substantial marks, not zero-balance remnants.
+
+Please investigate properly and answer these specific questions:
+
+1. Does the Job Wise Report actually call filterRecords? If it does, and it shows the full
+   58,844 rows, then either no records have active = false, or Job Wise bypasses that
+   check. Which is it?
+
+2. How many records in the 29-Jul import have active = false? Give the count and total
+   balance weight. If it is not 353 / 330.258 MT, then active = false is not the
+   explanation and something else on Activity Wise is doing the filtering.
+
+3. If active = false is not the cause, what else does Activity Wise apply that Job Wise and
+   Project Wise do not? This page has an "All Locations" filter the others lack — are rows
+   with no resolvable location being dropped from the grouping or the total?
+
+4. For whichever records are being excluded, tell me why they were excluded at ingestion.
+   "Superseded pool row" needs substantiating: if a row was superseded, what superseded it,
+   and why is the superseding row not counted instead?
+
+Please do not change any code yet. I want the diagnosis first.
+
+One thing worth flagging as you look: if these records are deactivated in the pool, they are
+nevertheless still PRESENT and live in the source WIP file — the ERP considers them
+current. So the pool and the source file disagree about 353 marks / 330.258 MT. That is a
+data-integrity question, not a display one, and it may matter more than the page total.
+```
+
+---
+
+## What to watch for in the reply
+
+- **A count for `active = false` on this import.** If it is not 353 / 330.258 MT, the
+  hypothesis is dead and the answer must come from elsewhere.
+- **A direct answer on whether Job Wise calls `filterRecords`.** The two facts as stated —
+  "every page uses filterRecords" and "Job Wise shows all 58,844 rows" — cannot both be
+  true.
+- **Substantiation for "superseded".** If a pool row was superseded, its replacement should
+  be counted, and the total would not drop.
+- **No code changes.** This is a diagnosis request; a fix applied before the cause is known
+  risks hiding the discrepancy rather than resolving it.
