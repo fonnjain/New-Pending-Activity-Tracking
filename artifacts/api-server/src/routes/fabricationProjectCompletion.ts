@@ -197,7 +197,7 @@ router.get(
             eq(recordPoolTable.isInitialCutting, false),
             sql`(
               (${recordPoolTable.jobCardType} = 'Job Card Not Started'
-               AND ${recordPoolTable.jobCardStatus} = 'Authorized')
+               AND ${recordPoolTable.jobCardStatus} = 'AUTHORIZED')
               OR
               (${recordPoolTable.jobCardType} IS NULL
                AND upper(${recordPoolTable.activity}) = 'C')

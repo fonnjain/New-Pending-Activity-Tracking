@@ -471,7 +471,14 @@ async function mergeImport(
         .values(toInsert.slice(i, i + chunk))
         .onConflictDoUpdate({
           target: recordPoolTable.hash,
-          set: { isInitialCutting: sql`EXCLUDED.is_initial_cutting` },
+          set: {
+            isInitialCutting: sql`EXCLUDED.is_initial_cutting`,
+            // Refresh non-hashed derived columns so a re-upload of a new-format file
+            // (which has Col A "Type" and Col G "Status") stamps existing pool rows
+            // that were first inserted from an older format without these columns.
+            jobCardType: sql`COALESCE(EXCLUDED.job_card_type, record_pool.job_card_type)`,
+            jobCardStatus: sql`COALESCE(EXCLUDED.job_card_status, record_pool.job_card_status)`,
+          },
         })
         .returning({ id: recordPoolTable.id, hash: recordPoolTable.hash });
       for (const e of inserted) poolIdByHash.set(e.hash, e.id);

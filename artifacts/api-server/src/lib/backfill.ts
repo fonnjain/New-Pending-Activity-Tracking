@@ -184,7 +184,7 @@ export async function backfillJobCardType(): Promise<number> {
       UPDATE record_pool
          SET job_card_type = 'FG Pending For Dispatch'
        WHERE job_card_type IS NULL
-         AND job_card_status = 'Authorized'
+         AND job_card_status = 'AUTHORIZED'
          AND (activity IS NULL OR activity = '')
     `),
     // Rule 3: Authorized + unambiguously JCNS activity → JCNS
@@ -192,7 +192,7 @@ export async function backfillJobCardType(): Promise<number> {
       UPDATE record_pool
          SET job_card_type = 'Job Card Not Started'
        WHERE job_card_type IS NULL
-         AND job_card_status = 'Authorized'
+         AND job_card_status = 'AUTHORIZED'
          AND upper(activity) IN ('C', 'BL', 'NTF', 'NTFSW')
     `),
     // Rule 4: Authorized + any other non-blank activity → WIP
@@ -200,7 +200,7 @@ export async function backfillJobCardType(): Promise<number> {
       UPDATE record_pool
          SET job_card_type = 'Job Card WIP'
        WHERE job_card_type IS NULL
-         AND job_card_status = 'Authorized'
+         AND job_card_status = 'AUTHORIZED'
          AND activity IS NOT NULL
          AND activity != ''
     `),
