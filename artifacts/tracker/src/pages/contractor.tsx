@@ -153,7 +153,7 @@ function ContractorContent() {
       cols,
       sortedStats,
       { sheetName: "Workload" },
-    );
+    ).catch((err) => console.error("[Export] contractor_wise failed", err));
   };
 
   if (selectedContractor) {

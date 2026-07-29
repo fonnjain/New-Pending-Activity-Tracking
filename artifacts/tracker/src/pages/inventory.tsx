@@ -1907,7 +1907,11 @@ export default function InventoryView() {
       : jobFilter
         ? jobFilter.replace(/[^\w-]+/g, "-")
         : "all";
-    void exportToXlsxSheets(`inventory_${baseTag}_${date}.xlsx`, sheets);
+    void exportToXlsxSheets(`inventory_${baseTag}_${date}.xlsx`, sheets)
+      .catch((err) => {
+        console.error("[Export] inventory failed", err);
+        toast({ title: "Export failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+      });
   };
 
   return (

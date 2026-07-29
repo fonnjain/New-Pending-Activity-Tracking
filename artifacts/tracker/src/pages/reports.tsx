@@ -406,7 +406,7 @@ function ReportBuilder() {
       .sort(compareActivity)
       .map((act) => ({ name: act, columns: REPORT_COLUMNS, rows: byActivity.get(act)! }));
     const date = new Date().toISOString().slice(0, 10);
-    exportToXlsxSheets(`report_${tag}_${date}.xlsx`, [
+    void exportToXlsxSheets(`report_${tag}_${date}.xlsx`, [
       {
         name: "Summary",
         columns: REPORT_COLUMNS,
@@ -414,7 +414,7 @@ function ReportBuilder() {
         summaryRows: [...activitySubtotals, ...holeOpSubtotals],
       },
       ...activitySheets,
-    ]);
+    ]).catch((err) => console.error("[Export] report failed", err));
   };
 
   if (selectedImportId == null) {
@@ -2269,6 +2269,13 @@ function FabCompletionReport() {
   function handleExportExcel() {
     const date = new Date().toISOString().slice(0, 10);
 
+    // The API response rows do not include totalFabBalanceMt (it is computed
+    // client-side).  Add it to every data row so the export column is populated.
+    const withTotal = (r: FabricationProjectCompletionRow) => ({
+      ...r,
+      totalFabBalanceMt: fabTotal(r),
+    });
+
     const subtotalValues = (s: FabSums) => ({
       releaseBalanceCalcMt:    s.releaseBalanceCalcMt,
       assignmentBalanceCalcMt: s.assignmentBalanceCalcMt,
@@ -2293,7 +2300,7 @@ function FabCompletionReport() {
       bom.subGroups.forEach((sg, si) => {
         const isLast = si === bom.subGroups.length - 1;
         summarySections.push({
-          rows: sg.rows,
+          rows: sg.rows.map(withTotal),
           summaryRows: [
             {
               label: `${bom.label} / ${sg.subType} Subtotal`,
@@ -2313,7 +2320,7 @@ function FabCompletionReport() {
       name: bom.label,
       columns: FAB_COMP_COLUMNS,
       sections: bom.subGroups.map((sg) => ({
-        rows: sg.rows,
+        rows: sg.rows.map(withTotal),
         summaryRows: [
           {
             label: `${sg.subType} Subtotal`,
@@ -2324,7 +2331,7 @@ function FabCompletionReport() {
       })),
     }));
 
-    exportToXlsxSheets(`fab_completion_tlt_${date}.xlsx`, [
+    void exportToXlsxSheets(`fab_completion_tlt_${date}.xlsx`, [
       { name: "Summary", columns: FAB_COMP_COLUMNS, sections: summarySections },
       ...bomSheets,
     ]);
@@ -2929,7 +2936,7 @@ function DailyProductionMovementReport() {
     void exportToXlsxSheets(
       `Daily_Production_Movement_Activity_Wise_${new Date().toISOString().slice(0, 10)}.xlsx`,
       [summarySheet, ...actSheets],
-    );
+    ).catch((err) => console.error("[Export] daily_production_movement failed", err));
   };
 
   if (!selectedImportId) {

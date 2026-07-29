@@ -235,7 +235,7 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
     void exportToXlsxSheets(
       `turnaround_${new Date().toISOString().slice(0, 10)}.xlsx`,
       sheets,
-    );
+    ).catch((err) => console.error("[Export] turnaround failed", err));
   };
 
   return (

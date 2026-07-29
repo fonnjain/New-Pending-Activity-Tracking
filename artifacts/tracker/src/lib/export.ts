@@ -1,3 +1,10 @@
+// Static import so Vite bundles ExcelJS into the main chunk rather than a lazy
+// chunk.  Dynamic `await import("exceljs")` was previously used here, which
+// caused a "Failed to fetch dynamically imported module" error in production
+// when the chunk hash changed between builds and the old deployment still served
+// the old hash.
+import ExcelJS from "exceljs";
+
 // Header names + order EXACTLY as parse.ts expects them on the third row of
 // Sheet1. Each tuple is [header label, record field]. Keeping this in lockstep
 // with the server COL map is what makes a cleaned file round-trip through the
@@ -519,7 +526,6 @@ export async function exportToXlsx(
   options: { sheetName?: string; summaryRows?: XlsxSummaryRow[] } = {},
 ) {
   const { sheetName = "Report", summaryRows = [] } = options;
-  const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
   wb.created = new Date();
   writeSheet(wb, { name: sheetName, columns, rows, summaryRows }, new Set<string>());
@@ -535,7 +541,6 @@ export async function exportToXlsxSheets(
   sheets: XlsxSheet[],
   combined?: { inHouse: XlsxBlockGroup[]; outVendor: XlsxBlockGroup[] },
 ) {
-  const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
   wb.created = new Date();
   const used = new Set<string>();
@@ -572,7 +577,6 @@ export async function exportToXlsxBlockGrid(
   filename: string,
   sheets: XlsxGridSheet[],
 ) {
-  const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
   wb.created = new Date();
   const used = new Set<string>();

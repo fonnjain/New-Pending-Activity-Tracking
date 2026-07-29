@@ -814,7 +814,7 @@ function ActivityContent() {
     void exportToXlsxSheets(
       `activity_wise_${new Date().toISOString().slice(0, 10)}.xlsx`,
       sheets,
-    );
+    ).catch((err) => console.error("[Export] activity_wise failed", err));
   };
 
   return (

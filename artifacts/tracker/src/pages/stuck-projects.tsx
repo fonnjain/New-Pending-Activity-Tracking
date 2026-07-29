@@ -193,7 +193,7 @@ function StuckContent({ importId }: { importId: number }) {
     void exportToXlsxSheets(
       `stuck_projects_${new Date().toISOString().slice(0, 10)}.xlsx`,
       sheets,
-    );
+    ).catch((err) => console.error("[Export] stuck_projects failed", err));
   };
 
   return (
