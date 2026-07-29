@@ -18,7 +18,7 @@ const FAB_MID_ACTS = ["HG", "RFI", "NH", "B", "HAB", "W", "Q", "TS"] as const;
 type FabMidAct = (typeof FAB_MID_ACTS)[number];
 
 // BOM label canonical display order for sorting.
-const BOM_ORDER = ["Proto", "Mass", "Pre", "Mixed", "Unknown"];
+const BOM_ORDER = ["Proto", "Mass", "Pre", "Mixed", "No BOM match"];
 
 function bomSortIndex(label: string): number {
   const i = BOM_ORDER.indexOf(label);
@@ -300,7 +300,7 @@ router.get(
 
     function getBomLabel(project: string, structure: string): string {
       const types = bomDistinct.get(structureKey(project, structure));
-      if (!types || types.size === 0) return "Unknown";
+      if (!types || types.size === 0) return "No BOM match";
       if (types.size === 1) return [...types][0]!;
       return "Mixed";
     }
@@ -374,7 +374,7 @@ router.get(
         existing.qualityCheckBalanceMt += qcMt;
       }
 
-      if (bomLabel === "Unknown") {
+      if (bomLabel === "No BOM match") {
         const set = unknownByProject.get(project) ?? new Set<string>();
         set.add(structure);
         unknownByProject.set(project, set);

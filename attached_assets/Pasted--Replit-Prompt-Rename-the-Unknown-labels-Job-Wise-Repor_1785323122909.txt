@@ -1,0 +1,119 @@
+# Replit Prompt — Rename the "Unknown" labels
+### Job Wise Report and Fabrication Report, verified against WIP_29-07-2026
+
+**Send this when the Agent is free.** It bounced an earlier question because it was
+mid-build; it does not queue questions while working.
+
+---
+
+## Evidence behind this prompt
+
+Measured directly from `WIP_29-07-2026.xls`, TLT rows only:
+
+| | Job Wise screen | `Type = "FG Pending For Dispatch"` | Blank Activity |
+|---|---|---|---|
+| Marks | 8,577 | **8,577** | **8,577** |
+| Pieces | 178,564 | **178,564** | **178,564** |
+| Weight | 2,232.2 t | **2,232.207 MT** | **2,232.207 MT** |
+
+All three measures match exactly, and the two conditions are interchangeable — zero rows
+are blank-activity-but-not-FG, and zero rows are FG-but-with-an-activity. File totals also
+reconcile: 58,844 marks / 1,057,632 pcs / 10,770.770 MT against the screen's 58,844 /
+1,057,632 / 10,770.8 t.
+
+**Note the collision.** The word "Unknown" is used for two unrelated things:
+
+| Where | What it actually means |
+|---|---|
+| Job Wise Report — activity bucket | Finished Goods (blank activity) |
+| Fabrication Report — BOM Label | No matching row in the Order Review |
+
+Both need renaming. Fixing only one is worse than fixing neither, because people will
+assume the remaining "Unknown" also means finished goods.
+
+---
+
+## The prompt
+
+```
+The label "Unknown" is used in at least two places in the app for two completely
+different things, and in one of them it is actively misleading. Please rename both and
+check whether it appears anywhere else.
+
+BACKGROUND, VERIFIED AGAINST THE FILES
+
+In the Job Wise Report, the activity bucket labelled "Unknown" is not unknown at all — it
+is Finished Goods. Measured on the 29-Jul WIP file, TLT only:
+
+  Screen "Unknown"                        8,577 marks / 178,564 pcs / 2,232.2 t
+  Type = "FG Pending For Dispatch"        8,577 marks / 178,564 pcs / 2,232.207 MT
+  Rows with blank Activity                8,577 marks / 178,564 pcs / 2,232.207 MT
+
+Exact match on all three measures. Zero rows are blank-activity but not FG, and zero rows
+are FG but carry an activity. FG rows always have a blank Activity by ERP rule, so they
+fall into the no-activity bucket and get labelled "Unknown".
+
+In the Fabrication Report, "Unknown" is a BOM Label and means something entirely
+different: the structure has no matching row in order_review_rows, so no Proto / Mass /
+Pre value could be assigned. Currently zero rows carry it — the exports show only Proto
+(41), Mass (64) and Pre (1) — but the code path exists and will surface as soon as a
+structure fails to join.
+
+PLEASE DO FOUR THINGS
+
+1. Find every place in the app that displays the label "Unknown" in results — pages,
+   reports, Excel exports, chart legends, filter dropdowns and tooltips. Tell me the full
+   list before or alongside making changes, since I only know about two.
+
+2. In the Job Wise Report, rename the activity bucket from "Unknown" to
+   "Finished Goods (FG)". Apply it on screen, in the Excel export, and anywhere that
+   bucket is labelled. Do not change how the bucket is computed — only what it is called.
+
+3. In the Fabrication Report, rename the BOM Label "Unknown" to "No BOM match". Same rule:
+   label only, no logic change. Please also check whether the §5.5 threshold logic or any
+   sort order references the literal string "Unknown", and update those references so
+   nothing breaks.
+
+4. This is the important one. Tell me whether the Job Wise "Unknown" bucket is an explicit
+   check for a blank activity, or a catch-all else branch that receives anything not
+   matching a known activity code.
+
+   If it is a catch-all, an unexpected or misspelled activity code would silently land in
+   it and now be labelled "Finished Goods", which would be a worse error than the current
+   vague label. In that case please split it into two buckets:
+
+       "Finished Goods (FG)"   -> activity is blank
+       "Unrecognised activity" -> activity is present but matches no known code,
+                                  shown as a visible warning when non-zero
+
+   Every WIP activity should fall in the Quality Check set {HG, RFI, NH, B, HAB, W, Q, TS}
+   or the Galvanising set {G, GB, Y}, and this has held with zero exceptions on every file
+   from 21 to 29 July. So the second bucket should always read zero — which is exactly why
+   a non-zero value there is worth surfacing.
+
+Do not change any calculation, filter or bucket definition. These are display labels plus
+one structural split.
+
+After the change, the Job Wise Report on the 29-Jul import should show
+"Finished Goods (FG)" with 8,577 marks / 178,564 pcs / 2,232.2 t, and if you added the
+split, "Unrecognised activity" should read zero.
+
+When done, paste the changed label strings verbatim, the list of every location you found
+"Unknown" in, and the condition that feeds the FG bucket.
+```
+
+---
+
+## What to check when it reports back
+
+- **The full list of "Unknown" locations.** I only know about two; there are likely more
+  in filter dropdowns and chart legends. If the list comes back with just the two I named,
+  push back and ask it to grep for the literal string.
+- **Whether it answered question 4 with the actual condition**, not a description. The
+  Agent has been reliable when pasting source and unreliable when characterising it — it
+  misread the same regex three times and twice claimed FG rows were absent from
+  `record_pool` when the on-screen figures proved otherwise. Read the pasted condition,
+  not the summary sentence.
+- **That nothing else keyed on the literal string "Unknown".** Sort order in the
+  Fabrication Report is Proto → Mass → Pre → Mixed → Unknown, and the §5.5 threshold
+  filter targets Unknown-label rows specifically. Both reference the old string.

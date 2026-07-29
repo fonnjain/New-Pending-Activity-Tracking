@@ -14,6 +14,7 @@ import {
   matchesContractorCategoryFilter,
   migrateTurnaroundSettings,
   normalizeActivity,
+  PROCESS_SEQUENCE,
   routeIncludesOp,
   scopeFor,
   sequenceFor,
@@ -300,7 +301,11 @@ function ReportBuilder() {
       { balanceQty: number; balanceWt: number; ageSum: number; ageCount: number }
     >();
     for (const r of rows) {
-      const key = r.activity || "Unknown";
+      const key = !r.activity
+        ? "Finished Goods (FG)"
+        : (PROCESS_SEQUENCE as readonly string[]).includes(r.activity)
+          ? r.activity
+          : "Unrecognised activity";
       const g = groups.get(key) ?? { balanceQty: 0, balanceWt: 0, ageSum: 0, ageCount: 0 };
       g.balanceQty += r.balanceQty ?? 0;
       g.balanceWt += r.balanceWt ?? 0;
@@ -364,7 +369,11 @@ function ReportBuilder() {
       { marks: number; qty: number; wt: number; ageSum: number; ageCount: number }
     >();
     for (const r of rows) {
-      const key = r.activity || "Unknown";
+      const key = !r.activity
+        ? "Finished Goods (FG)"
+        : (PROCESS_SEQUENCE as readonly string[]).includes(r.activity)
+          ? r.activity
+          : "Unrecognised activity";
       const g = groups.get(key) ?? { marks: 0, qty: 0, wt: 0, ageSum: 0, ageCount: 0 };
       g.marks += 1;
       g.qty += r.balanceQty ?? 0;
@@ -397,7 +406,11 @@ function ReportBuilder() {
     // Then one worksheet per activity (process-ordered) with its own TOTAL row.
     const byActivity = new Map<string, typeof enrichedRows>();
     for (const r of enrichedRows) {
-      const key = r.activity || "Unknown";
+      const key = !r.activity
+        ? "Finished Goods (FG)"
+        : (PROCESS_SEQUENCE as readonly string[]).includes(r.activity)
+          ? r.activity
+          : "Unrecognised activity";
       if (!byActivity.has(key)) byActivity.set(key, []);
       byActivity.get(key)!.push(r);
     }
@@ -1877,7 +1890,7 @@ export function ContractorPerformanceReport() {
 // All weights server-computed and returned in MT (3 dp). TLT only.
 // Respects the global Job filter; groups by project with per-project subtotals.
 // Canonical BOM label sort order.
-const BOM_LABEL_ORDER = ["Proto", "Mass", "Pre", "Mixed", "Unknown"];
+const BOM_LABEL_ORDER = ["Proto", "Mass", "Pre", "Mixed", "No BOM match"];
 function bomLabelIndex(label: string) {
   const i = BOM_LABEL_ORDER.indexOf(label);
   return i === -1 ? BOM_LABEL_ORDER.length : i;
@@ -2203,7 +2216,7 @@ function FabCompletionReport() {
   const { visibleRows, visibleUnknownProjects } = useMemo(() => {
     const unknownCombined = new Map<string, number>();
     for (const r of rows) {
-      if (r.bomLabel !== "Unknown") continue;
+      if (r.bomLabel !== "No BOM match") continue;
       const combined =
         r.releaseBalanceCalcMt +
         r.assignmentBalanceCalcMt +
@@ -2223,7 +2236,7 @@ function FabCompletionReport() {
         .map(([p]) => p),
     );
     const visibleRows = rows.filter(
-      (r) => r.bomLabel !== "Unknown" || visibleUnknownProjects.has(r.project),
+      (r) => r.bomLabel !== "No BOM match" || visibleUnknownProjects.has(r.project),
     );
     return { visibleRows, visibleUnknownProjects };
   }, [rows]);
@@ -2529,13 +2542,13 @@ function FabCompletionReport() {
 
             // ── Cause footer helper ───────────────────────────────────────────
             const causeFooter = (bomLabel: string) =>
-              bomLabel === "Unknown" && unknownCauseFooter ? (
-                <tr key="unknown-cause-footer">
+              bomLabel === "No BOM match" && unknownCauseFooter ? (
+                <tr key="no-bom-cause-footer">
                   <td
                     colSpan={totalCols}
                     className="px-3 py-2 text-xs text-muted-foreground border-b border-border bg-muted/10"
                   >
-                    <span className="font-medium text-foreground">Unknown structures (cause):</span>
+                    <span className="font-medium text-foreground">No BOM match — structures (cause):</span>
                     {unknownCauseFooter.mismatches.length > 0 && (
                       <div className="mt-0.5">
                         <span className="font-medium">Code mismatch (in OR under a different code): </span>
