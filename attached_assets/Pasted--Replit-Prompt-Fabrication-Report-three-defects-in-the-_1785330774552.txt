@@ -1,0 +1,119 @@
+# Replit Prompt — Fabrication Report: three defects in the 29-Jul export
+### The definitions are right. The problem is which rows reach the report.
+
+**Verified first, so the Agent does not go hunting in the wrong place.** On every row that
+reconciles, the calculations are exactly correct:
+
+- **Cutting Balance** = Not Started + Authorized — all six Proto/STUB rows exact, subtotal
+  14.939 exact, 900-B 82.263 exact, 912-A 11.549558 exact.
+- **Assignment Balance** = the new definition (Not Started + Authorized + blank
+  contractor). Decisive where old and new differ: Proto/STUB subtotal reads 0.000 (new)
+  not 2.783 (old); 900-B reads 18.104 (new) not 22.531 (old).
+- **Total column formula** is correct on every subtotal: Proto 2,180.827 + Mass 3,930.761
+  + Pre 126.470 = **6,238.058**, exactly `SUM(D:N) − Assignment`.
+
+So this prompt is about row inclusion and the export, not about the maths.
+
+---
+
+## The prompt
+
+```
+Three defects in the Fabrication Report, found by comparing the 29-Jul Excel export
+against the source WIP file. The calculations themselves are correct — I verified Cutting,
+Assignment and the Total formula all match the file exactly on the rows that reconcile. The
+problems are about which rows reach the report, and about the export.
+
+Please take these in order; the first is the smallest.
+
+DEFECT 1 — The Total column fix was only applied on screen, not to the Excel export
+
+In fab_completion_tlt_2026-07-29.xlsx, column O "Total Fabrication Balance
+(excl. Assignment)":
+
+  populated on data rows      : 0 of 146
+  populated on subtotal rows  : 11 of 11  (all correct)
+  grand TOTAL row             : 0
+
+The subtotals are right — Proto 2,180.827 + Mass 3,930.761 + Pre 126.470 = 6,238.058,
+which is exactly SUM(D:N) minus Assignment. On screen the column populates correctly. Only
+the Excel export path was missed.
+
+Please apply the same fix to the export: the formula on every data row, and the grand TOTAL
+row computed from the BOM Label totals rather than by summing the (currently empty) data
+rows. After the fix the TOTAL row should read 6,238.058.
+
+DEFECT 2 — Two projects are missing from the report entirely
+
+  Project 956: 107.078 MT of Cutting in the file, ABSENT from the export
+  Project 963:  74.281 MT of Cutting in the file, ABSENT from the export
+
+Both are newly started projects with no Order Review BOM match yet, so they should be
+labelled "No BOM match". Per the §5.5 rule, projects whose No-BOM-match total is at or
+above 1.0 MT must be SHOWN, with a cause footnote — only those below 1.0 MT are hidden. At
+107 MT and 74 MT these are far above the threshold and should be visible.
+
+I suspect this is a regression from the "Unknown" to "No BOM match" rename. The §5.5
+threshold comparisons were among the strings changed, and if a comparison was inverted or
+one site was missed, qualifying projects would be dropped instead of shown.
+
+Please check the threshold logic and the cause-footer trigger against the renamed label,
+and confirm 956 and 963 appear after the fix.
+
+DEFECT 3 — Row inclusion is wrong more broadly, and batch attribution is shifting weight
+
+Comparing export against file for Cutting Balance:
+
+  (project, batch) combinations matching within 1 kg :  65 of 119  (54.6%)
+  projects matching with batch collapsed             :  38 of 57
+  projects missing entirely                          :   2  (181.359 MT — Defect 2)
+  projects present but wrong                         :  28  (net -170.835 MT)
+  TOTAL Cutting: export 2,172.502 vs file 2,524.695  (-352.194 MT, 14% short)
+
+Assignment Balance is also short: export 741.092 vs file 1,077.668 (-336.577 MT).
+Release Balance is nearly right: export 2,145.831 vs file 2,148.912 (-3.081 MT).
+
+Within that, batch attribution is visibly moving weight into the blank-batch bucket:
+
+  900-C  export  77.945   file 287.228   -209.283
+  900-Z  export 205.840   file   0.664   +205.177
+  933-B  export   1.356   file  15.600    -14.245
+  933-Z  export  15.461   file   0.582    +14.879
+
+Project 900's batch Z holds 0.664 MT across just 6 marks in the WIP file on every day from
+26 to 29 July, yet the report shows 205.840 MT there. Batch B matches exactly (82.263),
+which confirms the import is the 29-Jul one and this is not staleness.
+
+Two questions:
+
+  a) Where does the MFC Batch value come from? Please paste the exact source. Note the
+     record_pool schema comment says "mfc_batch text -- Col U: MFC batch letter", but in
+     the current 24-column WIP layout Col U is "Ref. Job Card No." and the batch is in Col
+     X, "Batch No.". That comment is written in old 21-column letters — as are its
+     neighbours (activity Col E, mark_no Col J, last_production_date Col S) — so it is
+     probably just stale documentation, but it is the first thing to rule out.
+
+  b) Batch attribution alone cannot explain 28 projects being wrong with batch collapsed.
+     What else determines whether a row reaches this report? Please account for the
+     -352.194 MT of Cutting and the -336.577 MT of Assignment.
+
+Please diagnose Defect 3 before changing anything — I want to understand the cause, not
+have the numbers adjusted to agree.
+
+When done, paste the export Total-column expression, the corrected threshold comparison,
+the MFC Batch source, and your explanation for the row-inclusion shortfall.
+```
+
+---
+
+## What to check in the reply
+
+- **That the Total fix names the export path specifically.** Reporting "already fixed"
+  means it looked at the on-screen code again; the export is a separate path and is
+  demonstrably still broken.
+- **That 956 and 963 appear** after the threshold fix, with a No-BOM-match cause footnote.
+- **A real number for Defect 3(b).** The batch swap on 900 and 933 accounts for roughly
+  4 MT net, and the two missing projects for 181 MT. That leaves about 170 MT unexplained
+  across 28 projects, which is the part that matters.
+- **No code changes on Defect 3 before the diagnosis.** Adjusting figures to reconcile
+  without knowing why would hide the cause.
