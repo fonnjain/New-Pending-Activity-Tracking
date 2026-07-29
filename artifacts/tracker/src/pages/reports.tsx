@@ -14,6 +14,7 @@ import {
   matchesContractorCategoryFilter,
   migrateTurnaroundSettings,
   normalizeActivity,
+  NTLT_ACTIVITIES,
   PROCESS_SEQUENCE,
   routeIncludesOp,
   scopeFor,
@@ -303,9 +304,9 @@ function ReportBuilder() {
     for (const r of rows) {
       const key = !r.activity
         ? "Finished Goods (FG)"
-        : (PROCESS_SEQUENCE as readonly string[]).includes(r.activity)
+        : ((r.category || "TLT") === "NTLT" ? NTLT_ACTIVITIES : (PROCESS_SEQUENCE as readonly string[])).includes(r.activity)
           ? r.activity
-          : "Unrecognised activity";
+          : `⚠ ${r.activity}`;
       const g = groups.get(key) ?? { balanceQty: 0, balanceWt: 0, ageSum: 0, ageCount: 0 };
       g.balanceQty += r.balanceQty ?? 0;
       g.balanceWt += r.balanceWt ?? 0;
@@ -371,9 +372,9 @@ function ReportBuilder() {
     for (const r of rows) {
       const key = !r.activity
         ? "Finished Goods (FG)"
-        : (PROCESS_SEQUENCE as readonly string[]).includes(r.activity)
+        : ((r.category || "TLT") === "NTLT" ? NTLT_ACTIVITIES : (PROCESS_SEQUENCE as readonly string[])).includes(r.activity)
           ? r.activity
-          : "Unrecognised activity";
+          : `⚠ ${r.activity}`;
       const g = groups.get(key) ?? { marks: 0, qty: 0, wt: 0, ageSum: 0, ageCount: 0 };
       g.marks += 1;
       g.qty += r.balanceQty ?? 0;
@@ -408,9 +409,9 @@ function ReportBuilder() {
     for (const r of enrichedRows) {
       const key = !r.activity
         ? "Finished Goods (FG)"
-        : (PROCESS_SEQUENCE as readonly string[]).includes(r.activity)
+        : ((r.category || "TLT") === "NTLT" ? NTLT_ACTIVITIES : (PROCESS_SEQUENCE as readonly string[])).includes(r.activity)
           ? r.activity
-          : "Unrecognised activity";
+          : `⚠ ${r.activity}`;
       if (!byActivity.has(key)) byActivity.set(key, []);
       byActivity.get(key)!.push(r);
     }

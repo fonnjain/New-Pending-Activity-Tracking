@@ -1,0 +1,98 @@
+# Replit Prompt — Fix the NTLT regression in the activity bucket split
+### Follow-up to the "Unknown" rename
+
+The rename work was good and the `||` correction was right. But the new
+`Unrecognised activity` bucket uses `PROCESS_SEQUENCE`, which is the **TLT** activity
+sequence. NTLT uses three codes that are not in it, so valid NTLT work is now flagged as an
+error.
+
+Measured on `WIP_29-07-2026.xls`:
+
+| | Finished Goods (FG) | Known codes | Unrecognised activity |
+|---|---|---|---|
+| TLT | 8,577 marks / 2,232.207 MT | 50,267 / 8,538.563 | **0 / 0.000** |
+| NTLT | 32 / 630.910 | 179 / 2,168.829 | **98 / 3,759.399** |
+
+The three codes falling through: `NTF` (93 marks, 3,729.406 MT), `NTFSW` (4 marks,
+29.494 MT), `BL` (1 mark, 0.500 MT).
+
+That is **55% of NTLT's total balance** flagged as an error. The old code handled these
+correctly — `NTF` is truthy, so it displayed as its own row.
+
+---
+
+## The prompt
+
+```
+The activity bucket split you just added has a regression for NTLT. Please fix it.
+
+The problem: PROCESS_SEQUENCE is the TLT process sequence —
+["C","HG","RFI","NH","B","HAB","W","Q","TS","G","GB","Y"]. NTLT uses three activity codes
+that are not in that list: NTF, NTFSW and BL. So with Order Type set to NTLT or All, valid
+NTLT work is now labelled "Unrecognised activity".
+
+Measured on the 29-Jul WIP file:
+
+  TLT   Unrecognised activity:   0 marks /     0.000 MT   (correct)
+  NTLT  Unrecognised activity:  98 marks / 3,759.399 MT   (all valid work)
+          NTF    93 marks  3,729.406 MT
+          NTFSW   4 marks     29.494 MT
+          BL      1 mark       0.500 MT
+
+That is about 55% of NTLT's total balance being flagged as an error. Note the previous code
+handled these correctly — "NTF" is truthy, so `r.activity || "Unknown"` left it as its own
+row labelled NTF. The split is the right idea but is comparing against the wrong set.
+
+Please make three changes:
+
+1. Recognise activity codes per order nature, not against a single TLT list. A code should
+   only be "unrecognised" if it is not valid for the nature of the row it is on.
+
+   TLT valid activities:   C, HG, RFI, NH, B, HAB, W, Q, TS, G, GB, Y
+   NTLT valid activities:  BL, NTF, NTFSW, G, GB, TS, Y
+
+   The NTLT list is what has actually been observed across the 21 to 29 July files. Please
+   define it as an explicit named constant next to PROCESS_SEQUENCE rather than widening
+   PROCESS_SEQUENCE itself, because PROCESS_SEQUENCE also drives the TLT stage ordering
+   and must not gain NTLT codes.
+
+2. When a code genuinely is unrecognised, show which code it was. Grouping everything into
+   one "Unrecognised activity" row loses the information that makes the warning actionable.
+   Either list the offending codes in the row label or make the row expandable to show
+   them.
+
+3. Confirm which report each of these three lines belongs to:
+       reports.tsx:303, reports.tsx:367, reports.tsx:400
+   You labelled them "Fab Report activity subtotals", but the Fabrication Report's activity
+   columns are C, HG, RFI, NH, B, HAB, W and Q/TS only — it has no galvanising or
+   blank-activity column. So these may belong to Daily Production Movement or Activity Wise
+   Net Balance Movement instead. If they do, the same NTLT problem applies there and needs
+   the same fix.
+
+After the change, on the 29-Jul import:
+  Order Type = TLT   -> Unrecognised activity: 0 marks, row hidden
+  Order Type = NTLT  -> Unrecognised activity: 0 marks, row hidden;
+                        NTF, NTFSW and BL appear as their own activity rows
+  Order Type = All   -> Unrecognised activity: 0 marks, row hidden
+
+Please test under all three Order Type settings, not just the TLT default.
+
+The Finished Goods (FG) rename itself is correct and should stay as is — blank activity
+means FG in both natures, verified 8,577 of 8,577 TLT rows and 32 of 32 NTLT rows.
+
+When done, paste the new per-nature validity constants and the changed bucket condition
+verbatim, and tell me the Unrecognised activity counts you get under each of the three
+Order Type settings.
+```
+
+---
+
+## What to check in the reply
+
+- **That it tested all three Order Type settings.** The original fix reported "zero
+  unrecognised activities" on the 29-Jul file, which was true only under the default TLT
+  filter. That is how this slipped through.
+- **That `PROCESS_SEQUENCE` itself was not widened.** It drives TLT stage ordering; adding
+  NTF or BL to it would put NTLT codes into the TLT sequence.
+- **The answer on the three `reports.tsx` line numbers.** If they belong to another report,
+  that report needs the same per-nature fix.

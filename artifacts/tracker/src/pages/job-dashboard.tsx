@@ -7,6 +7,7 @@ import {
   PROCESS_PHASES,
   processPhasesForMode,
   PROCESS_SEQUENCE,
+  NTLT_ACTIVITIES,
   type ProcessPhaseKey,
 } from "@workspace/domain";
 import { useTracker, useContractorCategoryMap, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE, dateRangeWindow, type MfcViewMode } from "@/lib/store";
@@ -308,9 +309,9 @@ function JobDashboardContent() {
       filtered.forEach((r) => {
         const key = !r.activity
           ? "Finished Goods (FG)"
-          : (PROCESS_SEQUENCE as readonly string[]).includes(r.activity)
+          : ((r.category || "TLT") === "NTLT" ? NTLT_ACTIVITIES : (PROCESS_SEQUENCE as readonly string[])).includes(r.activity)
             ? r.activity
-            : "Unrecognised activity";
+            : `⚠ ${r.activity}`;
         if (!actGroups.has(key)) actGroups.set(key, []);
         actGroups.get(key)!.push(r);
       });

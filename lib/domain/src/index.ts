@@ -46,6 +46,11 @@ export const SEQUENCES = {
   NTLT_GENERAL: ["TS", "G", "GB", "Y"],
 } as const;
 
+// Observable NTLT activity codes, validated against WIP files 21–29 Jul 2026.
+// BL / NTF / NTFSW are NTLT-specific; G, GB, TS, Y are shared with TLT.
+// Defined separately from PROCESS_SEQUENCE so TLT stage ordering is not widened.
+export const NTLT_ACTIVITIES: readonly string[] = ["BL", "NTF", "NTFSW", "G", "GB", "TS", "Y"];
+
 export type SequenceKey = keyof typeof SEQUENCES;
 // A process sequence is an ordered, read-only list of activity codes.
 export type ActivitySequence = readonly string[];
