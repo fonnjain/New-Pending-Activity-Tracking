@@ -1003,8 +1003,8 @@ function FilterBar() {
           onChange={(v) => setMfcViewMode(v as MfcViewMode)}
           options={[
             { value: "project-with-mfc", label: "Project with MFC" },
-            { value: "view-by-mfc",       label: "View by MFC" },
-            { value: "project-then-mfc",  label: "Project Then MFC" },
+            { value: "view-by-mfc",       label: "View by MFC",      disabled: true },
+            { value: "project-then-mfc",  label: "Project Then MFC", disabled: true },
           ]}
         />
       </div>
