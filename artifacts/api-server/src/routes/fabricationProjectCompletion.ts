@@ -156,6 +156,8 @@ router.get(
           structure: recordPoolTable.structure,
           towerSubType:
             sql<string | null>`max(${recordPoolTable.towerSubType})`,
+          mfcBatch:
+            sql<string | null>`max(${recordPoolTable.mfcBatch})`,
         })
         .from(importRowsTable)
         .innerJoin(
@@ -309,6 +311,7 @@ router.get(
       string,
       {
         project: string;
+        mfcBatch: string | null;
         bomLabel: string;
         subTypeGroup: string;
         releaseBalanceCalcMt: number;
@@ -326,10 +329,10 @@ router.get(
     // unknownByProject: project → deduplicated list of WIP structure codes with no OR match
     const unknownByProject = new Map<string, Set<string>>();
 
-    for (const { project, structure, towerSubType } of tltStructures) {
+    for (const { project, structure, towerSubType, mfcBatch } of tltStructures) {
       const bomLabel = getBomLabel(project, structure);
       const subTypeGroup = classifySubType(towerSubType);
-      const gKey = `${project}\u0001${bomLabel}\u0001${subTypeGroup}`;
+      const gKey = `${project}\u0001${bomLabel}\u0001${subTypeGroup}\u0001${mfcBatch ?? ""}`;
 
       const key = structureKey(project, structure);
       const relMt    = releaseMap.get(key) ?? 0;
@@ -346,7 +349,7 @@ router.get(
       const existing = grouped.get(gKey);
       if (!existing) {
         grouped.set(gKey, {
-          project, bomLabel, subTypeGroup,
+          project, mfcBatch: mfcBatch ?? null, bomLabel, subTypeGroup,
           releaseBalanceCalcMt: relMt,
           assignmentBalanceCalcMt: assignMt,
           cuttingBalanceMt: cutMt,

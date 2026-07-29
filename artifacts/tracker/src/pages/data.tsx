@@ -2617,7 +2617,7 @@ function LoginActivitySection() {
 const ERP_RULES_QUERY_KEY = ["erp-rules"] as const;
 
 async function fetchErpRules(): Promise<ErpRulesResponse> {
-  const r = await fetch("/production/api/reports/erp-rules", { credentials: "include" });
+  const r = await fetch("/api/reports/erp-rules", { credentials: "include" });
   if (!r.ok) throw new Error(`ERP rules fetch failed: ${r.status}`);
   return r.json() as Promise<ErpRulesResponse>;
 }

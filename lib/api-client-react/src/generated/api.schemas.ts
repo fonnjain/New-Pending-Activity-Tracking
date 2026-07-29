@@ -2198,6 +2198,8 @@ export interface ReleaseBalanceResponse {
 export interface FabricationProjectCompletionRow {
   /** Normalized project / job code. */
   project: string;
+  /** MFC Batch identifier (Col U from WIP file), or null when not set. */
+  mfcBatch: string | null;
   /** BOM Label: Proto | Mass | Pre | Mixed | Unknown. */
   bomLabel: string;
   /** Tower Sub Type group: STUB | SST | Other. */

@@ -2076,6 +2076,7 @@ const FAB_COMP_COLUMNS: XlsxColumn[] = [
   { label: "BOM Label",                                   field: "bomLabel" },
   { label: "Sub-Type Group",                              field: "subTypeGroup" },
   { label: "Project",                                     field: "project" },
+  { label: "MFC Batch",                                   field: "mfcBatch" },
   { label: "Release Balance Calc (MT)",                   field: "releaseBalanceCalcMt",    numeric: true, decimals: 3, total: true },
   { label: "Assignment Balance Calc (MT)",                field: "assignmentBalanceCalcMt", numeric: true, decimals: 3, total: true },
   { label: "Cutting Balance — C (MT)",                    field: "cuttingBalanceMt",        numeric: true, decimals: 3, total: true },
@@ -2321,8 +2322,8 @@ function FabCompletionReport() {
           {/* specOps(s) = collapsed B+HAB+W combined weight */}
           {(() => {
             const specOps = (b: number, hab: number, w: number) => b + hab + w;
-            // total column count: +1 for the Total Fab Balance column (12 collapsed, 14 expanded)
-            const totalCols = specOpsExpanded ? 14 : 12;
+            // total column count: +1 for MFC Batch, +1 for Total Fab Balance (13 collapsed, 15 expanded)
+            const totalCols = specOpsExpanded ? 15 : 13;
             const fabGroupSpan = specOpsExpanded ? 8 : 6;
             const TOTAL_COL_TOOLTIP =
               "Total Fabrication Balance = Release + Cutting + HG + RFI + NH + B + HAB + W + Quality (Q/TS).\n" +
@@ -2341,6 +2342,9 @@ function FabCompletionReport() {
                 </th>
                 <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
                   Project
+                </th>
+                <th className="text-left px-3 py-2 font-semibold border-r border-border/30" rowSpan={2}>
+                  MFC Batch
                 </th>
                 <th className="text-center px-2 py-1.5 font-semibold border-r border-border/30 text-indigo-700 dark:text-indigo-400" colSpan={2}>
                   Pre-Production (MT)
@@ -2406,7 +2410,7 @@ function FabCompletionReport() {
                     <>
                       {sg.rows.map((row, rowIdx) => (
                         <tr
-                          key={`${row.bomLabel}-${row.subTypeGroup}-${row.project}`}
+                          key={`${row.bomLabel}-${row.subTypeGroup}-${row.project}-${row.mfcBatch ?? ""}`}
                           className="border-b border-border/40 hover:bg-muted/30"
                         >
                           <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">
@@ -2416,6 +2420,7 @@ function FabCompletionReport() {
                             {rowIdx === 0 ? row.subTypeGroup : ""}
                           </td>
                           <td className="px-3 py-1.5 font-medium border-r border-border/20">{row.project}</td>
+                          <td className="px-3 py-1.5 border-r border-border/20 text-muted-foreground">{row.mfcBatch ?? ""}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums text-indigo-800 dark:text-indigo-300">
                             {fmt(row.releaseBalanceCalcMt)}
                           </td>
@@ -2453,6 +2458,7 @@ function FabCompletionReport() {
                           {sg.subType} Subtotal
                         </td>
                         <td className="px-3 py-1.5 border-r border-border/20" />
+                        <td className="px-3 py-1.5 border-r border-border/20" />
                         <td className="px-2 py-1.5 text-right tabular-nums text-indigo-800 dark:text-indigo-300">
                           {fmt(sg.subtotal.releaseBalanceCalcMt)}
                         </td>
@@ -2488,6 +2494,7 @@ function FabCompletionReport() {
                   >
                     <td className="px-3 py-1.5 border-r border-border/20">{bom.label}</td>
                     <td className="px-3 py-1.5 text-muted-foreground border-r border-border/20">Total</td>
+                    <td className="px-3 py-1.5 border-r border-border/20" />
                     <td className="px-3 py-1.5 border-r border-border/20" />
                     <td className="px-2 py-1.5 text-right tabular-nums text-indigo-800 dark:text-indigo-300">
                       {fmt(bom.subtotal.releaseBalanceCalcMt)}
@@ -2549,7 +2556,7 @@ function FabCompletionReport() {
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-border bg-muted font-bold">
-                <td className="px-3 py-2 border-r border-border/20" colSpan={3}>
+                <td className="px-3 py-2 border-r border-border/20" colSpan={4}>
                   Grand Total
                 </td>
                 <td className="px-2 py-2 text-right tabular-nums text-indigo-800 dark:text-indigo-300">
