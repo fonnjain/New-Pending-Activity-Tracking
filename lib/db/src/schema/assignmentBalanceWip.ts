@@ -1,24 +1,17 @@
 import {
   pgTable,
   text,
-  integer,
   doublePrecision,
   timestamp,
   primaryKey,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
-import { importsTable } from "./imports";
 
-// Per-(importId, project, structure) snapshot of Assignment Balance.
-// Append-only: each WIP upload inserts rows for its own import_id and deletes
-// ONLY the rows with that same import_id before reinserting — historical imports
-// are never overwritten.  This mirrors the release_balance_wip design so a
-// historical view shows each import's assignment balance alongside its other
-// figures (not today's balance grafted onto every past import).
-//
-// Additive, display-only — never affects parsing, hashing, dedup, ageing,
-// activity, milestone, dispatch, or accumulated-WIP math.
+// Per-(project, structure) snapshot of Assignment Balance from the latest WIP
+// import.  Always reflects the most-recent upload — replaced wholesale on each
+// import.  Additive, display-only — never affects parsing, hashing, dedup,
+// ageing, activity, milestone, dispatch, or accumulated-WIP math.
 //
 // Definition: Col A == "Job Card Not Started" AND Col G == "Authorized"
 //   AND Col D (Contractor) is blank.
@@ -28,12 +21,13 @@ import { importsTable } from "./imports";
 // Release Balance.  Assignment Balance therefore represents work that has been
 // released to the shop floor (Authorized) but has not yet been assigned to a
 // contractor — the actionable queue.
+//
+// Note: the fabricationProjectCompletion route computes this inline from
+// record_pool per (project, structure, mfcBatch), so this pre-computed table
+// is retained only for legacy consumers and the admin recompute endpoint.
 export const assignmentBalanceWipTable = pgTable(
   "assignment_balance_wip",
   {
-    importId: integer("import_id")
-      .notNull()
-      .references(() => importsTable.id, { onDelete: "cascade" }),
     project: text("project").notNull(),
     structure: text("structure").notNull(),
     assignmentBalanceComputedMt: doublePrecision("assignment_balance_computed_mt")
@@ -43,7 +37,7 @@ export const assignmentBalanceWipTable = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.importId, t.project, t.structure] })],
+  (t) => [primaryKey({ columns: [t.project, t.structure] })],
 );
 
 export const insertAssignmentBalanceWipSchema = createInsertSchema(

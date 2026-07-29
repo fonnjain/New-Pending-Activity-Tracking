@@ -13,8 +13,8 @@ All five pool queries in `fabricationProjectCompletion.ts` (tltStructures, relea
 **OpenAPI:**
 `FabricationProjectCompletionRow` and `FabricationProjectCompletionTotals` declare: `mfcBatch` (nullable string), `hgBalanceMt`, `rfiBalanceMt`, `nhBalanceMt`, `bBalanceMt`, `habBalanceMt`, `wBalanceMt` (all double).  Run `pnpm --filter @workspace/api-spec run codegen` after any change to the spec.
 
-## assignment_balance_wip schema (Fix C)
-Primary key is `(import_id, project, structure)` — NOT `(project, structure)`.  `import_id` is a NOT NULL FK to `imports.id` ON DELETE CASCADE.  `recomputeAssignmentBalance(buffer, importId)` scoped-deletes only that import's rows.  `backfillAssignmentBalanceFromPool()` skips imports that already have rows (idempotent).  Both boot-level (index.ts) and per-import call sites use `importId`.
+## assignment_balance_wip schema
+Primary key stays `(project, structure)` — no import_id column.  Reason: the fabricationProjectCompletion route computes assignment balance INLINE from record_pool per (project, structure, mfcBatch) so the pre-computed table is vestigial; adding import_id to the PK causes a non-trivial production migration that Replit's auto-diff handles in the wrong statement order (ADD CONSTRAINT before ADD COLUMN).  Keep this table as latest-import-snapshot only.
 
 ## Grand total interpretation
 The unfiltered API grand total (all TLT, latest import) is ~6,566 MT.  The user's on-screen totals are always smaller because a job-set filter is active.  The export sums whatever rows it renders — the filtered total and the API unfiltered total are both correct; they are not the same number.

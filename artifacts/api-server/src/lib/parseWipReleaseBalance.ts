@@ -273,89 +273,70 @@ export function parseWipAssignmentBalance(
 }
 
 /**
- * Pool-based backfill of assignment_balance_wip for imports that do not yet
- * have rows in the table.  Mirrors the file-based definition exactly:
+ * Pool-based backfill of assignment_balance_wip using the LATEST import's
+ * record_pool rows. Mirrors the file-based definition exactly:
  *   job_card_type = 'Job Card Not Started'
  *   AND (job_card_status IS NULL OR job_card_status = 'AUTHORIZED')
  *   AND (contractor IS NULL OR contractor = '')
- * Scoped per import_id (append-only, same as release_balance_wip).
- * Safe to call from admin/recompute since it needs no file buffer.
+ * Grouped by (project, structure), summed in MT. Replaces the table wholesale
+ * (same as the file-based recompute). Safe to call from admin/recompute since
+ * it needs no file buffer — derives entirely from what's already in the pool.
+ * No-op (clears table) when there are no imports.
  */
 export async function backfillAssignmentBalanceFromPool(): Promise<number> {
-  // Find all imports that already have assignment_balance_wip rows (skip them).
-  const existingImportIds = new Set<number>(
-    (
-      await db
-        .selectDistinct({ importId: assignmentBalanceWipTable.importId })
-        .from(assignmentBalanceWipTable)
-    ).map((r) => r.importId),
-  );
-
-  const allImports = await db
+  // Find the latest import id.
+  const [latest] = await db
     .select({ id: importsTable.id })
     .from(importsTable)
-    .orderBy(importsTable.id);
+    .orderBy(sql`${importsTable.id} desc`)
+    .limit(1);
 
-  const toBackfill = allImports.filter((i) => !existingImportIds.has(i.id));
-  if (toBackfill.length === 0) return 0;
-
-  let totalInserted = 0;
-  for (const { id: importId } of toBackfill) {
-    const computed = await db
-      .select({
-        project: recordPoolTable.job,
-        structure: recordPoolTable.structure,
-        assignmentBalanceComputedMt: sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
-      })
-      .from(importRowsTable)
-      .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
-      .where(
-        and(
-          eq(importRowsTable.importId, importId),
-          sql`${recordPoolTable.jobCardType} = 'Job Card Not Started'`,
-          sql`(${recordPoolTable.jobCardStatus} IS NULL OR upper(${recordPoolTable.jobCardStatus}) = 'AUTHORIZED')`,
-          sql`(${recordPoolTable.contractor} IS NULL OR trim(${recordPoolTable.contractor}) = '')`,
-        ),
-      )
-      .groupBy(recordPoolTable.job, recordPoolTable.structure);
-
-    if (computed.length > 0) {
-      await db
-        .insert(assignmentBalanceWipTable)
-        .values(
-          computed.map((r) => ({
-            importId,
-            project: r.project,
-            structure: r.structure,
-            assignmentBalanceComputedMt: r.assignmentBalanceComputedMt,
-          })),
-        )
-        .onConflictDoNothing();
-      totalInserted += computed.length;
-    }
+  if (!latest) {
+    await db.delete(assignmentBalanceWipTable);
+    return 0;
   }
-  return totalInserted;
+
+  const computed = await db
+    .select({
+      project: recordPoolTable.job,
+      structure: recordPoolTable.structure,
+      assignmentBalanceComputedMt: sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
+    })
+    .from(importRowsTable)
+    .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+    .where(
+      and(
+        eq(importRowsTable.importId, latest.id),
+        sql`${recordPoolTable.jobCardType} = 'Job Card Not Started'`,
+        sql`(${recordPoolTable.jobCardStatus} IS NULL OR upper(${recordPoolTable.jobCardStatus}) = 'AUTHORIZED')`,
+        sql`(${recordPoolTable.contractor} IS NULL OR trim(${recordPoolTable.contractor}) = '')`,
+      ),
+    )
+    .groupBy(recordPoolTable.job, recordPoolTable.structure);
+
+  await db.transaction(async (tx) => {
+    await tx.delete(assignmentBalanceWipTable);
+    if (computed.length > 0) {
+      await tx.insert(assignmentBalanceWipTable).values(
+        computed.map((r) => ({
+          project: r.project,
+          structure: r.structure,
+          assignmentBalanceComputedMt: r.assignmentBalanceComputedMt,
+        })),
+      );
+    }
+  });
+
+  return computed.length;
 }
 
-/**
- * Recompute Assignment Balance for one specific import from its WIP file buffer.
- * Only touches rows WHERE import_id = importId — never deletes another import's data.
- * Mirrors recomputeReleaseBalance for consistent scoping.
- */
-export async function recomputeAssignmentBalance(
-  buffer: Buffer,
-  importId: number,
-): Promise<void> {
+export async function recomputeAssignmentBalance(buffer: Buffer): Promise<void> {
   const rows = parseWipAssignmentBalance(buffer);
   await db.transaction(async (tx) => {
-    // Scoped delete — only this import's rows.
-    await tx
-      .delete(assignmentBalanceWipTable)
-      .where(eq(assignmentBalanceWipTable.importId, importId));
+    await tx.delete(assignmentBalanceWipTable);
     if (rows.length > 0) {
       await tx.insert(assignmentBalanceWipTable).values(
         rows.map((r) => ({
-          importId,
           project: r.project,
           structure: r.structure,
           assignmentBalanceComputedMt: r.assignmentBalanceComputedMt,
