@@ -1,14 +1,11 @@
 import { Router, type IRouter } from "express";
 import {
   db,
-  releaseBalanceWipTable,
-  assignmentBalanceWipTable,
   importRowsTable,
   recordPoolTable,
   importsTable,
 } from "@workspace/db";
 import { desc, eq, and, sql, or } from "drizzle-orm";
-import { bundleActivitySet } from "@workspace/domain";
 import { loadLatestOrderReview } from "../lib/dispatch";
 
 // Individual fab activities tracked between Cutting and Quality Check.
@@ -45,6 +42,13 @@ function classifySubType(raw: string | null): "STUB" | "SST" | "Other" {
 
 function structureKey(project: string, structure: string): string {
   return `${project}\u0001${structure}`;
+}
+
+// Per-mark batch key: (project, structure, mfcBatch) → unique lookup key so each
+// mark's weight is attributed to the batch it actually carries, not the dominant
+// batch of the whole structure.  mfcBatch null/empty → sentinel "".
+function batchKey(project: string, structure: string, mfcBatch: string | null): string {
+  return `${project}\u0001${structure}\u0001${mfcBatch ?? ""}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,9 +108,14 @@ const router: IRouter = Router();
 
 // GET /reports/fabrication-project-completion-tlt
 // Fabrication Report – Project Completion (TLT only).
-// Grouped by (project × BOM Label). TLT marks only.
-// Measures: Release Balance Calc, Assignment Balance Calc, Cutting Balance, Quality Check Balance.
+// Grouped by (project × BOM Label × Sub-type × MFC Batch). TLT marks only.
+// Measures: Release Balance Calc, Assignment Balance Calc, Cutting Balance, individual
+// fab activities (HG, RFI, NH, B, HAB, W), Quality Check Balance (Q+TS).
 // All weights in MT (kg ÷ 1000).
+//
+// Per-mark batch attribution: each mark's weight is credited to the mfc_batch it
+// carries, not the dominant batch of its structure.  Structures with marks in two
+// distinct batches produce two rows with independent measure columns.
 router.get(
   "/reports/fabrication-project-completion-tlt",
   async (_req, res): Promise<void> => {
@@ -145,19 +154,20 @@ router.get(
       tltStructures,
       cuttingAgg,
       fabMidAgg,
-      releaseRows,
-      assignmentRows,
+      releaseByBatch,
+      assignmentByBatch,
       orderReview,
     ] = await Promise.all([
-      // TLT (project, structure) pairs + dominant tower sub type for the latest import.
+      // TLT (project, structure, mfcBatch) triplets for the latest import.
+      // Group by mfc_batch directly — no MAX — so each mark's weight stays
+      // in the batch it carries.  One row per (project, structure, mfcBatch).
       db
         .select({
           project: recordPoolTable.job,
           structure: recordPoolTable.structure,
           towerSubType:
             sql<string | null>`max(${recordPoolTable.towerSubType})`,
-          mfcBatch:
-            sql<string | null>`max(${recordPoolTable.mfcBatch})`,
+          mfcBatch: recordPoolTable.mfcBatch,
         })
         .from(importRowsTable)
         .innerJoin(
@@ -170,20 +180,27 @@ router.get(
             eq(recordPoolTable.category, "TLT"),
           ),
         )
-        .groupBy(recordPoolTable.job, recordPoolTable.structure),
+        .groupBy(
+          recordPoolTable.job,
+          recordPoolTable.structure,
+          recordPoolTable.mfcBatch,
+        ),
 
       // Cutting balance = "Job Card Not Started" + "Authorized".
       // Primary: job_card_type = 'Job Card Not Started' AND job_card_status = 'Authorized'
       //   (new-format files that store Col A; TLT and NTLT alike).
-      // Fallback: upper(activity) = 'C' AND is_initial_cutting = false
+      // Fallback: upper(activity) = 'C' AND is_initial_cutting IS NOT TRUE
       //   (old-format files without job_card_type; correct for TLT by rule T1;
       //    no old NTLT files have this gap).
-      // is_initial_cutting = false in both branches to exclude NOT_RELEASED rows
-      // (is_initial_cutting is the most-indexed proxy and avoids a full text scan).
+      // is_initial_cutting IS NOT TRUE in both branches to exclude NOT_RELEASED rows.
+      // Using IS NOT TRUE (not = false) so any NULL flag doesn't incorrectly include
+      // Initial marks during the window before the boot backfill completes.
+      // Grouped by (project, structure, mfcBatch) for per-mark batch attribution.
       db
         .select({
           project: recordPoolTable.job,
           structure: recordPoolTable.structure,
+          mfcBatch: recordPoolTable.mfcBatch,
           balanceMt:
             sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
         })
@@ -196,7 +213,7 @@ router.get(
           and(
             eq(importRowsTable.importId, latestImport.id),
             eq(recordPoolTable.category, "TLT"),
-            eq(recordPoolTable.isInitialCutting, false),
+            sql`${recordPoolTable.isInitialCutting} IS NOT TRUE`,
             sql`(
               (${recordPoolTable.jobCardType} = 'Job Card Not Started'
                AND ${recordPoolTable.jobCardStatus} = 'AUTHORIZED')
@@ -206,14 +223,19 @@ router.get(
             )`,
           ),
         )
-        .groupBy(recordPoolTable.job, recordPoolTable.structure),
+        .groupBy(
+          recordPoolTable.job,
+          recordPoolTable.structure,
+          recordPoolTable.mfcBatch,
+        ),
 
       // Per-activity balance for HG, RFI, NH, B, HAB, W, Q, TS — one row per
-      // (project, structure, activity). Split into individual maps after.
+      // (project, structure, mfcBatch, activity). Split into individual maps after.
       db
         .select({
           project: recordPoolTable.job,
           structure: recordPoolTable.structure,
+          mfcBatch: recordPoolTable.mfcBatch,
           activity: sql<string>`upper(${recordPoolTable.activity})`,
           balanceMt:
             sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
@@ -233,38 +255,94 @@ router.get(
         .groupBy(
           recordPoolTable.job,
           recordPoolTable.structure,
+          recordPoolTable.mfcBatch,
           sql`upper(${recordPoolTable.activity})`,
         ),
 
-      // Release balance (JCNS + Initial) — scoped to this import.
+      // Release balance (JCNS + Initial rows) — computed inline from the pool,
+      // grouped by (project, structure, mfcBatch) for per-mark batch attribution.
+      // is_initial_cutting = true correctly identifies Initial marks (set during
+      // parse from job_card_status = 'INITIAL').
       db
-        .select()
-        .from(releaseBalanceWipTable)
-        .where(eq(releaseBalanceWipTable.importId, latestImport.id)),
+        .select({
+          project: recordPoolTable.job,
+          structure: recordPoolTable.structure,
+          mfcBatch: recordPoolTable.mfcBatch,
+          balanceMt:
+            sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
+        })
+        .from(importRowsTable)
+        .innerJoin(
+          recordPoolTable,
+          eq(importRowsTable.poolId, recordPoolTable.id),
+        )
+        .where(
+          and(
+            eq(importRowsTable.importId, latestImport.id),
+            eq(recordPoolTable.category, "TLT"),
+            eq(recordPoolTable.isInitialCutting, true),
+          ),
+        )
+        .groupBy(
+          recordPoolTable.job,
+          recordPoolTable.structure,
+          recordPoolTable.mfcBatch,
+        ),
 
-      // Assignment balance (JCNS + blank contractor) — pre-computed, whole-file.
-      db.select().from(assignmentBalanceWipTable),
+      // Assignment balance (JCNS + Authorized + blank contractor) — computed inline
+      // from the pool, grouped by (project, structure, mfcBatch).
+      // job_card_status = 'AUTHORIZED' already excludes Initial marks; no
+      // is_initial_cutting filter needed here.
+      db
+        .select({
+          project: recordPoolTable.job,
+          structure: recordPoolTable.structure,
+          mfcBatch: recordPoolTable.mfcBatch,
+          balanceMt:
+            sql<number>`coalesce(sum(${recordPoolTable.balanceWt}) / 1000.0, 0)`,
+        })
+        .from(importRowsTable)
+        .innerJoin(
+          recordPoolTable,
+          eq(importRowsTable.poolId, recordPoolTable.id),
+        )
+        .where(
+          and(
+            eq(importRowsTable.importId, latestImport.id),
+            eq(recordPoolTable.category, "TLT"),
+            sql`${recordPoolTable.jobCardType} = 'Job Card Not Started'`,
+            sql`${recordPoolTable.jobCardStatus} = 'AUTHORIZED'`,
+            sql`(${recordPoolTable.contractor} IS NULL OR trim(${recordPoolTable.contractor}) = '')`,
+          ),
+        )
+        .groupBy(
+          recordPoolTable.job,
+          recordPoolTable.structure,
+          recordPoolTable.mfcBatch,
+        ),
 
       // Order Review for BOM labels.
       loadLatestOrderReview(),
     ]);
 
-    // 3. Build lookup maps keyed by "project\x01structure".
+    // 3. Build lookup maps keyed by batchKey(project, structure, mfcBatch).
+    //    Each measure is now per (project, structure, mfcBatch) so a structure whose
+    //    marks span two batches gets two independent entries.
     const releaseMap = new Map<string, number>(
-      releaseRows.map((r) => [
-        structureKey(r.project, r.structure),
-        r.releaseBalanceComputedMt,
+      releaseByBatch.map((r) => [
+        batchKey(r.project, r.structure, r.mfcBatch),
+        r.balanceMt,
       ]),
     );
     const assignmentMap = new Map<string, number>(
-      assignmentRows.map((r) => [
-        structureKey(r.project, r.structure),
-        r.assignmentBalanceComputedMt,
+      assignmentByBatch.map((r) => [
+        batchKey(r.project, r.structure, r.mfcBatch),
+        r.balanceMt,
       ]),
     );
     const cuttingMap = new Map<string, number>(
       cuttingAgg.map((r) => [
-        structureKey(r.project, r.structure),
+        batchKey(r.project, r.structure, r.mfcBatch),
         r.balanceMt,
       ]),
     );
@@ -275,14 +353,14 @@ router.get(
     for (const r of fabMidAgg) {
       const act = r.activity as FabMidAct;
       if (actMaps.has(act)) {
-        actMaps.get(act)!.set(structureKey(r.project, r.structure), r.balanceMt);
+        actMaps.get(act)!.set(batchKey(r.project, r.structure, r.mfcBatch), r.balanceMt);
       }
     }
-    const actMap = (a: FabMidAct, key: string) => actMaps.get(a)?.get(key) ?? 0;
+    const actMap = (a: FabMidAct, bkey: string) => actMaps.get(a)?.get(bkey) ?? 0;
 
     // 4. Build BOM label map from Order Review rows.
     // For each (project, structure), collect the set of distinct non-null bomType
-    // values. Exactly one → that label; 0 → "Unknown"; 2+ → "Mixed".
+    // values. Exactly one → that label; 0 → "No BOM match"; 2+ → "Mixed".
     const bomDistinct = new Map<string, Set<string>>();
     // Also build per-project OR structure list for cause classification.
     const orByProject = new Map<string, string[]>();
@@ -305,8 +383,8 @@ router.get(
       return "Mixed";
     }
 
-    // 5. Group by (bomLabel, subTypeGroup, project), summing all measures.
-    // Also track Unknown structures per project for cause classification.
+    // 5. Group by (project × bomLabel × subTypeGroup × mfcBatch), summing all measures.
+    // Also track No-BOM-match structures per project for cause classification.
     const grouped = new Map<
       string,
       {
@@ -334,17 +412,17 @@ router.get(
       const subTypeGroup = classifySubType(towerSubType);
       const gKey = `${project}\u0001${bomLabel}\u0001${subTypeGroup}\u0001${mfcBatch ?? ""}`;
 
-      const key = structureKey(project, structure);
-      const relMt    = releaseMap.get(key) ?? 0;
-      const assignMt = assignmentMap.get(key) ?? 0;
-      const cutMt    = cuttingMap.get(key) ?? 0;
-      const hgMt     = actMap("HG",  key);
-      const rfiMt    = actMap("RFI", key);
-      const nhMt     = actMap("NH",  key);
-      const bMt      = actMap("B",   key);
-      const habMt    = actMap("HAB", key);
-      const wMt      = actMap("W",   key);
-      const qcMt     = actMap("Q",   key) + actMap("TS", key); // Quality Check = Q + TS
+      const bkey = batchKey(project, structure, mfcBatch);
+      const relMt    = releaseMap.get(bkey) ?? 0;
+      const assignMt = assignmentMap.get(bkey) ?? 0;
+      const cutMt    = cuttingMap.get(bkey) ?? 0;
+      const hgMt     = actMap("HG",  bkey);
+      const rfiMt    = actMap("RFI", bkey);
+      const nhMt     = actMap("NH",  bkey);
+      const bMt      = actMap("B",   bkey);
+      const habMt    = actMap("HAB", bkey);
+      const wMt      = actMap("W",   bkey);
+      const qcMt     = actMap("Q",   bkey) + actMap("TS", bkey); // Quality Check = Q + TS
 
       const existing = grouped.get(gKey);
       if (!existing) {
@@ -407,7 +485,7 @@ router.get(
       ZERO_TOTALS,
     );
 
-    // 8. Build unknownCauses: for each project with Unknown structures, classify
+    // 8. Build unknownCauses: for each project with No-BOM-match structures, classify
     //    each structure as "mismatch" or "absent" using affix rules.
     const unknownCauses = [...unknownByProject.entries()].map(
       ([project, structureSet]) => ({

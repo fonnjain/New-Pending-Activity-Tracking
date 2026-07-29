@@ -999,6 +999,7 @@ export const ListImportsResponseItem = zod.object({
   "ntltOrphanCount": zod.number().optional().describe('NTLT marks (RSJ POLE \/ EARTHING \/ GENERAL) with no project code, attributed to \"(Unassigned)\" grouped by Section. Absent when zero such rows exist.\n'),
   "ntltOrphanWtMt": zod.number().optional().describe('Total Balance Wt. (MT) of the NTLT orphan marks (same rows as ntltOrphanCount). Absent when ntltOrphanCount is absent.\n'),
   "unclassifiedRowCount": zod.number().optional().describe('Rows whose Col A (\"Type\") or Col G (\"Job Card Status\") did not match the verified closed value sets. Non-zero means a new file format value was encountered. Absent (or zero) in the normal case.\n'),
+  "unclassifiedWtKg": zod.number().optional().describe('Total Balance Wt. (kg) of unclassified rows — same population as unclassifiedRowCount. Absent when unclassifiedRowCount is absent or zero.\n'),
   "unclassifiedSamples": zod.array(zod.object({
   "type": zod.string(),
   "status": zod.string()
@@ -1122,6 +1123,7 @@ export const CommitStagedImportResponse = zod.union([zod.object({
   "ntltOrphanCount": zod.number().optional().describe('NTLT marks (RSJ POLE \/ EARTHING \/ GENERAL) with no project code, attributed to \"(Unassigned)\" grouped by Section. Absent when zero such rows exist.\n'),
   "ntltOrphanWtMt": zod.number().optional().describe('Total Balance Wt. (MT) of the NTLT orphan marks (same rows as ntltOrphanCount). Absent when ntltOrphanCount is absent.\n'),
   "unclassifiedRowCount": zod.number().optional().describe('Rows whose Col A (\"Type\") or Col G (\"Job Card Status\") did not match the verified closed value sets. Non-zero means a new file format value was encountered. Absent (or zero) in the normal case.\n'),
+  "unclassifiedWtKg": zod.number().optional().describe('Total Balance Wt. (kg) of unclassified rows — same population as unclassifiedRowCount. Absent when unclassifiedRowCount is absent or zero.\n'),
   "unclassifiedSamples": zod.array(zod.object({
   "type": zod.string(),
   "status": zod.string()
@@ -1227,6 +1229,7 @@ export const CommitStagedImportResponse = zod.union([zod.object({
   "totalFileDespatchMt": zod.number(),
   "skippedTotals": zod.number(),
   "missingStructure": zod.number(),
+  "missingStructureWtMt": zod.number().optional().describe('Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added.\n'),
   "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
   "unmatchedToWip": zod.number().describe('File structures with no matching structure in the newest WIP import.')
 }).describe('Parse summary for an Order Review ingest.'),
@@ -1254,6 +1257,23 @@ export const CommitStagedImportResponse = zod.union([zod.object({
 }).describe('One Order Review file upload (rows are upserted, not appended).'),
   "seeded": zod.number().describe('Number of newly seeded (project, structure) dispatch keys.')
 }).describe('Commit result for an Order Review file.')])
+
+
+/**
+ * Returns all deletion audit log entries (WIP and Order Review), newest first. Each entry records who deleted which file and when.
+
+ * @summary List import deletion log
+ */
+export const ListDeletionLogResponseItem = zod.object({
+  "id": zod.number(),
+  "importId": zod.number().nullish().describe('Original import id at time of deletion.'),
+  "fileType": zod.string().describe('\"wip\" or \"order-review\"'),
+  "sourceFilename": zod.string(),
+  "reportDate": zod.string().nullish().describe('The as-on \/ report date of the file (YYYY-MM-DD).'),
+  "deletedAt": zod.string().describe('ISO timestamp of when the deletion occurred.'),
+  "deletedBy": zod.string().describe('Display name or email of the user who deleted the file.')
+}).describe('One entry in the import deletion audit log.')
+export const ListDeletionLogResponse = zod.array(ListDeletionLogResponseItem)
 
 
 /**
@@ -1374,6 +1394,7 @@ export const GetImportResponse = zod.object({
   "ntltOrphanCount": zod.number().optional().describe('NTLT marks (RSJ POLE \/ EARTHING \/ GENERAL) with no project code, attributed to \"(Unassigned)\" grouped by Section. Absent when zero such rows exist.\n'),
   "ntltOrphanWtMt": zod.number().optional().describe('Total Balance Wt. (MT) of the NTLT orphan marks (same rows as ntltOrphanCount). Absent when ntltOrphanCount is absent.\n'),
   "unclassifiedRowCount": zod.number().optional().describe('Rows whose Col A (\"Type\") or Col G (\"Job Card Status\") did not match the verified closed value sets. Non-zero means a new file format value was encountered. Absent (or zero) in the normal case.\n'),
+  "unclassifiedWtKg": zod.number().optional().describe('Total Balance Wt. (kg) of unclassified rows — same population as unclassifiedRowCount. Absent when unclassifiedRowCount is absent or zero.\n'),
   "unclassifiedSamples": zod.array(zod.object({
   "type": zod.string(),
   "status": zod.string()
@@ -1748,17 +1769,30 @@ export const GetFabricationProjectCompletionTltResponse = zod.object({
   "available": zod.boolean().describe('False when no WIP import exists.'),
   "rows": zod.array(zod.object({
   "project": zod.string().describe('Normalized project \/ job code.'),
-  "bomLabel": zod.string().describe('BOM Label: Proto | Mass | Pre | Mixed | Unknown.'),
+  "bomLabel": zod.string().describe('BOM Label: Proto | Mass | Pre | Mixed | No BOM match.'),
   "subTypeGroup": zod.string().describe('Tower Sub Type group: STUB | SST | Other.'),
+  "mfcBatch": zod.string().nullish().describe('MFC batch code for this row (null when mark has no batch).'),
   "releaseBalanceCalcMt": zod.number().describe('Release Balance Calculated (JCNS + Initial rows), in MT.'),
   "assignmentBalanceCalcMt": zod.number().describe('Assignment Balance Calculated (JCNS + blank contractor), in MT.'),
-  "cuttingBalanceMt": zod.number().describe('Cutting Balance (activity C), in MT.'),
-  "qualityCheckBalanceMt": zod.number().describe('Quality Check Balance (RFI,NH,B,HAB,W,Q,TS), in MT.')
+  "cuttingBalanceMt": zod.number().describe('Cutting Balance (JCNS + Authorized, activity C), in MT.'),
+  "hgBalanceMt": zod.number().describe('Hot Galvanizing balance (activity HG), in MT.'),
+  "rfiBalanceMt": zod.number().describe('RFI balance (activity RFI), in MT.'),
+  "nhBalanceMt": zod.number().describe('NH balance (activity NH), in MT.'),
+  "bBalanceMt": zod.number().describe('B balance (activity B), in MT.'),
+  "habBalanceMt": zod.number().describe('HAB balance (activity HAB), in MT.'),
+  "wBalanceMt": zod.number().describe('W balance (activity W), in MT.'),
+  "qualityCheckBalanceMt": zod.number().describe('Quality Check Balance (Q + TS), in MT.')
 })).describe('One row per (project, BOM Label), sorted by project then BOM label.'),
   "totals": zod.object({
   "releaseBalanceCalcMt": zod.number(),
   "assignmentBalanceCalcMt": zod.number(),
   "cuttingBalanceMt": zod.number(),
+  "hgBalanceMt": zod.number(),
+  "rfiBalanceMt": zod.number(),
+  "nhBalanceMt": zod.number(),
+  "bBalanceMt": zod.number(),
+  "habBalanceMt": zod.number(),
+  "wBalanceMt": zod.number(),
   "qualityCheckBalanceMt": zod.number()
 }),
   "unknownCauses": zod.array(zod.object({
@@ -1809,6 +1843,7 @@ export const GetOrderStatusResponse = zod.object({
   "totalFileDespatchMt": zod.number(),
   "skippedTotals": zod.number(),
   "missingStructure": zod.number(),
+  "missingStructureWtMt": zod.number().optional().describe('Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added.\n'),
   "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
   "unmatchedToWip": zod.number().describe('File structures with no matching structure in the newest WIP import.')
 }).describe('Parse summary for an Order Review ingest.'),
@@ -1908,6 +1943,7 @@ export const GetOrderStatusResponse = zod.object({
   "totalFileDespatchMt": zod.number(),
   "skippedTotals": zod.number(),
   "missingStructure": zod.number(),
+  "missingStructureWtMt": zod.number().optional().describe('Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added.\n'),
   "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
   "unmatchedToWip": zod.number().describe('File structures with no matching structure in the newest WIP import.')
 }).describe('Parse summary for an Order Review ingest.'),

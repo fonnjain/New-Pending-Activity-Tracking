@@ -143,16 +143,6 @@ export interface ImportUpload {
   reportDate?: string;
 }
 
-export interface ImportDeletionLogEntry {
-  id: number;
-  importId?: number | null;
-  fileType: string;
-  sourceFilename: string;
-  reportDate?: string | null;
-  deletedAt: string;
-  deletedBy: string;
-}
-
 export type ParseSummaryUnclassifiedSamplesItem = {
   type: string;
   status: string;
@@ -345,7 +335,8 @@ export interface OrderReviewSummary {
   totalFileDespatchMt: number;
   skippedTotals: number;
   missingStructure: number;
-  /** Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added. */
+  /** Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added.
+   */
   missingStructureWtMt?: number;
   /** File structures that match a structure in the newest WIP import. */
   matchedToWip: number;
@@ -1778,11 +1769,6 @@ export interface OrderStatusRow {
      */
   fileGalvMt: number | null;
   /**
-     * Progress Inspection MT from the Order Review file (col O).
-     * @nullable
-     */
-  inspectionMt: number | null;
-  /**
      * Despatch MT as stated in the Order Review file.
      * @nullable
      */
@@ -2198,31 +2184,31 @@ export interface ReleaseBalanceResponse {
 export interface FabricationProjectCompletionRow {
   /** Normalized project / job code. */
   project: string;
-  /** MFC Batch identifier (Col U from WIP file), or null when not set. */
-  mfcBatch: string | null;
-  /** BOM Label: Proto | Mass | Pre | Mixed | Unknown. */
+  /** BOM Label: Proto | Mass | Pre | Mixed | No BOM match. */
   bomLabel: string;
   /** Tower Sub Type group: STUB | SST | Other. */
   subTypeGroup: string;
+  /** MFC batch code for this row (null when mark has no batch). */
+  mfcBatch?: string | null;
   /** Release Balance Calculated (JCNS + Initial rows), in MT. */
   releaseBalanceCalcMt: number;
   /** Assignment Balance Calculated (JCNS + blank contractor), in MT. */
   assignmentBalanceCalcMt: number;
-  /** Cutting Balance (activity C, non-initial), in MT. */
+  /** Cutting Balance (JCNS + Authorized, activity C), in MT. */
   cuttingBalanceMt: number;
-  /** Hot-Dip Galvanising / Hole-Galv balance (activity HG), in MT. */
+  /** Hot Galvanizing balance (activity HG), in MT. */
   hgBalanceMt: number;
   /** RFI balance (activity RFI), in MT. */
   rfiBalanceMt: number;
   /** NH balance (activity NH), in MT. */
   nhBalanceMt: number;
-  /** Bending balance (activity B), in MT. */
+  /** B balance (activity B), in MT. */
   bBalanceMt: number;
   /** HAB balance (activity HAB), in MT. */
   habBalanceMt: number;
-  /** Welding balance (activity W), in MT. */
+  /** W balance (activity W), in MT. */
   wBalanceMt: number;
-  /** Quality Check balance (Q + TS only), in MT. */
+  /** Quality Check Balance (Q + TS), in MT. */
   qualityCheckBalanceMt: number;
 }
 
@@ -2400,6 +2386,30 @@ export interface ContractorBalanceMovementResponse {
   days: ContractorBalanceMovementDay[];
 }
 
+/**
+ * One entry in the import deletion audit log.
+ */
+export interface ImportDeletionLogEntry {
+  id: number;
+  /**
+     * Original import id at time of deletion.
+     * @nullable
+     */
+  importId?: number | null;
+  /** "wip" or "order-review" */
+  fileType: string;
+  sourceFilename: string;
+  /**
+     * The as-on / report date of the file (YYYY-MM-DD).
+     * @nullable
+     */
+  reportDate?: string | null;
+  /** ISO timestamp of when the deletion occurred. */
+  deletedAt: string;
+  /** Display name or email of the user who deleted the file. */
+  deletedBy: string;
+}
+
 export type DeleteRsjThicknessParams = {
 groupKey: string;
 };
@@ -2481,45 +2491,4 @@ export type DeleteInventorySideOverrideParams = {
 projectCode: string;
 bucket: string;
 };
-
-// ---------------------------------------------------------------------------
-// ERP Rules
-// ---------------------------------------------------------------------------
-
-export interface ErpSampleRow {
-  project: string;
-  structure: string;
-  markNo: string;
-  /** Key→value pairs of the fields that broke the rule. */
-  fields: { [key: string]: string | null };
-}
-
-export interface ErpRuleResult {
-  /** e.g. "U1", "T8" */
-  id: string;
-  /** Plain-English statement of what the rule checks. */
-  label: string;
-  /** "UNIVERSAL" applies to every row; "TLT" applies to Structure-nature rows only. */
-  scope: 'UNIVERSAL' | 'TLT';
-  pass: boolean;
-  /** True when the import pre-dates the column this rule checks (rule cannot be evaluated). */
-  notApplicable?: boolean;
-  violatingRowCount: number;
-  violatingWeightMt: number;
-  /** Up to 10 offending rows. Empty when pass=true. */
-  sampleRows: ErpSampleRow[];
-}
-
-export interface ErpRulesResponse {
-  available: boolean;
-  importId?: number;
-  /** @nullable */
-  asOnDate?: string | null;
-  /** True when the import pre-dates the Type column (Col A); all rules show N/A. */
-  typeColumnMissing?: boolean;
-  totalRules: number;
-  passingRules: number;
-  failingRules: number;
-  rules: ErpRuleResult[];
-}
 

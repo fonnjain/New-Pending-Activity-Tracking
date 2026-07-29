@@ -10,5 +10,11 @@ export interface FabricationProjectCompletionTotals {
   releaseBalanceCalcMt: number;
   assignmentBalanceCalcMt: number;
   cuttingBalanceMt: number;
+  hgBalanceMt: number;
+  rfiBalanceMt: number;
+  nhBalanceMt: number;
+  bBalanceMt: number;
+  habBalanceMt: number;
+  wBalanceMt: number;
   qualityCheckBalanceMt: number;
 }

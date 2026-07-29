@@ -1,16 +1,21 @@
 import {
   pgTable,
   text,
+  integer,
   doublePrecision,
   timestamp,
   primaryKey,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { importsTable } from "./imports";
 
-// Per-(project, structure) snapshot of Assignment Balance from the most recently
-// uploaded WIP file. Replaced wholesale (DELETE + re-insert) on every WIP
-// commit — NOT append-only; always reflects the latest file only.
+// Per-(importId, project, structure) snapshot of Assignment Balance.
+// Append-only: each WIP upload inserts rows for its own import_id and deletes
+// ONLY the rows with that same import_id before reinserting — historical imports
+// are never overwritten.  This mirrors the release_balance_wip design so a
+// historical view shows each import's assignment balance alongside its other
+// figures (not today's balance grafted onto every past import).
 //
 // Additive, display-only — never affects parsing, hashing, dedup, ageing,
 // activity, milestone, dispatch, or accumulated-WIP math.
@@ -26,6 +31,9 @@ import { z } from "zod/v4";
 export const assignmentBalanceWipTable = pgTable(
   "assignment_balance_wip",
   {
+    importId: integer("import_id")
+      .notNull()
+      .references(() => importsTable.id, { onDelete: "cascade" }),
     project: text("project").notNull(),
     structure: text("structure").notNull(),
     assignmentBalanceComputedMt: doublePrecision("assignment_balance_computed_mt")
@@ -35,7 +43,7 @@ export const assignmentBalanceWipTable = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.project, t.structure] })],
+  (t) => [primaryKey({ columns: [t.importId, t.project, t.structure] })],
 );
 
 export const insertAssignmentBalanceWipSchema = createInsertSchema(

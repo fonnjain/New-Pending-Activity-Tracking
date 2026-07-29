@@ -1,0 +1,116 @@
+# Replit Prompt — Fabrication Report: go-ahead, with three corrections
+### Response to the D1/D2/D3 diagnosis
+
+**What checked out.** The `MAX(mfc_batch)` mechanism is confirmed — project 900's structure
+`4QMD3` does have exactly one stray batch-Z mark (0.047 MT) alongside its batch-C marks.
+And project 956 is in the 29-Jul Order Review as Mass across 11 structures, exactly as
+described.
+
+**What did not.** Two details are wrong or incomplete, and one conclusion was reached
+without evidence.
+
+---
+
+## The prompt
+
+```
+Good diagnosis — the MAX(mfc_batch) finding in particular. I verified it against the WIP
+file: project 900's structure 4QMD3 does have exactly one stray batch-Z mark at 0.047 MT
+sitting alongside its batch-C marks. The mechanism is confirmed.
+
+Three corrections before you proceed, then go-ahead on the fixes.
+
+CORRECTION 1 — Your 4QMD3 figures do not match the file
+
+  You reported : 796 marks batch C, 205.177 MT
+  The file has : 1,810 marks batch C, 273.188 MT
+  Batch Z      : 1 mark, 0.047 MT  (this one matches)
+
+The 205.177 is exactly the weight I measured shifting into batch Z, so you are counting
+something real — but it is not that structure's batch-C total. Please re-check the scoping
+of that query before designing the fix, because the fix depends on knowing which rows are
+actually affected.
+
+CORRECTION 2 — Project 963 spans three BOM types, not one
+
+The 29-Jul Order Review contains:
+
+  963  Mass   4QMA2, 4QMD2
+  963  Proto  4QMA3, 4QMA3M
+  963  Pre    4QMD3
+
+You reported only the Mass structures. Since BOM Label is assigned per (project,
+structure), project 963 should appear in three separate sections of the report. Please
+confirm it does.
+
+Also, a timing question: the 29-Jul Order Review already contains both 956 and 963, yet
+they were absent from the 29-Jul export entirely. If the OR was loaded after that export
+was taken, say so and I will treat it as closed. If not, something else dropped them and
+D2 is not actually fixed.
+
+CORRECTION 3 — Do not close the 21 MT residual as "definitional differences"
+
+You reported the cutting query now yields 2,503 MT against the file's 2,524.695, and
+described the ~21 MT gap as "likely marks the cutting definition legitimately excludes, or
+minor definitional differences".
+
+Cutting Balance is Type = "Job Card Not Started" AND Status = "Authorized". That is a
+complete, unambiguous definition — there are no marks it "legitimately excludes" beyond
+what it states, and no definitional latitude. Please account for the 21 MT specifically.
+Small unexplained remainders in this system have twice turned out to be real defects.
+
+NOW THE FIXES — please proceed with these
+
+FIX A — is_initial_cutting NULL handling
+
+Changing eq(isInitialCutting, false) to ne(isInitialCutting, true) treats the symptom.
+Please also add a NOT NULL DEFAULT false constraint on the column, and backfill any
+remaining NULLs. Otherwise every future query against that flag carries the same trap, and
+the next occurrence will not be caught by a report comparison.
+
+Tell me how many rows are currently NULL before you backfill.
+
+FIX B — Per-structure batch attribution
+
+MAX(mfc_batch) is wrong because "Z" (the blank-batch placeholder) sorts after every real
+letter, so a single unbatched mark captures the whole structure. Attributing a whole
+structure to one batch is itself questionable when its marks genuinely differ.
+
+Please attribute batch PER MARK rather than per structure, so a structure's weight splits
+across the batches its marks actually carry. If per-mark attribution is not feasible in
+this query, tell me why and propose an alternative — but do not simply swap MAX for MIN,
+which would move the error rather than remove it.
+
+Either way, batch Z must mean "these marks have no batch", not "this structure contained
+one mark without a batch".
+
+FIX C — Assignment balance backfill ordering
+
+Make the assignment_balance_wip pre-computation run after the is_initial_cutting backfill
+completes. While you are in that table: it still has no import_id, so it is replaced
+wholesale on every upload and a historical view shows today's Assignment Balance alongside
+that import's other figures. Please add import_id and scope the lookup, the same way
+release_balance_wip was fixed.
+
+FIX D — Confirm D1 in an actual export
+
+The most recent export I have still shows 0 of 146 data rows populated in the Total column
+and a grand TOTAL of 0. You report it fixed last session. Please generate a fresh export
+and tell me the value in the grand TOTAL row. It should be 6,238.058.
+
+When done, paste the changed queries, the constraint definition, the NULL row count before
+backfill, and the grand TOTAL figure from a real export.
+```
+
+---
+
+## What to check in the reply
+
+- **A number for the 21 MT.** "Definitional differences" is not an answer for a definition
+  with no latitude in it.
+- **The NULL count before backfill.** If it is large, that tells you how long Cutting has
+  been under-reported and on which imports.
+- **That batch attribution moved to per-mark.** A MIN instead of MAX just relocates the
+  error to the lowest letter.
+- **An actual exported TOTAL figure**, not a code reading. D1 has now been reported fixed
+  twice while the export still showed the bug both times.

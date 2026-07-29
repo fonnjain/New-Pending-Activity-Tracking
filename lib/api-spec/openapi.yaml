@@ -4689,10 +4689,14 @@ components:
           description: Normalized project / job code.
         bomLabel:
           type: string
-          description: "BOM Label: Proto | Mass | Pre | Mixed | Unknown."
+          description: "BOM Label: Proto | Mass | Pre | Mixed | No BOM match."
         subTypeGroup:
           type: string
           description: "Tower Sub Type group: STUB | SST | Other."
+        mfcBatch:
+          type: string
+          nullable: true
+          description: MFC batch code for this row (null when mark has no batch).
         releaseBalanceCalcMt:
           type: number
           format: double
@@ -4704,11 +4708,35 @@ components:
         cuttingBalanceMt:
           type: number
           format: double
-          description: Cutting Balance (activity C), in MT.
+          description: Cutting Balance (JCNS + Authorized, activity C), in MT.
+        hgBalanceMt:
+          type: number
+          format: double
+          description: Hot Galvanizing balance (activity HG), in MT.
+        rfiBalanceMt:
+          type: number
+          format: double
+          description: RFI balance (activity RFI), in MT.
+        nhBalanceMt:
+          type: number
+          format: double
+          description: NH balance (activity NH), in MT.
+        bBalanceMt:
+          type: number
+          format: double
+          description: B balance (activity B), in MT.
+        habBalanceMt:
+          type: number
+          format: double
+          description: HAB balance (activity HAB), in MT.
+        wBalanceMt:
+          type: number
+          format: double
+          description: W balance (activity W), in MT.
         qualityCheckBalanceMt:
           type: number
           format: double
-          description: Quality Check Balance (RFI,NH,B,HAB,W,Q,TS), in MT.
+          description: Quality Check Balance (Q + TS), in MT.
       required:
         - project
         - bomLabel
@@ -4716,6 +4744,12 @@ components:
         - releaseBalanceCalcMt
         - assignmentBalanceCalcMt
         - cuttingBalanceMt
+        - hgBalanceMt
+        - rfiBalanceMt
+        - nhBalanceMt
+        - bBalanceMt
+        - habBalanceMt
+        - wBalanceMt
         - qualityCheckBalanceMt
     FabricationProjectCompletionTotals:
       type: object
@@ -4729,6 +4763,24 @@ components:
         cuttingBalanceMt:
           type: number
           format: double
+        hgBalanceMt:
+          type: number
+          format: double
+        rfiBalanceMt:
+          type: number
+          format: double
+        nhBalanceMt:
+          type: number
+          format: double
+        bBalanceMt:
+          type: number
+          format: double
+        habBalanceMt:
+          type: number
+          format: double
+        wBalanceMt:
+          type: number
+          format: double
         qualityCheckBalanceMt:
           type: number
           format: double
@@ -4736,6 +4788,12 @@ components:
         - releaseBalanceCalcMt
         - assignmentBalanceCalcMt
         - cuttingBalanceMt
+        - hgBalanceMt
+        - rfiBalanceMt
+        - nhBalanceMt
+        - bBalanceMt
+        - habBalanceMt
+        - wBalanceMt
         - qualityCheckBalanceMt
     UnknownStructureCauseEntry:
       type: object

@@ -9,16 +9,30 @@
 export interface FabricationProjectCompletionRow {
   /** Normalized project / job code. */
   project: string;
-  /** BOM Label: Proto | Mass | Pre | Mixed | Unknown. */
+  /** BOM Label: Proto | Mass | Pre | Mixed | No BOM match. */
   bomLabel: string;
   /** Tower Sub Type group: STUB | SST | Other. */
   subTypeGroup: string;
+  /** MFC batch code for this row (null when mark has no batch). */
+  mfcBatch?: string | null;
   /** Release Balance Calculated (JCNS + Initial rows), in MT. */
   releaseBalanceCalcMt: number;
   /** Assignment Balance Calculated (JCNS + blank contractor), in MT. */
   assignmentBalanceCalcMt: number;
-  /** Cutting Balance (activity C), in MT. */
+  /** Cutting Balance (JCNS + Authorized, activity C), in MT. */
   cuttingBalanceMt: number;
-  /** Quality Check Balance (RFI,NH,B,HAB,W,Q,TS), in MT. */
+  /** Hot Galvanizing balance (activity HG), in MT. */
+  hgBalanceMt: number;
+  /** RFI balance (activity RFI), in MT. */
+  rfiBalanceMt: number;
+  /** NH balance (activity NH), in MT. */
+  nhBalanceMt: number;
+  /** B balance (activity B), in MT. */
+  bBalanceMt: number;
+  /** HAB balance (activity HAB), in MT. */
+  habBalanceMt: number;
+  /** W balance (activity W), in MT. */
+  wBalanceMt: number;
+  /** Quality Check Balance (Q + TS), in MT. */
   qualityCheckBalanceMt: number;
 }

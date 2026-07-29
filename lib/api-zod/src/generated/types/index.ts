@@ -81,6 +81,7 @@ export * from './graceCell';
 export * from './graceCellMode';
 export * from './healthStatus';
 export * from './import';
+export * from './importDeletionLogEntry';
 export * from './importSummary';
 export * from './importUpload';
 export * from './inventoryBucketRow';

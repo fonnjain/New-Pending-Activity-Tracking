@@ -662,8 +662,9 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
     req.log.warn({ err, importId: result.import.id }, "Release balance recompute failed after import");
   }
   // Refresh Assignment Balance snapshot (Not Started + blank contractor; best-effort).
+  // Runs after Release Balance so both snapshots are consistent for this import.
   try {
-    await recomputeAssignmentBalance(file.buffer);
+    await recomputeAssignmentBalance(file.buffer, result.import.id);
   } catch (err) {
     req.log.warn({ err }, "Assignment balance recompute failed after import");
   }
@@ -1445,7 +1446,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   }
   // Refresh Assignment Balance snapshot (Not Started + blank contractor; best-effort).
   try {
-    await recomputeAssignmentBalance(staged.fileData);
+    await recomputeAssignmentBalance(staged.fileData, result.import.id);
   } catch (err) {
     req.log.warn({ err }, "Assignment balance recompute failed after commit");
   }
