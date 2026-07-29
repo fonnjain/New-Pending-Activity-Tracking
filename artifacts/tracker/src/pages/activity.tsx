@@ -1,4 +1,4 @@
-import { useTracker, useFilteredRecords, dateRangeWindow } from "@/lib/store";
+import { useTracker, useFilteredRecords, dateRangeWindow, type MfcViewMode } from "@/lib/store";
 import {
   useGetImportRecords,
   getGetImportRecordsQueryKey,
@@ -239,6 +239,59 @@ function ActPerfProjectGroup({
 }
 
 // ---------------------------------------------------------------------------
+// Flat drill-down group — used by "project-then-mfc" and "view-by-mfc" modes.
+// Renders a top-level key (e.g. "807 / Batch A" or "Batch A") with contractors
+// directly below, skipping the nested Project→MFC hierarchy.
+// ---------------------------------------------------------------------------
+
+function ActPerfFlatGroup({
+  groupKey, conMap, moveWindow,
+}: { groupKey: string; conMap: Map<string, any[]>; moveWindow: { start: string; end: string } }) {
+  const [open, setOpen] = useState(false);
+  const allRecs = useMemo(() => [...conMap.values()].flat(), [conMap]);
+  const stats = useMemo(() => actPerfRollup(allRecs, moveWindow), [allRecs, moveWindow]);
+  const sortedContractors = useMemo(
+    () => [...conMap.entries()]
+      .sort((a, b) => b[1].reduce((s: number, r: any) => s + (r.balanceWt ?? 0), 0) - a[1].reduce((s: number, r: any) => s + (r.balanceWt ?? 0), 0))
+      .map(([c]) => c),
+    [conMap],
+  );
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="w-full">
+        <div className="flex items-center justify-between py-2.5 px-4 pl-6 hover:bg-muted/30 transition-colors gap-2">
+          <div className="flex items-center gap-2 text-left min-w-0">
+            <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
+            <div className="min-w-0">
+              <div className="font-semibold text-sm truncate">{groupKey}</div>
+              <div className="text-[11px] text-muted-foreground">
+                <span className="font-bold text-foreground text-xs">{formatWeight(stats.weightMt)}</span>
+                {" • "}{stats.marks.toLocaleString()} marks
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="leading-tight text-right">
+              <div className="text-[10px] uppercase text-muted-foreground font-semibold">Avg Age</div>
+              <div className={`font-bold text-sm ${getAgeingColor(stats.avgAge)}`}>
+                {stats.avgAge != null ? `${stats.avgAge}d` : "-"}
+              </div>
+            </div>
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="border-t divide-y bg-muted/5">
+          {sortedContractors.map((c) => (
+            <ActPerfContractorGroup key={c} contractor={c} records={conMap.get(c)!} moveWindow={moveWindow} />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Per-activity drill-down row inside the summary table
 // ---------------------------------------------------------------------------
 
@@ -252,9 +305,12 @@ function ActivityDrillRow({
   totalWt: number;
 }) {
   const [open, setOpen] = useState(false);
+  const { mfcViewMode } = useTracker();
   const stats = useMemo(() => actPerfRollup(records, moveWindow), [records, moveWindow]);
 
+  // "project-with-mfc": nested Project → MFC → Contractor hierarchy.
   const projectMap = useMemo(() => {
+    if (mfcViewMode !== "project-with-mfc") return new Map<string, Map<string, Map<string, any[]>>>();
     const pm = new Map<string, Map<string, Map<string, any[]>>>();
     for (const r of records) {
       const proj = r.job || "(Unassigned)";
@@ -268,7 +324,26 @@ function ActivityDrillRow({
       conMap.get(con)!.push(r);
     }
     return pm;
-  }, [records]);
+  }, [records, mfcViewMode]);
+
+  // "project-then-mfc" / "view-by-mfc": flat topKey → Contractor → records[].
+  // project-then-mfc key = "Project / Batch X"; view-by-mfc key = "Batch X".
+  const flatMap = useMemo(() => {
+    if (mfcViewMode === "project-with-mfc") return new Map<string, Map<string, any[]>>();
+    const fm = new Map<string, Map<string, any[]>>();
+    for (const r of records) {
+      const proj = r.job || "(Unassigned)";
+      const mfcRaw = r.mfcBatch || "Z";
+      const mfcLabel = mfcRaw === "Z" ? "No Batch" : `Batch ${mfcRaw}`;
+      const topKey = mfcViewMode === "view-by-mfc" ? mfcLabel : `${proj} / ${mfcLabel}`;
+      const con = r.contractor || "Unassigned";
+      if (!fm.has(topKey)) fm.set(topKey, new Map());
+      const conMap = fm.get(topKey)!;
+      if (!conMap.has(con)) conMap.set(con, []);
+      conMap.get(con)!.push(r);
+    }
+    return fm;
+  }, [records, mfcViewMode]);
 
   const sortedProjects = useMemo(
     () => [...projectMap.entries()]
@@ -281,6 +356,18 @@ function ActivityDrillRow({
     [projectMap],
   );
 
+  const sortedFlatKeys = useMemo(
+    () => [...flatMap.entries()]
+      .sort((a, b) => {
+        const wa = [...a[1].values()].flat().reduce((s: number, r: any) => s + (r.balanceWt ?? 0), 0);
+        const wb = [...b[1].values()].flat().reduce((s: number, r: any) => s + (r.balanceWt ?? 0), 0);
+        return wb - wa;
+      })
+      .map(([k]) => k),
+    [flatMap],
+  );
+
+  const groupCount = mfcViewMode === "project-with-mfc" ? sortedProjects.length : sortedFlatKeys.length;
   const sharePct = totalWt > 0 ? (stats.weightMt / totalWt) * 100 : 0;
 
   return (
@@ -308,16 +395,21 @@ function ActivityDrillRow({
           {stats.avgAge != null ? `${stats.avgAge}d` : "-"}
         </TableCell>
         <TableCell className="text-right text-muted-foreground text-xs">
-          {sortedProjects.length}
+          {groupCount}
         </TableCell>
       </TableRow>
       {open && (
         <TableRow>
           <TableCell colSpan={8} className="p-0 bg-muted/10">
             <div className="border-y divide-y">
-              {sortedProjects.map((p) => (
-                <ActPerfProjectGroup key={p} project={p} mfcMap={projectMap.get(p)!} moveWindow={moveWindow} />
-              ))}
+              {mfcViewMode === "project-with-mfc"
+                ? sortedProjects.map((p) => (
+                    <ActPerfProjectGroup key={p} project={p} mfcMap={projectMap.get(p)!} moveWindow={moveWindow} />
+                  ))
+                : sortedFlatKeys.map((k) => (
+                    <ActPerfFlatGroup key={k} groupKey={k} conMap={flatMap.get(k)!} moveWindow={moveWindow} />
+                  ))
+              }
             </div>
           </TableCell>
         </TableRow>

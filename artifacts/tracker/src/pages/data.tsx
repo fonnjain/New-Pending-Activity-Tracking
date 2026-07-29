@@ -23,7 +23,7 @@ import { ContractorSetupContent } from "@/pages/contractor-setup";
 import { WarningParametersContent } from "@/pages/warning-parameters";
 import { ThicknessContent } from "@/pages/thickness";
 
-const ADMIN_TABS = [
+const ADMIN_TABS: Array<{ path: string; label: string; disabled?: boolean }> = [
   { path: "/data", label: "Data" },
   { path: "/job-templates", label: "Job Templates", disabled: true },
   { path: "/computed-fg", label: "Computed FG" },
@@ -35,7 +35,7 @@ const ADMIN_TABS = [
   { path: "/thickness", label: "Thickness" },
   { path: "/erp-rules", label: "ERP Rules" },
   { path: "/users", label: "Users" },
-] as const;
+];
 
 export default function DataView() {
   const { data: authStatus } = useGetAuthStatus({
@@ -56,7 +56,7 @@ function AdminTabbedPage() {
         <Segmented
           value={active}
           onChange={(v) => v && setLocation(v)}
-          options={ADMIN_TABS.map((t) => ({ value: t.path, label: t.label }))}
+          options={ADMIN_TABS.map((t) => ({ value: t.path, label: t.label, disabled: t.disabled }))}
         />
       </div>
       {active === "/job-templates" ? (

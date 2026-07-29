@@ -110,7 +110,7 @@ const TrackerContext = createContext<TrackerContextType | undefined>(undefined);
 export function TrackerProvider({ children }: { children: ReactNode }) {
   const [selectedImportId, setSelectedImportId] = useState<number | null>(null);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
-  const [mfcViewMode, setMfcViewMode] = useState<MfcViewMode>("project-with-mfc");
+  const [mfcViewMode, setMfcViewMode] = useState<MfcViewMode>("project-then-mfc");
   const { data: imports } = useListImports();
 
   // Default to the newest import, and recover if the selected one is removed.

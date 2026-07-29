@@ -75,7 +75,7 @@ export default function JobDashboard() {
 }
 
 function JobDashboardContent() {
-  const { selectedImportId, filters } = useTracker();
+  const { selectedImportId, filters, mfcViewMode } = useTracker();
   const { toast } = useToast();
   // Project Wise drills down by Project (TLT) or Section (NTLT). "All" Order
   // Type shows BOTH — every row is resolved by its own category below.
@@ -167,20 +167,30 @@ function JobDashboardContent() {
   const rowIsNtlt = (r: { category: string | null }) => (r.category || "TLT") === "NTLT";
   // Per-row resolution lets "All" mix both categories. In All mode keys are
   // category-prefixed so a TLT project and an NTLT section never merge.
-  const primaryOf = (r: { job: string | null; groupKey: string | null; category: string | null }) => {
+  // MFC batch (WO Batch No.) is a TLT-only sub-level between Project and
+  // Structure. Blank-origin batches resolve to "Z" so they sort/group last.
+  const mfcOf = (r: { mfcBatch?: string | null }) => r.mfcBatch || "Z";
+
+  const primaryOf = (r: { job: string | null; groupKey: string | null; category: string | null; mfcBatch?: string | null }) => {
+    // MFC modes apply only to TLT rows in single-category (non-All) mode.
+    if (!isAll && !rowIsNtlt(r)) {
+      if (mfcViewMode === "view-by-mfc") return mfcOf(r);
+      if (mfcViewMode === "project-then-mfc")
+        return `${r.job || "Unknown"} / ${mfcOf(r) === "Z" ? "No Batch" : `Batch ${mfcOf(r)}`}`;
+    }
     const base = (rowIsNtlt(r) ? r.groupKey : r.job) || "Unknown";
     return isAll ? `${rowIsNtlt(r) ? "NTLT" : "TLT"}: ${base}` : base;
   };
   const secondaryOf = (r: { structure: string | null; ntltSubtype: string | null; category: string | null }) =>
     rowIsNtlt(r) ? r.ntltSubtype : r.structure;
-  // MFC batch (WO Batch No.) is a TLT-only sub-level between Project and
-  // Structure. Blank-origin batches resolve to "Z" so they sort/group last.
-  const mfcOf = (r: { mfcBatch?: string | null }) => r.mfcBatch || "Z";
 
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [projectSort, setProjectSort] = useState<ProjectSortKey>("assignDate");
 
-  const primaryLabel = isAll ? "Group" : isNtlt ? "Section" : "Project";
+  const primaryLabel = isAll ? "Group" : isNtlt ? "Section"
+    : mfcViewMode === "view-by-mfc" ? "MFC Batch"
+    : mfcViewMode === "project-then-mfc" ? "Project / MFC"
+    : "Project";
 
   // Clear drill-down when the global Order Type changes.
   useEffect(() => { setSelectedJob(null); }, [filters.category]);
@@ -205,7 +215,7 @@ function JobDashboardContent() {
         if (!isNtlt && filters.mfcBatch && mfcOf(r) !== filters.mfcBatch) return false;
         return true;
       }),
-    [records, isNtlt, filters.job, filters.selectedJobs, filters.section, filters.mfcBatch, activeJobSet],
+    [records, isNtlt, filters.job, filters.selectedJobs, filters.section, filters.mfcBatch, activeJobSet, mfcViewMode],
   );
 
   // Date window from the global date-range preset/custom filter.
@@ -321,7 +331,7 @@ function JobDashboardContent() {
         byProject,
         byActivity,
       };
-    }, [filtered]);
+    }, [filtered, mfcViewMode]);
 
   const sortedProjects = useMemo(() => {
     const arr = [...byProject];
