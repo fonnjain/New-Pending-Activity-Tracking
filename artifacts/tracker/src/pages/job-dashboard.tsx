@@ -8,7 +8,7 @@ import {
   processPhasesForMode,
   type ProcessPhaseKey,
 } from "@workspace/domain";
-import { useTracker, useContractorCategoryMap, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE, dateRangeWindow } from "@/lib/store";
+import { useTracker, useContractorCategoryMap, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE, dateRangeWindow, type MfcViewMode } from "@/lib/store";
 import {
   buildContractorGroups,
   matchesContractorSelection,
@@ -528,6 +528,7 @@ function JobDashboardContent() {
         headerPhases={headerPhases}
         orderEntry={orderByJob.get(selectedJob)}
         orderRows={order?.rows?.filter((r) => r.project === rawJob) ?? []}
+        mfcViewMode={mfcViewMode}
       />
     );
   }
@@ -831,6 +832,7 @@ function JobDetail({
   headerPhases = PROCESS_PHASES,
   orderEntry,
   orderRows = [],
+  mfcViewMode = "project-with-mfc",
 }: {
   job: string;
   label: string;
@@ -839,6 +841,7 @@ function JobDetail({
   headerPhases?: typeof PROCESS_PHASES;
   orderEntry?: { wo: number; rel: number; disp: number; fileBalRelease: number };
   orderRows?: Array<{ structure: string; weightMt: number | null; woOrderQtyMt: number | null; releaseMt: number | null; fileDespatchMt: number | null; fileBalReleaseMt: number | null }>;
+  mfcViewMode?: MfcViewMode;
 }) {
   const jobIsNtlt = records.some((r) => (r.category || "TLT") === "NTLT");
   const isNtlt = jobIsNtlt;
@@ -869,8 +872,10 @@ function JobDetail({
 
   // Drill-down state. TLT: Project -> MFC (only) -> Structure (collapsible
   // marks). NTLT has no MFC concept, so it goes straight to Structure level.
+  // view-by-mfc mode: Batch (already selected) -> Project -> Structure.
   const [selectedMfc, setSelectedMfc] = useState<string | null>(null);
-  const atMfcListLevel = !isNtlt && selectedMfc === null;
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const atMfcListLevel = !isNtlt && selectedMfc === null && mfcViewMode !== "view-by-mfc";
 
   const emptyPhases = () =>
     Object.fromEntries(
@@ -928,6 +933,174 @@ function JobDetail({
     }
     return { marks, weight, phases };
   }, [byMfc]);
+
+  // view-by-mfc: project rollups within the selected batch.
+  const byProjectForBatch = useMemo(() => {
+    if (mfcViewMode !== "view-by-mfc") return [];
+    const groups = new Map<string, any[]>();
+    for (const r of records) {
+      const k = r.job || "(Unassigned)";
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(r);
+    }
+    return Array.from(groups.entries())
+      .map(([proj, recs]) => {
+        const aged = recs.filter((r) => r.ageingDays !== null);
+        const phases = emptyPhases();
+        for (const r of recs) {
+          const key = processPhase(r.activity);
+          if (key && (key !== "cutting" || isActiveCutting(r))) {
+            phases[key].marks += 1;
+            phases[key].weight += r.balanceWt;
+          }
+        }
+        return {
+          proj,
+          structures: new Set(recs.map((r) => r.structure).filter(Boolean)).size,
+          marks: recs.length,
+          qty: recs.reduce((s, r) => s + r.balanceQty, 0),
+          weight: recs.reduce((s, r) => s + r.balanceWt, 0),
+          phases,
+          avgAge: aged.length
+            ? Math.round(aged.reduce((s, r) => s + (r.ageingDays || 0), 0) / aged.length)
+            : null,
+        };
+      })
+      .sort((a, b) => a.proj.localeCompare(b.proj));
+  }, [records, mfcViewMode]);
+
+  // view-by-mfc — Project list level (batch already selected, pick a project).
+  if (mfcViewMode === "view-by-mfc" && selectedProject === null) {
+    const totalCols = 2 + headerPhases.length + 3;
+    const totWt = byProjectForBatch.reduce((s, p) => s + p.weight, 0);
+    const totMk = byProjectForBatch.reduce((s, p) => s + p.marks, 0);
+    return (
+      <div className="space-y-4">
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors shrink-0 mt-1"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            Back
+          </button>
+          <h2 className="text-xl font-bold tracking-tight truncate">Batch {job}</h2>
+        </div>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+              Select a project
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Project</TableHead>
+                    <TableHead className="text-right">Structures</TableHead>
+                    {headerPhases.map((ph) => (
+                      <TableHead key={ph.key} className="text-right align-bottom">
+                        <span className="block whitespace-normal leading-tight">{ph.label}</span>
+                        <span className="block text-[10px] font-normal text-muted-foreground normal-case">
+                          wt / marks
+                        </span>
+                      </TableHead>
+                    ))}
+                    <TableHead className="text-right align-bottom">
+                      <span className="block">Total</span>
+                      <span className="block text-[10px] font-normal text-muted-foreground normal-case">wt / marks</span>
+                    </TableHead>
+                    <TableHead className="text-right">Avg Ageing</TableHead>
+                    <TableHead className="w-6" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {byProjectForBatch.map((p) => (
+                    <TableRow
+                      key={p.proj}
+                      className="cursor-pointer hover:bg-muted/40"
+                      onClick={() => setSelectedProject(p.proj)}
+                    >
+                      <TableCell className="font-medium">{p.proj}</TableCell>
+                      <TableCell className="text-right">{p.structures}</TableCell>
+                      {headerPhases.map((ph) => {
+                        if (ph.key === "dispatch") return <TableCell key={ph.key} className="text-right"><span className="text-muted-foreground">-</span></TableCell>;
+                        const cell = p.phases[ph.key];
+                        return (
+                          <TableCell key={ph.key} className="text-right tabular-nums">
+                            {cell.marks > 0 ? (
+                              <>
+                                <span className="font-bold">{formatWeight(cell.weight)}</span>
+                                <span className="block text-xs text-muted-foreground">{cell.marks} marks</span>
+                              </>
+                            ) : <span className="text-muted-foreground">-</span>}
+                          </TableCell>
+                        );
+                      })}
+                      <TableCell className="text-right tabular-nums bg-muted/30">
+                        <span className="font-bold">{formatWeight(p.weight)}</span>
+                        <span className="block text-xs text-muted-foreground">{p.marks} marks</span>
+                      </TableCell>
+                      <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(p.avgAge)}`}>
+                        {p.avgAge !== null ? `${p.avgAge}d` : "-"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground"><ChevronRight className="w-4 h-4" /></TableCell>
+                    </TableRow>
+                  ))}
+                  {byProjectForBatch.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={totalCols} className="text-center py-4 text-muted-foreground">
+                        No projects found for this batch.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+                {byProjectForBatch.length > 0 && (
+                  <TableFooter>
+                    <TableRow className="border-t-2">
+                      <TableCell className="font-bold uppercase tracking-wider text-xs">Total</TableCell>
+                      <TableCell />
+                      {headerPhases.map((ph) => {
+                        if (ph.key === "dispatch") return <TableCell key={ph.key}><span className="text-muted-foreground">-</span></TableCell>;
+                        const wt = byProjectForBatch.reduce((s, p) => s + p.phases[ph.key].weight, 0);
+                        const mk = byProjectForBatch.reduce((s, p) => s + p.phases[ph.key].marks, 0);
+                        return (
+                          <TableCell key={ph.key} className="text-right tabular-nums">
+                            {mk > 0 ? <><span className="font-bold">{formatWeight(wt)}</span><span className="block text-xs text-muted-foreground">{mk} marks</span></> : <span className="text-muted-foreground">-</span>}
+                          </TableCell>
+                        );
+                      })}
+                      <TableCell className="text-right tabular-nums bg-muted/50">
+                        <span className="font-bold">{formatWeight(totWt)}</span>
+                        <span className="block text-xs text-muted-foreground">{totMk} marks</span>
+                      </TableCell>
+                      <TableCell /><TableCell />
+                    </TableRow>
+                  </TableFooter>
+                )}
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // view-by-mfc — drill into the selected project's structures.
+  if (mfcViewMode === "view-by-mfc" && selectedProject !== null) {
+    return (
+      <StructureDrilldown
+        job={selectedProject}
+        label="Project"
+        records={records.filter((r) => (r.job || "(Unassigned)") === selectedProject)}
+        isNtlt={false}
+        mfc={job}
+        onBack={() => setSelectedProject(null)}
+      />
+    );
+  }
 
   if (atMfcListLevel) {
     const totalCols = 3 + (orderEntry ? 4 : 0) + headerPhases.length + 3;
