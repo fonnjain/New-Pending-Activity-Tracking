@@ -113,6 +113,7 @@ function DataViewContent() {
     orderImports.map((o) => o.asOnDate).filter((d): d is string => !!d),
   );
   const { selectedImportId, setSelectedImportId } = useTracker();
+  const [, setLocation] = useLocation();
   const deleteImport = useDeleteImport();
   const deleteAll = useDeleteAllImports();
   const deleteOrderImport = useDeleteOrderImport();
@@ -167,6 +168,9 @@ function DataViewContent() {
     setSelectedImportId(res.import.id);
     queryClient.invalidateQueries({ queryKey: getListImportsQueryKey() });
     queryClient.invalidateQueries({ queryKey: getGetOrderStatusQueryKey() });
+    // Navigate straight to Project Wise after a WIP upload so the user
+    // lands on the default report view immediately.
+    setLocation("/jobs");
   };
 
   const handleDelete = (id: number) => {
