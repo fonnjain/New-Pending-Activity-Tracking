@@ -618,6 +618,7 @@ function PlantLocationPicker({
 }
 
 function FilterBar() {
+  const [location] = useLocation();
   const { filters, setFilter, setSelectedJobs, setPlantLocations, clearFilters, selectedImportId, mfcViewMode, setMfcViewMode } = useTracker();
   const { data: contractorCategoriesData = [] } = useListContractorCategories();
   const [isOpen, setIsOpen] = useState(false);
@@ -997,14 +998,15 @@ function FilterBar() {
       )}
 
       {/* MFC View mode — global, shown on every page with the filter bar */}
+      {/* "View by MFC" and "Project Then MFC" are only active on the Contractor Wise page */}
       <div className="flex items-center gap-3 px-3 md:px-6 py-2 border-t bg-muted/20">
         <Segmented
           value={mfcViewMode}
           onChange={(v) => setMfcViewMode(v as MfcViewMode)}
           options={[
             { value: "project-with-mfc", label: "Project with MFC" },
-            { value: "view-by-mfc",       label: "View by MFC",      disabled: true },
-            { value: "project-then-mfc",  label: "Project Then MFC", disabled: true },
+            { value: "view-by-mfc",       label: "View by MFC",      disabled: !location.includes("/contractor") },
+            { value: "project-then-mfc",  label: "Project Then MFC", disabled: !location.includes("/contractor") },
           ]}
         />
       </div>

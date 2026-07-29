@@ -285,6 +285,7 @@ function ContractorContent() {
 
 function ContractorDetail({ name, records, categoryInfo, onBack }: { name: string, records: any[], categoryInfo: ContractorCategoryInfo, onBack: () => void }) {
   const [search, setSearch] = useState("");
+  const { mfcViewMode } = useTracker();
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -305,6 +306,7 @@ function ContractorDetail({ name, records, categoryInfo, onBack }: { name: strin
     return { activities, sortedActivities };
   }, [filtered]);
 
+  // "project-with-mfc": group by project (existing behaviour).
   const { projects, sortedProjects } = useMemo(() => {
     const projects = new Map<string, any[]>();
     filtered.forEach(r => {
@@ -320,8 +322,39 @@ function ContractorDetail({ name, records, categoryInfo, onBack }: { name: strin
     return { projects, sortedProjects };
   }, [filtered]);
 
+  // "view-by-mfc": group by MFC batch (alphabetical).
+  const { mfcGroups, sortedMfcKeys } = useMemo(() => {
+    const mfcGroups = new Map<string, any[]>();
+    filtered.forEach(r => {
+      const mfc = r.mfcBatch || "Z";
+      if (!mfcGroups.has(mfc)) mfcGroups.set(mfc, []);
+      mfcGroups.get(mfc)!.push(r);
+    });
+    const sortedMfcKeys = [...mfcGroups.keys()].sort((a, b) => a.localeCompare(b));
+    return { mfcGroups, sortedMfcKeys };
+  }, [filtered]);
+
+  // "project-then-mfc": group by "Project / Batch X" flat key (alphabetical).
+  const { flatGroups, sortedFlatKeys } = useMemo(() => {
+    const flatGroups = new Map<string, any[]>();
+    filtered.forEach(r => {
+      const job = r.job || "(Unassigned)";
+      const mfc = r.mfcBatch || "Z";
+      const key = `${job} / Batch ${mfc}`;
+      if (!flatGroups.has(key)) flatGroups.set(key, []);
+      flatGroups.get(key)!.push(r);
+    });
+    const sortedFlatKeys = [...flatGroups.keys()].sort((a, b) => a.localeCompare(b));
+    return { flatGroups, sortedFlatKeys };
+  }, [filtered]);
+
   const totalQty = useMemo(() => filtered.reduce((sum, r) => sum + r.balanceQty, 0), [filtered]);
   const totalWt = useMemo(() => filtered.reduce((sum, r) => sum + r.balanceWt, 0), [filtered]);
+
+  const leftPanelLabel =
+    mfcViewMode === "view-by-mfc" ? "MFC Batches" :
+    mfcViewMode === "project-then-mfc" ? "Project / MFC" :
+    "Projects";
 
   return (
     <div className="space-y-4">
@@ -361,8 +394,18 @@ function ContractorDetail({ name, records, categoryInfo, onBack }: { name: strin
       ) : (
         <div className="grid lg:grid-cols-2 gap-6 items-start">
           <div className="space-y-3">
-            <h3 className="px-1 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Projects</h3>
-            {sortedProjects.map(job => (
+            <h3 className="px-1 text-sm font-semibold uppercase tracking-wider text-muted-foreground">{leftPanelLabel}</h3>
+            {mfcViewMode === "view-by-mfc" && sortedMfcKeys.map(mfc => (
+              <Card key={mfc} className="overflow-hidden">
+                <ContractorMfcGroup mfcRaw={mfc} records={mfcGroups.get(mfc)!} />
+              </Card>
+            ))}
+            {mfcViewMode === "project-then-mfc" && sortedFlatKeys.map(key => (
+              <Card key={key} className="overflow-hidden">
+                <ContractorMfcGroup mfcRaw={key} records={flatGroups.get(key)!} labelOverride={key} />
+              </Card>
+            ))}
+            {mfcViewMode === "project-with-mfc" && sortedProjects.map(job => (
               <ContractorProjectCard key={job} project={job} records={projects.get(job)!} />
             ))}
           </div>
@@ -477,10 +520,10 @@ function ContractorStructureGroup({ structure, records }: { structure: string; r
 }
 
 // Level 2: MFC batch → structure groups
-function ContractorMfcGroup({ mfcRaw, records }: { mfcRaw: string; records: any[] }) {
+function ContractorMfcGroup({ mfcRaw, records, labelOverride }: { mfcRaw: string; records: any[]; labelOverride?: string }) {
   const [open, setOpen] = useState(false);
 
-  const label = `Batch ${mfcRaw}`;
+  const label = labelOverride ?? `Batch ${mfcRaw}`;
   const wt = records.reduce((s, r) => s + r.balanceWt, 0);
   const structureCount = new Set(records.map(r => r.structure).filter(Boolean)).size;
 
