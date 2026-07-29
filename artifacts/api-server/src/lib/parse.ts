@@ -1014,12 +1014,18 @@ export function parseWorkbook(
     // NOT part of the hash; defaults false for old-format rows (no status col).
     const jcStatus = cellToString(row["Job Card Status"]).trim().toUpperCase();
     const activityUpper = (base.activity ?? "").trim().toUpperCase();
+    void activityUpper; // retained for future use
+    // Store Col A "Type" (job_card_type) so classifyWipCase() can work without
+    // any activity-based proxies. Empty string → null (old-format files without
+    // the Type column). NOT part of the hash; additive/display-only.
+    // Canonical values: "Job Card Not Started" | "Job Card WIP" | "FG Pending For Dispatch"
+    // (stored in original case, matched case-insensitively in classifyWipCase).
+    base.jobCardType = rowType.trim() || null;
     // Store the raw Job Card Status so classifyWipCase() can use it directly at
     // read time — no proxies needed. Empty string → null (old-format rows without
     // the column). NOT part of the hash; defaults null for legacy rows.
     base.jobCardStatus = jcStatus || null;
     base.isInitialCutting = jcStatus === "INITIAL";
-    void activityUpper; // retained for future use
 
     // Detect rows that fall outside the verified closed value sets for Col A / Col G.
     // Only applies when the "Type" column is present (new-format files); old-format

@@ -8,19 +8,21 @@ import {
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
-// Per-(project, structure) snapshot of "Job Card Not Started + blank contractor"
-// balance weight from the most recently uploaded WIP file. Replaced wholesale
-// (DELETE + re-insert) on every WIP commit — NOT append-only; always reflects
-// the latest file only.
+// Per-(project, structure) snapshot of Assignment Balance from the most recently
+// uploaded WIP file. Replaced wholesale (DELETE + re-insert) on every WIP
+// commit — NOT append-only; always reflects the latest file only.
 //
 // Additive, display-only — never affects parsing, hashing, dedup, ageing,
 // activity, milestone, dispatch, or accumulated-WIP math.
 //
-// Source: WIP Col A == "Job Card Not Started" AND Col D (Contractor) is blank.
+// Definition: Col A == "Job Card Not Started" AND Col G == "Authorized"
+//   AND Col D (Contractor) is blank.
 // Weight is stored in MT (Col Q "Balance Wt." ÷ 1000).
-// NOTE: "Not Started + Initial" rows (counted in release_balance_wip) ALSO have
-// a blank contractor and are therefore counted here too — the overlap is
-// intentional (two different lenses on the same data).
+//
+// Excludes Initial (Not Started + Initial) rows: those are already counted in
+// Release Balance.  Assignment Balance therefore represents work that has been
+// released to the shop floor (Authorized) but has not yet been assigned to a
+// contractor — the actionable queue.
 export const assignmentBalanceWipTable = pgTable(
   "assignment_balance_wip",
   {

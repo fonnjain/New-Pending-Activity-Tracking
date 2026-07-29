@@ -1,0 +1,251 @@
+# Work Package — Global Bucket Definitions, Report Total, and ERP Rules Tab
+### Three prompts for the Replit Agent. Run in order; each depends on the one before.
+
+**Verification basis.** Everything below was measured against seven WIP files (21, 22, 23,
+24, 26, 27, 28 July 2026) totalling 419,705 rows, plus the matching Order Review files.
+
+**Two working notes.** The Agent times out on broad prompts, so each is scoped to one
+change. And it has proved reliable when pasting source but unreliable when describing it —
+it misread the same regex three times and twice claimed FG rows were absent from
+`record_pool` when the on-screen figures proved otherwise. **Every prompt ends by asking
+it to paste the changed lines. Read the paste, not the summary.**
+
+---
+
+## Why these three buckets are common to TLT and NTLT
+
+Release, Assignment and Cutting key only on **Type (Col A) + Job Card Status (Col G) +
+Contractor (Col D)**. None of them touches Activity or Order Nature.
+
+Activity is the *only* dimension that differs between the two natures:
+
+| | TLT | NTLT |
+|---|---|---|
+| Not Started activities | `C` | `BL, NTF, NTFSW, G, TS` |
+| Job Card WIP activities | `B, G, GB, HAB, NH, Q, RFI, TS, W, Y` | `G, GB, TS, Y` |
+| FG activities | (blank) | (blank) |
+
+That divergence is exactly why the old activity-based Cutting rule returned **zero** for
+NTLT. Keying on Type + Status makes all three buckets nature-agnostic by construction, and
+the five-bucket model then partitions both natures with zero unclassified marks.
+
+---
+
+## PROMPT A — Make Release / Assignment / Cutting global for TLT and NTLT
+
+```
+Please change three bucket definitions so they are computed identically for TLT and NTLT,
+keyed only on Type (Col A), Job Card Status (Col G) and Contractor (Col D). None of them
+should reference Activity or Order Nature.
+
+  Release Balance    = Type "Job Card Not Started" AND Status "Initial"
+  Assignment Balance = Type "Job Card Not Started" AND Status "Authorized"
+                       AND Contractor is blank
+  Cutting Balance    = Type "Job Card Not Started" AND Status "Authorized"
+
+Three changes from what runs today:
+
+1. CUTTING is currently computed as UPPER(activity) = 'C' AND is_initial_cutting = false.
+   Replace it with the Type + Status rule above.
+
+   For TLT this changes nothing — verified zero divergence on 21, 24, 26, 27 and 28 July.
+   For NTLT it is a significant fix: the activity-based rule returns EXACTLY ZERO for NTLT
+   on every day, because no NTLT row ever carries activity C. NTLT not-started work sits
+   at BL, NTF, NTFSW, G and TS. The Type-based rule recovers 4,232.715 MT on 28-Jul
+   (4,404.963 MT on 21-Jul) that is currently invisible in any NTLT or "All" view.
+
+2. ASSIGNMENT BALANCE currently omits the status check — it is Type "Job Card Not Started"
+   AND blank contractor, which includes Initial rows. Add AND Status = "Authorized".
+
+   This removes a double count: today its Initial portion (2,277.436 MT on 28-Jul) is
+   already counted in Release Balance. After the change Assignment Balance becomes
+   1,033.439 MT on 28-Jul — released work with nobody assigned, which is the number that
+   is actually actionable. Range over the week is 837 to 1,060 MT, about 37 to 42 percent
+   of Cutting.
+
+3. RELEASE BALANCE keeps its current definition. Do NOT add a blank-contractor condition
+   to it. Assert it instead — see Prompt C rule T4. Verified: zero of about 11,000 Initial
+   marks carry a contractor on any of seven days, so the filter would be a no-op today but
+   would silently drop rows if that ever changed. Adding a redundant condition is how the
+   Assign Date requirement wiped out project 821.
+
+Two properties become structural after this change. Please add them as assertions:
+
+  - Assignment Balance is now Cutting plus one extra condition, so Assignment is a subset
+    of Cutting by construction, not by any data property.
+  - Release and Cutting partition "Job Card Not Started" exactly, because Job Card Status
+    only ever takes the values Initial and Authorized.
+
+Apply this everywhere these buckets are computed — the Project Wise page, the server-side
+Job Wise route, the Fabrication Report, the Data page, and every Excel export. Do not
+leave an activity-based copy anywhere.
+
+Expected results after the change, 28-Jul import:
+  TLT   Release 2,277.436   Cutting 2,465.975   Assignment 1,033.439
+  NTLT  Cutting 4,232.715   (currently shows 0.000)
+  Five buckets partition BOTH natures with zero unclassified marks:
+    TLT  10,906.991 MT / 59,046 marks      NTLT  6,849.132 MT / 319 marks
+
+Be aware this is a visible step change for anyone reading NTLT figures, which have been
+showing zero. It is a fix, not a regression.
+
+When done, paste each changed definition verbatim and list every file you touched.
+```
+
+---
+
+## PROMPT B — Fix the Total column on the Fabrication Report
+
+```
+The "Total Fabrication Balance (excl. Assignment)" column on the Fabrication Report has
+the correct formula but two bugs.
+
+Confirmed working: every Sub-Type subtotal and BOM Label total equals
+D + F + G + H + I + J + K + L + M exactly, and Proto 2,226.833 + Mass 4,057.075 +
+Pre 132.166 = 6,416.074, which is right.
+
+Bug 1: the column is EMPTY on all 106 data rows. It only populates on subtotal and total
+rows. Every per-project data row needs the same formula applied.
+
+Bug 2: the grand TOTAL row shows 0 instead of 6,416.074, on all four sheets — Summary,
+Proto, Mass and Pre. Since the intermediate subtotals are all correct, it looks like the
+grand total sums the N column over data rows, which are currently empty, rather than
+adding the BOM Label totals or applying the formula to the grand-total figures.
+
+Fix both, on screen and in the Excel export.
+
+Column E (Assignment Balance) must remain excluded. After Prompt A it is defined as
+Cutting plus a blank-contractor condition, so it is entirely contained within column F and
+including it would double count.
+
+After the fix, on this data the TOTAL row should read 6,416.074 and every data row should
+show its own D + F + G..M.
+
+Paste the data-row expression and the grand-total expression verbatim.
+```
+
+---
+
+## PROMPT C — ERP Rules tab on the Data page
+
+```
+Please add a new "ERP" tab to the Data page.
+
+Layout: a TLT / NTLT selector at the top with TLT selected by default. The NTLT panel
+should exist but be empty, showing "NTLT rules to be defined". Only build TLT for now.
+
+The tab lists every ERP rule the WIP file is expected to satisfy, re-checks them on every
+import, and shows pass or fail per rule with the violating row count and weight. Any
+failure must be visually prominent — these rules are what the rest of the app's
+calculations depend on, so a violation means a number somewhere is about to be wrong.
+
+Group the rules in two sections.
+
+SECTION 1 — UNIVERSAL (apply to every row, TLT and NTLT alike)
+
+  U1  Type (Col A) is one of exactly three values: "Job Card Not Started",
+      "Job Card WIP", "FG Pending For Dispatch". Never blank.
+  U2  Job Card Status (Col G) is one of exactly two values: "Initial", "Authorized".
+      Never blank.
+  U3  Status "Initial" occurs ONLY with Type "Job Card Not Started".
+  U4  Type "FG Pending For Dispatch" always has a BLANK Activity.
+  U5  Type "FG Pending For Dispatch" is always "Authorized".
+  U6  Type "Job Card WIP" is NEVER activity C.
+  U7  Type "Job Card WIP" is always "Authorized".
+  U8  Balance Wt. is greater than zero on every row.
+  U9  Mark No. is never blank.
+
+SECTION 2 — TLT ONLY (rows where Order Nature = "Structure")
+
+  T1  Type "Job Card Not Started" is ALWAYS activity C.
+      IMPORTANT: TLT-only. Must NOT be applied to NTLT, where not-started work sits at
+      BL, NTF, NTFSW, G and TS.
+  T2  Project Code (Col B) is never blank.
+  T3  Alias (Col J) is never blank.
+  T4  Status "Initial" always has a BLANK Contractor.
+  T5  Marks at activity C never have a Last Production Entry Date.
+  T6  Marks at any activity other than C or blank ALWAYS have a Last Production Entry
+      Date.
+  T7  Every "Job Card WIP" activity falls in the Quality Check set
+      {HG, RFI, NH, B, HAB, W, Q, TS} or the Galvanising set {G, GB, Y}.
+  T8  The five buckets partition the file exactly: Release Balance + Cutting +
+      Quality Check + Galvanising + FG WIP = total TLT balance, with zero unclassified
+      marks.
+
+For each rule show: rule ID, plain-English statement, PASS or FAIL, violating row count,
+violating weight in MT, and for failures a sample of up to 10 offending rows with their
+project, structure, mark number and the field values that broke the rule.
+
+Add a summary banner at the top: "19 of 19 ERP rules holding", or
+"2 rules VIOLATED — calculations may be unreliable".
+
+Reference data for your implementation: all nineteen rules currently hold with ZERO
+violations on every WIP file from 21 to 28 July, across 419,705 rows. If your check
+reports a failure on this data, the check itself is wrong, not the data.
+
+Two design points:
+
+  - Store the per-import result so the tab can show history, for example "T4 last failed:
+    never". A rule that has held for months and then breaks is the signal worth catching.
+  - Rules T1, T2 and T3 are inverted or absent for NTLT — NTLT project code and alias are
+    always blank by design, and not-started activity is never C. Do not write the TLT
+    checks in a way that assumes they generalise; scope them explicitly to
+    Order Nature = "Structure".
+
+This tab is read-only reporting. It must not alter, correct or filter any imported data.
+
+When done, paste the rule definitions and tell me the pass/fail counts you get on the
+latest import.
+```
+
+---
+
+## Verification table — all nineteen rules, seven days
+
+| Rule | 21 | 22 | 23 | 24 | 26 | 27 | 28 |
+|---|---|---|---|---|---|---|---|
+| U1 Type in 3 allowed values | ok | ok | ok | ok | ok | ok | ok |
+| U2 Status in 2 allowed values | ok | ok | ok | ok | ok | ok | ok |
+| U3 Initial only with Not Started | ok | ok | ok | ok | ok | ok | ok |
+| U4 FG always blank activity | ok | ok | ok | ok | ok | ok | ok |
+| U5 FG always Authorized | ok | ok | ok | ok | ok | ok | ok |
+| U6 WIP never activity C | ok | ok | ok | ok | ok | ok | ok |
+| U7 WIP always Authorized | ok | ok | ok | ok | ok | ok | ok |
+| U8 Balance Wt greater than zero | ok | ok | ok | ok | ok | ok | ok |
+| U9 Mark No never blank | ok | ok | ok | ok | ok | ok | ok |
+| T1 Not Started always activity C | ok | ok | ok | ok | ok | ok | ok |
+| T2 Project Code never blank | ok | ok | ok | ok | ok | ok | ok |
+| T3 Alias never blank | ok | ok | ok | ok | ok | ok | ok |
+| T4 Initial always blank contractor | ok | ok | ok | ok | ok | ok | ok |
+| T5 C marks have no Last Production date | ok | ok | ok | ok | ok | ok | ok |
+| T6 non-C non-FG marks have Last Production date | ok | ok | ok | ok | ok | ok | ok |
+| T7 WIP activity in QC or Galvanising set | ok | ok | ok | ok | ok | ok | ok |
+| T8 Five buckets partition TLT exactly | ok | ok | ok | ok | ok | ok | ok |
+
+Two NTLT observations, recorded for when that work starts — **not yet rules**:
+
+- NTLT Project Code is always blank (all 7 days)
+- NTLT Alias is always blank (all 7 days)
+
+These are the inverse of T2 and T3, which is why the NTLT rule set has to be written
+separately rather than inherited.
+
+---
+
+## Which rules are enforced, and which are merely observed
+
+Worth keeping in mind when deciding how hard to fail on a violation.
+
+**Almost certainly ERP-enforced** — semantically necessary, and they hold identically
+across both order natures: U1, U2, U3, U4, U5, U6, U7. You cannot have work in progress on
+an unauthorised job card, so the state machine
+`Not Started/Initial → Not Started/Authorized → WIP/Authorized → FG/Authorized` is
+structural. Only four of six possible Type × Status combinations ever occur.
+
+**Process facts, true for TLT but not universal:** T1 above all. It is false for NTLT.
+Treat these as scoped assertions, never as general invariants.
+
+**Business-process conventions that could change:** T4 (Initial implies blank contractor)
+holds because assignment happens at or after release. If the ERP ever permits
+pre-assignment this breaks — which is exactly why it belongs in the ERP tab as a monitored
+rule rather than as a filter condition inside Release Balance.

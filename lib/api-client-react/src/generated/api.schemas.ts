@@ -2480,3 +2480,44 @@ projectCode: string;
 bucket: string;
 };
 
+// ---------------------------------------------------------------------------
+// ERP Rules
+// ---------------------------------------------------------------------------
+
+export interface ErpSampleRow {
+  project: string;
+  structure: string;
+  markNo: string;
+  /** Key→value pairs of the fields that broke the rule. */
+  fields: { [key: string]: string | null };
+}
+
+export interface ErpRuleResult {
+  /** e.g. "U1", "T8" */
+  id: string;
+  /** Plain-English statement of what the rule checks. */
+  label: string;
+  /** "UNIVERSAL" applies to every row; "TLT" applies to Structure-nature rows only. */
+  scope: 'UNIVERSAL' | 'TLT';
+  pass: boolean;
+  /** True when the import pre-dates the column this rule checks (rule cannot be evaluated). */
+  notApplicable?: boolean;
+  violatingRowCount: number;
+  violatingWeightMt: number;
+  /** Up to 10 offending rows. Empty when pass=true. */
+  sampleRows: ErpSampleRow[];
+}
+
+export interface ErpRulesResponse {
+  available: boolean;
+  importId?: number;
+  /** @nullable */
+  asOnDate?: string | null;
+  /** True when the import pre-dates the Type column (Col A); all rules show N/A. */
+  typeColumnMissing?: boolean;
+  totalRules: number;
+  passingRules: number;
+  failingRules: number;
+  rules: ErpRuleResult[];
+}
+

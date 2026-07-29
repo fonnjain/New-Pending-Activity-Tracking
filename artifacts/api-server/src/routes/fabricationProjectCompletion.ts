@@ -170,7 +170,14 @@ router.get(
         )
         .groupBy(recordPoolTable.job, recordPoolTable.structure),
 
-      // Cutting balance (activity = C, excluding Initial marks).
+      // Cutting balance = "Job Card Not Started" + "Authorized".
+      // Primary: job_card_type = 'Job Card Not Started' AND job_card_status = 'Authorized'
+      //   (new-format files that store Col A; TLT and NTLT alike).
+      // Fallback: upper(activity) = 'C' AND is_initial_cutting = false
+      //   (old-format files without job_card_type; correct for TLT by rule T1;
+      //    no old NTLT files have this gap).
+      // is_initial_cutting = false in both branches to exclude NOT_RELEASED rows
+      // (is_initial_cutting is the most-indexed proxy and avoids a full text scan).
       db
         .select({
           project: recordPoolTable.job,
@@ -187,8 +194,14 @@ router.get(
           and(
             eq(importRowsTable.importId, latestImport.id),
             eq(recordPoolTable.category, "TLT"),
-            eq(sql`upper(${recordPoolTable.activity})`, "C"),
             eq(recordPoolTable.isInitialCutting, false),
+            sql`(
+              (${recordPoolTable.jobCardType} = 'Job Card Not Started'
+               AND ${recordPoolTable.jobCardStatus} = 'Authorized')
+              OR
+              (${recordPoolTable.jobCardType} IS NULL
+               AND upper(${recordPoolTable.activity}) = 'C')
+            )`,
           ),
         )
         .groupBy(recordPoolTable.job, recordPoolTable.structure),

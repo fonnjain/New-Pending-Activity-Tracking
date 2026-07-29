@@ -1,6 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { backfillClassification, backfillHoleOperation, backfillInitialCutting } from "./lib/backfill";
+import { backfillClassification, backfillHoleOperation, backfillInitialCutting, backfillJobCardType } from "./lib/backfill";
 import { backfillReleaseBalanceFromPool } from "./lib/parseWipReleaseBalance";
 import { seedContractorCategories } from "./lib/seedContractorCategories";
 import { seedRsjThickness } from "./lib/seedRsjThickness";
@@ -40,6 +40,13 @@ app.listen(port, (err) => {
   // not-released marks missed by the old Activity=C predicate). Self-draining.
   backfillInitialCutting().catch((err) => {
     logger.error({ err }, "Initial-cutting backfill failed");
+  });
+
+  // Best-effort backfill: populate job_card_type from stored proxy columns
+  // (job_card_status + activity) for rows parsed before the col existed.
+  // Self-draining (no-op once all rows with job_card_status set are typed).
+  backfillJobCardType().catch((err) => {
+    logger.error({ err }, "Job-card-type backfill failed");
   });
 
   // Best-effort, one-time backfill of the derived hole-operation columns on

@@ -194,10 +194,16 @@ export async function backfillReleaseBalanceFromPool(): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
-// Assignment Balance — Col A "Job Card Not Started" AND Col D (Contractor) blank
+// Assignment Balance — Col A "Job Card Not Started" AND Col G "Authorized"
+// AND Col D (Contractor) blank.
 // ---------------------------------------------------------------------------
-// Intentional overlap with Release Balance: a "Not Started + Initial" row also
-// has a blank contractor, so it is counted in BOTH. Do NOT deduplicate.
+// Definition: released-but-unassigned work. Excludes Initial (Not Started +
+// Initial) rows — those are already in Release Balance. By requiring
+// Status="Authorized" Assignment is now a strict subset of Cutting Balance
+// (Cutting = JCNS + Authorized regardless of contractor), which means it
+// cannot exceed Cutting and the Total column is not double-counted.
+//
+// Observable consequence: Assignment ≈ 37-42% of Cutting on 21-28 Jul data.
 
 export interface AssignmentBalanceStructureRow {
   project: string;
@@ -234,6 +240,10 @@ export function parseWipAssignmentBalance(
   for (const row of rawRows) {
     const type = cellStr(row["Type"]).toLowerCase();
     if (type !== "job card not started") continue;
+
+    // Must be Authorized — Initial rows are already counted in Release Balance.
+    const status = cellStr(row["Job Card Status"]).toLowerCase();
+    if (status !== "authorized") continue;
 
     const contractor = cellStr(row["Contractor"]);
     if (contractor !== "") continue;

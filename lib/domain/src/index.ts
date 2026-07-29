@@ -2052,30 +2052,52 @@ export type WipCase =
 /**
  * Classify a mark into one of the four mutually exclusive WIP cases.
  *
- * When `jobCardStatus` is stored (new-format files ≥ Jul 2026) it is used directly —
- * no proxies needed.  Falls back to `isInitialCutting` + activity for legacy rows
- * where jobCardStatus is null (old-format files without the Status column).
+ * When `jobCardType` AND `jobCardStatus` are both stored (new-format files
+ * ≥ Jul 2026 that include Col A) the classification uses them directly — no
+ * activity-based proxies needed.  This makes Release / Assignment / Cutting
+ * correct for NTLT as well as TLT (NTLT not-started work sits at activities
+ * like BL / NTF / NTFSW / G / TS, not C, so the old activity=C proxy
+ * returned ZERO cutting for NTLT).
+ *
+ * Falls back through two progressively weaker proxies for legacy rows:
+ *   - jobCardStatus present but no jobCardType: activity=C stands in for JCNS.
+ *     Correct for TLT (T1 guarantees JCNS is always activity C); harmless for
+ *     NTLT because old-format NTLT files pre-date the Status column.
+ *   - Neither stored (oldest files): isInitialCutting + blank-activity proxy.
  */
 export function classifyWipCase(r: {
   activity?: string | null;
   isInitialCutting?: boolean | null;
+  jobCardType?: string | null;
   jobCardStatus?: string | null;
 }): WipCase {
   const act = (r.activity ?? "").trim().toUpperCase();
 
-  if (r.jobCardStatus != null) {
-    // Job Card Status is stored — apply the spec cases directly.
+  if (r.jobCardType != null && r.jobCardStatus != null) {
+    // Both Type (Col A) and Status (Col G) are stored — authoritative path.
+    const tp = r.jobCardType.trim().toUpperCase();
     const st = r.jobCardStatus.trim().toUpperCase();
-    if (act === "C" && st === "INITIAL") return "NOT_RELEASED";
-    if (act === "C" && st === "AUTHORIZED") return "CUTTING";
-    if (act !== "" && act !== "C") return "IN_PRODUCTION";
-    if (act === "") return "FINISHED_GOODS";
+    if (tp === "JOB CARD NOT STARTED" && st === "INITIAL")    return "NOT_RELEASED";
+    if (tp === "JOB CARD NOT STARTED" && st === "AUTHORIZED") return "CUTTING";
+    if (tp === "JOB CARD WIP")                                return "IN_PRODUCTION";
+    if (tp === "FG PENDING FOR DISPATCH")                     return "FINISHED_GOODS";
     return "UNCLASSIFIED";
   }
 
-  // Legacy fallback (jobCardStatus not stored).  Structural facts verified on
-  // WIP 21-Jul: "Initial" only occurs with activity=C; "FG Pending" always has
-  // blank activity.  These facts make the four cases unambiguous from stored data.
+  if (r.jobCardStatus != null) {
+    // Status stored but Type not (transitional rows). Use activity=C as proxy
+    // for "Job Card Not Started" — exact for TLT (T1), harmless for legacy NTLT.
+    const st = r.jobCardStatus.trim().toUpperCase();
+    if (act === "C" && st === "INITIAL")    return "NOT_RELEASED";
+    if (act === "C" && st === "AUTHORIZED") return "CUTTING";
+    if (act !== "" && act !== "C")          return "IN_PRODUCTION";
+    if (act === "")                         return "FINISHED_GOODS";
+    return "UNCLASSIFIED";
+  }
+
+  // Legacy fallback (neither jobCardType nor jobCardStatus stored).
+  // Structural facts verified on WIP 21-Jul: "Initial" only occurs with
+  // activity=C; "FG Pending" always has blank activity.
   if (act === "C") return r.isInitialCutting ? "NOT_RELEASED" : "CUTTING";
   if (!act) return "FINISHED_GOODS";
   return "IN_PRODUCTION";

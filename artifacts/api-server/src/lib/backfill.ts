@@ -153,6 +153,71 @@ export async function backfillHoleOperation(): Promise<number> {
 }
 
 /**
+ * Idempotent backfill: populate job_card_type for record_pool rows that were
+ * parsed before the column existed.  Only touches rows WHERE job_card_type IS
+ * NULL; self-draining on every subsequent boot.
+ *
+ * Derivation rules (in priority order, applied only when job_card_status IS
+ * NOT NULL — old-format rows without status stay null and use the legacy proxy):
+ *
+ *   1. job_card_status = 'INITIAL'
+ *        → 'Job Card Not Started'          (U3: Initial only with JCNS)
+ *   2. job_card_status = 'Authorized' AND activity = '' (blank)
+ *        → 'FG Pending For Dispatch'       (U4: FG always has blank activity)
+ *   3. job_card_status = 'Authorized' AND upper(activity) IN ('C','BL','NTF','NTFSW')
+ *        → 'Job Card Not Started'          (C = TLT T1; BL/NTF/NTFSW = NTLT-only JCNS)
+ *   4. job_card_status = 'Authorized' AND activity not blank AND not in rule-3 set
+ *        → 'Job Card WIP'                  (best proxy; G/TS NTLT JCNS is ambiguous
+ *                                           in old data without the Type column)
+ */
+export async function backfillJobCardType(): Promise<number> {
+  const [r1, r2, r3, r4] = await Promise.all([
+    // Rule 1: Initial → JCNS
+    db.execute(sql`
+      UPDATE record_pool
+         SET job_card_type = 'Job Card Not Started'
+       WHERE job_card_type IS NULL
+         AND job_card_status = 'INITIAL'
+    `),
+    // Rule 2: Authorized + blank activity → FG
+    db.execute(sql`
+      UPDATE record_pool
+         SET job_card_type = 'FG Pending For Dispatch'
+       WHERE job_card_type IS NULL
+         AND job_card_status = 'Authorized'
+         AND (activity IS NULL OR activity = '')
+    `),
+    // Rule 3: Authorized + unambiguously JCNS activity → JCNS
+    db.execute(sql`
+      UPDATE record_pool
+         SET job_card_type = 'Job Card Not Started'
+       WHERE job_card_type IS NULL
+         AND job_card_status = 'Authorized'
+         AND upper(activity) IN ('C', 'BL', 'NTF', 'NTFSW')
+    `),
+    // Rule 4: Authorized + any other non-blank activity → WIP
+    db.execute(sql`
+      UPDATE record_pool
+         SET job_card_type = 'Job Card WIP'
+       WHERE job_card_type IS NULL
+         AND job_card_status = 'Authorized'
+         AND activity IS NOT NULL
+         AND activity != ''
+    `),
+  ]);
+
+  const updated =
+    Number((r1 as { rowCount?: number }).rowCount ?? 0) +
+    Number((r2 as { rowCount?: number }).rowCount ?? 0) +
+    Number((r3 as { rowCount?: number }).rowCount ?? 0) +
+    Number((r4 as { rowCount?: number }).rowCount ?? 0);
+  if (updated > 0) {
+    logger.info({ updated }, "Backfilled record_pool job_card_type");
+  }
+  return updated;
+}
+
+/**
  * Idempotent backfill: set is_initial_cutting = true for every record_pool row
  * whose job_card_status = 'INITIAL' but whose is_initial_cutting is currently
  * false.  This corrects rows that were parsed before the definition of

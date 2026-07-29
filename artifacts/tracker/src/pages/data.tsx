@@ -1,5 +1,5 @@
 import { useMemo, useState, Fragment } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow, type ErpRulesResponse, type ErpRuleResult } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
@@ -8,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, ListChecks, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History } from "lucide-react";
+import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, ListChecks, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History, CircleCheck, CircleX, Info } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx, exportToJson, type XlsxColumn } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
@@ -16,7 +16,7 @@ import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { AiReviewPanel } from "@/components/ai-review-panel";
 import { StagedUploadPanel } from "@/components/staged-upload-panel";
 import { AccessDenied, LogoutButton } from "@/components/login-gate";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Segmented } from "@/components/ui/segmented";
 import { ContractorSetupContent } from "@/pages/contractor-setup";
@@ -32,6 +32,7 @@ const ADMIN_TABS = [
   { path: "/contractor-setup", label: "Contractor Setup" },
   { path: "/warning-parameters", label: "Warning Parameters" },
   { path: "/thickness", label: "Thickness" },
+  { path: "/erp-rules", label: "ERP Rules" },
   { path: "/users", label: "Users" },
 ] as const;
 
@@ -71,6 +72,8 @@ function AdminTabbedPage() {
         <WarningParametersContent />
       ) : active === "/thickness" ? (
         <ThicknessContent />
+      ) : active === "/erp-rules" ? (
+        <ErpRulesContent />
       ) : active === "/users" ? (
         <UsersContent />
       ) : (
@@ -2587,6 +2590,7 @@ function LoginActivitySection() {
         </div>
       </div>
 
+
       {isLoading ? (
         <Card className="border-border">
           <CardContent className="p-6 text-center text-muted-foreground text-sm">Loading activity...</CardContent>
@@ -2603,5 +2607,274 @@ function LoginActivitySection() {
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ERP Rules Content
+// ---------------------------------------------------------------------------
+
+const ERP_RULES_QUERY_KEY = ["erp-rules"] as const;
+
+async function fetchErpRules(): Promise<ErpRulesResponse> {
+  const r = await fetch("/production/api/reports/erp-rules", { credentials: "include" });
+  if (!r.ok) throw new Error(`ERP rules fetch failed: ${r.status}`);
+  return r.json() as Promise<ErpRulesResponse>;
+}
+
+function ErpRulesContent() {
+  const [nature, setNature] = useState<"TLT" | "NTLT">("TLT");
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ERP_RULES_QUERY_KEY,
+    queryFn: fetchErpRules,
+    staleTime: 60_000,
+  });
+
+  const universalRules = data?.rules.filter((r) => r.scope === "UNIVERSAL") ?? [];
+  const tltRules = data?.rules.filter((r) => r.scope === "TLT") ?? [];
+  const allVisible = nature === "TLT" ? [...universalRules, ...tltRules] : universalRules;
+  const visibleFailing = allVisible.filter((r) => !r.pass).length;
+  const visiblePassing = allVisible.filter((r) => r.pass).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-base font-semibold">ERP Integrity Rules</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Rules the WIP file is expected to satisfy. A failure means a calculation
+            somewhere is about to be wrong.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => void refetch()}>
+          <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
+        </Button>
+      </div>
+
+      <div className="flex gap-2">
+        {(["TLT", "NTLT"] as const).map((n) => (
+          <button
+            key={n}
+            onClick={() => setNature(n)}
+            className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
+              nature === n
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background text-foreground border-border hover:bg-muted"
+            }`}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+
+      {nature === "NTLT" && (
+        <Card className="border-border">
+          <CardContent className="p-8 text-center text-muted-foreground">
+            <Info className="h-8 w-8 mx-auto mb-2 opacity-40" />
+            <p className="text-sm font-medium">NTLT rules to be defined</p>
+            <p className="text-xs mt-1">
+              NTLT project and alias fields are always blank by design (inverse of TLT
+              rules T2/T3). Rule authoring will begin once NTLT scope is agreed.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {nature === "TLT" && (
+        <>
+          {isLoading && (
+            <Card className="border-border">
+              <CardContent className="p-6 text-center text-sm text-muted-foreground">
+                Checking rules…
+              </CardContent>
+            </Card>
+          )}
+
+          {error && (
+            <Card className="border-destructive bg-destructive/5">
+              <CardContent className="p-4 flex items-center gap-2 text-sm text-destructive">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                Failed to load rules: {String(error)}
+              </CardContent>
+            </Card>
+          )}
+
+          {data && !isLoading && (
+            <>
+              {/* typeColumnMissing notice */}
+              {(data as ErpRulesResponse & { typeColumnMissing?: boolean }).typeColumnMissing && (
+                <div className="flex items-start gap-2 rounded-md px-4 py-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-700 text-amber-800 dark:text-amber-300">
+                  <Info className="h-4 w-4 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium">WIP file pre-dates the Type column (Col A)</p>
+                    <p className="text-xs mt-0.5">
+                      Rules will evaluate fully once a new-format WIP file is uploaded. All rules are shown as N/A below.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Summary banner (only when type column present) */}
+              {!(data as ErpRulesResponse & { typeColumnMissing?: boolean }).typeColumnMissing && (
+                visibleFailing === 0 ? (
+                  <div className="flex items-center gap-2 rounded-md px-4 py-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300">
+                    <CircleCheck className="h-4 w-4 shrink-0" />
+                    <span className="text-sm font-medium">
+                      {visiblePassing} of {allVisible.length} ERP rules holding
+                      {data.asOnDate ? ` — import ${data.asOnDate}` : ""}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 rounded-md px-4 py-3 bg-destructive/10 border border-destructive/30 text-destructive">
+                    <CircleX className="h-4 w-4 shrink-0" />
+                    <span className="text-sm font-bold">
+                      {visibleFailing} rule{visibleFailing !== 1 ? "s" : ""} VIOLATED — calculations may be unreliable.{" "}
+                      {visiblePassing} of {allVisible.length} passing.
+                    </span>
+                  </div>
+                )
+              )}
+
+              <div className="space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">
+                  Section 1 — Universal (all rows)
+                </h3>
+                {universalRules.map((rule) => (
+                  <ErpRuleRow key={rule.id} rule={rule} />
+                ))}
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">
+                  Section 2 — TLT Only (Order Nature = "Structure")
+                </h3>
+                {tltRules.map((rule) => (
+                  <ErpRuleRow key={rule.id} rule={rule} />
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ErpRuleRow({ rule }: { rule: ErpRuleResult }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasSamples = rule.sampleRows.length > 0;
+  const isNA = !!(rule as ErpRuleResult & { notApplicable?: boolean }).notApplicable;
+
+  return (
+    <Card
+      className={`border ${
+        isNA
+          ? "border-border opacity-60"
+          : rule.pass
+            ? "border-border"
+            : "border-destructive/50 bg-destructive/5 dark:bg-destructive/10"
+      }`}
+    >
+      <div
+        className={`flex items-start gap-3 px-4 py-3 ${hasSamples ? "cursor-pointer select-none" : ""}`}
+        onClick={() => hasSamples && setExpanded((v) => !v)}
+      >
+        <div className="mt-0.5 shrink-0">
+          {isNA ? (
+            <Info className="h-4 w-4 text-muted-foreground" />
+          ) : rule.pass ? (
+            <CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+          ) : (
+            <CircleX className="h-4 w-4 text-destructive" />
+          )}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold font-mono bg-muted px-1.5 py-0.5 rounded">
+              {rule.id}
+            </span>
+            <span
+              className={`text-xs font-semibold ${
+                isNA
+                  ? "text-muted-foreground"
+                  : rule.pass
+                    ? "text-emerald-700 dark:text-emerald-400"
+                    : "text-destructive"
+              }`}
+            >
+              {isNA ? "N/A" : rule.pass ? "PASS" : "FAIL"}
+            </span>
+            {!rule.pass && !isNA && (
+              <span className="text-xs text-muted-foreground">
+                {rule.violatingRowCount.toLocaleString()} row
+                {rule.violatingRowCount !== 1 ? "s" : ""}
+                {" · "}
+                {rule.violatingWeightMt.toFixed(3)} MT
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+            {rule.label}
+          </p>
+        </div>
+
+        {hasSamples && (
+          <div className="shrink-0 text-muted-foreground mt-0.5">
+            {expanded ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </div>
+        )}
+      </div>
+
+      {!rule.pass && expanded && hasSamples && (
+        <div className="border-t border-border/40 px-4 py-3">
+          <p className="text-xs font-medium text-muted-foreground mb-2">
+            Sample offending rows (up to 10):
+          </p>
+          <div className="overflow-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-border/40 bg-muted/40">
+                  <th className="text-left px-2 py-1 font-medium">Project</th>
+                  <th className="text-left px-2 py-1 font-medium">Structure</th>
+                  <th className="text-left px-2 py-1 font-medium">Mark No.</th>
+                  {Object.keys(rule.sampleRows[0]?.fields ?? {}).map((k) => (
+                    <th key={k} className="text-left px-2 py-1 font-medium">
+                      {k}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rule.sampleRows.map((row, i) => (
+                  <tr
+                    key={i}
+                    className="border-b border-border/20 hover:bg-muted/20"
+                  >
+                    <td className="px-2 py-1">{row.project}</td>
+                    <td className="px-2 py-1">{row.structure}</td>
+                    <td className="px-2 py-1">{row.markNo}</td>
+                    {Object.values(row.fields).map((v, j) => (
+                      <td key={j} className="px-2 py-1 font-mono">
+                        {v != null ? v : <span className="text-muted-foreground italic">blank</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {rule.violatingRowCount > 10 && (
+            <p className="text-xs text-muted-foreground mt-2">
+              … and {(rule.violatingRowCount - 10).toLocaleString()} more rows not shown.
+            </p>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
