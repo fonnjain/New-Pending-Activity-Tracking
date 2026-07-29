@@ -25,7 +25,7 @@ import { ThicknessContent } from "@/pages/thickness";
 
 const ADMIN_TABS = [
   { path: "/data", label: "Data" },
-  { path: "/job-templates", label: "Job Templates" },
+  { path: "/job-templates", label: "Job Templates", disabled: true },
   { path: "/computed-fg", label: "Computed FG" },
   { path: "/order-reconciliation", label: "Order Reconciliation" },
   { path: "/release-balance", label: "Release Balance" },

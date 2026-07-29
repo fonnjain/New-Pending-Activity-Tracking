@@ -9,7 +9,10 @@ import {
   backfillJobCardType,
   backfillInitialCutting,
 } from "../lib/backfill";
-import { backfillReleaseBalanceFromPool } from "../lib/parseWipReleaseBalance";
+import {
+  backfillReleaseBalanceFromPool,
+  backfillAssignmentBalanceFromPool,
+} from "../lib/parseWipReleaseBalance";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -31,6 +34,7 @@ router.post("/admin/recompute", requireAuth, async (_req, res): Promise<void> =>
       releaseBalanceBackfilled,
       jobCardTypeBackfilled,
       initialCuttingBackfilled,
+      assignmentBalanceBackfilled,
     ] = await Promise.all([
       backfillClassification(),
       backfillHoleOperation(),
@@ -39,6 +43,7 @@ router.post("/admin/recompute", requireAuth, async (_req, res): Promise<void> =>
       backfillReleaseBalanceFromPool(),
       backfillJobCardType(),
       backfillInitialCutting(),
+      backfillAssignmentBalanceFromPool(),
     ]);
     await recomputeDispatch();
 
@@ -50,6 +55,7 @@ router.post("/admin/recompute", requireAuth, async (_req, res): Promise<void> =>
       releaseBalanceBackfilled,
       jobCardTypeBackfilled,
       initialCuttingBackfilled,
+      assignmentBalanceBackfilled,
       generatedAt: new Date().toISOString(),
     });
   } catch (err) {
