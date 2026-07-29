@@ -378,29 +378,170 @@ function ContractorDetail({ name, records, categoryInfo, onBack }: { name: strin
   );
 }
 
-function ContractorProjectCard({ project, records }: { project: string, records: any[] }) {
+// Level 3: individual marks table inside a structure
+function ContractorStructureGroup({ structure, records }: { structure: string; records: any[] }) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
-  const wt = records.reduce((sum, r) => sum + r.balanceWt, 0);
-  const structureCount = new Set(
-    records.map(r => r.structure).filter((s): s is string => !!s)
-  ).size;
-
+  const wt = records.reduce((s, r) => s + r.balanceWt, 0);
   const withAge = records.filter(r => r.ageingDays !== null);
-  const avgAge = withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays, 0) / withAge.length) : null;
+  const avgAge = withAge.length
+    ? Math.round(withAge.reduce((s, r) => s + r.ageingDays, 0) / withAge.length)
+    : null;
 
-  const sortedRows = useMemo(() => {
-    return [...records].sort((a, b) => {
-      const s = String(a.structure ?? "").localeCompare(String(b.structure ?? ""));
-      if (s !== 0) return s;
+  const sortedRows = useMemo(() =>
+    [...records].sort((a, b) => {
       const act = compareActivity(String(a.activity ?? ""), String(b.activity ?? ""));
       if (act !== 0) return act;
       return (b.ageingDays ?? -1) - (a.ageingDays ?? -1);
-    });
+    }),
+    [records],
+  );
+  const visibleRows = showAll ? sortedRows : sortedRows.slice(0, ROW_CAP);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="w-full">
+        <div className="flex items-center justify-between py-2 px-4 pl-10 hover:bg-muted/30 transition-colors gap-2">
+          <div className="flex items-center gap-2 min-w-0 text-left">
+            <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
+            <span className="font-medium text-sm truncate">{structure}</span>
+          </div>
+          <div className="flex items-center gap-3 shrink-0 text-xs">
+            <span className="font-semibold">{formatWeight(wt)}</span>
+            <span className="text-muted-foreground">{records.length} marks</span>
+            {avgAge !== null && (
+              <span className={`font-bold w-8 text-right ${getAgeingColor(avgAge)}`}>{avgAge}d</span>
+            )}
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="border-t bg-card">
+          <div className="overflow-x-auto">
+            <Table containerClassName="max-h-[20rem]">
+              <TableHeader className="sticky top-0 z-10 bg-card">
+                <TableRow>
+                  <TableHead>Mark</TableHead>
+                  <TableHead>Activity</TableHead>
+                  <TableHead>Section</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Wt</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead className="text-right">Ageing</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {visibleRows.map(r => (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
+                    <TableCell className="whitespace-nowrap">{r.activity || '-'}</TableCell>
+                    <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || '-'}</TableCell>
+                    <TableCell className="text-right">{r.balanceQty}</TableCell>
+                    <TableCell className="text-right font-bold">{formatWeight(r.balanceWt)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.assignDate)}</TableCell>
+                    <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
+                      {ageingCell(r)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+              <TableFooter className="sticky bottom-0 z-10 bg-muted">
+                <TableRow>
+                  <TableCell colSpan={3} className="font-semibold">Total ({records.length.toLocaleString()})</TableCell>
+                  <TableCell className="text-right font-bold tabular-nums">{records.reduce((s, r) => s + (r.balanceQty ?? 0), 0).toLocaleString()}</TableCell>
+                  <TableCell className="text-right font-bold tabular-nums">{formatWeight(records.reduce((s, r) => s + (r.balanceWt ?? 0), 0))}</TableCell>
+                  <TableCell colSpan={2} />
+                </TableRow>
+              </TableFooter>
+            </Table>
+          </div>
+          {sortedRows.length > ROW_CAP && (
+            <div className="p-2 text-center text-xs text-muted-foreground border-t">
+              {showAll ? (
+                <span>Showing all {sortedRows.length.toLocaleString()} marks.{" "}
+                  <button type="button" onClick={() => setShowAll(false)} className="text-primary font-medium hover:underline">Show less</button>
+                </span>
+              ) : (
+                <span>Showing first {ROW_CAP.toLocaleString()} of {sortedRows.length.toLocaleString()} marks.{" "}
+                  <button type="button" onClick={() => setShowAll(true)} className="text-primary font-medium hover:underline">Show all</button>
+                  {" "}or use the search to narrow down.
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+// Level 2: MFC batch → structure groups
+function ContractorMfcGroup({ mfcRaw, records }: { mfcRaw: string; records: any[] }) {
+  const [open, setOpen] = useState(false);
+
+  const label = mfcRaw === "Z" ? "No Batch" : `Batch ${mfcRaw}`;
+  const wt = records.reduce((s, r) => s + r.balanceWt, 0);
+  const structureCount = new Set(records.map(r => r.structure).filter(Boolean)).size;
+
+  const structures = useMemo(() => {
+    const sm = new Map<string, any[]>();
+    for (const r of records) {
+      const s = r.structure || "(No Structure)";
+      if (!sm.has(s)) sm.set(s, []);
+      sm.get(s)!.push(r);
+    }
+    return [...sm.entries()]
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   }, [records]);
 
-  const visibleRows = showAll ? sortedRows : sortedRows.slice(0, ROW_CAP);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="w-full">
+        <div className="flex items-center justify-between py-2 px-4 hover:bg-muted/20 transition-colors gap-2">
+          <div className="flex items-center gap-2 min-w-0 text-left">
+            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
+            <span className="text-[11px] bg-muted px-1.5 py-0.5 rounded font-mono font-semibold">{label}</span>
+            <span className="text-xs text-muted-foreground">
+              {records.length} marks • {structureCount} structure{structureCount !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <span className="text-sm font-semibold shrink-0">{formatWeight(wt)}</span>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="border-t divide-y bg-muted/5">
+          {structures.map(([structure, srecs]) => (
+            <ContractorStructureGroup key={structure} structure={structure} records={srecs} />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+// Level 1: project card → MFC batch groups
+function ContractorProjectCard({ project, records }: { project: string, records: any[] }) {
+  const [open, setOpen] = useState(false);
+
+  const wt = records.reduce((sum, r) => sum + r.balanceWt, 0);
+  const structureCount = new Set(records.map(r => r.structure).filter((s): s is string => !!s)).size;
+  const withAge = records.filter(r => r.ageingDays !== null);
+  const avgAge = withAge.length ? Math.round(withAge.reduce((sum, r) => sum + r.ageingDays, 0) / withAge.length) : null;
+
+  const mfcGroups = useMemo(() => {
+    const mm = new Map<string, any[]>();
+    for (const r of records) {
+      const mfc = r.mfcBatch || "Z";
+      if (!mm.has(mfc)) mm.set(mfc, []);
+      mm.get(mfc)!.push(r);
+    }
+    return [...mm.entries()].sort((a, b) => {
+      if (a[0] === "Z") return 1;
+      if (b[0] === "Z") return -1;
+      return a[0].localeCompare(b[0]);
+    });
+  }, [records]);
 
   return (
     <Card className="overflow-hidden">
@@ -429,75 +570,10 @@ function ContractorProjectCard({ project, records }: { project: string, records:
           </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="border-t bg-card">
-            <div className="overflow-x-auto">
-              <Table containerClassName="max-h-[28rem]">
-                <TableHeader className="sticky top-0 z-10 bg-card">
-                  <TableRow>
-                    <TableHead>Structure</TableHead>
-                    <TableHead>Mark</TableHead>
-                    <TableHead>Activity</TableHead>
-                    <TableHead>Section</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Wt</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead className="text-right">Ageing</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visibleRows.map(r => (
-                    <TableRow key={r.id}>
-                      <TableCell className="font-medium whitespace-nowrap">{r.structure || '-'}</TableCell>
-                      <TableCell className="font-mono font-medium whitespace-nowrap">{r.markId}</TableCell>
-                      <TableCell className="whitespace-nowrap">{r.activity || '-'}</TableCell>
-                      <TableCell className="text-muted-foreground max-w-[150px] truncate">{r.section || '-'}</TableCell>
-                      <TableCell className="text-right">{r.balanceQty}</TableCell>
-                      <TableCell className="text-right font-bold">{formatWeight(r.balanceWt)}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.assignDate)}</TableCell>
-                      <TableCell className={`text-right font-bold tabular-nums ${getAgeingColor(r.ageingDays)}`}>
-                        {ageingCell(r)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-                <TableFooter className="sticky bottom-0 z-10 bg-muted">
-                  <TableRow>
-                    <TableCell colSpan={4} className="font-semibold">Total ({records.length.toLocaleString()} marks)</TableCell>
-                    <TableCell className="text-right font-bold tabular-nums">{records.reduce((s, r) => s + (r.balanceQty ?? 0), 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right font-bold tabular-nums">{formatWeight(records.reduce((s, r) => s + (r.balanceWt ?? 0), 0))}</TableCell>
-                    <TableCell colSpan={2} />
-                  </TableRow>
-                </TableFooter>
-              </Table>
-            </div>
-            {sortedRows.length > ROW_CAP && (
-              <div className="p-3 text-center text-xs text-muted-foreground border-t">
-                {showAll ? (
-                  <span>
-                    Showing all {sortedRows.length.toLocaleString()} marks.{" "}
-                    <button
-                      type="button"
-                      onClick={() => setShowAll(false)}
-                      className="text-primary font-medium hover:underline"
-                    >
-                      Show less
-                    </button>
-                  </span>
-                ) : (
-                  <span>
-                    Showing first {ROW_CAP.toLocaleString()} of {sortedRows.length.toLocaleString()} marks.{" "}
-                    <button
-                      type="button"
-                      onClick={() => setShowAll(true)}
-                      className="text-primary font-medium hover:underline"
-                    >
-                      Show all
-                    </button>{" "}
-                    or use the search to narrow down.
-                  </span>
-                )}
-              </div>
-            )}
+          <div className="border-t divide-y">
+            {mfcGroups.map(([mfcRaw, mfcRecs]) => (
+              <ContractorMfcGroup key={mfcRaw} mfcRaw={mfcRaw} records={mfcRecs} />
+            ))}
           </div>
         </CollapsibleContent>
       </Collapsible>
