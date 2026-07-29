@@ -539,11 +539,7 @@ function CutoffBanner() {
   );
 }
 
-// Pages where the MFC view-mode toggle is applicable.
-const MFC_PAGES = new Set(["/inventory", "/reports"]);
-
 function FilterBar() {
-  const [location] = useLocation();
   const { filters, setFilter, setSelectedJobs, clearFilters, selectedImportId, mfcViewMode, setMfcViewMode } = useTracker();
   const [isOpen, setIsOpen] = useState(false);
   const { data: records = [] } = useGetImportRecords(selectedImportId as number, {
@@ -901,20 +897,18 @@ function FilterBar() {
         </div>
       )}
 
-      {/* MFC View mode — shown on Bucket List and Reports pages only */}
-      {MFC_PAGES.has(location) && (
-        <div className="flex items-center gap-3 px-3 md:px-6 py-2 border-t bg-muted/20">
-          <Segmented
-            value={mfcViewMode}
-            onChange={(v) => setMfcViewMode(v as MfcViewMode)}
-            options={[
-              { value: "project-with-mfc", label: "Project with MFC" },
-              { value: "view-by-mfc",       label: "View by MFC" },
-              { value: "project-then-mfc",  label: "Project Then MFC" },
-            ]}
-          />
-        </div>
-      )}
+      {/* MFC View mode — global, shown on every page with the filter bar */}
+      <div className="flex items-center gap-3 px-3 md:px-6 py-2 border-t bg-muted/20">
+        <Segmented
+          value={mfcViewMode}
+          onChange={(v) => setMfcViewMode(v as MfcViewMode)}
+          options={[
+            { value: "project-with-mfc", label: "Project with MFC" },
+            { value: "view-by-mfc",       label: "View by MFC" },
+            { value: "project-then-mfc",  label: "Project Then MFC" },
+          ]}
+        />
+      </div>
     </div>
   );
 }
