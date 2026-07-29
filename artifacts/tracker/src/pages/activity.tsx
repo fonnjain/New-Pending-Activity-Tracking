@@ -196,11 +196,7 @@ function ActPerfProjectGroup({
   const stats = useMemo(() => actPerfRollup(allRecs, moveWindow), [allRecs, moveWindow]);
   const sortedMfcs = useMemo(() => {
     const entries = [...mfcMap.entries()];
-    entries.sort((a, b) => {
-      if (a[0] === "Z") return 1;
-      if (b[0] === "Z") return -1;
-      return a[0].localeCompare(b[0]);
-    });
+    entries.sort((a, b) => a[0].localeCompare(b[0]));
     return entries.map(([m]) => m);
   }, [mfcMap]);
   return (
@@ -356,14 +352,10 @@ function ActivityDrillRow({
     [projectMap],
   );
 
+  // Alphabetical keeps same-project batches consecutive (project-then-mfc) and
+  // sorts batches A→B→C→Z (view-by-mfc).
   const sortedFlatKeys = useMemo(
-    () => [...flatMap.entries()]
-      .sort((a, b) => {
-        const wa = [...a[1].values()].flat().reduce((s: number, r: any) => s + (r.balanceWt ?? 0), 0);
-        const wb = [...b[1].values()].flat().reduce((s: number, r: any) => s + (r.balanceWt ?? 0), 0);
-        return wb - wa;
-      })
-      .map(([k]) => k),
+    () => [...flatMap.keys()].sort((a, b) => a.localeCompare(b)),
     [flatMap],
   );
 

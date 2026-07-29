@@ -536,11 +536,7 @@ function ContractorProjectCard({ project, records }: { project: string, records:
       if (!mm.has(mfc)) mm.set(mfc, []);
       mm.get(mfc)!.push(r);
     }
-    return [...mm.entries()].sort((a, b) => {
-      if (a[0] === "Z") return 1;
-      if (b[0] === "Z") return -1;
-      return a[0].localeCompare(b[0]);
-    });
+    return [...mm.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [records]);
 
   return (

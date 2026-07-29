@@ -335,6 +335,13 @@ function JobDashboardContent() {
 
   const sortedProjects = useMemo(() => {
     const arr = [...byProject];
+    // In project-then-mfc / view-by-mfc modes the primary key encodes the batch
+    // (e.g. "911 / Batch A"). Alphabetical sort naturally keeps all batches of
+    // the same project consecutive AND sorts batches A→B→C→Z within each project.
+    if (!isAll && !isNtlt && mfcViewMode !== "project-with-mfc") {
+      arr.sort((a, b) => a.job.localeCompare(b.job));
+      return arr;
+    }
     switch (projectSort) {
       case "project":
         arr.sort((a, b) => a.job.localeCompare(b.job));
@@ -365,7 +372,7 @@ function JobDashboardContent() {
         break;
     }
     return arr;
-  }, [byProject, projectSort]);
+  }, [byProject, projectSort, isAll, isNtlt, mfcViewMode]);
 
   const orderTotals = useMemo(() => {
     return byProject.reduce(
