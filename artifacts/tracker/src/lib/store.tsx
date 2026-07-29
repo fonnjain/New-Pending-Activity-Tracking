@@ -69,6 +69,9 @@ export interface Filters {
   // Active only when job === MULTI_JOBS_FILTER_VALUE. Stores the user's checked
   // project codes. Cleared whenever job is changed to anything else.
   selectedJobs: string[];
+  // Plant location multi-select: [] means "all locations"; ["unit_1"] filters to
+  // only contractors assigned to Unit 1 in the contractor-categories overlay.
+  plantLocations: string[];
 }
 
 interface TrackerContextType {
@@ -77,6 +80,7 @@ interface TrackerContextType {
   filters: Filters;
   setFilter: (key: keyof Filters, value: string | null) => void;
   setSelectedJobs: (jobs: string[]) => void;
+  setPlantLocations: (locations: string[]) => void;
   clearFilters: () => void;
   mfcViewMode: MfcViewMode;
   setMfcViewMode: (mode: MfcViewMode) => void;
@@ -98,6 +102,7 @@ const defaultFilters: Filters = {
   dateRange: null,
   search: "",
   selectedJobs: [],
+  plantLocations: [],
 };
 
 const TrackerContext = createContext<TrackerContextType | undefined>(undefined);
@@ -129,6 +134,10 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
       // every checkbox is cleared so the label reverts to "All Jobs".
       job: jobs.length > 0 ? MULTI_JOBS_FILTER_VALUE : null,
     }));
+  };
+
+  const setPlantLocations = (locations: string[]) => {
+    setFilters((prev) => ({ ...prev, plantLocations: locations }));
   };
 
   const setFilter = (key: keyof Filters, value: string | null) => {
@@ -191,7 +200,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
     setFilters((prev) => ({ ...defaultFilters, category: prev.category }));
 
   return (
-    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, clearFilters, mfcViewMode, setMfcViewMode }}>
+    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, setPlantLocations, clearFilters, mfcViewMode, setMfcViewMode }}>
       {children}
     </TrackerContext.Provider>
   );
@@ -289,6 +298,7 @@ export interface ContractorCategoryInfo {
   category: string; // CONTRACTOR_CATEGORIES value
   outVendorType: string[]; // FAB/GALVA tags
   displayName: string;
+  plantLocation: string | null; // unit_1 | unit_2 | null
 }
 
 export function useContractorCategoryMap(): Map<string, ContractorCategoryInfo> {
@@ -300,6 +310,7 @@ export function useContractorCategoryMap(): Map<string, ContractorCategoryInfo> 
         category: row.category,
         outVendorType: row.outVendorType ?? [],
         displayName: row.displayName,
+        plantLocation: row.plantLocation ?? null,
       });
     }
     return m;
@@ -313,7 +324,7 @@ export function contractorCategoryFor(
   map: Map<string, ContractorCategoryInfo>,
 ): ContractorCategoryInfo {
   const hit = map.get(normalizeContractorName(contractor));
-  return hit ?? { category: "UNCLASSIFIED", outVendorType: [], displayName: contractor ?? "" };
+  return hit ?? { category: "UNCLASSIFIED", outVendorType: [], displayName: contractor ?? "", plantLocation: null };
 }
 
 // Live "Current Jobs" list (uploaded project codes) as a Set, plus its raw
@@ -408,6 +419,17 @@ export function useFilteredRecords(records: Record[] | undefined) {
   return useMemo(() => {
     if (!records) return [];
     const { filters: rf, dateWindow } = resolveActiveFilters(filters, activeJobSet);
-    return filterRecords(records, rf, { dateWindow, categoryMap });
+    let result = filterRecords(records, rf, { dateWindow, categoryMap });
+    // Plant location post-filter: restrict to contractors whose plantLocation is
+    // in the selected set. An unclassified/unmapped contractor (plantLocation null)
+    // is excluded when any location is selected.
+    if (filters.plantLocations.length > 0) {
+      const plantSet = new Set(filters.plantLocations);
+      result = result.filter((r) => {
+        const info = contractorCategoryFor(r.contractor, categoryMap);
+        return info.plantLocation != null && plantSet.has(info.plantLocation);
+      });
+    }
+    return result;
   }, [records, filters, categoryMap, activeJobSet]);
 }

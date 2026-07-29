@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes, ChevronsUpDown } from "lucide-react";
 import { useTracker, dateRangeWindow, useActiveJobSet, useJobTemplates, MULTI_JOBS_FILTER_VALUE, isTemplateFilter, extractTemplateId, templateFilterValue, isNamedJobSetFilter, type JobTemplate, type MfcViewMode } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
-import { useGetImportRecords, useGetAuthStatus, getGetImportRecordsQueryKey, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
+import { useGetImportRecords, useGetAuthStatus, useListContractorCategories, getGetImportRecordsQueryKey, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
 import { LoginForm, ChangePasswordForm, LogoutButton } from "@/components/login-gate";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -539,8 +539,87 @@ function CutoffBanner() {
   );
 }
 
+// Plant location display labels.
+const PLANT_LOCATION_LABELS: Record<string, string> = {
+  unit_1: "Unit 1",
+  unit_2: "Unit 2",
+};
+
+// Multi-select picker for Plant Location (unit_1 / unit_2 etc.). Shows every
+// distinct location found in the contractor-categories overlay as checkboxes.
+function PlantLocationPicker({
+  available,
+  selected,
+  onChange,
+}: {
+  available: string[];
+  selected: string[];
+  onChange: (locs: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
+  const toggle = (loc: string) => {
+    const next = new Set(selectedSet);
+    if (next.has(loc)) next.delete(loc); else next.add(loc);
+    onChange(Array.from(next));
+  };
+
+  const label =
+    selected.length === 0
+      ? "All Locations"
+      : selected.length === 1
+        ? (PLANT_LOCATION_LABELS[selected[0]] ?? selected[0])
+        : `${selected.length} Locations`;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant={selected.length > 0 ? "secondary" : "outline"}
+          size="sm"
+          className="h-9 w-full justify-between font-normal text-sm"
+        >
+          <span className="truncate">{label}</span>
+          <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0 ml-1" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[180px] p-2" align="start">
+        <div className="space-y-0.5">
+          <button
+            onClick={() => { onChange([]); setOpen(false); }}
+            className={`w-full text-left px-2 py-1.5 rounded text-sm hover:bg-accent ${selected.length === 0 ? "bg-accent font-medium" : ""}`}
+          >
+            All Locations
+          </button>
+          {available.map((loc) => (
+            <div
+              key={loc}
+              className={`flex items-center gap-1.5 px-1 rounded text-sm hover:bg-accent ${selectedSet.has(loc) ? "bg-accent/50" : ""}`}
+            >
+              <Checkbox
+                checked={selectedSet.has(loc)}
+                onCheckedChange={() => toggle(loc)}
+                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                className="shrink-0"
+              />
+              <button className="flex-1 text-left py-1.5" onClick={() => toggle(loc)}>
+                {PLANT_LOCATION_LABELS[loc] ?? loc}
+              </button>
+            </div>
+          ))}
+          {available.length === 0 && (
+            <p className="text-xs text-muted-foreground text-center py-2">No locations set</p>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function FilterBar() {
-  const { filters, setFilter, setSelectedJobs, clearFilters, selectedImportId, mfcViewMode, setMfcViewMode } = useTracker();
+  const { filters, setFilter, setSelectedJobs, setPlantLocations, clearFilters, selectedImportId, mfcViewMode, setMfcViewMode } = useTracker();
+  const { data: contractorCategoriesData = [] } = useListContractorCategories();
   const [isOpen, setIsOpen] = useState(false);
   const { data: records = [] } = useGetImportRecords(selectedImportId as number, {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
@@ -678,9 +757,24 @@ function FilterBar() {
     [holeOpCounts],
   );
 
+  // Distinct plant locations observed in the contractor-categories overlay,
+  // sorted for a stable display order.
+  const availablePlantLocations = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          contractorCategoriesData
+            .map((c) => c.plantLocation)
+            .filter(Boolean) as string[],
+        ),
+      ).sort(),
+    [contractorCategoriesData],
+  );
+
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => {
     if (k === "category") return false; // Order Type is a mode, not a filter
     if (k === "selectedJobs") return false; // accounted for via filters.job
+    if (k === "plantLocations") return (v as string[]).length > 0;
     if (v === null || v === "") return false;
     if (Array.isArray(v)) return false; // empty or not — arrays handled via their owning key
     // MULTI_JOBS_FILTER_VALUE with nothing selected = effectively "All Jobs"
@@ -717,9 +811,18 @@ function FilterBar() {
               ]}
             />
           )}
-          {/* In ALL mode isNtlt is false, so this defaults to the Job picker —
-             the primary TLT dimension — which is what users expect when "All"
-             order types are shown. NTLT mode swaps it for the Section picker. */}
+          {/* 1. Date Range — first after Order Type */}
+          <DateRangeFilter />
+          {/* 2. Plant Location (multi-select) */}
+          <div className="w-[160px]">
+            <PlantLocationPicker
+              available={availablePlantLocations}
+              selected={filters.plantLocations}
+              onChange={setPlantLocations}
+            />
+          </div>
+          {/* 3. Jobs / Section — In ALL mode isNtlt is false, so defaults to the
+              Job picker (TLT primary dimension). NTLT mode swaps it for Section. */}
           <div className="w-full sm:w-[220px]">
             {isNtlt ? (
               <SearchableSelect
@@ -742,8 +845,7 @@ function FilterBar() {
               />
             )}
           </div>
-          {/* MFC batch (TLT sub-level, between Project and Structure). Hidden in
-             NTLT mode where Section is the primary dimension. */}
+          {/* 4. MFC batch (TLT sub-level). Hidden in NTLT mode. */}
           {!isNtlt && (
             <div className="w-[150px]">
               <SearchableSelect
@@ -755,16 +857,7 @@ function FilterBar() {
               />
             </div>
           )}
-          <div className="w-[180px]">
-            <SearchableSelect
-              value={filters.activity}
-              onChange={(v) => setFilter("activity", v)}
-              groups={activityGroups}
-              allLabel="All Activities"
-              searchPlaceholder="Search activities or bundles..."
-            />
-          </div>
-          <DateRangeFilter />
+          {/* 5. Contractor */}
           <div className="flex-1 min-w-[180px] max-w-[340px]">
             <SearchableSelect
               value={
@@ -776,13 +869,9 @@ function FilterBar() {
               onChange={(v) => {
                 const category = decodeContractorCategory(v);
                 if (category !== null) {
-                  // A classification was picked: drive the category filter and
-                  // clear any specific-contractor selection.
                   setFilter("contractor", null);
                   setFilter("contractorCategory", category);
                 } else {
-                  // A specific contractor (or "All") was picked: clear the
-                  // classification so the two never stack.
                   setFilter("contractorCategory", null);
                   setFilter("contractor", v);
                 }
@@ -790,6 +879,16 @@ function FilterBar() {
               groups={buildContractorGroups(contractors)}
               allLabel="All Contractors"
               searchPlaceholder="Search contractors or types..."
+            />
+          </div>
+          {/* 6. Activity */}
+          <div className="w-[180px]">
+            <SearchableSelect
+              value={filters.activity}
+              onChange={(v) => setFilter("activity", v)}
+              groups={activityGroups}
+              allLabel="All Activities"
+              searchPlaceholder="Search activities or bundles..."
             />
           </div>
           <div className="flex items-center gap-2 ml-auto">
