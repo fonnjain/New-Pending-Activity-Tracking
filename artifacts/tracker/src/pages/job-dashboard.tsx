@@ -1,13 +1,12 @@
 import { useState, useMemo, useEffect, Fragment, useCallback } from "react";
 import { isActiveCutting } from "@/lib/ageing";
 import {
+  activityDisplayKey,
   compareActivity,
   sortActivities,
   processPhase,
   PROCESS_PHASES,
   processPhasesForMode,
-  PROCESS_SEQUENCE,
-  NTLT_ACTIVITIES,
   type ProcessPhaseKey,
 } from "@workspace/domain";
 import { useTracker, useContractorCategoryMap, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE, dateRangeWindow, type MfcViewMode } from "@/lib/store";
@@ -307,11 +306,7 @@ function JobDashboardContent() {
 
       const actGroups = new Map<string, typeof filtered>();
       filtered.forEach((r) => {
-        const key = !r.activity
-          ? "Finished Goods (FG)"
-          : ((r.category || "TLT") === "NTLT" ? NTLT_ACTIVITIES : (PROCESS_SEQUENCE as readonly string[])).includes(r.activity)
-            ? r.activity
-            : `⚠ ${r.activity}`;
+        const key = activityDisplayKey(r.activity, r.category);
         if (!actGroups.has(key)) actGroups.set(key, []);
         actGroups.get(key)!.push(r);
       });

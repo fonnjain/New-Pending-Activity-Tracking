@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import { NetBalanceMovementPanel } from "@/components/NetBalanceMovementPanel";
 import { ContractorNetMovementPanel } from "@/components/ContractorNetMovementPanel";
 import {
+  activityDisplayKey,
   activityRank,
   assignDayKey,
   bundleActivitySet,
@@ -14,8 +15,6 @@ import {
   matchesContractorCategoryFilter,
   migrateTurnaroundSettings,
   normalizeActivity,
-  NTLT_ACTIVITIES,
-  PROCESS_SEQUENCE,
   routeIncludesOp,
   scopeFor,
   sequenceFor,
@@ -302,11 +301,7 @@ function ReportBuilder() {
       { balanceQty: number; balanceWt: number; ageSum: number; ageCount: number }
     >();
     for (const r of rows) {
-      const key = !r.activity
-        ? "Finished Goods (FG)"
-        : ((r.category || "TLT") === "NTLT" ? NTLT_ACTIVITIES : (PROCESS_SEQUENCE as readonly string[])).includes(r.activity)
-          ? r.activity
-          : `⚠ ${r.activity}`;
+      const key = activityDisplayKey(r.activity, r.category);
       const g = groups.get(key) ?? { balanceQty: 0, balanceWt: 0, ageSum: 0, ageCount: 0 };
       g.balanceQty += r.balanceQty ?? 0;
       g.balanceWt += r.balanceWt ?? 0;
@@ -370,11 +365,7 @@ function ReportBuilder() {
       { marks: number; qty: number; wt: number; ageSum: number; ageCount: number }
     >();
     for (const r of rows) {
-      const key = !r.activity
-        ? "Finished Goods (FG)"
-        : ((r.category || "TLT") === "NTLT" ? NTLT_ACTIVITIES : (PROCESS_SEQUENCE as readonly string[])).includes(r.activity)
-          ? r.activity
-          : `⚠ ${r.activity}`;
+      const key = activityDisplayKey(r.activity, r.category);
       const g = groups.get(key) ?? { marks: 0, qty: 0, wt: 0, ageSum: 0, ageCount: 0 };
       g.marks += 1;
       g.qty += r.balanceQty ?? 0;
@@ -407,11 +398,7 @@ function ReportBuilder() {
     // Then one worksheet per activity (process-ordered) with its own TOTAL row.
     const byActivity = new Map<string, typeof enrichedRows>();
     for (const r of enrichedRows) {
-      const key = !r.activity
-        ? "Finished Goods (FG)"
-        : ((r.category || "TLT") === "NTLT" ? NTLT_ACTIVITIES : (PROCESS_SEQUENCE as readonly string[])).includes(r.activity)
-          ? r.activity
-          : `⚠ ${r.activity}`;
+      const key = activityDisplayKey(r.activity, r.category);
       if (!byActivity.has(key)) byActivity.set(key, []);
       byActivity.get(key)!.push(r);
     }
@@ -2851,7 +2838,7 @@ function DailyProductionMovementReport() {
     const activities = new Map<string, any[]>();
     for (const r of records) {
       if (isCutting(r.activity) && !isActiveCutting(r)) continue;
-      const act = r.activity || "Unassigned";
+      const act = activityDisplayKey(r.activity, r.category);
       if (!activities.has(act)) activities.set(act, []);
       activities.get(act)!.push(r);
     }

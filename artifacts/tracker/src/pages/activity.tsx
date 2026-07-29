@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import { useState, useMemo } from "react";
-import { compareActivity } from "@workspace/domain";
+import { activityDisplayKey, compareActivity } from "@workspace/domain";
 import { useSettings } from "@/lib/settings";
 
 const ROW_CAP = 300;
@@ -702,7 +702,7 @@ function ActivityContent() {
     const activities = new Map<string, any[]>();
     records.forEach(r => {
       if (isCutting(r.activity) && !isActiveCutting(r)) return;
-      const act = r.activity || "Unassigned";
+      const act = activityDisplayKey(r.activity, r.category);
       if (!activities.has(act)) activities.set(act, []);
       activities.get(act)!.push(r);
     });

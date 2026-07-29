@@ -1,0 +1,111 @@
+# Replit Prompt — Fix "Unassigned" on Activity Wise, and find the rest semantically
+### Follow-up: the previous grep was textual, so it only caught one of the labels
+
+---
+
+## Why the last fix missed this
+
+The earlier search was for the literal string `"Unknown"`. The Activity Wise page uses
+`"Unassigned"` for the same thing, so it was never touched. There may be further variants
+(`"Not set"`, `"N/A"`, `"Other"`, `"-"`, or an empty string rendered as a dash).
+
+**The search has to be semantic, not textual:** find every place that groups or labels rows
+by activity and has a fallback branch for a blank, null or undefined activity — regardless
+of which word that branch produces.
+
+## Verified — "Unassigned" is Finished Goods
+
+Activity Wise, 29-Jul import, Order Type = TLT:
+
+| | Screen ("Unassigned") | File (blank activity, TLT) |
+|---|---|---|
+| Marks | 8,577 | **8,577** |
+| Pieces | 178,564 | **178,564** |
+| Weight | 2,232.2 t | **2,232.207 MT** |
+
+Every other visible activity row also matches the file exactly — B 115.041, HAB 5.762,
+W 38.038, Q 223.597, TS 342.535, G 690.041, GB 352.040, Y 902.532 MT. So the bucketing is
+correct; only the label is wrong.
+
+## A second, unrelated issue on the same page
+
+The page total is **48,192 marks / 877,287 pcs / 8,291.6 t**. Summing all TLT non-Initial
+rows from the file gives **48,545 / 887,953 / 8,621.858** — short by **353 marks /
+10,666 pcs / 330.258 MT**. Since every visible row is exact, the gap is in the rows above
+the fold (C, RFI, NH). Included as a question in the prompt, not a claimed bug.
+
+---
+
+## The prompt
+
+```
+The "Unknown" rename you did was correct but incomplete, because the search was for that
+literal string. The Activity Wise page uses a different word for the same thing and was
+missed.
+
+Verified on the 29-Jul import, Order Type = TLT: the Activity Wise row labelled
+"Unassigned" is 8,577 marks / 178,564 pcs / 2,232.2 t, which is exactly the Finished Goods
+population (rows with a blank Activity, Type = "FG Pending For Dispatch"). Same bucket, same
+numbers, different label.
+
+Please do the following.
+
+1. Search SEMANTICALLY, not for a literal string. Find every place in the app that groups,
+   buckets or labels rows by Activity and has a fallback branch for a blank, null or
+   undefined activity value — whatever word that branch produces. Look for patterns like
+   `activity ||`, `activity ??`, `activity ? ... : ...`, `activity === ""`,
+   `!activity`, and any lookup map with a default entry. Candidate labels to check for
+   include "Unassigned", "Not set", "N/A", "Other", "None", "-" and an empty string
+   rendered as a dash.
+
+   Tell me the full list you find before or alongside the changes.
+
+2. Apply the SAME treatment already applied to the Job Wise Report at every one of those
+   sites:
+
+       blank / null activity            -> "Finished Goods (FG)"
+       activity valid for the row's nature -> the code itself
+       activity present but not valid   -> `⚠ ${activity}`
+
+   Use the existing per-nature check — PROCESS_SEQUENCE for TLT, NTLT_ACTIVITIES for NTLT —
+   exactly as implemented in job-dashboard.tsx. Do not duplicate the logic; if it is not
+   already a shared helper in @workspace/domain, please extract it into one and have every
+   site call it. Four or five copies of this condition is how the same bug comes back.
+
+3. Cover the Excel exports and any chart legends or filter dropdowns on those pages too,
+   not just the on-screen table.
+
+4. Separate question, same page. The Activity Wise total reads 48,192 marks / 877,287 pcs
+   / 8,291.6 t, but summing all TLT non-Initial rows from the source file gives 48,545 /
+   887,953 / 8,621.858 MT — a shortfall of 353 marks / 10,666 pcs / 330.258 MT. Every
+   visible per-activity row matches the file exactly, so the gap is in the rows above the
+   fold (C, RFI or NH).
+
+   What is being excluded? This page has an "All Locations" filter that the other pages do
+   not — are rows with no resolvable location being dropped from the total? Please explain
+   rather than change anything, and if rows are being silently excluded, tell me how many
+   and why.
+
+Do not change any bucket definition or calculation. Items 1 to 3 are labels plus one shared
+helper; item 4 is a question.
+
+When done, paste the full list of sites you found, the shared helper, and your answer to
+item 4.
+```
+
+---
+
+## What to check in the reply
+
+- **That the list is longer than one entry.** If it comes back with only Activity Wise,
+  push back — the previous textual grep found eleven `"Unknown"` sites across four files,
+  so the semantic search should surface a comparable spread.
+- **That the logic was extracted into one shared helper**, not copy-pasted a fifth time.
+  The condition now exists at four sites after the last change; adding more copies is
+  exactly the "same rule in several places" pattern that has caused repeated regressions
+  in this codebase.
+- **That per-nature checking was preserved.** Any new site using `PROCESS_SEQUENCE` alone
+  will flag valid NTLT codes (`NTF`, `NTFSW`, `BL`) as unrecognised — that regression was
+  just fixed once and can easily be reintroduced.
+- **A real answer to item 4**, with a row count. "Nothing is excluded" is not consistent
+  with the 330.258 MT gap.

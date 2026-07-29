@@ -12,7 +12,7 @@ import { ChevronDown, ChevronLeft, Search, Building2, FileSpreadsheet } from "lu
 import { Button } from "@/components/ui/button";
 import { exportToXlsx, type XlsxColumn } from "@/lib/export";
 import { useMemo, useRef, useState } from "react";
-import { compareActivity, contractorCategoryLabel, outVendorTypeLabel, bundleActivitySet } from "@workspace/domain";
+import { activityDisplayKey, compareActivity, contractorCategoryLabel, outVendorTypeLabel, bundleActivitySet } from "@workspace/domain";
 import { ContractorPerformanceReport } from "./reports";
 
 // Activity scopes for the per-contractor load split, sliced from the canonical
@@ -298,7 +298,7 @@ function ContractorDetail({ name, records, categoryInfo, onBack }: { name: strin
   const { activities, sortedActivities } = useMemo(() => {
     const activities = new Map<string, any[]>();
     filtered.forEach(r => {
-      const act = r.activity || "Unassigned";
+      const act = activityDisplayKey(r.activity, r.category);
       if (!activities.has(act)) activities.set(act, []);
       activities.get(act)!.push(r);
     });

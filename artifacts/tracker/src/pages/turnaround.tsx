@@ -15,6 +15,7 @@ import {
   migrateTurnaroundSettings,
   compareActivity,
   scopeFor,
+  activityDisplayKey,
   sequenceFor,
   type LifecycleResult,
 } from "@workspace/domain";
@@ -177,7 +178,7 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
   const stages = useMemo(() => {
     const map = new Map<string, Bucket>();
     for (const { r, res } of classified) {
-      const key = r.activity || "—";
+      const key = activityDisplayKey(r.activity, r.category);
       const b = map.get(key) ?? newBucket();
       tally(b, res);
       map.set(key, b);

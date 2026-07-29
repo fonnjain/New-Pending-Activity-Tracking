@@ -15,7 +15,7 @@ import {
   trendArrow,
   fmtDays,
 } from "@/lib/velocity";
-import { compareActivity } from "@workspace/domain";
+import { activityDisplayKey, compareActivity } from "@workspace/domain";
 import { EmptyState } from "./overview";
 import { ProjectCompletionBanner } from "@/components/project-completion-banner";
 import { AlertTriangle, ChevronRight, FileSpreadsheet } from "lucide-react";
@@ -125,7 +125,7 @@ function StuckContent({ importId }: { importId: number }) {
       { markCount: number; stalled: number; slow: number; paceSum: number; paceCount: number }
     >();
     for (const v of items) {
-      const key = v.activity || "—";
+      const key = activityDisplayKey(v.activity);
       const g = map.get(key) ?? { markCount: 0, stalled: 0, slow: 0, paceSum: 0, paceCount: 0 };
       g.markCount++;
       if (v.status === "stalled") g.stalled++;

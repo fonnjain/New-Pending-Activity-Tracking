@@ -51,6 +51,38 @@ export const SEQUENCES = {
 // Defined separately from PROCESS_SEQUENCE so TLT stage ordering is not widened.
 export const NTLT_ACTIVITIES: readonly string[] = ["BL", "NTF", "NTFSW", "G", "GB", "TS", "Y"];
 
+// Precomputed sets for O(1) membership lookup by activityDisplayKey.
+const _TLT_ACTIVITY_SET = new Set<string>(PROCESS_SEQUENCE as readonly string[]);
+const _NTLT_ACTIVITY_SET = new Set<string>(NTLT_ACTIVITIES);
+const _ALL_ACTIVITY_SET = new Set<string>([..._TLT_ACTIVITY_SET, ..._NTLT_ACTIVITY_SET]);
+
+/**
+ * Canonical display key for grouping / labelling records by activity.
+ *
+ *   blank / null / undefined      → "Finished Goods (FG)"
+ *   code valid for the row nature → the code itself
+ *   code present but not valid    → `⚠ ${code}`
+ *
+ * Pass `category = null` (or omit it) when the record's nature is unavailable;
+ * the code is then checked against the union of all TLT + NTLT codes so that
+ * valid NTLT codes (NTF, NTFSW, BL …) never produce a spurious warning in
+ * mixed-mode or nature-unknown contexts.
+ *
+ * Use this instead of `activity || "Unknown"` / `activity || "Unassigned"` /
+ * `activity || "—"` everywhere the app buckets or labels records by activity.
+ */
+export function activityDisplayKey(
+  activity: string | null | undefined,
+  category?: string | null,
+): string {
+  if (!activity) return "Finished Goods (FG)";
+  const set =
+    category === "NTLT" ? _NTLT_ACTIVITY_SET
+    : category != null  ? _TLT_ACTIVITY_SET   // explicit TLT or other named category
+    :                     _ALL_ACTIVITY_SET;  // nature unknown: accept either set
+  return set.has(activity) ? activity : `⚠ ${activity}`;
+}
+
 export type SequenceKey = keyof typeof SEQUENCES;
 // A process sequence is an ordered, read-only list of activity codes.
 export type ActivitySequence = readonly string[];
