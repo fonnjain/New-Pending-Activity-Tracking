@@ -1,4 +1,4 @@
-import { useTracker, resolveActiveFilters, useCurrentJobsSet } from "@/lib/store";
+import { useTracker, resolveActiveFilters, useActiveJobSet } from "@/lib/store";
 import { getImportSummary, type SummaryRequest } from "@workspace/api-client-react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -22,19 +22,19 @@ export default function Overview() {
 function OverviewContent() {
   const { selectedImportId, filters } = useTracker();
   const importId = selectedImportId as number;
-  const { set: currentJobsSet } = useCurrentJobsSet();
+  const activeJobSet = useActiveJobSet();
 
   // Build the server-summary request from the active header filters + resolved
   // date window. The window is resolved from the client's LOCAL today so the
   // server classifies dates identically regardless of its timezone. jobIn is
   // sent as an array (JSON-serializable); the server rebuilds it into a Set.
   const request: SummaryRequest = useMemo(() => {
-    const { filters: rf, dateWindow } = resolveActiveFilters(filters, currentJobsSet);
+    const { filters: rf, dateWindow } = resolveActiveFilters(filters, activeJobSet);
     return {
       filters: { ...rf, jobIn: rf.jobIn ? Array.from(rf.jobIn) : null },
       dateWindow,
     };
-  }, [filters, currentJobsSet]);
+  }, [filters, activeJobSet]);
 
   // Server computes every headline metric (KPIs, ageing buckets, top aged,
   // busiest contractors, lifecycle + velocity tallies) from the same shared

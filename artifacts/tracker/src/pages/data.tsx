@@ -1,6 +1,6 @@
 import { useMemo, useState, Fragment } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetCurrentJobs, useUploadCurrentJobs, useClearCurrentJobs, getGetCurrentJobsQueryKey, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow, type ErpRulesResponse, type ErpRuleResult } from "@workspace/api-client-react";
-import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow, type ErpRulesResponse, type ErpRuleResult } from "@workspace/api-client-react";
+import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
 import { contractorCategoryLabel } from "@workspace/domain";
@@ -8,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, ListChecks, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History, CircleCheck, CircleX, Info } from "lucide-react";
+import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, PlusCircle, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History, CircleCheck, CircleX, Info } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx, exportToJson, type XlsxColumn } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
@@ -25,6 +25,7 @@ import { ThicknessContent } from "@/pages/thickness";
 
 const ADMIN_TABS = [
   { path: "/data", label: "Data" },
+  { path: "/job-templates", label: "Job Templates" },
   { path: "/computed-fg", label: "Computed FG" },
   { path: "/order-reconciliation", label: "Order Reconciliation" },
   { path: "/release-balance", label: "Release Balance" },
@@ -58,7 +59,9 @@ function AdminTabbedPage() {
           options={ADMIN_TABS.map((t) => ({ value: t.path, label: t.label }))}
         />
       </div>
-      {active === "/computed-fg" ? (
+      {active === "/job-templates" ? (
+        <JobTemplatesContent />
+      ) : active === "/computed-fg" ? (
         <ComputedFgContent />
       ) : active === "/order-reconciliation" ? (
         <OrderReconciliationContent />
@@ -300,8 +303,6 @@ function DataViewContent() {
           takenDates={takenOrDates}
         />
       </div>
-
-      <CurrentJobsCard />
 
       {selectedImportId && <AiSanitizePanel importId={selectedImportId} />}
 
@@ -663,130 +664,6 @@ function CutoffCard() {
 // project codes (.xlsx/.xls) that powers a set-membership "Current Jobs"
 // option in the existing Job filter. Each upload REPLACES the list; it never
 // touches WIP/Order Review parsing, hash/dedup, Activity, qty, or ageing.
-function CurrentJobsCard() {
-  const { data, refetch } = useGetCurrentJobs();
-  const upload = useUploadCurrentJobs();
-  const clear = useClearCurrentJobs();
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-
-  const meta = data?.meta ?? null;
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    upload.mutate(
-      { data: { file } },
-      {
-        onSuccess: (res) => {
-          toast({
-            title: "Current Jobs list uploaded",
-            description: `${res.codeCount.toLocaleString()} codes, ${res.matchedCount.toLocaleString()} matched known projects${res.unmatched.length > 0 ? `, ${res.unmatched.length.toLocaleString()} unmatched` : ""}.`,
-          });
-          queryClient.invalidateQueries({ queryKey: getGetCurrentJobsQueryKey() });
-        },
-        onError: (err) => {
-          toast({
-            variant: "destructive",
-            title: "Could not upload Current Jobs list",
-            description: err?.data?.error || err?.message || "Unknown error",
-          });
-        },
-      },
-    );
-    e.target.value = "";
-  };
-
-  const handleClear = () => {
-    if (!confirm("Clear the Current Jobs list? The \"Current Jobs\" Job filter will then match nothing until a new list is uploaded.")) return;
-    clear.mutate(undefined, {
-      onSuccess: () => {
-        toast({ title: "Current Jobs list cleared" });
-        queryClient.invalidateQueries({ queryKey: getGetCurrentJobsQueryKey() });
-        refetch();
-      },
-      onError: (err) => {
-        toast({ variant: "destructive", title: "Clear failed", description: err?.message || "Unknown error" });
-      },
-    });
-  };
-
-  return (
-    <Card className="border-emerald-500/40 bg-emerald-500/5">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-          <ListChecks className="w-4 h-4" /> Current Jobs
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          Upload a plain list of project codes (.xlsx/.xls). This powers a "Current Jobs" option in the
-          Job filter that restricts every page to only these projects. Each upload replaces the previous list.
-        </p>
-        <div className="flex flex-wrap items-center gap-3">
-          <Button asChild className="h-9 gap-2" disabled={upload.isPending}>
-            <label className="cursor-pointer">
-              <ListChecks className="w-4 h-4" />
-              {upload.isPending ? "Uploading..." : "Upload Current Jobs list"}
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                className="hidden"
-                onChange={handleFileChange}
-                disabled={upload.isPending}
-              />
-            </label>
-          </Button>
-          {meta && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 gap-2 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
-              onClick={handleClear}
-              disabled={clear.isPending}
-            >
-              <Trash2 className="w-4 h-4" />
-              {clear.isPending ? "Clearing..." : "Clear list"}
-            </Button>
-          )}
-        </div>
-        {meta ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pt-1">
-            <div>
-              <span className="block text-muted-foreground text-xs uppercase mb-1">File</span>
-              <span className="font-bold truncate block" title={meta.fileName}>{meta.fileName}</span>
-            </div>
-            <div>
-              <span className="block text-muted-foreground text-xs uppercase mb-1">Uploaded</span>
-              <span className="font-bold tabular-nums">{formatDate(meta.uploadedAt)}</span>
-            </div>
-            <div>
-              <span className="block text-muted-foreground text-xs uppercase mb-1">Codes</span>
-              <span className="font-bold text-lg tabular-nums text-primary">{meta.codeCount.toLocaleString()}</span>
-            </div>
-            <div>
-              <span className="block text-muted-foreground text-xs uppercase mb-1">Matched Known Projects</span>
-              <span className="font-bold text-lg tabular-nums">{meta.matchedCount.toLocaleString()}</span>
-            </div>
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">No Current Jobs list uploaded yet.</p>
-        )}
-        {meta && meta.unmatched.length > 0 && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-            <span>
-              {meta.unmatched.length.toLocaleString()} code{meta.unmatched.length === 1 ? "" : "s"} did not match any
-              known project from the latest WIP or Order Review import (still stored and usable by the filter):{" "}
-              <span className="font-mono">{meta.unmatched.join(", ")}</span>
-            </span>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 function ReleaseBalanceContent() {
   // No importId param — defaults to the latest import on the server side,
   // which is what the comparison page needs (it is not import-selector-scoped).
@@ -794,14 +671,14 @@ function ReleaseBalanceContent() {
     query: { queryKey: getGetReleaseBalanceQueryKey() },
   });
   const { filters } = useTracker();
-  const { set: currentJobsSet } = useCurrentJobsSet();
+  const namedJobSet = useActiveJobSet();
   const activeJobSet = useMemo(() => {
-    if (filters.job === CURRENT_JOBS_FILTER_VALUE) return currentJobsSet;
+    if (isNamedJobSetFilter(filters.job)) return namedJobSet;
     if (filters.job === MULTI_JOBS_FILTER_VALUE)
       return filters.selectedJobs.length > 0 ? new Set(filters.selectedJobs) : null;
     if (filters.job) return new Set([filters.job]);
     return null;
-  }, [filters.job, filters.selectedJobs, currentJobsSet]);
+  }, [filters.job, filters.selectedJobs, namedJobSet]);
   const allRows = useMemo(() => data?.rows ?? [], [data]);
   const rows = useMemo(
     () => (activeJobSet ? allRows.filter((r) => activeJobSet.has(r.project ?? "")) : allRows),
@@ -1832,14 +1709,14 @@ function OrderReconciliationContent() {
     query: { queryKey: getGetOrderStatusQueryKey() },
   });
   const { filters } = useTracker();
-  const { set: currentJobsSet } = useCurrentJobsSet();
+  const namedJobSet2 = useActiveJobSet();
   const activeJobSet = useMemo(() => {
-    if (filters.job === CURRENT_JOBS_FILTER_VALUE) return currentJobsSet;
+    if (isNamedJobSetFilter(filters.job)) return namedJobSet2;
     if (filters.job === MULTI_JOBS_FILTER_VALUE)
       return filters.selectedJobs.length > 0 ? new Set(filters.selectedJobs) : null;
     if (filters.job) return new Set([filters.job]);
     return null;
-  }, [filters.job, filters.selectedJobs, currentJobsSet]);
+  }, [filters.job, filters.selectedJobs, namedJobSet2]);
 
   const recon = order?.reconciliation;
   const allReconRows = recon?.rows ?? [];
@@ -2620,6 +2497,255 @@ async function fetchErpRules(): Promise<ErpRulesResponse> {
   const r = await fetch("/api/reports/erp-rules", { credentials: "include" });
   if (!r.ok) throw new Error(`ERP rules fetch failed: ${r.status}`);
   return r.json() as Promise<ErpRulesResponse>;
+}
+
+// ---------------------------------------------------------------------------
+// Job Templates — named project sets for the global Jobs filter
+// ---------------------------------------------------------------------------
+interface JTTemplate { id: number; name: string; category: string; sortOrder: number; members: string[] }
+interface JTProjects { tlt: string[]; ntlt: string[] }
+
+function indexToAlphaLabel(i: number): string {
+  let label = "";
+  let n = i + 1;
+  while (n > 0) { n--; label = String.fromCharCode(65 + (n % 26)) + label; n = Math.floor(n / 26); }
+  return label;
+}
+
+function JobTemplatesContent() {
+  const [localCategory, setLocalCategory] = useState<"TLT" | "NTLT">("TLT");
+  const [dragState, setDragState] = useState<{ code: string; fromTemplateId: number | null } | null>(null);
+  const [dropTarget, setDropTarget] = useState<number | "pool" | null>(null);
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: allTemplates = [], isLoading: tLoading } = useQuery<JTTemplate[]>({
+    queryKey: ["job-templates"],
+    queryFn: () => fetch("/api/job-templates", { credentials: "include" }).then((r) => r.json()),
+    staleTime: 15_000,
+  });
+
+  const { data: projects } = useQuery<JTProjects>({
+    queryKey: ["job-templates-projects"],
+    queryFn: () => fetch("/api/job-templates/projects", { credentials: "include" }).then((r) => r.json()),
+    staleTime: 60_000,
+  });
+
+  const catTemplates = allTemplates.filter((t) => t.category === localCategory);
+  const allProjectsForCategory = localCategory === "TLT" ? (projects?.tlt ?? []) : (projects?.ntlt ?? []);
+  const assignedSet = new Set(catTemplates.flatMap((t) => t.members));
+  const available = allProjectsForCategory.filter((p) => !assignedSet.has(p));
+
+  async function saveMembers(templateId: number, members: string[]) {
+    setSaving(true);
+    try {
+      await fetch(`/api/job-templates/${templateId}/members`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ members }),
+      });
+      queryClient.invalidateQueries({ queryKey: ["job-templates"] });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createTemplate() {
+    setSaving(true);
+    try {
+      const r = await fetch("/api/job-templates", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: localCategory }),
+      });
+      const created: JTTemplate = await r.json();
+      queryClient.invalidateQueries({ queryKey: ["job-templates"] });
+      toast({ title: `${created.name} created` });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteTemplate(t: JTTemplate) {
+    if (!confirm(`Delete "${t.name}"? Its ${t.members.length} project(s) will return to the available pool.`)) return;
+    setSaving(true);
+    try {
+      await fetch(`/api/job-templates/${t.id}`, { method: "DELETE", credentials: "include" });
+      queryClient.invalidateQueries({ queryKey: ["job-templates"] });
+      toast({ title: `${t.name} deleted` });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function onDragStart(code: string, fromTemplateId: number | null) {
+    setDragState({ code, fromTemplateId });
+  }
+
+  function onDrop(targetId: number | "pool") {
+    if (!dragState) return;
+    const { code, fromTemplateId } = dragState;
+
+    if (targetId === "pool") {
+      if (fromTemplateId !== null) {
+        const src = catTemplates.find((t) => t.id === fromTemplateId);
+        if (src) saveMembers(fromTemplateId, src.members.filter((m) => m !== code));
+      }
+    } else {
+      const target = catTemplates.find((t) => t.id === targetId);
+      if (!target) return;
+      const newMembers = [...new Set([...target.members, code])].sort();
+      if (fromTemplateId !== null && fromTemplateId !== targetId) {
+        const src = catTemplates.find((t) => t.id === fromTemplateId);
+        if (src) saveMembers(fromTemplateId, src.members.filter((m) => m !== code));
+      }
+      saveMembers(targetId, newMembers);
+    }
+
+    setDragState(null);
+    setDropTarget(null);
+  }
+
+  const nextLabel = indexToAlphaLabel(catTemplates.length);
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-lg font-semibold">Job Templates</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Named project sets for the global Jobs filter. Drag projects from the available pool into a template,
+            or drag them back to unassign. Templates appear in the Jobs dropdown on every page.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Segmented
+            value={localCategory}
+            onChange={(v) => v && setLocalCategory(v as "TLT" | "NTLT")}
+            options={[{ value: "TLT", label: "TLT" }, { value: "NTLT", label: "NTLT" }]}
+          />
+          <Button size="sm" onClick={createTemplate} disabled={saving} className="gap-1.5 h-9">
+            <PlusCircle className="w-3.5 h-3.5" />
+            Add {localCategory} Job {nextLabel}
+          </Button>
+        </div>
+      </div>
+
+      {/* Two-panel drag-and-drop area */}
+      <div className="flex gap-4 overflow-x-auto pb-2 items-start min-h-[320px]">
+
+        {/* Available pool — left panel */}
+        <div
+          className={`shrink-0 w-52 rounded-lg border-2 transition-colors ${
+            dropTarget === "pool" ? "border-primary bg-primary/5" : "border-border bg-muted/20"
+          }`}
+          onDragOver={(e) => { e.preventDefault(); setDropTarget("pool"); }}
+          onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget(null); }}
+          onDrop={(e) => { e.preventDefault(); onDrop("pool"); }}
+        >
+          <div className="px-3 py-2.5 border-b">
+            <h3 className="text-sm font-semibold">Available Projects</h3>
+            <p className="text-xs text-muted-foreground">{available.length} unassigned</p>
+          </div>
+          <div className="p-2 space-y-1 max-h-[58vh] overflow-y-auto">
+            {tLoading ? (
+              <p className="text-xs text-muted-foreground text-center py-4">Loading…</p>
+            ) : available.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-6 leading-relaxed px-2">
+                {allProjectsForCategory.length === 0
+                  ? "No projects found in the latest WIP import."
+                  : "All projects have been assigned."}
+              </p>
+            ) : (
+              available.map((code) => (
+                <div
+                  key={code}
+                  draggable
+                  onDragStart={() => onDragStart(code, null)}
+                  onDragEnd={() => { setDragState(null); setDropTarget(null); }}
+                  className="px-2 py-1 rounded text-xs font-mono bg-background border cursor-grab hover:bg-accent select-none"
+                >
+                  {code}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Template columns */}
+        {catTemplates.length === 0 ? (
+          <div className="flex items-center justify-center border-2 border-dashed rounded-lg w-52 h-32 text-sm text-muted-foreground self-center text-center px-3">
+            Click Add to create a template
+          </div>
+        ) : (
+          catTemplates.map((template) => (
+            <div
+              key={template.id}
+              className={`shrink-0 w-52 rounded-lg border-2 transition-colors ${
+                dropTarget === template.id ? "border-primary bg-primary/5" : "border-border bg-background"
+              }`}
+              onDragOver={(e) => { e.preventDefault(); setDropTarget(template.id); }}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget(null); }}
+              onDrop={(e) => { e.preventDefault(); onDrop(template.id); }}
+            >
+              <div className="px-3 py-2.5 border-b flex items-center justify-between gap-1">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold truncate">{template.name}</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {template.members.length} project{template.members.length !== 1 ? "s" : ""}
+                  </p>
+                </div>
+                <button
+                  className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                  onClick={() => deleteTemplate(template)}
+                  title="Delete template"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="p-2 space-y-1 max-h-[58vh] overflow-y-auto">
+                {template.members.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-6">
+                    Drop projects here
+                  </p>
+                ) : (
+                  template.members.map((code) => (
+                    <div
+                      key={code}
+                      draggable
+                      onDragStart={() => onDragStart(code, template.id)}
+                      onDragEnd={() => { setDragState(null); setDropTarget(null); }}
+                      className="px-2 py-1 rounded text-xs font-mono bg-primary/10 border border-primary/20 cursor-grab hover:bg-primary/15 select-none flex items-center gap-1"
+                    >
+                      <span className="flex-1 truncate">{code}</span>
+                      <button
+                        className="text-muted-foreground hover:text-destructive shrink-0 leading-none text-base"
+                        onClick={(e) => { e.stopPropagation(); saveMembers(template.id, template.members.filter((m) => m !== code)); }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        title="Remove from template"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {dragState && (
+        <p className="text-xs text-muted-foreground">
+          Dragging <span className="font-mono font-medium">{dragState.code}</span> — drop it onto a template to assign, or onto "Available Projects" to unassign.
+        </p>
+      )}
+    </div>
+  );
 }
 
 function ErpRulesContent() {

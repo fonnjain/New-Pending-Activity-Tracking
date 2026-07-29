@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes, ChevronsUpDown } from "lucide-react";
-import { useTracker, dateRangeWindow, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
+import { useTracker, dateRangeWindow, useActiveJobSet, useJobTemplates, MULTI_JOBS_FILTER_VALUE, isTemplateFilter, extractTemplateId, templateFilterValue, isNamedJobSetFilter, type JobTemplate } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useGetImportRecords, useGetAuthStatus, getGetImportRecordsQueryKey, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
 import { LoginForm, ChangePasswordForm, LogoutButton } from "@/components/login-gate";
@@ -20,27 +20,27 @@ import {
   decodeContractorCategory,
 } from "@/lib/contractorFilter";
 
-// Job picker with checkbox multi-select. Always rendered for the TLT job
-// dimension — clicking "All Jobs" or "Current Jobs" sets those modes; clicking
-// individual project codes toggles them in/out of a multi-selection.
-// Clicking the project label (text) single-selects and closes; clicking the
-// checkbox adds/removes from multi-selection without closing the popover.
+// Job picker with checkbox multi-select. Renders "All Jobs" at the top,
+// then any named Job Templates (from the Job Templates admin page), then
+// individual project codes with multi-select checkboxes.
 function MultiJobPicker({
   jobs,
   filterJob,
   selectedJobs,
   onAllJobs,
-  onCurrentJobs,
+  onTemplate,
   onSingleJob,
   onSelectedJobsChange,
+  templates,
 }: {
   jobs: string[];
   filterJob: string | null;
   selectedJobs: string[];
   onAllJobs: () => void;
-  onCurrentJobs: () => void;
+  onTemplate: (id: number) => void;
   onSingleJob: (job: string) => void;
   onSelectedJobsChange: (jobs: string[]) => void;
+  templates: JobTemplate[];
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -60,20 +60,24 @@ function MultiJobPicker({
     setSearch("");
   };
 
-  const isCurrentJobs = filterJob === CURRENT_JOBS_FILTER_VALUE;
+  const isActiveTemplate = isTemplateFilter(filterJob);
+  const activeTemplateId = isActiveTemplate ? extractTemplateId(filterJob!) : null;
   const isMultiJobs = filterJob === MULTI_JOBS_FILTER_VALUE;
   // filterJob holds a direct project code when neither sentinel applies.
-  const isSingleJob = filterJob !== null && !isCurrentJobs && !isMultiJobs;
+  const isSingleJob = filterJob !== null && !isActiveTemplate && !isMultiJobs;
 
-  const label = isCurrentJobs
-    ? "Current Jobs"
-    : isSingleJob
+  const activeTemplateName = isActiveTemplate
+    ? (templates.find((t) => t.id === activeTemplateId)?.name ?? "Template")
+    : null;
+
+  const label = activeTemplateName
+    ?? (isSingleJob
       ? filterJob!
       : isMultiJobs && selectedJobs.length === 1
         ? selectedJobs[0]
         : isMultiJobs && selectedJobs.length > 1
           ? `${selectedJobs.length} Jobs`
-          : "All Jobs";
+          : "All Jobs");
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -97,12 +101,17 @@ function MultiJobPicker({
             >
               All Jobs
             </button>
-            <button
-              onClick={() => { onCurrentJobs(); setOpen(false); }}
-              className={`w-full text-left px-2 py-1.5 rounded text-sm hover:bg-accent ${isCurrentJobs ? "bg-accent font-medium" : ""}`}
-            >
-              Current Jobs
-            </button>
+            {/* Named templates from the Job Templates admin page */}
+            {templates.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => { onTemplate(t.id); setOpen(false); }}
+                className={`w-full text-left px-2 py-1.5 rounded text-sm hover:bg-accent ${activeTemplateId === t.id ? "bg-accent font-medium" : ""}`}
+              >
+                {t.name}
+                <span className="ml-1.5 text-xs text-muted-foreground">({t.members.length})</span>
+              </button>
+            ))}
           </div>
           <div className="border-t pt-2 space-y-1.5">
             <div className="flex items-center justify-between text-xs px-0.5">
@@ -555,14 +564,15 @@ function FilterBar() {
     [modeRecords]
   );
 
-  // "Current Jobs" / "Select Multiple Jobs" sentinels — must be declared
-  // before matchesJobFilter which references currentJobsSet.
-  const { set: currentJobsSet } = useCurrentJobsSet();
+  // Named-set sentinels (templates / legacy current-jobs) — must be declared
+  // before matchesJobFilter which references activeJobSet.
+  const activeJobSet = useActiveJobSet();
+  const templates = useJobTemplates();
 
   // Helper: does a record match the current job filter (handles sentinels).
   const matchesJobFilter = (rJob: string | null | undefined) => {
     if (!filters.job) return true;
-    if (filters.job === CURRENT_JOBS_FILTER_VALUE) return currentJobsSet.has(rJob ?? "");
+    if (isNamedJobSetFilter(filters.job)) return activeJobSet.has(rJob ?? "");
     if (filters.job === MULTI_JOBS_FILTER_VALUE) {
       return filters.selectedJobs.length === 0 || filters.selectedJobs.includes(rJob ?? "");
     }
@@ -579,7 +589,7 @@ function FilterBar() {
       : matchesJobFilter(r.job) &&
         (!filters.mfcBatch || (r.mfcBatch || "Z") === filters.mfcBatch) &&
         (!filters.structure || r.structure === filters.structure)),
-    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.selectedJobs, filters.mfcBatch, filters.structure, currentJobsSet]
+    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.selectedJobs, filters.mfcBatch, filters.structure, activeJobSet]
   );
   // isMultiJobs = job filter is in checkbox multi-select mode.
   const isMultiJobs = filters.job === MULTI_JOBS_FILTER_VALUE;
@@ -601,7 +611,7 @@ function FilterBar() {
       .filter(r => matchesJobFilter(r.job))
       .map(r => r.mfcBatch || "Z")
     )).sort(),
-    [modeRecords, filters.job, filters.selectedJobs, currentJobsSet]
+    [modeRecords, filters.job, filters.selectedJobs, activeJobSet]
   );
 
   const structures = useMemo(
@@ -610,7 +620,7 @@ function FilterBar() {
       .map(r => r.structure)
       .filter(Boolean)
     )).sort(),
-    [modeRecords, filters.job, filters.selectedJobs, filters.mfcBatch, currentJobsSet]
+    [modeRecords, filters.job, filters.selectedJobs, filters.mfcBatch, activeJobSet]
   );
 
   const marks = useMemo(
@@ -725,9 +735,10 @@ function FilterBar() {
                 filterJob={filters.job}
                 selectedJobs={filters.selectedJobs}
                 onAllJobs={() => setFilter("job", null)}
-                onCurrentJobs={() => setFilter("job", CURRENT_JOBS_FILTER_VALUE)}
+                onTemplate={(id) => setFilter("job", templateFilterValue(id))}
                 onSingleJob={(job) => setFilter("job", job)}
                 onSelectedJobsChange={setSelectedJobs}
+                templates={templates}
               />
             )}
           </div>
@@ -877,11 +888,11 @@ function FilterBar() {
           </div>
         </CollapsibleContent>
       </Collapsible>
-      {!isNtlt && filters.job === CURRENT_JOBS_FILTER_VALUE && currentJobsSet.size === 0 && (
+      {!isNtlt && isNamedJobSetFilter(filters.job) && activeJobSet.size === 0 && (
         <div className="bg-amber-500/10 border-t border-amber-500/25 text-amber-800 dark:text-amber-300 text-xs md:text-sm px-4 md:px-6 py-2 flex items-center gap-2">
           <Filter className="h-3.5 w-3.5 shrink-0" />
           <span>
-            No Current Jobs list has been uploaded yet (or it was cleared). Upload one on the Data tab, or switch the Job filter back to All.
+            This job template contains no projects yet — it matches nothing. Add projects on the Job Templates page, or switch the Job filter back to All.
           </span>
         </div>
       )}

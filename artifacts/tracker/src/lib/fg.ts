@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import {
   useTracker,
-  useCurrentJobsSet,
-  CURRENT_JOBS_FILTER_VALUE,
+  useActiveJobSet,
+  isNamedJobSetFilter,
   MULTI_JOBS_FILTER_VALUE,
 } from "@/lib/store";
 import {
@@ -49,13 +49,13 @@ export function useFgRows(): {
     return imp?.summary?.fgWipByStructure ?? {};
   }, [imports, selectedImportId]);
 
-  const { set: currentJobsSet } = useCurrentJobsSet();
+  const activeJobSet = useActiveJobSet();
 
   const rows = useMemo<FgComputedRow[]>(() => {
     const all = order?.rows ?? [];
     let filtered: typeof all;
-    if (filters.job === CURRENT_JOBS_FILTER_VALUE) {
-      filtered = all.filter((r) => currentJobsSet.has(r.project));
+    if (isNamedJobSetFilter(filters.job)) {
+      filtered = all.filter((r) => activeJobSet.has(r.project));
     } else if (filters.job === MULTI_JOBS_FILTER_VALUE) {
       const s = new Set(filters.selectedJobs);
       filtered = s.size > 0 ? all.filter((r) => s.has(r.project)) : all;
@@ -77,7 +77,7 @@ export function useFgRows(): {
         fgWipMt: typeof fgWipKg === "number" ? fgWipKg / 1000 : null,
       };
     });
-  }, [order, filters.job, filters.selectedJobs, currentJobsSet, fgWipByStructure]);
+  }, [order, filters.job, filters.selectedJobs, activeJobSet, fgWipByStructure]);
 
   return {
     available: order?.available ?? false,

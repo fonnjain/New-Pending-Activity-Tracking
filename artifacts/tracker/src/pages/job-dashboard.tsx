@@ -8,7 +8,7 @@ import {
   processPhasesForMode,
   type ProcessPhaseKey,
 } from "@workspace/domain";
-import { useTracker, useContractorCategoryMap, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE, MULTI_JOBS_FILTER_VALUE, dateRangeWindow } from "@/lib/store";
+import { useTracker, useContractorCategoryMap, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE, dateRangeWindow } from "@/lib/store";
 import {
   buildContractorGroups,
   matchesContractorSelection,
@@ -185,7 +185,7 @@ function JobDashboardContent() {
   // Clear drill-down when the global Order Type changes.
   useEffect(() => { setSelectedJob(null); }, [filters.category]);
 
-  const { set: currentJobsSet } = useCurrentJobsSet();
+  const activeJobSet = useActiveJobSet();
 
   // Pre-filter: apply global job/section + MFC selections.
   const preFiltered = useMemo(
@@ -194,8 +194,8 @@ function JobDashboardContent() {
         if (isNtlt) {
           if (filters.section && r.groupKey !== filters.section) return false;
         } else {
-          if (filters.job === CURRENT_JOBS_FILTER_VALUE) {
-            if (!currentJobsSet.has(r.job ?? "")) return false;
+          if (isNamedJobSetFilter(filters.job)) {
+            if (!activeJobSet.has(r.job ?? "")) return false;
           } else if (filters.job === MULTI_JOBS_FILTER_VALUE) {
             if (filters.selectedJobs.length > 0 && !filters.selectedJobs.includes(r.job ?? "")) return false;
           } else if (filters.job) {
@@ -205,7 +205,7 @@ function JobDashboardContent() {
         if (!isNtlt && filters.mfcBatch && mfcOf(r) !== filters.mfcBatch) return false;
         return true;
       }),
-    [records, isNtlt, filters.job, filters.selectedJobs, filters.section, filters.mfcBatch, currentJobsSet],
+    [records, isNtlt, filters.job, filters.selectedJobs, filters.section, filters.mfcBatch, activeJobSet],
   );
 
   // Date window from the global date-range preset/custom filter.

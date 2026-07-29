@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useRef } from "react";
-import { useTracker, useCurrentJobsSet, CURRENT_JOBS_FILTER_VALUE } from "@/lib/store";
+import { useTracker, useActiveJobSet, isNamedJobSetFilter } from "@/lib/store";
 import {
   useGetAuthStatus,
   useListInventoryManualE,
@@ -1316,12 +1316,12 @@ export default function InventoryView() {
   const [groupByMfc, setGroupByMfc] = useState(false);
 
   const jobFilter = filters.job;
-  const isCurrentJobs = jobFilter === CURRENT_JOBS_FILTER_VALUE;
-  const { set: currentJobsSet } = useCurrentJobsSet();
+  const isCurrentJobs = isNamedJobSetFilter(jobFilter);
+  const activeJobSet = useActiveJobSet();
 
   const applyJobFilter = (rows: InventoryStructureCard[]): InventoryStructureCard[] => {
     let out = rows;
-    if (isCurrentJobs) out = out.filter((r) => currentJobsSet.has(r.project));
+    if (isCurrentJobs) out = out.filter((r) => activeJobSet.has(r.project));
     else if (jobFilter) out = out.filter((r) => r.project === jobFilter);
     return out;
   };
@@ -1587,7 +1587,7 @@ export default function InventoryView() {
 
   const applyJobFilterManual = (entries: InventoryManualEntry[]): InventoryManualEntry[] => {
     let out = entries;
-    if (isCurrentJobs) out = out.filter((e) => currentJobsSet.has(e.projectCode));
+    if (isCurrentJobs) out = out.filter((e) => activeJobSet.has(e.projectCode));
     else if (jobFilter) out = out.filter((e) => e.projectCode === jobFilter);
     return out;
   };
@@ -1895,13 +1895,12 @@ export default function InventoryView() {
         </Card>
       )}
 
-      {isCurrentJobs && currentJobsSet.size === 0 && (
+      {isCurrentJobs && activeJobSet.size === 0 && (
         <Card className="border-amber-500/40">
           <CardContent className="py-4 flex items-center gap-2 text-sm">
             <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
             <span>
-              No Current Jobs list has been uploaded (or it&apos;s empty), so the Current Jobs
-              filter matches nothing. Upload a project-code list on the Data page.
+              This job template is empty — it matches no projects. Add projects to it on the Job Templates page.
             </span>
           </CardContent>
         </Card>

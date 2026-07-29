@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useListImports, useListContractorCategories, useGetCurrentJobs, type Record } from "@workspace/api-client-react";
 import { getActivityBundle, normalizeContractorName, filterRecords, parseAssignDateMs, dateToDayKey, type RecordFilters } from "@workspace/domain";
 
@@ -17,6 +18,31 @@ export const CURRENT_JOBS_FILTER_VALUE = "__CURRENT_JOBS__";
 // The actual selected codes live in `filters.selectedJobs` (string[]). Resolved
 // into `RecordFilters.jobIn` by resolveActiveFilters.
 export const MULTI_JOBS_FILTER_VALUE = "__MULTI_JOBS__";
+
+// Job Templates — named project sets managed via the Job Templates admin page.
+// Each template filter value embeds the template DB id so resolution is O(1).
+export const TEMPLATE_FILTER_PREFIX = "__TEMPLATE_";
+export function isTemplateFilter(v: string | null | undefined): v is string {
+  return !!v?.startsWith(TEMPLATE_FILTER_PREFIX);
+}
+export function templateFilterValue(id: number): string {
+  return `${TEMPLATE_FILTER_PREFIX}${id}__`;
+}
+export function extractTemplateId(v: string): number {
+  return parseInt(v.slice(TEMPLATE_FILTER_PREFIX.length).replace(/__$/, ""), 10);
+}
+/** True when the filter is any kind of named project set (old current-jobs or new template). */
+export function isNamedJobSetFilter(v: string | null | undefined): boolean {
+  return v === CURRENT_JOBS_FILTER_VALUE || isTemplateFilter(v);
+}
+
+export interface JobTemplate {
+  id: number;
+  name: string;
+  category: string;
+  sortOrder: number;
+  members: string[];
+}
 
 export interface Filters {
   category: string; // "TLT" | "NTLT" (Order type) — a MODE, never null
@@ -290,29 +316,62 @@ export function useCurrentJobsSet() {
   return { set, meta: data?.meta ?? null };
 }
 
+// All job templates from the server, used by the filter dropdown and the
+// active-job-set resolver.
+export function useJobTemplates(): JobTemplate[] {
+  const { data } = useQuery<JobTemplate[]>({
+    queryKey: ["job-templates"],
+    queryFn: () =>
+      fetch("/api/job-templates", { credentials: "include" }).then((r) =>
+        r.json(),
+      ),
+    staleTime: 30_000,
+  });
+  return data ?? [];
+}
+
+// Returns the project-code Set for the currently active filter, handling both
+// the legacy "Current Jobs" sentinel and the new named-template sentinels.
+// Use this everywhere pages need to resolve the active named set.
+export function useActiveJobSet(): ReadonlySet<string> {
+  const { filters } = useTracker();
+  const { set: currentJobsSet } = useCurrentJobsSet();
+  const templates = useJobTemplates();
+
+  return useMemo(() => {
+    if (filters.job === CURRENT_JOBS_FILTER_VALUE) return currentJobsSet;
+    if (isTemplateFilter(filters.job)) {
+      const id = extractTemplateId(filters.job);
+      const tpl = templates.find((t) => t.id === id);
+      return new Set<string>(tpl?.members ?? []);
+    }
+    return new Set<string>();
+  }, [filters.job, currentJobsSet, templates]);
+}
+
 // Resolve the active filters into the shared RecordFilters shape plus the
-// concrete date window (epoch ms, computed from LOCAL today). The server
-// summary endpoint receives this resolved window so both sides classify dates
-// identically regardless of server timezone. `currentJobsSet` resolves the
-// CURRENT_JOBS_FILTER_VALUE sentinel into a set-membership filter; omit it
-// (or pass null/undefined) when the sentinel can't be active for the caller.
+// concrete date window (epoch ms, computed from LOCAL today). `namedJobSet`
+// resolves both the legacy CURRENT_JOBS_FILTER_VALUE sentinel and the new
+// template sentinels into a set-membership filter; pass the result of
+// useActiveJobSet() when calling from a component, or null when the caller
+// knows named-set filters can't be active.
 export function resolveActiveFilters(
   filters: Filters,
-  currentJobsSet?: ReadonlySet<string> | null,
+  namedJobSet?: ReadonlySet<string> | null,
 ): {
   filters: RecordFilters;
   dateWindow: { start: number; end: number } | null;
 } {
   const win = dateRangeWindow(filters.dateRange);
-  const isCurrentJobs = filters.job === CURRENT_JOBS_FILTER_VALUE;
+  const isNamedSet = isNamedJobSetFilter(filters.job);
   const isMultiJobs = filters.job === MULTI_JOBS_FILTER_VALUE;
   return {
     filters: {
       category: filters.category,
       ntltSubtype: filters.ntltSubtype,
-      job: (isCurrentJobs || isMultiJobs) ? null : filters.job,
-      jobIn: isCurrentJobs
-        ? (currentJobsSet ?? new Set<string>())
+      job: (isNamedSet || isMultiJobs) ? null : filters.job,
+      jobIn: isNamedSet
+        ? (namedJobSet ?? new Set<string>())
         : isMultiJobs
           ? new Set(filters.selectedJobs)
           : null,
@@ -334,11 +393,11 @@ export function resolveActiveFilters(
 export function useFilteredRecords(records: Record[] | undefined) {
   const { filters } = useTracker();
   const categoryMap = useContractorCategoryMap();
-  const { set: currentJobsSet } = useCurrentJobsSet();
+  const activeJobSet = useActiveJobSet();
 
   return useMemo(() => {
     if (!records) return [];
-    const { filters: rf, dateWindow } = resolveActiveFilters(filters, currentJobsSet);
+    const { filters: rf, dateWindow } = resolveActiveFilters(filters, activeJobSet);
     return filterRecords(records, rf, { dateWindow, categoryMap });
-  }, [records, filters, categoryMap, currentJobsSet]);
+  }, [records, filters, categoryMap, activeJobSet]);
 }

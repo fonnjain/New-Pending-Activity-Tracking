@@ -68,6 +68,7 @@ function ProductionTracker() {
         <Route path="/users" component={DataView} />
         <Route path="/order-review-generated" component={DataView} />
         <Route path="/erp-rules" component={DataView} />
+        <Route path="/job-templates" component={DataView} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
@@ -95,6 +96,7 @@ const LEGACY_TRACKER_PATHS = [
   "/order-review-generated",
   "/erp-rules",
   "/users",
+  "/job-templates",
 ];
 
 function Router() {

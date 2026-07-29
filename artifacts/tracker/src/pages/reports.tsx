@@ -57,9 +57,9 @@ import {
   useContractorCategoryMap,
   contractorCategoryFor,
   dateRangeWindow,
-  CURRENT_JOBS_FILTER_VALUE,
+  isNamedJobSetFilter,
   MULTI_JOBS_FILTER_VALUE,
-  useCurrentJobsSet,
+  useActiveJobSet,
 } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1139,7 +1139,7 @@ export function ContractorPerformanceReport() {
     query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) },
   });
   const categoryMap = useContractorCategoryMap();
-  const { set: currentJobsSet } = useCurrentJobsSet();
+  const activeJobSet = useActiveJobSet();
   const [contractorFilter, setContractorFilter] = useState<string | null>(null);
   const [stageFilter, setStageFilter] = useState<Stage | null>(null);
 
@@ -1168,8 +1168,8 @@ export function ContractorPerformanceReport() {
       // real project and clutters a per-project contractor report.
       if (e.project === "(Unassigned)") return false;
       if (filters.job) {
-        if (filters.job === CURRENT_JOBS_FILTER_VALUE) {
-          if (!currentJobsSet.has(e.project)) return false;
+        if (isNamedJobSetFilter(filters.job)) {
+          if (!activeJobSet.has(e.project)) return false;
         } else if (filters.job === MULTI_JOBS_FILTER_VALUE) {
           if (!filters.selectedJobs?.includes(e.project)) return false;
         } else if (e.project !== filters.job) {
@@ -1205,7 +1205,7 @@ export function ContractorPerformanceReport() {
 
       return true;
     });
-  }, [data, filters.job, filters.selectedJobs, filters.contractor, filters.contractorCategory, filters.outVendorType, filters.activity, filters.dateRange, filters.search, categoryMap, currentJobsSet]);
+  }, [data, filters.job, filters.selectedJobs, filters.contractor, filters.contractorCategory, filters.outVendorType, filters.activity, filters.dateRange, filters.search, categoryMap, activeJobSet]);
 
   // Live-balance completion (additive): per contractor, how much balance
   // weight is still pending in the Fabrication (C..Q) / Galvanizing (GB)
@@ -2095,18 +2095,17 @@ const FAB_COMP_COLUMNS: XlsxColumn[] = [
 function FabCompletionReport() {
   const { data, isLoading } = useGetFabricationProjectCompletionTlt();
   const { filters } = useTracker();
-  const { set: currentJobsSet } = useCurrentJobsSet();
+  const activeJobSet = useActiveJobSet();
 
-  // Rows after the global job filter (All / single project / Current Jobs).
+  // Rows after the global job filter (All / single project / named template set).
   const jobFilteredRows: FabricationProjectCompletionRow[] = useMemo(() => {
     if (!data?.rows) return [];
-    if (filters.job === CURRENT_JOBS_FILTER_VALUE) {
-      if (!currentJobsSet) return data.rows;
-      return data.rows.filter((r) => currentJobsSet.has(r.project));
+    if (isNamedJobSetFilter(filters.job)) {
+      return data.rows.filter((r) => activeJobSet.has(r.project));
     }
     if (filters.job) return data.rows.filter((r) => r.project === filters.job);
     return data.rows;
-  }, [data, filters.job, currentJobsSet]);
+  }, [data, filters.job, activeJobSet]);
 
   // Distinct projects within the current job scope — drives the checkbox list.
   const availableProjects = useMemo(
