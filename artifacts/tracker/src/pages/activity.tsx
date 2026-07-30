@@ -4,6 +4,9 @@ import {
   getGetImportRecordsQueryKey,
   useGetImportProductionMovement,
   getGetImportProductionMovementQueryKey,
+  useGetReleaseBalance,
+  getGetReleaseBalanceQueryKey,
+  useGetFabricationProjectCompletionTlt,
 } from "@workspace/api-client-react";
 import { NetBalanceMovementPanel } from "@/components/NetBalanceMovementPanel";
 import { EmptyState, getAgeingColor } from "./overview";
@@ -651,6 +654,26 @@ function ActivityContent() {
   });
   const records = useFilteredRecords(allRecords);
 
+  // Release Balance Computed — scoped to the current import so it moves with
+  // the import selector rather than always showing the latest import's figure.
+  const relBalParams = selectedImportId ? { importId: selectedImportId } : undefined;
+  const { data: relBalData } = useGetReleaseBalance(relBalParams, {
+    query: {
+      queryKey: getGetReleaseBalanceQueryKey(relBalParams),
+      enabled: !!selectedImportId,
+    },
+  });
+  const releaseBalanceComputedMt = relBalData?.totals?.releaseBalanceComputedMt ?? null;
+
+  // Assignment Balance — sum of assignmentBalanceCalcMt across all Fab Completion rows.
+  const { data: fabData } = useGetFabricationProjectCompletionTlt();
+  const assignmentBalanceMt = useMemo(
+    () => fabData?.rows != null
+      ? fabData.rows.reduce((s, r) => s + (r.assignmentBalanceCalcMt ?? 0), 0)
+      : null,
+    [fabData],
+  );
+
   // Production movement: consecutive-import cutting output + net balance delta.
   const { data: productionMovement, isLoading: isMovementLoading } =
     useGetImportProductionMovement(selectedImportId as number, {
@@ -831,11 +854,19 @@ function ActivityContent() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiTile title="Marks" value={isLoading ? "..." : totalMarks.toLocaleString()} />
         <KpiTile title="Balance Weight" value={isLoading ? "..." : formatWeight(totalWt)} />
         <KpiTile title={`Avg Age (${agedCount.toLocaleString()} ageable)`} value={isLoading ? "..." : avgAge !== null ? `${avgAge}d` : "-"} />
         <KpiTile title="Activities" value={isLoading ? "..." : sortedActivities.length.toLocaleString()} />
+        <KpiTile
+          title="Release Bal. Computed"
+          value={releaseBalanceComputedMt != null ? `${releaseBalanceComputedMt.toFixed(3)} t` : "..."}
+        />
+        <KpiTile
+          title="Assignment Balance"
+          value={assignmentBalanceMt != null ? `${assignmentBalanceMt.toFixed(3)} t` : "..."}
+        />
       </div>
 
       {notAgedCount > 0 && (
