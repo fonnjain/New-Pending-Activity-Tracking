@@ -216,7 +216,7 @@ const HOLE_OP_LABELS: Record<string, string> = {
 };
 const HOLE_OP_ORDER = ["PUNCHING", "DRILLING", "NOT_SET"] as const;
 
-const COL_COUNT = REPORT_COLUMNS.length;
+const COL_COUNT = EXPORT_COLUMNS.length; // 10 — drives colSpan for the on-screen table
 const TABLE_CAP = 500;
 
 function num(v: number | null | undefined): string {
@@ -499,62 +499,12 @@ function ReportBuilder() {
       <TableCell className="text-right tabular-nums">{num(r.balanceQty)}</TableCell>
       <TableCell className="text-right tabular-nums">{formatWeight(r.balanceWt)}</TableCell>
       <TableCell>{r.contractor ?? "Unassigned"}</TableCell>
+      <TableCell className="text-xs text-muted-foreground tabular-nums">
+        {r.lastProductionDate ?? "-"}
+      </TableCell>
       <TableCell className={`text-right font-bold ${getAgeingColor(r.ageingDays)}`}>
         {ageingCell(r)}
       </TableCell>
-      <TableCell className="text-right tabular-nums text-muted-foreground">
-        {r.cumulativeTarget !== null ? `${r.cumulativeTarget}d` : "-"}
-      </TableCell>
-      <TableCell className={`text-right tabular-nums font-bold ${lifecycleTextColor(r.lifecycleStatusRaw)}`}>
-        {r.overrun !== null && r.overrun > 0 ? `+${r.overrun}d` : r.overrun !== null ? `${r.overrun}d` : "-"}
-      </TableCell>
-      <TableCell className="text-right tabular-nums text-muted-foreground">
-        {r.consumedPct !== null ? `${r.consumedPct}%` : "-"}
-      </TableCell>
-      <TableCell className="text-right tabular-nums text-muted-foreground">
-        {r.daysToTarget !== null ? `${r.daysToTarget}d` : "-"}
-      </TableCell>
-      <TableCell className={`text-xs font-semibold ${lifecycleTextColor(r.lifecycleStatusRaw)}`}>
-        {r.lifecycleStatus}
-      </TableCell>
-      <TableCell className="text-xs">
-        {r.stalled ? (
-          <span className="font-semibold text-ageing-red">Stalled</span>
-        ) : (
-          <span className="text-muted-foreground">-</span>
-        )}
-      </TableCell>
-      <TableCell className="text-xs font-semibold">
-        {r.velocityStatusRaw ? (
-          <span className={velocityStatusColor(r.velocityStatusRaw)}>
-            {r.velocityStatusLabel}
-          </span>
-        ) : (
-          <span className="text-muted-foreground">-</span>
-        )}
-      </TableCell>
-      <TableCell className="text-right tabular-nums text-muted-foreground">
-        {fmtDays(r.daysPerStage)}
-      </TableCell>
-      <TableCell className="text-right tabular-nums text-muted-foreground">
-        {fmtDays(r.etaDays)}
-      </TableCell>
-      <TableCell className="text-right tabular-nums text-muted-foreground">
-        {r.etaGap !== null && r.etaGap !== undefined
-          ? `${r.etaGap > 0 ? "+" : ""}${fmtDays(r.etaGap)}`
-          : "-"}
-      </TableCell>
-      <TableCell className="text-xs text-muted-foreground">
-        {r.trendRaw ? (
-          <span>
-            {trendArrow(r.trendRaw)} {r.trendLabel}
-          </span>
-        ) : (
-          "-"
-        )}
-      </TableCell>
-      <TableCell className="text-xs text-muted-foreground">{r.sectionType ?? "-"}</TableCell>
-      <TableCell className="text-xs text-muted-foreground">{r.holeOperationLabel}</TableCell>
     </TableRow>
   );
 
@@ -568,20 +518,8 @@ function ReportBuilder() {
       <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Balance Qty</TableCell>
       <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Balance Wt</TableCell>
       <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Contractor</TableCell>
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Last Op Date</TableCell>
       <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Ageing</TableCell>
-      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Target</TableCell>
-      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Overrun</TableCell>
-      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Consumed</TableCell>
-      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">To Target</TableCell>
-      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Status</TableCell>
-      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Stalled</TableCell>
-      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Velocity</TableCell>
-      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Days/Stage</TableCell>
-      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">ETA</TableCell>
-      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">ETA Gap</TableCell>
-      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Trend</TableCell>
-      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Section Type</TableCell>
-      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Hole Op.</TableCell>
     </TableRow>
   );
 
@@ -732,22 +670,10 @@ function ReportBuilder() {
                       <TableCell className="text-right tabular-nums">{num(s.qty)}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatWeight(s.wt)}</TableCell>
                       <TableCell></TableCell>
+                      <TableCell></TableCell>
                       <TableCell className={`text-right tabular-nums ${getAgeingColor(s.avgAge)}`}>
                         {s.avgAge !== null ? `${s.avgAge}d` : "-"}
                       </TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
                     </TableRow>
                   ))}
                 </>
