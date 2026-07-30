@@ -5,6 +5,7 @@ import {
   compareActivity,
   sortActivities,
   processPhase,
+  classifyWipCase,
   PROCESS_PHASES,
   processPhasesForMode,
   type ProcessPhaseKey,
@@ -267,18 +268,28 @@ function JobDashboardContent() {
       const byProject = Array.from(projGroups.entries()).map(([job, recs]) => {
         const phases = emptyPhases();
         for (const r of recs) {
-          const key = processPhase(r.activity);
-          // Initial Cutting marks are already counted as Release Balance —
-          // exclude them from the Cutting phase bucket via isActiveCutting.
-          if (key && (key !== "cutting" || isActiveCutting(r))) {
-            phases[key].marks += 1;
-            phases[key].weight += r.balanceWt;
-          } else if (!r.activity) {
-            // Blank activity = "FG Pending For Dispatch" → dispatch bucket.
-            // Populates phases.dispatch.weight so allPhasesWt in the
-            // reconciliation covers the same population as totalWt (which
-            // includes FG record rows from record_pool). The UI FG column
-            // still reads fgWipForJob() from parseSummary — unchanged.
+          // Use classifyWipCase to apply the Type guard:
+          //   CUTTING        → Cutting bucket (any activity, Type="Job Card Not Started")
+          //   IN_PRODUCTION  → quality/galvanising by activity (Type="Job Card WIP")
+          //   FINISHED_GOODS → dispatch bucket (regardless of activity code)
+          //   NOT_RELEASED   → skip (counted as Release Balance, not here)
+          const wipCase = classifyWipCase(r);
+          if (wipCase === "CUTTING") {
+            phases.cutting.marks += 1;
+            phases.cutting.weight += r.balanceWt;
+          } else if (wipCase === "IN_PRODUCTION") {
+            const key = processPhase(r.activity);
+            if (key === "quality" || key === "galvanising") {
+              phases[key].marks += 1;
+              phases[key].weight += r.balanceWt;
+            }
+            // Unknown activity code: safely dropped (no silent miscounting).
+          } else if (wipCase === "FINISHED_GOODS") {
+            // FG Pending For Dispatch — covers TLT + NTLT regardless of
+            // whether r.activity is blank or holds a scheduled activity code.
+            // Populates phases.dispatch so allPhasesWt reconciliation matches
+            // totalWt; the UI FG column still reads fgWipForJob() from
+            // parseSummary.
             phases.dispatch.marks += 1;
             phases.dispatch.weight += r.balanceWt;
           }
@@ -899,11 +910,19 @@ function JobDetail({
         const aged = recs.filter((r) => r.ageingDays !== null);
         const phases = emptyPhases();
         for (const r of recs) {
-          const key = processPhase(r.activity);
-          // Initial Cutting marks excluded from the Cutting phase — they are Release Balance.
-          if (key && (key !== "cutting" || isActiveCutting(r))) {
-            phases[key].marks += 1;
-            phases[key].weight += r.balanceWt;
+          const wipCase = classifyWipCase(r);
+          if (wipCase === "CUTTING") {
+            phases.cutting.marks += 1;
+            phases.cutting.weight += r.balanceWt;
+          } else if (wipCase === "IN_PRODUCTION") {
+            const key = processPhase(r.activity);
+            if (key === "quality" || key === "galvanising") {
+              phases[key].marks += 1;
+              phases[key].weight += r.balanceWt;
+            }
+          } else if (wipCase === "FINISHED_GOODS") {
+            phases.dispatch.marks += 1;
+            phases.dispatch.weight += r.balanceWt;
           }
         }
         return {
@@ -950,10 +969,19 @@ function JobDetail({
         const aged = recs.filter((r) => r.ageingDays !== null);
         const phases = emptyPhases();
         for (const r of recs) {
-          const key = processPhase(r.activity);
-          if (key && (key !== "cutting" || isActiveCutting(r))) {
-            phases[key].marks += 1;
-            phases[key].weight += r.balanceWt;
+          const wipCase = classifyWipCase(r);
+          if (wipCase === "CUTTING") {
+            phases.cutting.marks += 1;
+            phases.cutting.weight += r.balanceWt;
+          } else if (wipCase === "IN_PRODUCTION") {
+            const key = processPhase(r.activity);
+            if (key === "quality" || key === "galvanising") {
+              phases[key].marks += 1;
+              phases[key].weight += r.balanceWt;
+            }
+          } else if (wipCase === "FINISHED_GOODS") {
+            phases.dispatch.marks += 1;
+            phases.dispatch.weight += r.balanceWt;
           }
         }
         return {

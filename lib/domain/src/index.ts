@@ -159,11 +159,21 @@ export type ProcessPhase = {
 };
 
 export const PROCESS_PHASES: ProcessPhase[] = [
-  { key: "cutting", label: "Cutting", activities: [PROCESS_SEQUENCE[0]] },
+  {
+    key: "cutting",
+    label: "Cutting",
+    // TLT: C only.  NTLT: NTF/NTFSW/NTFW are "Job Card Not Started" equivalents —
+    // pre-galvanising not-started activities that belong here, NOT in Quality Check.
+    // Phase classification MUST be driven by classifyWipCase() so the Type guard
+    // (Type="Job Card Not Started") is always applied, not just activity code alone.
+    activities: [PROCESS_SEQUENCE[0], ...NTLT_FAB_CODES],
+  },
   {
     key: "quality",
     label: "Quality Check",
-    activities: [...PROCESS_SEQUENCE.slice(1, GALV_START_INDEX), ...NTLT_FAB_CODES],
+    // Type guard required: only Type="Job Card WIP" records count here.
+    // NTF/NTFSW/NTFW removed — those are NTLT not-started activities (→ Cutting).
+    activities: PROCESS_SEQUENCE.slice(1, GALV_START_INDEX),
   },
   {
     key: "galvanising",
@@ -2086,21 +2096,30 @@ export type WipCase =
   | "FINISHED_GOODS"
   | "UNCLASSIFIED";
 
+// Activity codes that represent "Job Card Not Started" work, used in the legacy
+// and transitional fallback paths of classifyWipCase (when jobCardType is absent).
+// C = TLT; NTF/NTFSW/NTFW = NTLT not-started codes (computed from SEQUENCES so
+// they can never drift); BL = legacy NTLT Bending/Lapping (not in SEQUENCES).
+const JCNS_ACTIVITY_CODES = new Set<string>([
+  "C",
+  ...NTLT_FAB_CODES.map((c) => c.toUpperCase()),
+  "BL",
+]);
+
 /**
  * Classify a mark into one of the four mutually exclusive WIP cases.
  *
- * When `jobCardType` AND `jobCardStatus` are both stored (new-format files
- * ≥ Jul 2026 that include Col A) the classification uses them directly — no
- * activity-based proxies needed.  This makes Release / Assignment / Cutting
- * correct for NTLT as well as TLT (NTLT not-started work sits at activities
- * like BL / NTF / NTFSW / G / TS, not C, so the old activity=C proxy
- * returned ZERO cutting for NTLT).
- *
- * Falls back through two progressively weaker proxies for legacy rows:
- *   - jobCardStatus present but no jobCardType: activity=C stands in for JCNS.
- *     Correct for TLT (T1 guarantees JCNS is always activity C); harmless for
- *     NTLT because old-format NTLT files pre-date the Status column.
- *   - Neither stored (oldest files): isInitialCutting + blank-activity proxy.
+ * Priority:
+ *   1. jobCardType stored (new-format ≥ Jul-2026 files that include Col A) —
+ *      authoritative.  jobCardStatus is used when present; isInitialCutting
+ *      is the fallback when jobCardStatus is absent (covers the case where only
+ *      Col A but not Col G is returned by the API).  Makes Cutting correct for
+ *      NTLT: NTLT not-started work sits at activities like NTF/NTFSW/NTFW/G/TS,
+ *      not C, so the old activity=C proxy returned ZERO cutting for NTLT.
+ *   2. jobCardStatus stored but no jobCardType (transitional rows) — use
+ *      JCNS_ACTIVITY_CODES (C + NTF/NTFSW/NTFW) as proxy for JCNS; covers both
+ *      TLT (T1 guarantees JCNS = activity C) and NTLT not-started codes.
+ *   3. Neither stored (oldest files) — isInitialCutting + JCNS_ACTIVITY_CODES proxy.
  */
 export function classifyWipCase(r: {
   activity?: string | null;
@@ -2110,32 +2129,34 @@ export function classifyWipCase(r: {
 }): WipCase {
   const act = (r.activity ?? "").trim().toUpperCase();
 
-  if (r.jobCardType != null && r.jobCardStatus != null) {
-    // Both Type (Col A) and Status (Col G) are stored — authoritative path.
+  if (r.jobCardType != null) {
+    // Col A (Type) stored — authoritative discriminator.
+    // For "Job Card Not Started": use Col G when present, else isInitialCutting proxy.
     const tp = r.jobCardType.trim().toUpperCase();
-    const st = r.jobCardStatus.trim().toUpperCase();
-    if (tp === "JOB CARD NOT STARTED" && st === "INITIAL")    return "NOT_RELEASED";
-    if (tp === "JOB CARD NOT STARTED" && st === "AUTHORIZED") return "CUTTING";
-    if (tp === "JOB CARD WIP")                                return "IN_PRODUCTION";
-    if (tp === "FG PENDING FOR DISPATCH")                     return "FINISHED_GOODS";
+    if (tp === "JOB CARD WIP")           return "IN_PRODUCTION";
+    if (tp === "FG PENDING FOR DISPATCH") return "FINISHED_GOODS";
+    if (tp === "JOB CARD NOT STARTED") {
+      const isInitial = r.jobCardStatus != null
+        ? r.jobCardStatus.trim().toUpperCase() === "INITIAL"
+        : (r.isInitialCutting ?? false);
+      return isInitial ? "NOT_RELEASED" : "CUTTING";
+    }
     return "UNCLASSIFIED";
   }
 
   if (r.jobCardStatus != null) {
-    // Status stored but Type not (transitional rows). Use activity=C as proxy
-    // for "Job Card Not Started" — exact for TLT (T1), harmless for legacy NTLT.
+    // Status stored but Type not (transitional rows). Use JCNS_ACTIVITY_CODES
+    // as JCNS proxy — covers C (TLT) and NTF/NTFSW/NTFW (NTLT not-started).
     const st = r.jobCardStatus.trim().toUpperCase();
-    if (act === "C" && st === "INITIAL")    return "NOT_RELEASED";
-    if (act === "C" && st === "AUTHORIZED") return "CUTTING";
-    if (act !== "" && act !== "C")          return "IN_PRODUCTION";
-    if (act === "")                         return "FINISHED_GOODS";
-    return "UNCLASSIFIED";
+    if (JCNS_ACTIVITY_CODES.has(act) && st === "INITIAL")    return "NOT_RELEASED";
+    if (JCNS_ACTIVITY_CODES.has(act) && st === "AUTHORIZED") return "CUTTING";
+    if (act !== "")                                           return "IN_PRODUCTION";
+    return "FINISHED_GOODS";
   }
 
   // Legacy fallback (neither jobCardType nor jobCardStatus stored).
-  // Structural facts verified on WIP 21-Jul: "Initial" only occurs with
-  // activity=C; "FG Pending" always has blank activity.
-  if (act === "C") return r.isInitialCutting ? "NOT_RELEASED" : "CUTTING";
+  // NTF/NTFSW/NTFW treated same as C — all are JCNS proxies.
+  if (JCNS_ACTIVITY_CODES.has(act)) return r.isInitialCutting ? "NOT_RELEASED" : "CUTTING";
   if (!act) return "FINISHED_GOODS";
   return "IN_PRODUCTION";
 }

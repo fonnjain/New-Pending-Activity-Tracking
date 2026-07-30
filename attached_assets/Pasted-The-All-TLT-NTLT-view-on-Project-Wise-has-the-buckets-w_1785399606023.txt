@@ -1,0 +1,56 @@
+The All (TLT+NTLT) view on Project Wise has the buckets wrong. The Total is correct
+(17,196.608 MT / 58,630 marks, matching the file) but the columns beneath it sum to
+16,596.785 — they do not add up to their own total.
+
+Correct buckets for the 30-Jul import, All order types, measured from WIP_30-07-2026.xls:
+
+  Release       2,112.271 MT    9,806 marks
+  Cutting       6,517.034 MT   14,582 marks
+  Quality Check 1,979.811 MT   15,237 marks
+  Galvanising   3,707.449 MT   10,342 marks
+  FG            2,880.044 MT    8,663 marks
+  SUM          17,196.608 MT   58,630 marks   (zero unclassified)
+
+What the screen shows, and the error:
+
+  Cutting       2,519.232   should be 6,517.034   TLT-only, missing all NTLT
+  Quality Check 5,743.437   should be 1,979.811   inflated by 3,763.626
+  Galvanising   3,941.125   should be 3,707.449   inflated by 233.676
+  FG            2,280.720   should be 2,880.044   TLT-only, missing 599.324
+
+CAUSE: NTF, NTFSW and NTFW were added to the Quality Check activity set — the header now
+reads "(HG, RFI, NH, B, HAB, W, Q, TS, NTF, NTFSW, NTFW)". Those three are NTLT NOT-STARTED
+activities. They belong in Cutting.
+
+Because Quality Check keys on activity alone with no Type guard, adding them pulls NTLT
+not-started work into Quality Check. The screen's 5,743.437 matches "activity-only with
+those three codes added" exactly, which confirms the mechanism.
+
+PLEASE FIX AS FOLLOWS:
+
+1. REMOVE NTF, NTFSW and NTFW from the Quality Check activity set. Restore it to
+   {HG, RFI, NH, B, HAB, W, Q, TS}.
+
+2. ADD the Type guard that has always been missing. Quality Check and Galvanising must both
+   require Type = "Job Card WIP":
+
+     Quality Check = Type "Job Card WIP" AND activity in {HG,RFI,NH,B,HAB,W,Q,TS}
+     Galvanising   = Type "Job Card WIP" AND activity in {G,GB,Y}
+
+   Without this guard, NTLT not-started rows at G and TS will keep leaking into Galvanising
+   and Quality Check even after the three codes are removed. That accounts for the
+   remaining 233.676 MT of Galvanising inflation.
+
+3. CONFIRM Cutting is Type = "Job Card Not Started" AND Status = "Authorized" with no order
+   nature filter. It is currently returning the TLT-only figure in the All view, which means
+   either the agreed definition did not land here or something is filtering it.
+
+4. CONFIRM FG covers both natures. It is showing 2,280.720 (TLT) where All should be
+   2,880.044.
+
+After the fix, the five columns must SUM to the Total column. They do not today, and that
+is the check to run — the Total is already correct, so any mismatch is in the buckets.
+
+Verify under all three Order Type settings, not just TLT. The TLT figures are unchanged by
+this fix (Release 2,112.271 / Cutting 2,519.232 / QC 1,867.583 / Galv 1,933.288 / FG
+2,280.720 = 10,713.093).

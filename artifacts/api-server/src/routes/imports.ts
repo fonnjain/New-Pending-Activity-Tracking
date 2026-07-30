@@ -356,6 +356,13 @@ function serializeRecord(
     // Job Card Status="Initial". These marks must NOT contribute to any Cutting
     // balance figure — they are already counted as Release Balance.
     isInitialCutting: r.isInitialCutting,
+    // Type (Col A) — "Job Card Not Started" | "Job Card WIP" |
+    // "FG Pending For Dispatch" | null (old-format files).  Required by
+    // classifyWipCase() on the frontend to apply the correct Type guard for the
+    // Quality Check and Galvanising phase buckets, and to correctly attribute
+    // NTLT "Job Card Not Started" records at G/TS/NTF/NTFSW/NTFW to Cutting
+    // rather than Galvanising or Quality Check.
+    jobCardType: r.jobCardType ?? null,
   };
 }
 

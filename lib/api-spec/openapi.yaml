@@ -2737,6 +2737,15 @@ components:
         fg:
           type: ["string", "null"]
           description: Finished Goods placeholder. Blank (null) everywhere for now — not in any process sequence/bundle and not in the row hash. Reserved for future use.
+        jobCardType:
+          type: ["string", "null"]
+          description: >
+            Type (Col A) from the WIP file — "Job Card Not Started" | "Job Card WIP" |
+            "FG Pending For Dispatch". Null for old-format files that pre-date the Type
+            column. Required by classifyWipCase() for the authoritative phase-bucket
+            classification: Quality Check and Galvanising must only count
+            Type="Job Card WIP" records; Cutting counts Type="Job Card Not Started" +
+            Authorized regardless of activity code (covers NTLT NTF/NTFSW/NTFW/G/TS).
         isInitialCutting:
           type: boolean
           description: >

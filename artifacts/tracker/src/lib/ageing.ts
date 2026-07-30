@@ -31,7 +31,10 @@ export function ageingBucket(days: number): AgeingBucket {
 //   NTF   = NTLT Non-TLT Fabrication
 //   NTFSW = NTLT Non-TLT Fabrication with Stiffener Welding
 //   BL    = NTLT Bending/Lapping
-export const PRE_PRODUCTION_ACTIVITIES = new Set(["C", "NTF", "NTFSW", "BL"]);
+// NTFW (Non-TLT Fabrication with Welding) added alongside NTF and NTFSW —
+// all three are NTLT not-started fabrication codes from SEQUENCES.NTLT_RSJ
+// that precede TS and count as pre-production (ages from Assign Date).
+export const PRE_PRODUCTION_ACTIVITIES = new Set(["C", "NTF", "NTFSW", "NTFW", "BL"]);
 
 export function isPreProduction(activity: string | null | undefined): boolean {
   return PRE_PRODUCTION_ACTIVITIES.has((activity ?? "").trim().toUpperCase());
