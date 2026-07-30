@@ -129,7 +129,7 @@ export const PROCESS_STEP_LABELS: Record<ProcessStep, string> = {
 //   Ready for Dispatch = Finished Goods (FG) field, not an activity code
 // TS (Tee Stock) is the last fabrication step and belongs to Quality Check, so
 // the galvanising phase starts at G.
-export type ProcessPhaseKey = "cutting" | "quality" | "galvanising" | "dispatch";
+export type ProcessPhaseKey = "awaitingAssignment" | "cutting" | "quality" | "galvanising" | "dispatch";
 
 const GALV_START_INDEX = PROCESS_SEQUENCE.indexOf("G");
 const DISPATCH_INDEX = PROCESS_SEQUENCE.length - 1;
@@ -159,6 +159,15 @@ export type ProcessPhase = {
 };
 
 export const PROCESS_PHASES: ProcessPhase[] = [
+  {
+    key: "awaitingAssignment",
+    label: "Awaiting Assignment",
+    // JCNS + Authorized + blank contractor — peer bucket to Cutting.
+    // Not activity-based; driven entirely by classifyWipCase() returning
+    // "AWAITING_ASSIGNMENT". No activity codes appear here.
+    activities: [],
+    subLabel: "No contractor",
+  },
   {
     key: "cutting",
     label: "Cutting",

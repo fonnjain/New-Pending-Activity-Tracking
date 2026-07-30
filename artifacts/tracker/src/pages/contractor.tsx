@@ -2,7 +2,7 @@ import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCat
 import { useGetImportRecords, getGetImportRecordsQueryKey, useGetImportContractorMovement, getGetImportContractorMovementQueryKey } from "@workspace/api-client-react";
 import { ContractorNetMovementPanel } from "@/components/ContractorNetMovementPanel";
 import { EmptyState, getAgeingColor } from "./overview";
-import { ageingCell, isActiveCutting, isCutting } from "@/lib/ageing";
+import { ageingCell, isActiveCutting, isAwaitingAssignment, isCutting } from "@/lib/ageing";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -112,8 +112,10 @@ function ContractorContent() {
         projects,
         qty: recs.reduce((sum, r) => sum + r.balanceQty, 0),
         weight: recs.reduce((sum, r) => sum + r.balanceWt, 0),
+        // Include AWAITING_ASSIGNMENT (no contractor yet) in fabLoad — those marks
+        // belong to the Unassigned contractor's work queue, not a real contractor's.
         fabLoad: recs
-          .filter(r => FAB_SET.has((r.activity ?? "").toUpperCase()) && (!isCutting(r.activity) || isActiveCutting(r)))
+          .filter(r => FAB_SET.has((r.activity ?? "").toUpperCase()) && (!isCutting(r.activity) || isActiveCutting(r) || isAwaitingAssignment(r)))
           .reduce((sum, r) => sum + r.balanceWt, 0),
         galvaLoad: recs
           .filter(r => GALVA_SET.has((r.activity ?? "").toUpperCase()))

@@ -273,10 +273,14 @@ function JobDashboardContent() {
           //   IN_PRODUCTION  → quality/galvanising by activity (Type="Job Card WIP")
           //   FINISHED_GOODS → dispatch bucket (regardless of activity code)
           //   NOT_RELEASED   → skip (counted as Release Balance, not here)
-          // Both CUTTING and AWAITING_ASSIGNMENT count toward the "Cutting" phase here
-          // so the dashboard always shows a non-zero figure even when no contractor is assigned.
+          // AWAITING_ASSIGNMENT → separate peer bucket (no contractor yet).
+          // CUTTING            → contractor-assigned JCNS+Authorized work.
+          // Each gets its own phase so Project Wise shows them as distinct columns.
           const wipCase = classifyWipCase(r);
-          if (wipCase === "CUTTING" || wipCase === "AWAITING_ASSIGNMENT") {
+          if (wipCase === "AWAITING_ASSIGNMENT") {
+            phases.awaitingAssignment.marks += 1;
+            phases.awaitingAssignment.weight += r.balanceWt;
+          } else if (wipCase === "CUTTING") {
             phases.cutting.marks += 1;
             phases.cutting.weight += r.balanceWt;
           } else if (wipCase === "IN_PRODUCTION") {
@@ -423,6 +427,8 @@ function JobDashboardContent() {
             { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
             { label: "Release Balance Computed (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
             { label: "FG (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
+            { label: "Awaiting Assignment Wt (MT)", field: "awaitingAssignmentWt", numeric: true, decimals: 3, total: true },
+            { label: "Awaiting Assignment Marks", field: "awaitingAssignmentMarks", numeric: true, decimals: 0, total: true },
             { label: "Cutting Wt (MT)", field: "cuttingWt", numeric: true, decimals: 3, total: true },
             { label: "Cutting Marks", field: "cuttingMarks", numeric: true, decimals: 0, total: true },
             { label: "Quality Check Wt (MT)", field: "qualityWt", numeric: true, decimals: 3, total: true },
@@ -448,6 +454,8 @@ function JobDashboardContent() {
             releaseBalanceMt: orderByJob.get(p.job)?.fileBalRelease ?? 0,
             releaseBalanceComputedMt: relBalComputedByJob.get(p.job) ?? 0,
             computedFgMt: fgWipForJob(p.job) / 1000,
+            awaitingAssignmentWt: p.phases.awaitingAssignment.weight / 1000,
+            awaitingAssignmentMarks: p.phases.awaitingAssignment.marks,
             cuttingWt: p.phases.cutting.weight / 1000,
             cuttingMarks: p.phases.cutting.marks,
             qualityWt: p.phases.quality.weight / 1000,
@@ -913,7 +921,10 @@ function JobDetail({
         const phases = emptyPhases();
         for (const r of recs) {
           const wipCase = classifyWipCase(r);
-          if (wipCase === "CUTTING" || wipCase === "AWAITING_ASSIGNMENT") {
+          if (wipCase === "AWAITING_ASSIGNMENT") {
+            phases.awaitingAssignment.marks += 1;
+            phases.awaitingAssignment.weight += r.balanceWt;
+          } else if (wipCase === "CUTTING") {
             phases.cutting.marks += 1;
             phases.cutting.weight += r.balanceWt;
           } else if (wipCase === "IN_PRODUCTION") {
@@ -972,7 +983,10 @@ function JobDetail({
         const phases = emptyPhases();
         for (const r of recs) {
           const wipCase = classifyWipCase(r);
-          if (wipCase === "CUTTING" || wipCase === "AWAITING_ASSIGNMENT") {
+          if (wipCase === "AWAITING_ASSIGNMENT") {
+            phases.awaitingAssignment.marks += 1;
+            phases.awaitingAssignment.weight += r.balanceWt;
+          } else if (wipCase === "CUTTING") {
             phases.cutting.marks += 1;
             phases.cutting.weight += r.balanceWt;
           } else if (wipCase === "IN_PRODUCTION") {
