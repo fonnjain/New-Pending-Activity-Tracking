@@ -800,17 +800,19 @@ function ActivityContent() {
     const assignBalRecords: any[] = []; // AWAITING_ASSIGNMENT (JCNS+Authorized+no contractor)
 
     records.forEach(r => {
+      // Awaiting Assignment must be tested BEFORE the Release Balance guard —
+      // both have isCutting(activity)=true, but AWAITING_ASSIGNMENT has no
+      // contractor so !isActiveCutting is also true, causing it to fall into
+      // relBalRecords if we don't intercept it here first.
+      if (isAwaitingAssignment(r)) {
+        assignBalRecords.push(r);
+        return; // own dedicated row; do NOT double-count in activities
+      }
       if (!isActiveCutting(r) && isCutting(r.activity)) {
         // Release Balance (initial cutting / NOT_RELEASED): excluded from activity rows
         // but collected for the drill-down hierarchy.
         relBalRecords.push(r);
         return;
-      }
-      // Awaiting Assignment = JCNS+Authorized with no contractor assigned yet.
-      // Collected separately for the drill-down row; also kept in activities
-      // so it appears in the C row (peer bucket, not a subset of Cutting).
-      if (isAwaitingAssignment(r)) {
-        assignBalRecords.push(r);
       }
       const act = activityDisplayKey(r.activity, r.category);
       if (!activities.has(act)) activities.set(act, []);
