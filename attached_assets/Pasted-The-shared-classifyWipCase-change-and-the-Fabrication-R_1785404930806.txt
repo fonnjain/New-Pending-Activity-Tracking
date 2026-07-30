@@ -1,0 +1,47 @@
+The shared classifyWipCase change and the Fabrication Report work look right. Two things to
+confirm before I accept this.
+
+1. Your call-site table shows two surfaces merging the buckets back:
+
+     Job Dashboard phases    CUTTING || AWAITING_ASSIGNMENT -> phases.cutting
+     Plant Operation INHAND  isActiveCutting(r) || isAwaitingAssignment(r)
+
+   If phases.cutting drives the "Cutting Wt (MT)" column on Project Wise, that column will
+   still show 2,519.232 — the OLD combined figure — instead of 1,414.718. The whole point of
+   the change is that Cutting means contractor-assigned.
+
+   Please tell me what the Project Wise Cutting column reads right now for the 30-Jul import,
+   TLT. It must be 1,414.718 MT / 9,723 marks. If it shows 2,519.232 the change has not
+   landed there.
+
+   For Plant Operation, merging may be correct if "in-hand load" means all
+   not-started-authorized work. If so, keep it — but do not label it Cutting. Confirm which
+   you intend.
+
+2. Contractor Wise. Its "Unassigned" row showed Fabrication Load 1,111.982 MT on 30-Jul. Now
+   that isActiveCutting excludes no-contractor records, what does that row show? A contractor
+   grouping should still list unassigned work; only the Cutting component should move.
+
+VERIFICATION — please give me these figures from the running app, 30-Jul import:
+
+  TLT   Release 2,112.271 | Awaiting Assignment 1,104.513 | Cutting 1,414.718
+        Quality Check 1,867.583 | Galvanising 1,933.288 | FG WIP 2,280.720
+        TOTAL 10,713.093 MT / 58,321 marks, zero unclassified
+
+  ALL   Release 2,112.271 | Awaiting Assignment 3,728.497 | Cutting 2,788.537
+        Quality Check 1,979.811 | Galvanising 3,707.449 | FG WIP 2,880.044
+        TOTAL 17,196.608 MT / 58,630 marks, zero unclassified
+
+  Fabrication Report grand total: should be about 6,176.5 filtered (down from 6,497.646).
+  The ONLY legitimate movement is -321.158 for TS, because Awaiting Assignment + new Cutting
+  = old Cutting exactly. Any other figure means something else moved.
+
+  Project 821: Cutting 0.000 / 0 marks, Awaiting Assignment 5.148 MT / 301 marks.
+
+  Q column 252.508 MT, TS column 321.158 MT, shown separately.
+
+Also please send a fresh Fabrication Report and Project Wise export so I can reconcile them
+against the WIP file directly.
+
+On point 2 of your reply — you are right that no literal 821 test exists in code. The
+reference was in the documentation, and I have updated it there. No action needed.

@@ -1,5 +1,5 @@
 import { useMemo, useState, Fragment } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, useListInventoryMfcBatchColors, getListInventoryMfcBatchColorsQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow, type ErpRulesResponse, type ErpRuleResult } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, useListInventoryMfcBatchColors, getListInventoryMfcBatchColorsQueryKey, useUpsertInventoryMfcBatchColor, useDeleteInventoryMfcBatchColor, type InventoryMfcBatchColor, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow, type ErpRulesResponse, type ErpRuleResult } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
@@ -8,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, PlusCircle, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History, CircleCheck, CircleX, Info } from "lucide-react";
+import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, PlusCircle, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History, CircleCheck, CircleX, Info, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx, exportToJson, type XlsxColumn } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
@@ -3013,137 +3013,119 @@ function ErpRuleRow({ rule }: { rule: ErpRuleResult }) {
 }
 
 // ---------------------------------------------------------------------------
-// Bucket List Dates — per-project "Date of Client MFC" + "Project start date"
-// management tab on the Data page.
+// ---------------------------------------------------------------------------
+// Bucket List Dates — per-(project, mfcBatch) colour + date management tab.
 //
-// STORAGE: dates live in inventory_project_dates, keyed on project only.
-// NEVER rebuilt from any WIP import — upload-independent by design.
-// Colours remain in inventory_mfc_batch_color (upload-independent too).
+// Shows the same rows as the Bucket List page (inventory_mfc_batch_color):
+//   Project | MFC Batch | Colour | Date of Client MFC | Project Start Date | Edit | Delete
+//
+// Data source: inventory_mfc_batch_color (upload-independent).
 // ---------------------------------------------------------------------------
 
-type ProjectDatesRow = {
-  project: string;
-  dateOfClientMfc: string | null;
-  projectStartDate: string | null;
+const MFC_COLOR_OPTS = ["white", "yellow", "green", "blue"] as const;
+type BldColorName = typeof MFC_COLOR_OPTS[number];
+
+const BLD_DOT_STYLE: Record<BldColorName, React.CSSProperties> = {
+  white:  { background: "#ffffff", border: "1.5px solid #aaa" },
+  yellow: { background: "#fde047" },
+  green:  { background: "#4ade80" },
+  blue:   { background: "#60a5fa" },
 };
 
-const PROJECT_DATES_QK = ["/api/inventory-manual/project-dates"] as const;
-
-const MFC_DOT_CSS: Record<string, string> = {
-  white:  "bg-white border border-gray-400",
-  yellow: "bg-yellow-300",
-  green:  "bg-green-400",
-  blue:   "bg-blue-400",
+const BLD_COLOR_LABEL: Record<BldColorName, string> = {
+  white: "White", yellow: "Yellow", green: "Green", blue: "Blue",
 };
+
+function BldColorDot({ color }: { color: string }) {
+  const c = color as BldColorName;
+  const style = BLD_DOT_STYLE[c] ?? { background: "#ccc" };
+  return (
+    <span
+      className="inline-block w-3 h-3 rounded-full shrink-0"
+      style={style}
+      title={BLD_COLOR_LABEL[c] ?? color}
+    />
+  );
+}
 
 function BucketListDatesContent() {
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   const { data: authStatus } = useGetAuthStatus({ query: { queryKey: getGetAuthStatusQueryKey() } });
   const canEdit = authStatus?.role === "admin";
 
-  // Project dates — upload-independent per-project table.
-  const { data: projectDates = [], isLoading: datesLoading } = useQuery<ProjectDatesRow[]>({
-    queryKey: PROJECT_DATES_QK,
-    queryFn: () =>
-      fetch("/api/inventory-manual/project-dates", { credentials: "include" }).then((r) => r.json()),
-  });
-
-  // MFC batch colours — per (project, batch), already in the system.
-  const { data: batchColours = [] } = useListInventoryMfcBatchColors({
+  const { data: entries = [], isLoading } = useListInventoryMfcBatchColors({
     query: { queryKey: getListInventoryMfcBatchColorsQueryKey() },
   });
 
-  const saveMutation = useMutation({
-    mutationFn: (body: { project: string; dateOfClientMfc: string; projectStartDate: string }) =>
-      fetch("/api/inventory-manual/project-dates", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      }).then(async (r) => {
-        if (!r.ok) throw new Error(await r.text());
-        return r.json();
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: PROJECT_DATES_QK });
-      toast({ title: "Dates saved" });
+  const upsertMutation = useUpsertInventoryMfcBatchColor({
+    mutation: {
+      onSuccess: () => toast({ title: "Entry updated" }),
+      onError: () => toast({ variant: "destructive", title: "Save failed" }),
     },
-    onError: (err: Error) =>
-      toast({ variant: "destructive", title: "Save failed", description: err.message }),
   });
 
-  // All known projects: union of colour-assigned + already-have-dates projects.
-  const allProjects = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of batchColours) set.add(c.project);
-    for (const d of projectDates) set.add(d.project);
-    return [...set].sort();
-  }, [batchColours, projectDates]);
+  const deleteMutation = useDeleteInventoryMfcBatchColor({
+    mutation: {
+      onSuccess: () => toast({ title: "Entry deleted" }),
+      onError: () => toast({ variant: "destructive", title: "Delete failed" }),
+    },
+  });
 
-  const datesMap = useMemo(
-    () => new Map(projectDates.map((d) => [d.project, d])),
-    [projectDates],
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+
+  const handleDelete = (project: string, mfcBatch: string) => {
+    const key = `${project}\u0001${mfcBatch}`;
+    setDeletingKey(key);
+    deleteMutation.mutate(
+      { params: { project, mfcBatch } },
+      { onSettled: () => setDeletingKey(null) },
+    );
+  };
+
+  const handleSave = (entry: InventoryMfcBatchColor, patch: { color: string; dateOfClientMfc: string; projectStartDate: string }) => {
+    upsertMutation.mutate({
+      data: {
+        project: entry.project,
+        mfcBatch: entry.mfcBatch,
+        color: patch.color as InventoryMfcBatchColor["color"],
+        dateOfClientMfc: patch.dateOfClientMfc || undefined,
+        projectStartDate: patch.projectStartDate || undefined,
+      },
+    });
+  };
+
+  const sorted = useMemo(
+    () => [...entries].sort((a, b) => a.project.localeCompare(b.project) || a.mfcBatch.localeCompare(b.mfcBatch)),
+    [entries],
   );
 
-  // Index: project → batch colours sorted by batch letter.
-  const coloursMap = useMemo(() => {
-    const m = new Map<string, { mfcBatch: string; color: string }[]>();
-    for (const c of batchColours) {
-      if (!m.has(c.project)) m.set(c.project, []);
-      m.get(c.project)!.push({ mfcBatch: c.mfcBatch, color: c.color });
-    }
-    for (const arr of m.values()) arr.sort((a, b) => a.mfcBatch.localeCompare(b.mfcBatch));
-    return m;
-  }, [batchColours]);
+  const missingCount = sorted.filter((e) => !e.dateOfClientMfc || !e.projectStartDate).length;
 
-  // Missing-date projects first, then alphabetical within each group.
-  const sortedProjects = useMemo(
-    () =>
-      [...allProjects].sort((a, b) => {
-        const da = datesMap.get(a);
-        const db = datesMap.get(b);
-        const missingA = !da?.dateOfClientMfc || !da?.projectStartDate ? 0 : 1;
-        const missingB = !db?.dateOfClientMfc || !db?.projectStartDate ? 0 : 1;
-        if (missingA !== missingB) return missingA - missingB;
-        return a.localeCompare(b);
-      }),
-    [allProjects, datesMap],
-  );
-
-  if (datesLoading) {
+  if (isLoading) {
     return <div className="py-12 text-center text-sm text-muted-foreground">Loading...</div>;
   }
-
-  const missingCount = sortedProjects.filter((p) => {
-    const d = datesMap.get(p);
-    return !d?.dateOfClientMfc || !d?.projectStartDate;
-  }).length;
 
   return (
     <div className="space-y-4">
       <Card className="border-border">
         <CardHeader className="pb-2">
           <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
-            Bucket List — Project Dates
+            Bucket List — Colour &amp; Date Entries
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-xs text-muted-foreground mb-3">
-            Per-project milestone dates (Date of Client MFC and Project Start Date). Dates
-            do not affect bucket placement — colour alone gates Pre-Bucket B. Dates are
+            Per-(project, MFC batch) colour and milestone date entries. Dates and colours are
             stored permanently and are never rebuilt from an import.
           </p>
           {missingCount > 0 && (
             <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-              {missingCount} project{missingCount !== 1 ? "s" : ""} missing at least one
-              date — shown first below.
+              {missingCount} entr{missingCount !== 1 ? "ies" : "y"} missing at least one date — shown with amber highlight.
             </div>
           )}
-          {allProjects.length === 0 ? (
+          {sorted.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">
-              No projects with assigned batch colours yet. Assign a colour on the Bucket
-              List page first — projects appear here once any batch has a colour.
+              No entries yet. Assign a colour on the Bucket List page first.
             </p>
           ) : (
             <div className="border border-border rounded-lg overflow-hidden">
@@ -3151,26 +3133,30 @@ function BucketListDatesContent() {
                 <thead>
                   <tr className="bg-muted/60 text-muted-foreground uppercase tracking-wider">
                     <th className="text-left px-3 py-2 font-semibold">Project</th>
-                    <th className="text-left px-3 py-2 font-semibold">Batch Colours</th>
+                    <th className="text-left px-3 py-2 font-semibold">MFC Batch</th>
+                    <th className="text-left px-3 py-2 font-semibold">Colour</th>
                     <th className="text-left px-3 py-2 font-semibold">Date of Client MFC</th>
                     <th className="text-left px-3 py-2 font-semibold">Project Start Date</th>
-                    {canEdit && <th className="px-3 py-2 w-24" />}
+                    {canEdit && <th className="px-2 py-2 w-16" />}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {sortedProjects.map((project) => (
-                    <ProjectDatesTableRow
-                      key={project}
-                      project={project}
-                      dates={datesMap.get(project) ?? null}
-                      colours={coloursMap.get(project) ?? []}
-                      canEdit={canEdit}
-                      onSave={(mfc, start) =>
-                        saveMutation.mutate({ project, dateOfClientMfc: mfc, projectStartDate: start })
-                      }
-                      isSaving={saveMutation.isPending}
-                    />
-                  ))}
+                  {sorted.map((entry) => {
+                    const key = `${entry.project}\u0001${entry.mfcBatch}`;
+                    const missing = !entry.dateOfClientMfc || !entry.projectStartDate;
+                    return (
+                      <BldRow
+                        key={key}
+                        entry={entry}
+                        canEdit={canEdit}
+                        isMissing={missing}
+                        deletingKey={deletingKey}
+                        onDelete={handleDelete}
+                        onSave={handleSave}
+                        isSaving={upsertMutation.isPending}
+                      />
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -3181,57 +3167,77 @@ function BucketListDatesContent() {
   );
 }
 
-function ProjectDatesTableRow({
-  project,
-  dates,
-  colours,
+function BldRow({
+  entry,
   canEdit,
+  isMissing,
+  deletingKey,
+  onDelete,
   onSave,
   isSaving,
 }: {
-  project: string;
-  dates: ProjectDatesRow | null;
-  colours: { mfcBatch: string; color: string }[];
+  entry: InventoryMfcBatchColor;
   canEdit: boolean;
-  onSave: (dateOfClientMfc: string, projectStartDate: string) => void;
+  isMissing: boolean;
+  deletingKey: string | null;
+  onDelete: (project: string, mfcBatch: string) => void;
+  onSave: (entry: InventoryMfcBatchColor, patch: { color: string; dateOfClientMfc: string; projectStartDate: string }) => void;
   isSaving: boolean;
 }) {
   const [editing, setEditing] = useState(false);
-  const [mfcDate, setMfcDate] = useState(dates?.dateOfClientMfc ?? "");
-  const [startDate, setStartDate] = useState(dates?.projectStartDate ?? "");
+  const [color, setColor] = useState(entry.color as string);
+  const [mfcDate, setMfcDate] = useState(entry.dateOfClientMfc ?? "");
+  const [startDate, setStartDate] = useState(entry.projectStartDate ?? "");
 
   const handleEdit = () => {
-    setMfcDate(dates?.dateOfClientMfc ?? "");
-    setStartDate(dates?.projectStartDate ?? "");
+    setColor(entry.color as string);
+    setMfcDate(entry.dateOfClientMfc ?? "");
+    setStartDate(entry.projectStartDate ?? "");
     setEditing(true);
   };
 
   const handleSave = () => {
-    onSave(mfcDate, startDate);
+    onSave(entry, { color, dateOfClientMfc: mfcDate, projectStartDate: startDate });
     setEditing(false);
   };
 
-  const missingMfc = !dates?.dateOfClientMfc;
-  const missingStart = !dates?.projectStartDate;
+  const rowKey = `${entry.project}\u0001${entry.mfcBatch}`;
+  const isDeleting = deletingKey === rowKey;
 
   return (
-    <tr className={`hover:bg-muted/30 ${missingMfc || missingStart ? "bg-amber-50/40 dark:bg-amber-950/10" : ""}`}>
-      <td className="px-3 py-2 font-mono font-medium">{project}</td>
+    <tr className={`hover:bg-muted/30 ${isMissing ? "bg-amber-50/40 dark:bg-amber-950/10" : ""}`}>
+      {/* Project */}
+      <td className="px-3 py-2 font-mono font-medium">{entry.project}</td>
+      {/* MFC Batch */}
       <td className="px-3 py-2">
-        <div className="flex flex-wrap gap-1.5 items-center">
-          {colours.map(({ mfcBatch, color }) => (
-            <span key={mfcBatch} className="flex items-center gap-1">
-              <span
-                className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${MFC_DOT_CSS[color] ?? "bg-gray-300"}`}
-              />
-              <span className="text-[10px] text-muted-foreground">{mfcBatch}</span>
-            </span>
-          ))}
-          {colours.length === 0 && <span className="text-muted-foreground">—</span>}
-        </div>
+        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border border-border/60 text-muted-foreground">
+          {entry.mfcBatch}
+        </span>
       </td>
+
       {editing ? (
         <>
+          {/* Colour select */}
+          <td className="px-3 py-1.5">
+            <div className="flex gap-1.5 flex-wrap">
+              {MFC_COLOR_OPTS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setColor(c)}
+                  title={BLD_COLOR_LABEL[c]}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] transition-colors
+                    ${color === c
+                      ? "border-primary bg-primary/10 font-semibold"
+                      : "border-border/60 hover:bg-muted/40"}`}
+                >
+                  <BldColorDot color={c} />
+                  {BLD_COLOR_LABEL[c]}
+                </button>
+              ))}
+            </div>
+          </td>
+          {/* Date of Client MFC */}
           <td className="px-3 py-1.5">
             <input
               type="date"
@@ -3240,6 +3246,7 @@ function ProjectDatesTableRow({
               className="h-7 rounded border border-border bg-background px-2 text-xs w-36"
             />
           </td>
+          {/* Project Start Date */}
           <td className="px-3 py-1.5">
             <input
               type="date"
@@ -3249,7 +3256,7 @@ function ProjectDatesTableRow({
             />
           </td>
           {canEdit && (
-            <td className="px-3 py-1.5">
+            <td className="px-2 py-1.5">
               <div className="flex gap-1">
                 <Button size="sm" className="h-6 text-[11px] px-2" onClick={handleSave} disabled={isSaving}>
                   Save
@@ -3263,25 +3270,48 @@ function ProjectDatesTableRow({
         </>
       ) : (
         <>
+          {/* Colour dot + label */}
           <td className="px-3 py-2">
-            {dates?.dateOfClientMfc ? (
-              formatDate(dates.dateOfClientMfc)
-            ) : (
-              <span className="text-amber-600 dark:text-amber-400 font-semibold">Missing</span>
-            )}
+            <span className="flex items-center gap-1.5">
+              <BldColorDot color={entry.color as string} />
+              <span>{BLD_COLOR_LABEL[entry.color as BldColorName] ?? entry.color}</span>
+            </span>
           </td>
-          <td className="px-3 py-2">
-            {dates?.projectStartDate ? (
-              formatDate(dates.projectStartDate)
-            ) : (
-              <span className="text-amber-600 dark:text-amber-400 font-semibold">Missing</span>
-            )}
+          {/* Date of Client MFC */}
+          <td className="px-3 py-2 text-muted-foreground">
+            {entry.dateOfClientMfc
+              ? formatDate(entry.dateOfClientMfc)
+              : <span className="text-amber-600 dark:text-amber-400 font-semibold">—</span>}
+          </td>
+          {/* Project Start Date */}
+          <td className="px-3 py-2 text-muted-foreground">
+            {entry.projectStartDate
+              ? formatDate(entry.projectStartDate)
+              : <span className="text-amber-600 dark:text-amber-400 font-semibold">—</span>}
           </td>
           {canEdit && (
-            <td className="px-3 py-2">
-              <Button size="sm" variant="outline" className="h-6 text-[11px] px-2" onClick={handleEdit}>
-                Edit
-              </Button>
+            <td className="px-2 py-1.5">
+              <div className="flex items-center gap-0.5">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={handleEdit}
+                  title="Edit"
+                >
+                  <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  disabled={isDeleting}
+                  onClick={() => onDelete(entry.project, entry.mfcBatch)}
+                  title="Delete"
+                >
+                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                </Button>
+              </div>
             </td>
           )}
         </>
