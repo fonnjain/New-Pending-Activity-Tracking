@@ -315,32 +315,20 @@ function ReportBuilder() {
     [fabData],
   );
 
-  // Drill-down open state for the two balance summary rows.
-  const [openRelBal, setOpenRelBal] = useState(false);
-  const [openAssignBal, setOpenAssignBal] = useState(false);
-
-  // Per-project groupings for drill-down.
-  const relBalByProject = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of relBalData?.rows ?? []) {
-      m.set(r.project, (m.get(r.project) ?? 0) + (r.releaseBalanceComputedMt ?? 0));
-    }
-    return [...m.entries()]
-      .map(([project, wt]) => ({ project, wt }))
-      .filter((p) => p.wt > 0)
-      .sort((a, b) => b.wt - a.wt);
-  }, [relBalData]);
-
-  const assignByProject = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of fabData?.rows ?? []) {
-      m.set(r.project, (m.get(r.project) ?? 0) + (r.assignmentBalanceCalcMt ?? 0));
-    }
-    return [...m.entries()]
-      .map(([project, wt]) => ({ project, wt }))
-      .filter((p) => p.wt > 0)
-      .sort((a, b) => b.wt - a.wt);
-  }, [fabData]);
+  // Separate release-balance and assignment-balance records from the enriched set
+  // so they can be rendered as named groups in the itemwise section above C.
+  const relBalEnriched = useMemo(
+    () => enrichedRows.filter((r) => isCutting(r.activity) && !isActiveCutting(r)),
+    [enrichedRows],
+  );
+  const assignBalEnriched = useMemo(
+    () => enrichedRows.filter((r) => isActiveCutting(r) && !r.contractor),
+    [enrichedRows],
+  );
+  const otherEnriched = useMemo(
+    () => enrichedRows.filter((r) => !(isCutting(r.activity) && !isActiveCutting(r))),
+    [enrichedRows],
+  );
 
   // Per-activity subtotals (Qty + Wt) appended to the Excel export, ordered by
   // the canonical process sequence, under an "Activity-wise subtotal" heading.
@@ -476,7 +464,104 @@ function ReportBuilder() {
     );
   }
 
-  const visible = enrichedRows.slice(0, TABLE_CAP);
+  const visible = otherEnriched.slice(0, TABLE_CAP);
+
+  // Shared row renderer for itemwise sections (Release Bal, Assignment Bal, main).
+  const renderItemRow = (r: typeof enrichedRows[number], i: number, keyPrefix: string) => (
+    <TableRow key={`${keyPrefix}-${r.markId}-${i}`}>
+      <TableCell>{r.activity ?? "-"}</TableCell>
+      <TableCell>{r.section ?? "-"}</TableCell>
+      <TableCell className="font-mono text-xs">{r.markId}</TableCell>
+      <TableCell className="text-right tabular-nums">{num(r.length)}</TableCell>
+      <TableCell className="text-right tabular-nums">{num(r.width)}</TableCell>
+      <TableCell className="text-right tabular-nums">{num(r.balanceQty)}</TableCell>
+      <TableCell className="text-right tabular-nums">{formatWeight(r.balanceWt)}</TableCell>
+      <TableCell>{r.contractor ?? "Unassigned"}</TableCell>
+      <TableCell className={`text-right font-bold ${getAgeingColor(r.ageingDays)}`}>
+        {ageingCell(r)}
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-muted-foreground">
+        {r.cumulativeTarget !== null ? `${r.cumulativeTarget}d` : "-"}
+      </TableCell>
+      <TableCell className={`text-right tabular-nums font-bold ${lifecycleTextColor(r.lifecycleStatusRaw)}`}>
+        {r.overrun !== null && r.overrun > 0 ? `+${r.overrun}d` : r.overrun !== null ? `${r.overrun}d` : "-"}
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-muted-foreground">
+        {r.consumedPct !== null ? `${r.consumedPct}%` : "-"}
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-muted-foreground">
+        {r.daysToTarget !== null ? `${r.daysToTarget}d` : "-"}
+      </TableCell>
+      <TableCell className={`text-xs font-semibold ${lifecycleTextColor(r.lifecycleStatusRaw)}`}>
+        {r.lifecycleStatus}
+      </TableCell>
+      <TableCell className="text-xs">
+        {r.stalled ? (
+          <span className="font-semibold text-ageing-red">Stalled</span>
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        )}
+      </TableCell>
+      <TableCell className="text-xs font-semibold">
+        {r.velocityStatusRaw ? (
+          <span className={velocityStatusColor(r.velocityStatusRaw)}>
+            {r.velocityStatusLabel}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        )}
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-muted-foreground">
+        {fmtDays(r.daysPerStage)}
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-muted-foreground">
+        {fmtDays(r.etaDays)}
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-muted-foreground">
+        {r.etaGap !== null && r.etaGap !== undefined
+          ? `${r.etaGap > 0 ? "+" : ""}${fmtDays(r.etaGap)}`
+          : "-"}
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground">
+        {r.trendRaw ? (
+          <span>
+            {trendArrow(r.trendRaw)} {r.trendLabel}
+          </span>
+        ) : (
+          "-"
+        )}
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground">{r.sectionType ?? "-"}</TableCell>
+      <TableCell className="text-xs text-muted-foreground">{r.holeOperationLabel}</TableCell>
+    </TableRow>
+  );
+
+  const itemwiseColumnHeaders = (
+    <TableRow className="bg-muted/30 hover:bg-muted/30">
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Activity</TableCell>
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Section</TableCell>
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Mark No.</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Length</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Width</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Balance Qty</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Balance Wt</TableCell>
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Contractor</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Ageing</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Target</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Overrun</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Consumed</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">To Target</TableCell>
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Status</TableCell>
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Stalled</TableCell>
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Velocity</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Days/Stage</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">ETA</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">ETA Gap</TableCell>
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Trend</TableCell>
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Section Type</TableCell>
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Hole Op.</TableCell>
+    </TableRow>
+  );
 
   return (
     <Card className="border-border">
@@ -563,88 +648,40 @@ function ReportBuilder() {
               {(releaseBalComputedMt != null || assignmentBalMt != null) && (
                 <>
                   {releaseBalComputedMt != null && (
-                    <>
-                      <TableRow
-                        className="bg-muted/20 hover:bg-muted/40 cursor-pointer transition-colors font-semibold"
-                        onClick={() => setOpenRelBal((v) => !v)}
-                      >
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0 ${openRelBal ? "rotate-180" : ""}`} />
-                            <span className="text-xs font-semibold">Release Bal. Computed</span>
-                          </div>
-                        </TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell className="text-right tabular-nums font-bold">
-                          {releaseBalComputedMt.toFixed(3)} t
-                        </TableCell>
-                        {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
-                          <TableCell key={i} />
-                        ))}
-                      </TableRow>
-                      {openRelBal && relBalByProject.map((p) => (
-                        <TableRow key={`rel-${p.project}`} className="bg-muted/10 hover:bg-muted/10">
-                          <TableCell className="pl-8 text-xs font-mono text-muted-foreground">{p.project}</TableCell>
-                          <TableCell />
-                          <TableCell />
-                          <TableCell />
-                          <TableCell />
-                          <TableCell />
-                          <TableCell className="text-right tabular-nums text-xs font-semibold">
-                            {p.wt.toFixed(3)} t
-                          </TableCell>
-                          {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
-                            <TableCell key={i} />
-                          ))}
-                        </TableRow>
+                    <TableRow className="bg-muted/20 font-semibold">
+                      <TableCell>
+                        <span className="text-xs font-semibold">Release Bal. Computed</span>
+                      </TableCell>
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell className="text-right tabular-nums font-bold">
+                        {releaseBalComputedMt.toFixed(3)} t
+                      </TableCell>
+                      {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
+                        <TableCell key={i} />
                       ))}
-                    </>
+                    </TableRow>
                   )}
                   {assignmentBalMt != null && (
-                    <>
-                      <TableRow
-                        className="bg-muted/20 hover:bg-muted/40 cursor-pointer transition-colors font-semibold"
-                        onClick={() => setOpenAssignBal((v) => !v)}
-                      >
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0 ${openAssignBal ? "rotate-180" : ""}`} />
-                            <span className="text-xs font-semibold">Assignment Balance</span>
-                          </div>
-                        </TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell className="text-right tabular-nums font-bold">
-                          {assignmentBalMt.toFixed(3)} t
-                        </TableCell>
-                        {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
-                          <TableCell key={i} />
-                        ))}
-                      </TableRow>
-                      {openAssignBal && assignByProject.map((p) => (
-                        <TableRow key={`assign-${p.project}`} className="bg-muted/10 hover:bg-muted/10">
-                          <TableCell className="pl-8 text-xs font-mono text-muted-foreground">{p.project}</TableCell>
-                          <TableCell />
-                          <TableCell />
-                          <TableCell />
-                          <TableCell />
-                          <TableCell />
-                          <TableCell className="text-right tabular-xs text-xs font-semibold">
-                            {p.wt.toFixed(3)} t
-                          </TableCell>
-                          {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
-                            <TableCell key={i} />
-                          ))}
-                        </TableRow>
+                    <TableRow className="bg-muted/20 font-semibold">
+                      <TableCell>
+                        <span className="text-xs font-semibold">Assignment Balance</span>
+                      </TableCell>
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell className="text-right tabular-nums font-bold">
+                        {assignmentBalMt.toFixed(3)} t
+                      </TableCell>
+                      {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
+                        <TableCell key={i} />
                       ))}
-                    </>
+                    </TableRow>
                   )}
                 </>
               )}
@@ -693,7 +730,7 @@ function ReportBuilder() {
                   ))}
                 </>
               )}
-              {rows.length > 0 && showItemwise && (
+              {showItemwise && enrichedRows.length > 0 && (
                 <>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
@@ -703,100 +740,29 @@ function ReportBuilder() {
                       Itemwise Data
                     </TableCell>
                   </TableRow>
-                  <TableRow className="bg-muted/30 hover:bg-muted/30">
-                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Activity</TableCell>
-                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Section</TableCell>
-                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Mark No.</TableCell>
-                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Length</TableCell>
-                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Width</TableCell>
-                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Balance Qty</TableCell>
-                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Balance Wt</TableCell>
-                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Contractor</TableCell>
-                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Ageing</TableCell>
-                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Target</TableCell>
-                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Overrun</TableCell>
-                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Consumed</TableCell>
-                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">To Target</TableCell>
-                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Status</TableCell>
-                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Stalled</TableCell>
-                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Velocity</TableCell>
-                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Days/Stage</TableCell>
-                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">ETA</TableCell>
-                    <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">ETA Gap</TableCell>
-                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Trend</TableCell>
-                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Section Type</TableCell>
-                    <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Hole Op.</TableCell>
-                  </TableRow>
+                  {itemwiseColumnHeaders}
+                  {/* Release Bal. Computed group — initial-cutting marks, above C */}
+                  {relBalEnriched.length > 0 && (
+                    <TableRow className="bg-muted/40 hover:bg-muted/40">
+                      <TableCell colSpan={COL_COUNT} className="text-xs font-semibold text-muted-foreground pl-4">
+                        Release Bal. Computed — {relBalEnriched.length.toLocaleString()} marks
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {relBalEnriched.map((r, i) => renderItemRow(r, i, "rb"))}
+                  {/* Assignment Balance group — active-cutting marks with no contractor, above C */}
+                  {assignBalEnriched.length > 0 && (
+                    <TableRow className="bg-muted/40 hover:bg-muted/40">
+                      <TableCell colSpan={COL_COUNT} className="text-xs font-semibold text-muted-foreground pl-4">
+                        Assignment Balance — {assignBalEnriched.length.toLocaleString()} marks
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {assignBalEnriched.map((r, i) => renderItemRow(r, i, "ab"))}
+                  {/* All remaining marks (C with contractor, plus RFI, NH, B … TS, G, Y) */}
+                  {visible.map((r, i) => renderItemRow(r, i, "main"))}
                 </>
               )}
-              {showItemwise && visible.map((r, i) => (
-                <TableRow key={`${r.markId}-${i}`}>
-                  <TableCell>{r.activity ?? "-"}</TableCell>
-                  <TableCell>{r.section ?? "-"}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.markId}</TableCell>
-                  <TableCell className="text-right tabular-nums">{num(r.length)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{num(r.width)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{num(r.balanceQty)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatWeight(r.balanceWt)}</TableCell>
-                  <TableCell>{r.contractor ?? "Unassigned"}</TableCell>
-                  <TableCell className={`text-right font-bold ${getAgeingColor(r.ageingDays)}`}>
-                    {ageingCell(r)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {r.cumulativeTarget !== null ? `${r.cumulativeTarget}d` : "-"}
-                  </TableCell>
-                  <TableCell className={`text-right tabular-nums font-bold ${lifecycleTextColor(r.lifecycleStatusRaw)}`}>
-                    {r.overrun !== null && r.overrun > 0 ? `+${r.overrun}d` : r.overrun !== null ? `${r.overrun}d` : "-"}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {r.consumedPct !== null ? `${r.consumedPct}%` : "-"}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {r.daysToTarget !== null ? `${r.daysToTarget}d` : "-"}
-                  </TableCell>
-                  <TableCell className={`text-xs font-semibold ${lifecycleTextColor(r.lifecycleStatusRaw)}`}>
-                    {r.lifecycleStatus}
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {r.stalled ? (
-                      <span className="font-semibold text-ageing-red">Stalled</span>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-xs font-semibold">
-                    {r.velocityStatusRaw ? (
-                      <span className={velocityStatusColor(r.velocityStatusRaw)}>
-                        {r.velocityStatusLabel}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {fmtDays(r.daysPerStage)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {fmtDays(r.etaDays)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {r.etaGap !== null && r.etaGap !== undefined
-                      ? `${r.etaGap > 0 ? "+" : ""}${fmtDays(r.etaGap)}`
-                      : "-"}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {r.trendRaw ? (
-                      <span>
-                        {trendArrow(r.trendRaw)} {r.trendLabel}
-                      </span>
-                    ) : (
-                      "-"
-                    )}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{r.sectionType ?? "-"}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{r.holeOperationLabel}</TableCell>
-                </TableRow>
-              ))}
               {rows.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={COL_COUNT} className="text-center text-sm text-muted-foreground py-8">
