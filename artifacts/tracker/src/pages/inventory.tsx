@@ -1,4 +1,5 @@
-import { useMemo, useState, useCallback, useRef } from "react";
+import { useMemo, useState, useCallback } from "react";
+import { useLocation } from "wouter";
 import { useTracker, useActiveJobSet, isNamedJobSetFilter, type MfcViewMode } from "@/lib/store";
 import {
   useGetAuthStatus,
@@ -6,8 +7,6 @@ import {
   useUpsertInventoryManualE,
   useDeleteInventoryManualE,
   useListInventoryMfcBatchColors,
-  useUpsertInventoryMfcBatchColor,
-  useDeleteInventoryMfcBatchColor,
   getListInventoryManualEQueryKey,
   getListInventoryMfcBatchColorsQueryKey,
   type InventoryManualEntry,
@@ -1532,6 +1531,7 @@ function MfcBatchColorRow({
 }
 
 export default function InventoryView() {
+  const [, navigate] = useLocation();
   const { filters, mfcViewMode, setMfcViewMode } = useTracker();
   const queryClient = useQueryClient();
   const { available, asOnDate, isLoading, rawRows, buckets, manualE, projectMfcBatches } =
@@ -1568,96 +1568,14 @@ export default function InventoryView() {
     return set;
   }, [mfcBatchColors]);
 
-  // Prefill state for MFC form + scroll ref — populated by "Assign colour" CTA.
-  const [mfcFormPrefill, setMfcFormPrefill] = useState<{
-    project: string;
-    mfcBatch: string;
-    key: number;
-  } | null>(null);
-  const mfcSectionRef = useRef<HTMLDivElement>(null);
-
-  const handleAssignColour = useCallback((project: string, mfcBatch: string) => {
-    setMfcFormPrefill((prev) => ({
-      project,
-      mfcBatch,
-      key: (prev?.key ?? 0) + 1,
-    }));
-    setTimeout(() => {
-      mfcSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 50);
-  }, []);
-  const upsertMfcBatchColor = useUpsertInventoryMfcBatchColor();
-  const deleteMfcBatchColor = useDeleteInventoryMfcBatchColor();
-  const [deletingColorKey, setDeletingColorKey] = useState<string | null>(null);
+  // "Assign colour" CTA navigates to the Bucket List Dates tab under Data page.
+  const handleAssignColour = useCallback(() => {
+    navigate("~/production/data/bucket-list-dates");
+  }, [navigate]);
 
   const mfcBatchColorMap = useMemo(
     () => new Map(mfcBatchColors.map((c) => [`${c.project}\u0001${c.mfcBatch}`, c])),
     [mfcBatchColors],
-  );
-
-  const invalidateMfcColors = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: getListInventoryMfcBatchColorsQueryKey() }),
-    [queryClient],
-  );
-
-  const saveMfcBatchColor = useCallback(
-    (entry: {
-      project: string;
-      mfcBatch: string;
-      color: MfcColorName;
-      dateOfClientMfc?: string;
-      projectStartDate?: string;
-    }) => {
-      upsertMfcBatchColor.mutate(
-        {
-          data: {
-            project: entry.project,
-            mfcBatch: entry.mfcBatch,
-            color: entry.color,
-            dateOfClientMfc: entry.dateOfClientMfc ?? null,
-            projectStartDate: entry.projectStartDate ?? null,
-          },
-        },
-        {
-          onSuccess: () => {
-            invalidateMfcColors();
-            toast({ title: "Colour saved" });
-          },
-          onError: (err) => {
-            toast({
-              variant: "destructive",
-              title: "Failed to save colour",
-              description: err?.message ?? "Unknown error",
-            });
-          },
-        },
-      );
-    },
-    [upsertMfcBatchColor, invalidateMfcColors, toast],
-  );
-
-  const removeMfcBatchColor = useCallback(
-    (project: string, mfcBatch: string) => {
-      const key = `${project}\u0001${mfcBatch}`;
-      setDeletingColorKey(key);
-      deleteMfcBatchColor.mutate(
-        { params: { project, mfcBatch } },
-        {
-          onSettled: () => {
-            setDeletingColorKey(null);
-            invalidateMfcColors();
-          },
-          onError: (err) => {
-            toast({
-              variant: "destructive",
-              title: "Failed to delete",
-              description: err?.message ?? "Unknown error",
-            });
-          },
-        },
-      );
-    },
-    [deleteMfcBatchColor, invalidateMfcColors, toast],
   );
 
   // ── Client-side project hide/restore (no DB writes) ────────────────────────
@@ -1779,14 +1697,6 @@ export default function InventoryView() {
     () => new Set(buckets.a.map((r) => r.project)),
     [buckets.a],
   );
-  const reminderProjects = useMemo(
-    () =>
-      [...new Set(mfcBatchColors.map((c) => c.project))].filter(
-        (p) => !bucketAProjectSet.has(p),
-      ).sort(),
-    [mfcBatchColors, bucketAProjectSet],
-  );
-
   const upsertE = useUpsertInventoryManualE();
   const deleteE = useDeleteInventoryManualE();
   const [deletingEId, setDeletingEId] = useState<number | null>(null);
@@ -2215,81 +2125,34 @@ export default function InventoryView() {
         </CardContent>
       </Card>
 
-      {/* MFC Batch Colour + Pre-B side by side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-        {/* MFC Batch Colour Management */}
-        <div ref={mfcSectionRef}>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">MFC Batch Colour</CardTitle>
-            </CardHeader>
-            <CardContent className="px-0 pb-0">
-              {reminderProjects.length > 0 && (
-                <div className="mx-3 mb-3 flex items-start gap-2 p-3 rounded-md border border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/20 text-sm">
-                  <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-medium">Reminder:</span>{" "}
-                    {reminderProjects.length === 1
-                      ? "The following project has"
-                      : "The following projects have"}{" "}
-                    a colour assignment but{" "}
-                    {reminderProjects.length === 1 ? "is" : "are"} no longer in Bucket A:{" "}
-                    <span className="font-medium">{reminderProjects.join(", ")}</span>
-                  </div>
-                </div>
-              )}
-              {canEdit && (
-                <MfcBatchColorForm
-                  key={mfcFormPrefill?.key ?? 0}
-                  knownProjects={knownProjects}
-                  projectMfcBatches={projectMfcBatches}
-                  onSave={saveMfcBatchColor}
-                  isPending={upsertMfcBatchColor.isPending}
-                  initialProject={mfcFormPrefill?.project}
-                  initialBatch={mfcFormPrefill?.mfcBatch}
-                />
-              )}
-              <MfcBatchColorTable
-                entries={mfcBatchColors}
-                canEdit={canEdit}
-                onDelete={removeMfcBatchColor}
-                onSave={saveMfcBatchColor}
-                deletingKey={deletingColorKey}
-                isSaving={upsertMfcBatchColor.isPending}
-              />
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Pre-Bucket B — qualifies for B but colour + dates not yet assigned */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Pre-B — {BUCKET_LABELS.preB}</CardTitle>
-          </CardHeader>
-          <CardContent className="px-0 pb-0">
-            {isDeleteMode && (
-              <SelectionChecklist
-                rows={preBRows_raw.filter((r) => !deletedProjectSet.has(r.project))}
-                selectedProjects={selectedProjects}
-                onToggle={toggleProjectSelection}
+      {/* Pre-Bucket B — qualifies for B but colour + dates not yet assigned */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Pre-B — {BUCKET_LABELS.preB}</CardTitle>
+        </CardHeader>
+        <CardContent className="px-0 pb-0">
+          {isDeleteMode && (
+            <SelectionChecklist
+              rows={preBRows_raw.filter((r) => !deletedProjectSet.has(r.project))}
+              selectedProjects={selectedProjects}
+              onToggle={toggleProjectSelection}
+            />
+          )}
+          <div className="px-3 pb-3 pt-3">
+            {isLoading ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
+            ) : (
+              <PreBucketBPanel
+                rows={preBRows}
+                columns={BUCKET_B_COLUMNS}
+                mfcViewMode={mfcViewMode}
+                onAssignColour={handleAssignColour}
+                canAssign={canEdit}
               />
             )}
-            <div className="px-3 pb-3 pt-3">
-              {isLoading ? (
-                <div className="py-6 text-center text-sm text-muted-foreground">Loading...</div>
-              ) : (
-                <PreBucketBPanel
-                  rows={preBRows}
-                  columns={BUCKET_B_COLUMNS}
-                  mfcViewMode={mfcViewMode}
-                  onAssignColour={handleAssignColour}
-                  canAssign={canEdit}
-                />
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Bucket B */}
       <Card>
