@@ -95,7 +95,7 @@ import { ageingCell, isActiveCutting, isCutting } from "@/lib/ageing";
 import { getAgeingColor } from "./overview";
 import { AiTurnaroundReport } from "@/components/ai-turnaround-report";
 import PlantOperationView from "./plant-operation";
-import { FileSpreadsheet, Check, Eye, EyeOff } from "lucide-react";
+import { FileSpreadsheet, Check, Eye, EyeOff, ChevronDown } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Segmented } from "@/components/ui/segmented";
 
@@ -314,6 +314,33 @@ function ReportBuilder() {
         : null,
     [fabData],
   );
+
+  // Drill-down open state for the two balance summary rows.
+  const [openRelBal, setOpenRelBal] = useState(false);
+  const [openAssignBal, setOpenAssignBal] = useState(false);
+
+  // Per-project groupings for drill-down.
+  const relBalByProject = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of relBalData?.rows ?? []) {
+      m.set(r.project, (m.get(r.project) ?? 0) + (r.releaseBalanceComputedMt ?? 0));
+    }
+    return [...m.entries()]
+      .map(([project, wt]) => ({ project, wt }))
+      .filter((p) => p.wt > 0)
+      .sort((a, b) => b.wt - a.wt);
+  }, [relBalData]);
+
+  const assignByProject = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of fabData?.rows ?? []) {
+      m.set(r.project, (m.get(r.project) ?? 0) + (r.assignmentBalanceCalcMt ?? 0));
+    }
+    return [...m.entries()]
+      .map(([project, wt]) => ({ project, wt }))
+      .filter((p) => p.wt > 0)
+      .sort((a, b) => b.wt - a.wt);
+  }, [fabData]);
 
   // Per-activity subtotals (Qty + Wt) appended to the Excel export, ordered by
   // the canonical process sequence, under an "Activity-wise subtotal" heading.
@@ -536,36 +563,88 @@ function ReportBuilder() {
               {(releaseBalComputedMt != null || assignmentBalMt != null) && (
                 <>
                   {releaseBalComputedMt != null && (
-                    <TableRow className="bg-muted/20 hover:bg-muted/20 font-semibold">
-                      <TableCell className="text-xs font-semibold">Release Bal. Computed</TableCell>
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                      <TableCell className="text-right tabular-nums font-bold">
-                        {releaseBalComputedMt.toFixed(3)} t
-                      </TableCell>
-                      {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
-                        <TableCell key={i} />
+                    <>
+                      <TableRow
+                        className="bg-muted/20 hover:bg-muted/40 cursor-pointer transition-colors font-semibold"
+                        onClick={() => setOpenRelBal((v) => !v)}
+                      >
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0 ${openRelBal ? "rotate-180" : ""}`} />
+                            <span className="text-xs font-semibold">Release Bal. Computed</span>
+                          </div>
+                        </TableCell>
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell className="text-right tabular-nums font-bold">
+                          {releaseBalComputedMt.toFixed(3)} t
+                        </TableCell>
+                        {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
+                          <TableCell key={i} />
+                        ))}
+                      </TableRow>
+                      {openRelBal && relBalByProject.map((p) => (
+                        <TableRow key={`rel-${p.project}`} className="bg-muted/10 hover:bg-muted/10">
+                          <TableCell className="pl-8 text-xs font-mono text-muted-foreground">{p.project}</TableCell>
+                          <TableCell />
+                          <TableCell />
+                          <TableCell />
+                          <TableCell />
+                          <TableCell />
+                          <TableCell className="text-right tabular-nums text-xs font-semibold">
+                            {p.wt.toFixed(3)} t
+                          </TableCell>
+                          {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
+                            <TableCell key={i} />
+                          ))}
+                        </TableRow>
                       ))}
-                    </TableRow>
+                    </>
                   )}
                   {assignmentBalMt != null && (
-                    <TableRow className="bg-muted/20 hover:bg-muted/20 font-semibold">
-                      <TableCell className="text-xs font-semibold">Assignment Balance</TableCell>
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                      <TableCell className="text-right tabular-nums font-bold">
-                        {assignmentBalMt.toFixed(3)} t
-                      </TableCell>
-                      {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
-                        <TableCell key={i} />
+                    <>
+                      <TableRow
+                        className="bg-muted/20 hover:bg-muted/40 cursor-pointer transition-colors font-semibold"
+                        onClick={() => setOpenAssignBal((v) => !v)}
+                      >
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0 ${openAssignBal ? "rotate-180" : ""}`} />
+                            <span className="text-xs font-semibold">Assignment Balance</span>
+                          </div>
+                        </TableCell>
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell className="text-right tabular-nums font-bold">
+                          {assignmentBalMt.toFixed(3)} t
+                        </TableCell>
+                        {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
+                          <TableCell key={i} />
+                        ))}
+                      </TableRow>
+                      {openAssignBal && assignByProject.map((p) => (
+                        <TableRow key={`assign-${p.project}`} className="bg-muted/10 hover:bg-muted/10">
+                          <TableCell className="pl-8 text-xs font-mono text-muted-foreground">{p.project}</TableCell>
+                          <TableCell />
+                          <TableCell />
+                          <TableCell />
+                          <TableCell />
+                          <TableCell />
+                          <TableCell className="text-right tabular-xs text-xs font-semibold">
+                            {p.wt.toFixed(3)} t
+                          </TableCell>
+                          {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
+                            <TableCell key={i} />
+                          ))}
+                        </TableRow>
                       ))}
-                    </TableRow>
+                    </>
                   )}
                 </>
               )}
