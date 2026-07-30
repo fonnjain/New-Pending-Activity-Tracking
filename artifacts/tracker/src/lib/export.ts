@@ -94,9 +94,12 @@ function numFmt(decimals: number): string {
 // summaryRows from each section are written in order (section rows, then
 // section summaryRows) before moving to the next section. The grand-total row
 // still sums across all sections' rows.
+// `blankRows` inserts that many blank/empty rows after this section's summary
+// rows, useful for a visual gap between the overview block and the detail data.
 export type XlsxSection = {
   rows: any[];
   summaryRows?: XlsxSummaryRow[];
+  blankRows?: number;
 };
 
 // A single worksheet definition for a multi-sheet export.
@@ -185,8 +188,11 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
 
   // Track summary row numbers → level so borders/fills can differ from data rows.
   const summaryRowLevel = new Map<number, "subtotal" | "total">();
+  // Track blank gap row numbers so the border loop can skip them entirely.
+  const blankRowNums = new Set<number>();
 
-  // Write each section: data rows then that section's summary rows.
+  // Write each section: data rows, then that section's summary rows, then any
+  // blank gap rows (for visual spacing between the overview and detail blocks).
   // Track which Excel row numbers have a custom background color (MFC backfill).
   const rowBgColor = new Map<number, string>();
 
@@ -215,6 +221,10 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
         cell.font = { bold: true };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fillColor } };
       }
+    }
+    for (let i = 0; i < (section.blankRows ?? 0); i++) {
+      const gapRow = ws.addRow({});
+      blankRowNums.add(gapRow.number as number);
     }
   }
 
@@ -249,6 +259,8 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
   const totalsRowNum = hasTotals && allRows.length ? ws.rowCount : -1;
 
   for (let r = 1; r <= ws.rowCount; r++) {
+    // Skip blank gap rows entirely — no borders, no fill.
+    if (blankRowNums.has(r)) continue;
     const row = ws.getRow(r);
     const level = summaryRowLevel.get(r);
     const side = level === "total" ? heavy : level === "subtotal" ? medDark : thin;

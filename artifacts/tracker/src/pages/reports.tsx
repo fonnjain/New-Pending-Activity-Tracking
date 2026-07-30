@@ -401,6 +401,14 @@ function ReportBuilder() {
       specialRows.push({ label: "Awaiting Assignment", values, level: "subtotal" });
     }
 
+    // Grand total across every activity (special + regular).
+    const fullTotalQty =
+      [...groups.values()].reduce((s, g) => s + g.balanceQty, 0) +
+      specialRows.reduce((s, sr) => s + (sr.values.balanceQty ?? 0), 0);
+    const fullTotalWtMt =
+      [...groups.values()].reduce((s, g) => s + g.balanceWt / 1000, 0) +
+      specialRows.reduce((s, sr) => s + (sr.values.balanceWtMt ?? 0), 0);
+
     return [
       { label: "ACTIVITY-WISE SUBTOTAL", values: {} },
       ...specialRows,
@@ -413,6 +421,8 @@ function ReportBuilder() {
         if (g.ageCount) values.ageingDays = Math.round(g.ageSum / g.ageCount);
         return { label: act, values, level: "subtotal" as const };
       }),
+      // Full grand total row after all activity subtotals.
+      { label: "FULL TOTAL", values: { balanceQty: fullTotalQty, balanceWtMt: fullTotalWtMt }, level: "total" as const },
     ];
   }, [rows, relBalEnriched, assignBalEnriched, enrichedRows]);
 
@@ -509,7 +519,11 @@ function ReportBuilder() {
 
     // Build XlsxSection[] for one activity's rows — one section per contractor
     // (sorted A→Z), each followed by a contractor-subtotal summaryRow.
-    function contractorSections(mtRows: EnrichedMt[]): XlsxSection[] {
+    // `activityPrefix`: when provided the subtotal label becomes
+    // "Activity — Contractor" (used in the Summary sheet so each row identifies
+    // both dimensions; omit for per-activity sheets where the activity is
+    // already the sheet name).
+    function contractorSections(mtRows: EnrichedMt[], activityPrefix?: string): XlsxSection[] {
       const groups = new Map<string, EnrichedMt[]>();
       for (const r of mtRows) {
         const key = r.contractor ?? "Unassigned";
@@ -524,7 +538,8 @@ function ReportBuilder() {
           const aged = cRows.filter((r) => r.ageingDays != null);
           const vals: Record<string, number> = { balanceQty: qty, balanceWtMt: wt };
           if (aged.length) vals.ageingDays = Math.round(aged.reduce((s, r) => s + r.ageingDays!, 0) / aged.length);
-          return { rows: cRows, summaryRows: [{ label: contractor, vals, level: "subtotal" as const, values: vals }] };
+          const label = activityPrefix ? `${activityPrefix} — ${contractor}` : contractor;
+          return { rows: cRows, summaryRows: [{ label, level: "subtotal" as const, values: vals }] };
         });
     }
 
@@ -550,36 +565,39 @@ function ReportBuilder() {
     const relBalMt    = withMt(relBalEnriched);
     const assignBalMt = withMt(assignBalEnriched);
 
-    // Summary sheet data sections: per-activity → per-contractor → subtotals.
+    // Summary sheet data sections: per-activity → per-contractor (labelled as
+    // "Activity — Contractor") → activity total.
     const summaryDataSections: XlsxSection[] = [];
     if (relBalMt.length) {
-      summaryDataSections.push(...contractorSections(relBalMt));
+      summaryDataSections.push(...contractorSections(relBalMt, "Release Bal."));
       summaryDataSections.push({ rows: [], summaryRows: [activityTotalRow("Release Bal. — Total", relBalMt)] });
     }
     if (assignBalMt.length) {
-      summaryDataSections.push(...contractorSections(assignBalMt));
+      summaryDataSections.push(...contractorSections(assignBalMt, "Awaiting Assignment"));
       summaryDataSections.push({ rows: [], summaryRows: [activityTotalRow("Awaiting Assignment — Total", assignBalMt)] });
     }
     for (const act of [...byActivity.keys()].sort(compareActivity)) {
       const actMt = withMt(byActivity.get(act)!);
-      summaryDataSections.push(...contractorSections(actMt));
+      summaryDataSections.push(...contractorSections(actMt, act));
       summaryDataSections.push({ rows: [], summaryRows: [activityTotalRow(`${act} — Total`, actMt)] });
     }
 
     const date = new Date().toISOString().slice(0, 10);
     void exportToXlsxSheets(`report_${tag}_${date}.xlsx`, [
       {
-        // Summary sheet: activity-wise overview at TOP (Section 1), then data
-        // grouped by activity → contractor with subtotals (Sections 2+).
-        // Grand-total row auto-appended by writeSheet across all data rows.
+        // Summary sheet:
+        //  Section 1: activity-wise overview (subtotals + FULL TOTAL) + 1 blank gap row
+        //  Sections 2+: data grouped Activity→Contractor (subtotals labelled
+        //               "Activity — Contractor") + activity total rows
+        //  Auto-appended TOTAL row sums all data rows at the very bottom.
         name: "Summary",
         columns: EXPORT_COLUMNS,
         sections: [
-          { rows: [], summaryRows: activitySubtotals },
+          { rows: [], summaryRows: activitySubtotals, blankRows: 1 },
           ...summaryDataSections,
         ],
       },
-      // Release Bal. sheet — contractor sections + grand total.
+      // Release Bal. sheet — contractor subtotals (label = contractor only).
       ...(relBalMt.length
         ? [{ name: "Release Bal.", columns: EXPORT_COLUMNS, sections: contractorSections(relBalMt) }]
         : []),
@@ -587,7 +605,7 @@ function ReportBuilder() {
       ...(assignBalMt.length
         ? [{ name: "Awaiting Assign.", columns: EXPORT_COLUMNS, sections: contractorSections(assignBalMt) }]
         : []),
-      // One sheet per activity — contractor sections + grand total.
+      // One sheet per activity — contractor subtotals (label = contractor only).
       ...[...byActivity.keys()].sort(compareActivity).map((act) => ({
         name: act,
         columns: EXPORT_COLUMNS,
