@@ -16,10 +16,30 @@ export const recordPoolTable = pgTable("record_pool", {
   id: serial("id").primaryKey(),
   hash: text("hash").notNull().unique(),
   job: text("job").notNull(),
+  // Derived from Mark No. (WIP col I) via parse.ts `deriveMark`. Four rules, in order:
+  //
+  //   Rule A (bare): Mark No. has no space/backslash and col A + col G are both
+  //     empty (Earthing / General / RSJ Pole). structure = ""; mNo = the whole token.
+  //
+  //   Rule B (IS/SC/S): col G (alias) is exactly "IS", "SC", or "S". Structure is
+  //     taken from Mark No. — the body after stripping "<project> <alias>-", an
+  //     optional "VT" prefix, and an inner numeric project token (proMno). Alias is
+  //     used only to detect this rule class. Produces a 4-part markNumber.
+  //
+  //   Rule D (backslash): Mark No. contains a "\". structure = everything before the
+  //     LAST "\" with any leading "<project> " stripped; mNo = everything after the
+  //     last "\". Multiple backslashes are handled by lastIndexOf — the structure
+  //     itself can therefore contain backslashes (e.g. "SS-890\2TA5P"). Alias is
+  //     ignored for structure derivation entirely.
+  //
+  //   Rule C (standard, fallback): Mark No. = "<project> <alias>-<mNo>". structure
+  //     = col G (alias) used directly. This is the common case for most TLT marks.
+  //
+  // Summary: Alias is the structure in Rule C (the common case). In Rules B and D
+  // the structure is parsed out of Mark No.; in Rule A there is no structure at all.
   structure: text("structure").notNull(),
   markTail: text("mark_tail").notNull(),
   markId: text("mark_id").notNull(),
-  // Derived from "Mark No." (col H). See parse.ts deriveMark for the three cases.
   mNo: text("m_no").notNull().default(""),
   // IS/SC/S rows only (the 4-part markNumber's project-mark token); "" otherwise.
   proMno: text("pro_mno").notNull().default(""),
