@@ -193,6 +193,21 @@ const REPORT_COLUMNS: XlsxColumn[] = [
   { label: "Hole Operation", field: "holeOperationLabel" },
 ];
 
+// Simplified 10-column export format for the Job Wise Report download.
+// Drops all turnaround / lifecycle / velocity / ETA columns; adds Last Op Date.
+const EXPORT_COLUMNS: XlsxColumn[] = [
+  { label: "Activity",        field: "activity" },
+  { label: "Section",         field: "section" },
+  { label: "Mark No.",        field: "markId" },
+  { label: "Length",          field: "length",             numeric: true, decimals: 2 },
+  { label: "Width",           field: "width",              numeric: true, decimals: 2 },
+  { label: "Balance Qty",     field: "balanceQty",         numeric: true, decimals: 0, total: true },
+  { label: "Balance Wt (kg)", field: "balanceWt",          numeric: true, decimals: 2, total: true },
+  { label: "Contractor",      field: "contractor" },
+  { label: "Last Op Date",    field: "lastProductionDate" },
+  { label: "Ageing (days)",   field: "ageingDays",         numeric: true, decimals: 0 },
+];
+
 // Derived hole-operation display labels (no emojis).
 const HOLE_OP_LABELS: Record<string, string> = {
   PUNCHING: "Punching",
@@ -448,14 +463,14 @@ function ReportBuilder() {
     }
     const activitySheets = [...byActivity.keys()]
       .sort(compareActivity)
-      .map((act) => ({ name: act, columns: REPORT_COLUMNS, rows: byActivity.get(act)! }));
+      .map((act) => ({ name: act, columns: EXPORT_COLUMNS, rows: byActivity.get(act)! }));
     const date = new Date().toISOString().slice(0, 10);
     void exportToXlsxSheets(`report_${tag}_${date}.xlsx`, [
       {
         name: "Summary",
-        columns: REPORT_COLUMNS,
+        columns: EXPORT_COLUMNS,
         rows: enrichedRows,
-        summaryRows: [...activitySubtotals, ...holeOpSubtotals],
+        summaryRows: activitySubtotals,
       },
       ...activitySheets,
     ]).catch((err) => console.error("[Export] report failed", err));
