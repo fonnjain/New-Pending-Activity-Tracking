@@ -417,18 +417,73 @@ function ActivityDrillRow({
 // Activity Performance Table — flat summary with expandable drill-down
 // ---------------------------------------------------------------------------
 
+function BalanceDrillRow({
+  label,
+  totalMt,
+  projectRows,
+}: {
+  label: string;
+  totalMt: number;
+  projectRows: { project: string; weightMt: number }[];
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <TableRow
+        className="bg-muted/20 hover:bg-muted/40 cursor-pointer transition-colors"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <TableCell>
+          <div className="flex items-center gap-2">
+            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
+            <span className="font-semibold text-xs">{label}</span>
+          </div>
+        </TableCell>
+        <TableCell />
+        <TableCell />
+        <TableCell className="text-right tabular-nums font-bold">
+          {totalMt.toFixed(3)} t
+        </TableCell>
+        <TableCell />
+        <TableCell />
+        <TableCell className="text-right text-muted-foreground text-xs">
+          {projectRows.length}
+        </TableCell>
+      </TableRow>
+      {open && (
+        <TableRow>
+          <TableCell colSpan={7} className="p-0 bg-muted/10">
+            <div className="border-y divide-y">
+              {projectRows.map((p) => (
+                <div key={p.project} className="flex items-center justify-between px-8 py-1.5 text-xs">
+                  <span className="font-mono text-muted-foreground">{p.project}</span>
+                  <span className="tabular-nums font-semibold">{p.weightMt.toFixed(3)} t</span>
+                </div>
+              ))}
+            </div>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
+  );
+}
+
 function ActivityPerformanceTable({
   activities,
   sortedActivities,
   moveWindow,
   releaseBalanceComputedMt,
   assignmentBalanceMt,
+  releaseBalRows,
+  assignmentRows,
 }: {
   activities: Map<string, any[]>;
   sortedActivities: string[];
   moveWindow: { start: string; end: string };
   releaseBalanceComputedMt: number | null;
   assignmentBalanceMt: number | null;
+  releaseBalRows: { project: string; releaseBalanceComputedMt: number | null }[];
+  assignmentRows: { project: string; assignmentBalanceCalcMt: number }[];
 }) {
   const { settings } = useSettings();
 
@@ -456,6 +511,30 @@ function ActivityPerformanceTable({
     [activities, sortedActivities],
   );
 
+  // Group release balance rows by project, summing structure-level weights.
+  const relBalByProject = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of releaseBalRows) {
+      m.set(r.project, (m.get(r.project) ?? 0) + (r.releaseBalanceComputedMt ?? 0));
+    }
+    return [...m.entries()]
+      .map(([project, weightMt]) => ({ project, weightMt }))
+      .filter((p) => p.weightMt > 0)
+      .sort((a, b) => b.weightMt - a.weightMt);
+  }, [releaseBalRows]);
+
+  // Group assignment balance rows by project.
+  const assignByProject = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of assignmentRows) {
+      m.set(r.project, (m.get(r.project) ?? 0) + (r.assignmentBalanceCalcMt ?? 0));
+    }
+    return [...m.entries()]
+      .map(([project, weightMt]) => ({ project, weightMt }))
+      .filter((p) => p.weightMt > 0)
+      .sort((a, b) => b.weightMt - a.weightMt);
+  }, [assignmentRows]);
+
   if (sortedActivities.length === 0) return null;
 
   return (
@@ -479,30 +558,18 @@ function ActivityPerformanceTable({
           </TableHeader>
           <TableBody>
             {releaseBalanceComputedMt != null && (
-              <TableRow className="bg-muted/20 hover:bg-muted/20">
-                <TableCell className="font-semibold text-xs">Release Bal. Computed</TableCell>
-                <TableCell />
-                <TableCell />
-                <TableCell className="text-right tabular-nums font-bold">
-                  {releaseBalanceComputedMt.toFixed(3)} t
-                </TableCell>
-                <TableCell />
-                <TableCell />
-                <TableCell />
-              </TableRow>
+              <BalanceDrillRow
+                label="Release Bal. Computed"
+                totalMt={releaseBalanceComputedMt}
+                projectRows={relBalByProject}
+              />
             )}
             {assignmentBalanceMt != null && (
-              <TableRow className="bg-muted/20 hover:bg-muted/20">
-                <TableCell className="font-semibold text-xs">Assignment Balance</TableCell>
-                <TableCell />
-                <TableCell />
-                <TableCell className="text-right tabular-nums font-bold">
-                  {assignmentBalanceMt.toFixed(3)} t
-                </TableCell>
-                <TableCell />
-                <TableCell />
-                <TableCell />
-              </TableRow>
+              <BalanceDrillRow
+                label="Assignment Balance"
+                totalMt={assignmentBalanceMt}
+                projectRows={assignByProject}
+              />
             )}
             {sortedActivities.map((act) => (
               <ActivityDrillRow
@@ -917,6 +984,8 @@ function ActivityContent() {
             moveWindow={moveWindow}
             releaseBalanceComputedMt={releaseBalanceComputedMt}
             assignmentBalanceMt={assignmentBalanceMt}
+            releaseBalRows={relBalData?.rows ?? []}
+            assignmentRows={fabData?.rows ?? []}
           />
           <ActivityDailyMovementTable
             activities={activities}
