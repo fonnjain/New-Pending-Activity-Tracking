@@ -2249,21 +2249,21 @@ router.get("/contractor-movement", async (_req, res): Promise<void> => {
 // ---------------------------------------------------------------------------
 // Startup cache warm-up
 // ---------------------------------------------------------------------------
-// Called once at boot (fire-and-forget) to pre-populate the in-process
-// membershipCache and identityStateCache for all known imports. Without this,
-// the first request after a cold restart hits the raw SQL join (~60 s on prod).
-// The new import_rows(import_id) index makes the query fast, but pre-loading
-// means zero latency for the first user after a deploy.
+// Warms only the most recent WARM_LIMIT imports. The new import_rows(import_id)
+// index makes any uncached import load in ~400 ms, so warming everything is
+// unnecessary and caused OOM crashes on production (21 imports × 55 K rows
+// each filled the 2 GB heap before the server accepted any requests).
+const WARM_LIMIT = 3;
+
 export async function warmMembershipCaches(): Promise<void> {
-  const allImports = await db
+  const recent = await db
     .select({ id: importsTable.id })
     .from(importsTable)
-    .orderBy(desc(importsTable.id));
+    .orderBy(desc(importsTable.id))
+    .limit(WARM_LIMIT);
 
-  for (const imp of allImports) {
-    // loadMembership populates membershipCache as a side-effect.
+  for (const imp of recent) {
     await loadMembership(db, imp.id);
-    // loadIdentityStates populates identityStateCache as a side-effect.
     await loadIdentityStates(imp.id);
   }
 }

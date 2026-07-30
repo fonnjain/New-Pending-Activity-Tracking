@@ -193,19 +193,19 @@ const REPORT_COLUMNS: XlsxColumn[] = [
   { label: "Hole Operation", field: "holeOperationLabel" },
 ];
 
-// Simplified 10-column export format for the Job Wise Report download.
-// Drops all turnaround / lifecycle / velocity / ETA columns; adds Last Op Date.
+// 10-column export format. Column order requested by user; weight in MT.
+// `balanceWtMt` is a computed field added during export preprocessing (÷1000).
 const EXPORT_COLUMNS: XlsxColumn[] = [
-  { label: "Activity",        field: "activity" },
-  { label: "Section",         field: "section" },
   { label: "Mark No.",        field: "markId" },
-  { label: "Length",          field: "length",             numeric: true, decimals: 2 },
-  { label: "Width",           field: "width",              numeric: true, decimals: 2 },
-  { label: "Balance Qty",     field: "balanceQty",         numeric: true, decimals: 0, total: true },
-  { label: "Balance Wt (kg)", field: "balanceWt",          numeric: true, decimals: 2, total: true },
+  { label: "Section",         field: "section" },
+  { label: "Length",          field: "length",              numeric: true, decimals: 2 },
+  { label: "Width",           field: "width",               numeric: true, decimals: 2 },
+  { label: "Balance Qty",     field: "balanceQty",          numeric: true, decimals: 0, total: true },
+  { label: "Balance Wt (MT)", field: "balanceWtMt",         numeric: true, decimals: 3, total: true },
+  { label: "Activity",        field: "activity" },
   { label: "Contractor",      field: "contractor" },
   { label: "Last Op Date",    field: "lastProductionDate" },
-  { label: "Ageing (days)",   field: "ageingDays",         numeric: true, decimals: 0 },
+  { label: "Ageing (days)",   field: "ageingDays",          numeric: true, decimals: 0 },
 ];
 
 // Derived hole-operation display labels (no emojis).
@@ -390,13 +390,13 @@ function ReportBuilder() {
     const specialRows: XlsxSummaryRow[] = [];
     if (relBalEnriched.length) {
       const g = aggregateEnriched(relBalEnriched);
-      const values: Record<string, number> = { balanceQty: g.balanceQty, balanceWt: g.balanceWt };
+      const values: Record<string, number> = { balanceQty: g.balanceQty, balanceWtMt: g.balanceWt / 1000 };
       if (g.ageCount) values.ageingDays = Math.round(g.ageSum / g.ageCount);
       specialRows.push({ label: "Release Bal.", values, level: "subtotal" });
     }
     if (assignBalEnriched.length) {
       const g = aggregateEnriched(assignBalEnriched);
-      const values: Record<string, number> = { balanceQty: g.balanceQty, balanceWt: g.balanceWt };
+      const values: Record<string, number> = { balanceQty: g.balanceQty, balanceWtMt: g.balanceWt / 1000 };
       if (g.ageCount) values.ageingDays = Math.round(g.ageSum / g.ageCount);
       specialRows.push({ label: "Awaiting Assignment", values, level: "subtotal" });
     }
@@ -408,7 +408,7 @@ function ReportBuilder() {
         const g = groups.get(act)!;
         const values: Record<string, number> = {
           balanceQty: g.balanceQty,
-          balanceWt: g.balanceWt,
+          balanceWtMt: g.balanceWt / 1000,
         };
         if (g.ageCount) values.ageingDays = Math.round(g.ageSum / g.ageCount);
         return { label: act, values, level: "subtotal" as const };
@@ -501,42 +501,98 @@ function ReportBuilder() {
       /[^\w-]+/g,
       "-",
     );
-    // Activity sheets: exclude Release Bal. and Awaiting Assignment (they get
-    // their own dedicated sheets placed before C).
+
+    // Preprocess: add balanceWtMt (kg → MT) so the column reads the right value.
+    type EnrichedMt = typeof enrichedRows[number] & { balanceWtMt: number | null };
+    const withMt = (arr: typeof enrichedRows): EnrichedMt[] =>
+      arr.map((r) => ({ ...r, balanceWtMt: r.balanceWt != null ? r.balanceWt / 1000 : null }));
+
+    // Build XlsxSection[] for one activity's rows — one section per contractor
+    // (sorted A→Z), each followed by a contractor-subtotal summaryRow.
+    function contractorSections(mtRows: EnrichedMt[]): XlsxSection[] {
+      const groups = new Map<string, EnrichedMt[]>();
+      for (const r of mtRows) {
+        const key = r.contractor ?? "Unassigned";
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(r);
+      }
+      return [...groups.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([contractor, cRows]) => {
+          const qty = cRows.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
+          const wt  = cRows.reduce((s, r) => s + (r.balanceWtMt ?? 0), 0);
+          const aged = cRows.filter((r) => r.ageingDays != null);
+          const vals: Record<string, number> = { balanceQty: qty, balanceWtMt: wt };
+          if (aged.length) vals.ageingDays = Math.round(aged.reduce((s, r) => s + r.ageingDays!, 0) / aged.length);
+          return { rows: cRows, summaryRows: [{ label: contractor, vals, level: "subtotal" as const, values: vals }] };
+        });
+    }
+
+    // A single "activity total" summary row placed after all contractor sections.
+    function activityTotalRow(label: string, mtRows: EnrichedMt[]): XlsxSummaryRow {
+      const qty = mtRows.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
+      const wt  = mtRows.reduce((s, r) => s + (r.balanceWtMt ?? 0), 0);
+      const aged = mtRows.filter((r) => r.ageingDays != null);
+      const values: Record<string, number> = { balanceQty: qty, balanceWtMt: wt };
+      if (aged.length) values.ageingDays = Math.round(aged.reduce((s, r) => s + r.ageingDays!, 0) / aged.length);
+      return { label, values, level: "total" as const };
+    }
+
+    // Group otherEnriched by activity for the per-activity sheets.
     const byActivity = new Map<string, typeof enrichedRows>();
     for (const r of otherEnriched) {
       const key = activityDisplayKey(r.activity, r.category);
       if (!byActivity.has(key)) byActivity.set(key, []);
       byActivity.get(key)!.push(r);
     }
-    const activitySheets = [...byActivity.keys()]
-      .sort(compareActivity)
-      .map((act) => ({ name: act, columns: EXPORT_COLUMNS, rows: byActivity.get(act)! }));
 
-    // Release Bal. and Awaiting Assignment get their own sheets (before C).
-    const specialSheets = [
-      ...(relBalEnriched.length
-        ? [{ name: "Release Bal.", columns: EXPORT_COLUMNS, rows: relBalEnriched }]
-        : []),
-      ...(assignBalEnriched.length
-        ? [{ name: "Awaiting Assign.", columns: EXPORT_COLUMNS, rows: assignBalEnriched }]
-        : []),
-    ];
+    // Pre-compute MT rows for special groups.
+    const relBalMt    = withMt(relBalEnriched);
+    const assignBalMt = withMt(assignBalEnriched);
+
+    // Summary sheet data sections: per-activity → per-contractor → subtotals.
+    const summaryDataSections: XlsxSection[] = [];
+    if (relBalMt.length) {
+      summaryDataSections.push(...contractorSections(relBalMt));
+      summaryDataSections.push({ rows: [], summaryRows: [activityTotalRow("Release Bal. — Total", relBalMt)] });
+    }
+    if (assignBalMt.length) {
+      summaryDataSections.push(...contractorSections(assignBalMt));
+      summaryDataSections.push({ rows: [], summaryRows: [activityTotalRow("Awaiting Assignment — Total", assignBalMt)] });
+    }
+    for (const act of [...byActivity.keys()].sort(compareActivity)) {
+      const actMt = withMt(byActivity.get(act)!);
+      summaryDataSections.push(...contractorSections(actMt));
+      summaryDataSections.push({ rows: [], summaryRows: [activityTotalRow(`${act} — Total`, actMt)] });
+    }
 
     const date = new Date().toISOString().slice(0, 10);
     void exportToXlsxSheets(`report_${tag}_${date}.xlsx`, [
       {
-        // Summary sheet: activity-wise subtotals pinned at the TOP (Section 1),
-        // then all data rows below (Section 2). Grand-total row auto-appended.
+        // Summary sheet: activity-wise overview at TOP (Section 1), then data
+        // grouped by activity → contractor with subtotals (Sections 2+).
+        // Grand-total row auto-appended by writeSheet across all data rows.
         name: "Summary",
         columns: EXPORT_COLUMNS,
         sections: [
           { rows: [], summaryRows: activitySubtotals },
-          { rows: enrichedRows },
+          ...summaryDataSections,
         ],
       },
-      ...specialSheets,
-      ...activitySheets,
+      // Release Bal. sheet — contractor sections + grand total.
+      ...(relBalMt.length
+        ? [{ name: "Release Bal.", columns: EXPORT_COLUMNS, sections: contractorSections(relBalMt) }]
+        : []),
+      // Awaiting Assignment sheet — same.
+      ...(assignBalMt.length
+        ? [{ name: "Awaiting Assign.", columns: EXPORT_COLUMNS, sections: contractorSections(assignBalMt) }]
+        : []),
+      // One sheet per activity — contractor sections + grand total.
+      ...[...byActivity.keys()].sort(compareActivity).map((act) => ({
+        name: act,
+        columns: EXPORT_COLUMNS,
+        sections: contractorSections(withMt(byActivity.get(act)!)),
+      })),
     ]).catch((err) => console.error("[Export] report failed", err));
   };
 
@@ -550,18 +606,29 @@ function ReportBuilder() {
     );
   }
 
-  const visible = otherEnriched.slice(0, TABLE_CAP);
+  // otherEnriched grouped by activity key (process-ordered), respecting TABLE_CAP.
+  const otherByActivity = useMemo(() => {
+    const visible = otherEnriched.slice(0, TABLE_CAP);
+    const groups = new Map<string, typeof enrichedRows>();
+    for (const r of visible) {
+      const key = activityDisplayKey(r.activity, r.category);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(r);
+    }
+    return [...groups.entries()].sort(([a], [b]) => compareActivity(a, b));
+  }, [otherEnriched, enrichedRows]);
 
   // Shared row renderer for itemwise sections (Release Bal, Assignment Bal, main).
+  // Column order: Mark No. | Section | Length | Width | Bal Qty | Bal Wt (MT) | Activity | Contractor | Last Op Date | Ageing
   const renderItemRow = (r: typeof enrichedRows[number], i: number, keyPrefix: string) => (
     <TableRow key={`${keyPrefix}-${r.markId}-${i}`}>
-      <TableCell>{r.activity ?? "-"}</TableCell>
-      <TableCell>{r.section ?? "-"}</TableCell>
       <TableCell className="font-mono text-xs">{r.markId}</TableCell>
+      <TableCell>{r.section ?? "-"}</TableCell>
       <TableCell className="text-right tabular-nums">{num(r.length)}</TableCell>
       <TableCell className="text-right tabular-nums">{num(r.width)}</TableCell>
       <TableCell className="text-right tabular-nums">{num(r.balanceQty)}</TableCell>
-      <TableCell className="text-right tabular-nums">{formatWeight(r.balanceWt)}</TableCell>
+      <TableCell className="text-right tabular-nums">{formatWeightMT(r.balanceWt ?? 0)}</TableCell>
+      <TableCell>{r.activity ?? "-"}</TableCell>
       <TableCell>{r.contractor ?? "Unassigned"}</TableCell>
       <TableCell className="text-xs text-muted-foreground tabular-nums">
         {r.lastProductionDate ?? "-"}
@@ -574,18 +641,94 @@ function ReportBuilder() {
 
   const itemwiseColumnHeaders = (
     <TableRow className="bg-muted/30 hover:bg-muted/30">
-      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Activity</TableCell>
-      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Section</TableCell>
       <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Mark No.</TableCell>
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Section</TableCell>
       <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Length</TableCell>
       <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Width</TableCell>
-      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Balance Qty</TableCell>
-      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Balance Wt</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Bal Qty</TableCell>
+      <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Bal Wt (MT)</TableCell>
+      <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Activity</TableCell>
       <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Contractor</TableCell>
       <TableCell className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Last Op Date</TableCell>
       <TableCell className="text-right font-semibold text-xs uppercase tracking-wider text-muted-foreground">Ageing</TableCell>
     </TableRow>
   );
+
+  // Render one activity segment grouped by contractor, with a contractor subtotal
+  // after each contractor's marks and an activity-level total at the very end.
+  // Columns in the new order: Mark No. | Section | Length | Width | Qty | Wt (MT) |
+  //                           Activity | Contractor | Last Op Date | Ageing
+  const renderActivityGroup = (
+    label: string,
+    actRows: typeof enrichedRows,
+    prefix: string,
+  ) => {
+    if (!actRows.length) return null;
+    const cGroups = new Map<string, typeof enrichedRows>();
+    for (const r of actRows) {
+      const k = r.contractor ?? "Unassigned";
+      if (!cGroups.has(k)) cGroups.set(k, []);
+      cGroups.get(k)!.push(r);
+    }
+    const sorted = [...cGroups.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const allQty = actRows.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
+    const allWt  = actRows.reduce((s, r) => s + (r.balanceWt  ?? 0), 0);
+    const allAged = actRows.filter((r) => r.ageingDays != null);
+    const allAvg  = allAged.length
+      ? Math.round(allAged.reduce((s, r) => s + r.ageingDays!, 0) / allAged.length)
+      : null;
+
+    const subtotalRow = (
+      rowKey: string,
+      rowLabel: string,
+      cRows: typeof enrichedRows,
+      className: string,
+      bold: boolean,
+    ) => {
+      const qty  = cRows.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
+      const wt   = cRows.reduce((s, r) => s + (r.balanceWt  ?? 0), 0);
+      const aged = cRows.filter((r) => r.ageingDays != null);
+      const avg  = aged.length
+        ? Math.round(aged.reduce((s, r) => s + r.ageingDays!, 0) / aged.length)
+        : null;
+      return (
+        <TableRow key={rowKey} className={`${className} hover:${className}`}>
+          <TableCell className={`text-xs pl-6 ${bold ? "font-bold" : "font-semibold italic text-muted-foreground"}`}>
+            {rowLabel}
+          </TableCell>
+          <TableCell className="text-xs text-muted-foreground">{cRows.length.toLocaleString()} marks</TableCell>
+          <TableCell />
+          <TableCell />
+          <TableCell className={`text-right tabular-nums ${bold ? "font-bold" : "font-semibold"}`}>{num(qty)}</TableCell>
+          <TableCell className={`text-right tabular-nums ${bold ? "font-bold" : "font-semibold"}`}>{formatWeightMT(wt)}</TableCell>
+          <TableCell />
+          <TableCell />
+          <TableCell />
+          <TableCell className={`text-right tabular-nums ${bold ? "font-bold" : "font-semibold"} ${getAgeingColor(avg)}`}>
+            {avg !== null ? `${avg}d` : "-"}
+          </TableCell>
+        </TableRow>
+      );
+    };
+
+    return (
+      <>
+        {/* Activity header */}
+        <TableRow className="bg-muted/40 hover:bg-muted/40">
+          <TableCell colSpan={COL_COUNT} className="text-xs font-semibold text-muted-foreground pl-4">
+            {label} — {actRows.length.toLocaleString()} marks
+          </TableCell>
+        </TableRow>
+        {/* Per-contractor groups */}
+        {sorted.flatMap(([contractor, cRows]) => [
+          ...cRows.map((r, i) => renderItemRow(r, i, `${prefix}-${contractor}`)),
+          subtotalRow(`${prefix}-${contractor}-sub`, contractor, cRows, "bg-muted/20", false),
+        ])}
+        {/* Activity-level total */}
+        {subtotalRow(`${prefix}-total`, `${label} — Total`, actRows, "bg-muted/50", true)}
+      </>
+    );
+  };
 
   return (
     <Card className="border-border">
@@ -611,7 +754,7 @@ function ReportBuilder() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-xs text-muted-foreground">
             {rows.length.toLocaleString()} rows • {totalQty.toLocaleString()} pcs •{" "}
-            {formatWeight(totalWt)}
+            {formatWeightMT(totalWt)}
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -692,7 +835,7 @@ function ReportBuilder() {
                       <TableCell></TableCell>
                       <TableCell></TableCell>
                       <TableCell className="text-right tabular-nums">{num(s.qty)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{formatWeight(s.wt)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatWeightMT(s.wt)}</TableCell>
                       <TableCell></TableCell>
                       <TableCell></TableCell>
                       <TableCell className={`text-right tabular-nums ${getAgeingColor(s.avgAge)}`}>
@@ -713,26 +856,11 @@ function ReportBuilder() {
                     </TableCell>
                   </TableRow>
                   {itemwiseColumnHeaders}
-                  {/* Release Bal. Computed group — initial-cutting marks, above C */}
-                  {relBalEnriched.length > 0 && (
-                    <TableRow className="bg-muted/40 hover:bg-muted/40">
-                      <TableCell colSpan={COL_COUNT} className="text-xs font-semibold text-muted-foreground pl-4">
-                        Release Bal. Computed — {relBalEnriched.length.toLocaleString()} marks
-                      </TableCell>
-                    </TableRow>
+                  {renderActivityGroup("Release Bal.", relBalEnriched, "rb")}
+                  {renderActivityGroup("Awaiting Assignment", assignBalEnriched, "ab")}
+                  {otherByActivity.map(([act, actRows]) =>
+                    renderActivityGroup(act, actRows, `act-${act}`)
                   )}
-                  {relBalEnriched.map((r, i) => renderItemRow(r, i, "rb"))}
-                  {/* Awaiting Assignment group — JCNS+Authorized with no contractor, above C */}
-                  {assignBalEnriched.length > 0 && (
-                    <TableRow className="bg-muted/40 hover:bg-muted/40">
-                      <TableCell colSpan={COL_COUNT} className="text-xs font-semibold text-muted-foreground pl-4">
-                        Awaiting Assignment — {assignBalEnriched.length.toLocaleString()} marks
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {assignBalEnriched.map((r, i) => renderItemRow(r, i, "ab"))}
-                  {/* All remaining marks (C with contractor, plus RFI, NH, B … TS, G, Y) */}
-                  {visible.map((r, i) => renderItemRow(r, i, "main"))}
                 </>
               )}
               {rows.length === 0 && (
