@@ -108,7 +108,7 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
   if (!latestImport) {
     const empty: ErpRulesResponse = {
       available: false,
-      totalRules: 18,
+      totalRules: 19,
       passingRules: 0,
       failingRules: 0,
       rules: [],
@@ -170,6 +170,8 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
       ["T6", "Marks at any activity other than C or blank ALWAYS have a Last Production Entry Date.", "TLT"],
       ["T7", "Every \"Job Card WIP\" activity falls in the Quality Check or Galvanising set.", "TLT"],
       ["T8", "The five buckets partition the TLT file exactly.", "TLT"],
+      ["X1", "Every structure code that ends with one or more dots (e.g. DN30E., 4QMD3.) must have its own Order Review row distinct from the un-dotted variant.", "TLT"],
+      ["X2", "Every TLT WIP structure that carries pool balance must have a corresponding Order Review row.", "TLT"],
     ].map(([id, label, scope]) => ({
       id: id as string,
       label: label as string,
@@ -491,10 +493,42 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
     })),
   );
 
+  // -------------------------------------------------------------------------
+  // X2: Every TLT WIP structure with pool balance must have an Order Review row.
+  //
+  // Structures that appear in the WIP file but have no matching OR entry cannot
+  // be attributed to a confirmed contract quantity and are invisible to all
+  // order-vs-fabrication comparisons (Fab Completion, Generated OR chain, etc.).
+  // One representative pool row is shown per (project, structure) pair to
+  // avoid flooding the sample list with individual mark rows.
+  // Dotted structures caught by X1 are included here too — if X1 also fails
+  // the same structure appears in both rules, which is intentional.
+  // -------------------------------------------------------------------------
+  const unmatchedByStructure = new Map<string, PoolRow>();
+  for (const r of tlt) {
+    const key = `${r.project ?? ""}\x00${r.structure}`;
+    if (!orSet.has(key) && !unmatchedByStructure.has(key)) {
+      unmatchedByStructure.set(key, r);
+    }
+  }
+
+  const r_x2 = ruleResult(
+    "X2",
+    "Every TLT WIP structure that carries pool balance must have a corresponding Order Review row. " +
+    "Structures with no OR row cannot be attributed to a confirmed contract quantity and will not appear " +
+    "in order-vs-fabrication comparisons (Fab Completion, Generated OR chain, Consistency Panel). " +
+    "Fix by adding the missing row(s) to the Order Review file before the next upload.",
+    "TLT",
+    [...unmatchedByStructure.values()].map((r) => ({
+      row: r,
+      fields: { Structure: r.structure, Project: r.project },
+    })),
+  );
+
   const allRules: ErpRuleResult[] = [
     r_u1, r_u2, r_u3, r_u4, r_u5, r_u6, r_u7, r_u8, r_u9,
     r_t1, r_t2, r_t3, r_t4, r_t5, r_t6, r_t7, r_t8,
-    r_x1,
+    r_x1, r_x2,
   ];
 
   const totalRules = allRules.length;
