@@ -1,5 +1,5 @@
 import { useMemo, useState, Fragment } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, useListInventoryMfcBatchColors, getListInventoryMfcBatchColorsQueryKey, useUpsertInventoryMfcBatchColor, useDeleteInventoryMfcBatchColor, type InventoryMfcBatchColor, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow, type ErpRulesResponse, type ErpRuleResult } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, useListInventoryMfcBatchColors, getListInventoryMfcBatchColorsQueryKey, useUpsertInventoryMfcBatchColor, useDeleteInventoryMfcBatchColor, useGetInventoryBuckets, getGetInventoryBucketsQueryKey, type InventoryMfcBatchColor, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow, type ErpRulesResponse, type ErpRuleResult } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
@@ -3048,6 +3048,79 @@ function BldColorDot({ color }: { color: string }) {
   );
 }
 
+// Row for a (project, mfcBatch) pair that has WIP marks but no colour assigned yet.
+function UnassignedBldRow({
+  project,
+  mfcBatch,
+  onSaved,
+  isSaving,
+}: {
+  project: string;
+  mfcBatch: string;
+  onSaved: (project: string, mfcBatch: string, color: BldColorName) => void;
+  isSaving: boolean;
+}) {
+  const [color, setColor] = useState<BldColorName>("yellow");
+  const [open, setOpen] = useState(false);
+
+  const handleSave = () => {
+    onSaved(project, mfcBatch, color);
+    setOpen(false);
+  };
+
+  return (
+    <tr className="hover:bg-muted/30">
+      <td className="px-3 py-2 font-mono font-medium">{project}</td>
+      <td className="px-3 py-2">
+        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border border-border/60 text-muted-foreground">
+          {mfcBatch}
+        </span>
+      </td>
+      {open ? (
+        <>
+          <td className="px-3 py-1.5" colSpan={2}>
+            <div className="flex items-center gap-2 flex-wrap">
+              {MFC_COLOR_OPTS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setColor(c)}
+                  title={BLD_COLOR_LABEL[c]}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] transition-colors
+                    ${color === c ? "border-primary bg-primary/10 font-semibold" : "border-border/60 hover:bg-muted/40"}`}
+                >
+                  <BldColorDot color={c} />
+                  {BLD_COLOR_LABEL[c]}
+                </button>
+              ))}
+            </div>
+          </td>
+          <td className="px-2 py-1.5">
+            <div className="flex gap-1">
+              <Button size="sm" className="h-6 text-[11px] px-2" onClick={handleSave} disabled={isSaving}>
+                Save
+              </Button>
+              <Button size="sm" variant="outline" className="h-6 text-[11px] px-2" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+            </div>
+          </td>
+        </>
+      ) : (
+        <>
+          <td className="px-3 py-2 text-muted-foreground text-[11px] italic">No colour</td>
+          <td />
+          <td className="px-2 py-1.5">
+            <Button size="sm" variant="outline" className="h-6 text-[11px] px-2" onClick={() => setOpen(true)}>
+              Assign colour
+            </Button>
+          </td>
+        </>
+      )}
+    </tr>
+  );
+}
+
 function BucketListDatesContent() {
   const { toast } = useToast();
   const { data: authStatus } = useGetAuthStatus({ query: { queryKey: getGetAuthStatusQueryKey() } });
@@ -3055,6 +3128,11 @@ function BucketListDatesContent() {
 
   const { data: entries = [], isLoading } = useListInventoryMfcBatchColors({
     query: { queryKey: getListInventoryMfcBatchColorsQueryKey() },
+  });
+
+  // All (project, mfcBatch) pairs that have live WIP marks.
+  const { data: bucketsData, isLoading: bucketsLoading } = useGetInventoryBuckets({
+    query: { queryKey: getGetInventoryBucketsQueryKey() },
   });
 
   const upsertMutation = useUpsertInventoryMfcBatchColor({
@@ -3099,14 +3177,72 @@ function BucketListDatesContent() {
     [entries],
   );
 
+  // Pairs with live WIP marks that have no colour entry yet.
+  const unassigned = useMemo(() => {
+    const assignedKeys = new Set(entries.map((e) => `${e.project}\u0001${e.mfcBatch}`));
+    const seen = new Set<string>();
+    const result: { project: string; mfcBatch: string }[] = [];
+    for (const r of (bucketsData?.rows ?? [])) {
+      if (!r.hasWipMarks) continue;
+      const key = `${r.project}\u0001${r.mfcBatch}`;
+      if (assignedKeys.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      result.push({ project: r.project, mfcBatch: r.mfcBatch });
+    }
+    return result.sort((a, b) => a.project.localeCompare(b.project) || a.mfcBatch.localeCompare(b.mfcBatch));
+  }, [bucketsData, entries]);
+
+  const handleAssignNew = (project: string, mfcBatch: string, color: BldColorName) => {
+    upsertMutation.mutate({
+      data: { project, mfcBatch, color, dateOfClientMfc: undefined, projectStartDate: undefined },
+    });
+  };
+
   const missingCount = sorted.filter((e) => !e.dateOfClientMfc || !e.projectStartDate).length;
 
-  if (isLoading) {
+  if (isLoading || bucketsLoading) {
     return <div className="py-12 text-center text-sm text-muted-foreground">Loading...</div>;
   }
 
   return (
     <div className="space-y-4">
+      {/* ── Unassigned (no colour yet) ── */}
+      {unassigned.length > 0 && (
+        <Card className="border-destructive/40">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base uppercase tracking-wider text-destructive/80">
+              {unassigned.length} Project{unassigned.length !== 1 ? "s / Batches" : " / Batch"} — No Colour Assigned
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-destructive/5 text-muted-foreground uppercase tracking-wider border-b border-border">
+                    <th className="text-left px-3 py-2 font-semibold">Project</th>
+                    <th className="text-left px-3 py-2 font-semibold">MFC Batch</th>
+                    <th className="text-left px-3 py-2 font-semibold">Colour</th>
+                    <th className="px-3 py-2" colSpan={2} />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {unassigned.map((r) => (
+                    <UnassignedBldRow
+                      key={`${r.project}\u0001${r.mfcBatch}`}
+                      project={r.project}
+                      mfcBatch={r.mfcBatch}
+                      onSaved={handleAssignNew}
+                      isSaving={upsertMutation.isPending}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Assigned entries ── */}
       <Card className="border-border">
         <CardHeader className="pb-2">
           <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
@@ -3125,7 +3261,7 @@ function BucketListDatesContent() {
           )}
           {sorted.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">
-              No entries yet. Assign a colour on the Bucket List page first.
+              No colour entries yet. Use the &quot;Assign colour&quot; button above to add one.
             </p>
           ) : (
             <div className="border border-border rounded-lg overflow-hidden">
