@@ -487,10 +487,11 @@ function JobDashboardContent() {
   }, [exporting, isAll, isNtlt, sortedProjects, orderByJob, relBalComputedByJob, byActivity, toast]);
 
   // Reconciliation guard: all marks must be accounted for in exactly one bucket.
-  // Sum of (all phases' weight) + release balance (initial cutting, in kg)
-  // must equal totalWt (all marks' balance weight).
-  // A large shortfall indicates that release balance came from a different import
-  // (the cross-import scoping bug), or some marks have no known phase mapping.
+  // bucketTotal = sum of all phase weights (including phases.dispatch for FG)
+  //             + release balance (Initial Cutting marks, in kg).
+  // Must equal totalWt (every record_pool row's balance weight × copies).
+  // A persistent shortfall > 1 MT means some marks have no phase mapping;
+  // a negative shortfall means phases double-counted a mark.
   // IMPORTANT: this hook must stay BEFORE the selectedJob early-return below to
   // satisfy React's Rules of Hooks (hooks must run on every render unconditionally).
   const reconciliationWarning = useMemo(() => {

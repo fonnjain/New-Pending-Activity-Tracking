@@ -499,18 +499,16 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
   // Structures that appear in the WIP file but have no matching OR entry cannot
   // be attributed to a confirmed contract quantity and are invisible to all
   // order-vs-fabrication comparisons (Fab Completion, Generated OR chain, etc.).
-  // One representative pool row is shown per (project, structure) pair to
-  // avoid flooding the sample list with individual mark rows.
+  // ALL pool rows for unmatched structures are passed to ruleResult so that
+  // violatingWeightMt reflects the true tonnage exposure, not just one
+  // representative mark per structure.  The sample shown in the UI is still
+  // capped at 10 rows by ruleResult.
   // Dotted structures caught by X1 are included here too — if X1 also fails
   // the same structure appears in both rules, which is intentional.
   // -------------------------------------------------------------------------
-  const unmatchedByStructure = new Map<string, PoolRow>();
-  for (const r of tlt) {
-    const key = `${r.project ?? ""}\x00${r.structure}`;
-    if (!orSet.has(key) && !unmatchedByStructure.has(key)) {
-      unmatchedByStructure.set(key, r);
-    }
-  }
+  const unmatchedRows = tlt.filter(
+    (r) => !orSet.has(`${r.project ?? ""}\x00${r.structure}`),
+  );
 
   const r_x2 = ruleResult(
     "X2",
@@ -519,7 +517,7 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
     "in order-vs-fabrication comparisons (Fab Completion, Generated OR chain, Consistency Panel). " +
     "Fix by adding the missing row(s) to the Order Review file before the next upload.",
     "TLT",
-    [...unmatchedByStructure.values()].map((r) => ({
+    unmatchedRows.map((r) => ({
       row: r,
       fields: { Structure: r.structure, Project: r.project },
     })),
