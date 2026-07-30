@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, importRowsTable, recordPoolTable, importsTable } from "@workspace/db";
+import { db, importRowsTable, recordPoolTable, importsTable, orderReviewRowsTable } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
 
 const router: IRouter = Router();
@@ -108,7 +108,7 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
   if (!latestImport) {
     const empty: ErpRulesResponse = {
       available: false,
-      totalRules: 19,
+      totalRules: 18,
       passingRules: 0,
       failingRules: 0,
       rules: [],
@@ -458,9 +458,43 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
     })),
   );
 
+  // -------------------------------------------------------------------------
+  // X1: Every dotted structure code must have its own Order Review row.
+  //
+  // Trailing dots encode distinct physical tower types (e.g. DN30E = +3 m
+  // extension, DN30E. = +6 m, DN30E.. = +9 m).  If both a bare form and a
+  // dotted form appear in WIP, each MUST have its own OR entry.  This rule
+  // catches a future parser change that collapses trailing dots, because the
+  // join rate would immediately drop below 100% and this rule would fail.
+  // -------------------------------------------------------------------------
+  const orPairs = await db
+    .select({ project: orderReviewRowsTable.project, structure: orderReviewRowsTable.structure })
+    .from(orderReviewRowsTable);
+  const orSet = new Set(orPairs.map((o) => `${o.project}\x00${o.structure}`));
+
+  // Dotted structures in WIP with no OR counterpart.
+  const dottedWithoutOr = tlt.filter(
+    (r) =>
+      r.structure.endsWith(".") &&
+      !orSet.has(`${r.project ?? ""}\x00${r.structure}`),
+  );
+
+  const r_x1 = ruleResult(
+    "X1",
+    "Every structure code that ends with one or more dots (e.g. DN30E., 4QMD3.) must have its own Order Review row distinct from the un-dotted variant. " +
+    "Trailing dots encode extension height; they are NOT typos. " +
+    "This rule fails if a parser collapses trailing dots, causing silent weight mis-attribution.",
+    "TLT",
+    dottedWithoutOr.map((r) => ({
+      row: r,
+      fields: { Structure: r.structure, Project: r.project },
+    })),
+  );
+
   const allRules: ErpRuleResult[] = [
     r_u1, r_u2, r_u3, r_u4, r_u5, r_u6, r_u7, r_u8, r_u9,
     r_t1, r_t2, r_t3, r_t4, r_t5, r_t6, r_t7, r_t8,
+    r_x1,
   ];
 
   const totalRules = allRules.length;

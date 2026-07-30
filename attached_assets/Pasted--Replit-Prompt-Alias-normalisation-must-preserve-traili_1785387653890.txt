@@ -1,0 +1,132 @@
+# Replit Prompt — Alias normalisation must preserve trailing dots
+### Plus two outstanding verifications
+
+**Why this is urgent.** If the app strips trailing dots from structure codes, five structure
+pairs are being silently merged — and the join would **still report 100%**, so nothing
+surfaces as an error anywhere. 451.217 MT would simply sit in the wrong buckets.
+
+---
+
+## The evidence
+
+Your own 4QMD3 finding was right, and it generalises. On **project 886 the number of dots
+encodes the extension height**:
+
+| Structure | Sub-Type | Order Qty |
+|---|---|---|
+| `DN2E` | +3 MTR EXTN | 10.925 |
+| `DN2E.` | +6 MTR EXTN | 7.995 |
+| `DN30E` | +3 MTR EXTN | 1.814 |
+| `DN30E.` | +6 MTR EXTN | 10.021 |
+| `DN30E..` | +9 MTR EXTN | 2.503 |
+
+`DN30E..` is not a typo. Every dotted structure also has its own Order Review row with its
+own order quantity — 900/`4QMD3` 834.502 vs 900/`4QMD3.` 166.900; 938/`4G1` 16.104 vs
+938/`4G1.` 24.156; 938/`4TB` 45.833 vs 938/`4TB.` 61.110.
+
+**Join test:** preserving dots matches **763 of 763** structures (100%). Stripping them
+matches 758 of 758 (100%) — same rate, five fewer structures. Stripping loses information
+and gains nothing.
+
+---
+
+## The prompt
+
+```
+Three things — one possible bug, two verifications.
+
+1. ALIAS NORMALISATION — does it strip trailing dots?
+
+Please paste the normalisation function used for structure codes / alias on both sides of
+the WIP-to-Order-Review join.
+
+Structure codes MUST preserve trailing dots. Your 4QMD3 finding was correct and it
+generalises further than that structure. On project 886 the number of dots encodes the
+extension height:
+
+  DN2E     +3 MTR EXTN   order qty 10.925
+  DN2E.    +6 MTR EXTN   order qty  7.995
+  DN30E    +3 MTR EXTN   order qty  1.814
+  DN30E.   +6 MTR EXTN   order qty 10.021
+  DN30E..  +9 MTR EXTN   order qty  2.503
+
+DN30E.. is a +9 metre extension, not a typo. These are physically different towers.
+
+Every dotted structure has its own Order Review row with its own order quantity:
+  900/4QMD3  834.502  vs  900/4QMD3.  166.900
+  900/4QDD3  214.055  vs  900/4QDD3.  214.055
+  938/4G1     16.104  vs  938/4G1.     24.156
+  938/4TB     45.833  vs  938/4TB.     61.110
+  938/4BPI     4.376  vs  938/4BPI.     7.876
+
+Eight dotted aliases exist across TLT carrying 2,945 marks / 451.217 MT.
+
+I verified the join both ways: preserving dots matches 763 of 763 structures (100%);
+stripping matches 758 of 758 (100%). Same match rate, five fewer structures. So stripping
+costs information and buys nothing.
+
+Note this is ASYMMETRIC. Project code normalisation should KEEP stripping trailing dots
+(862. -> 862 is a genuine artefact on a numeric ID). Only the structure code side must
+preserve them.
+
+If the current code strips dots from alias, please fix it and tell me how many
+(project, structure) pairs merge back apart. If it already preserves them, say so and I
+will close this.
+
+Be aware this is the dangerous kind of bug: if dots are being stripped, the join still
+reports 100% and nothing looks wrong anywhere. It would only show up as weight landing in
+the wrong structure rows.
+
+2. FIX D — I still need an actual exported figure
+
+You have reported the Total column fixed twice, and both times the export I received showed
+0 of 146 data rows populated with a grand TOTAL of 0. Your last reply predicted the next
+export would show 6,593.950.
+
+Please generate a real export and tell me the actual value in the grand TOTAL row, and how
+many data rows have a non-empty Total. Not a code reading — the figure from a generated
+file.
+
+3. REGRESSION CHECK after the copies fix
+
+The copies fix touched five files and moved figures on most pages. Please confirm these
+against the 29-Jul import (id=32), TLT. All are measured directly from WIP_29-07-2026.xls
+and should match exactly:
+
+  Release Balance      2,148.912 MT
+  Cutting              2,524.695 MT
+  Assignment Balance   1,077.668 MT
+  Quality Check        1,920.343 MT
+  Galvanising          1,944.613 MT
+  FG WIP               2,232.207 MT
+  --------------------------------
+  Five buckets total  10,770.770 MT   = the full TLT balance, zero unclassified
+  (Release + Cutting + Quality Check + Galvanising + FG WIP; Assignment is a
+   subset of Cutting and must NOT be added in)
+
+  Order Review join    768 of 768 structures (100%)
+  Project 821 Cutting  301 marks / 5.148 MT
+
+If the five buckets do not sum to 10,770.770 with zero unclassified marks, something in the
+copies fix is inconsistent between queries.
+
+4. SUGGESTED ERP RULE
+
+Worth adding to the ERP tab: a structure code and its dotted variants are DISTINCT
+structures. If both forms appear in WIP, both must have their own Order Review row. That
+would catch it if a future parser change collapses them, since the join match rate would
+not.
+
+Paste the normalisation function, the exported TOTAL figure, and the six bucket totals.
+```
+
+---
+
+## What to check in the reply
+
+- **The pasted normalisation function**, not a description of it. This is exactly the kind
+  of detail the Agent has characterised incorrectly before.
+- **An actual exported number** for Fix D. Third time of asking.
+- **Exact matches on the six buckets.** These are measured from the source file; a near
+  miss means the copies fix is inconsistent between queries, which would be worse than the
+  original bug because different pages would disagree in new ways.
