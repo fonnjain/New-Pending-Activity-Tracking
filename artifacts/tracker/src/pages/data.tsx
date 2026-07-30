@@ -1,5 +1,5 @@
 import { useMemo, useState, Fragment } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow, type ErpRulesResponse, type ErpRuleResult } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, useListInventoryMfcBatchColors, getListInventoryMfcBatchColorsQueryKey, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow, type ErpRulesResponse, type ErpRuleResult } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
@@ -16,7 +16,7 @@ import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { AiReviewPanel } from "@/components/ai-review-panel";
 import { StagedUploadPanel } from "@/components/staged-upload-panel";
 import { AccessDenied, LogoutButton } from "@/components/login-gate";
-import { useQueryClient, useQuery } from "@tanstack/react-query";
+import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Segmented } from "@/components/ui/segmented";
 import { ContractorSetupContent } from "@/pages/contractor-setup";
@@ -34,6 +34,7 @@ const ADMIN_TABS: Array<{ path: string; label: string; disabled?: boolean }> = [
   { path: "/warning-parameters", label: "Warning Parameters" },
   { path: "/thickness", label: "Thickness" },
   { path: "/erp-rules", label: "ERP Rules" },
+  { path: "/bucket-list-dates", label: "Bucket List Dates" },
   { path: "/users", label: "Users" },
 ];
 
@@ -77,6 +78,8 @@ function AdminTabbedPage() {
         <ThicknessContent />
       ) : active === "/erp-rules" ? (
         <ErpRulesContent />
+      ) : active === "/bucket-list-dates" ? (
+        <BucketListDatesContent />
       ) : active === "/users" ? (
         <UsersContent />
       ) : (
@@ -3006,5 +3009,283 @@ function ErpRuleRow({ rule }: { rule: ErpRuleResult }) {
         </div>
       )}
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bucket List Dates — per-project "Date of Client MFC" + "Project start date"
+// management tab on the Data page.
+//
+// STORAGE: dates live in inventory_project_dates, keyed on project only.
+// NEVER rebuilt from any WIP import — upload-independent by design.
+// Colours remain in inventory_mfc_batch_color (upload-independent too).
+// ---------------------------------------------------------------------------
+
+type ProjectDatesRow = {
+  project: string;
+  dateOfClientMfc: string | null;
+  projectStartDate: string | null;
+};
+
+const PROJECT_DATES_QK = ["/api/inventory-manual/project-dates"] as const;
+
+const MFC_DOT_CSS: Record<string, string> = {
+  white:  "bg-white border border-gray-400",
+  yellow: "bg-yellow-300",
+  green:  "bg-green-400",
+  blue:   "bg-blue-400",
+};
+
+function BucketListDatesContent() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data: authStatus } = useGetAuthStatus({ query: { queryKey: getGetAuthStatusQueryKey() } });
+  const canEdit = authStatus?.role === "admin";
+
+  // Project dates — upload-independent per-project table.
+  const { data: projectDates = [], isLoading: datesLoading } = useQuery<ProjectDatesRow[]>({
+    queryKey: PROJECT_DATES_QK,
+    queryFn: () =>
+      fetch("/api/inventory-manual/project-dates", { credentials: "include" }).then((r) => r.json()),
+  });
+
+  // MFC batch colours — per (project, batch), already in the system.
+  const { data: batchColours = [] } = useListInventoryMfcBatchColors({
+    query: { queryKey: getListInventoryMfcBatchColorsQueryKey() },
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (body: { project: string; dateOfClientMfc: string; projectStartDate: string }) =>
+      fetch("/api/inventory-manual/project-dates", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(async (r) => {
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: PROJECT_DATES_QK });
+      toast({ title: "Dates saved" });
+    },
+    onError: (err: Error) =>
+      toast({ variant: "destructive", title: "Save failed", description: err.message }),
+  });
+
+  // All known projects: union of colour-assigned + already-have-dates projects.
+  const allProjects = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of batchColours) set.add(c.project);
+    for (const d of projectDates) set.add(d.project);
+    return [...set].sort();
+  }, [batchColours, projectDates]);
+
+  const datesMap = useMemo(
+    () => new Map(projectDates.map((d) => [d.project, d])),
+    [projectDates],
+  );
+
+  // Index: project → batch colours sorted by batch letter.
+  const coloursMap = useMemo(() => {
+    const m = new Map<string, { mfcBatch: string; color: string }[]>();
+    for (const c of batchColours) {
+      if (!m.has(c.project)) m.set(c.project, []);
+      m.get(c.project)!.push({ mfcBatch: c.mfcBatch, color: c.color });
+    }
+    for (const arr of m.values()) arr.sort((a, b) => a.mfcBatch.localeCompare(b.mfcBatch));
+    return m;
+  }, [batchColours]);
+
+  // Missing-date projects first, then alphabetical within each group.
+  const sortedProjects = useMemo(
+    () =>
+      [...allProjects].sort((a, b) => {
+        const da = datesMap.get(a);
+        const db = datesMap.get(b);
+        const missingA = !da?.dateOfClientMfc || !da?.projectStartDate ? 0 : 1;
+        const missingB = !db?.dateOfClientMfc || !db?.projectStartDate ? 0 : 1;
+        if (missingA !== missingB) return missingA - missingB;
+        return a.localeCompare(b);
+      }),
+    [allProjects, datesMap],
+  );
+
+  if (datesLoading) {
+    return <div className="py-12 text-center text-sm text-muted-foreground">Loading...</div>;
+  }
+
+  const missingCount = sortedProjects.filter((p) => {
+    const d = datesMap.get(p);
+    return !d?.dateOfClientMfc || !d?.projectStartDate;
+  }).length;
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-border">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+            Bucket List — Project Dates
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground mb-3">
+            Per-project milestone dates (Date of Client MFC and Project Start Date). Dates
+            do not affect bucket placement — colour alone gates Pre-Bucket B. Dates are
+            stored permanently and are never rebuilt from an import.
+          </p>
+          {missingCount > 0 && (
+            <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              {missingCount} project{missingCount !== 1 ? "s" : ""} missing at least one
+              date — shown first below.
+            </div>
+          )}
+          {allProjects.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">
+              No projects with assigned batch colours yet. Assign a colour on the Bucket
+              List page first — projects appear here once any batch has a colour.
+            </p>
+          ) : (
+            <div className="border border-border rounded-lg overflow-hidden">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-muted/60 text-muted-foreground uppercase tracking-wider">
+                    <th className="text-left px-3 py-2 font-semibold">Project</th>
+                    <th className="text-left px-3 py-2 font-semibold">Batch Colours</th>
+                    <th className="text-left px-3 py-2 font-semibold">Date of Client MFC</th>
+                    <th className="text-left px-3 py-2 font-semibold">Project Start Date</th>
+                    {canEdit && <th className="px-3 py-2 w-24" />}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {sortedProjects.map((project) => (
+                    <ProjectDatesTableRow
+                      key={project}
+                      project={project}
+                      dates={datesMap.get(project) ?? null}
+                      colours={coloursMap.get(project) ?? []}
+                      canEdit={canEdit}
+                      onSave={(mfc, start) =>
+                        saveMutation.mutate({ project, dateOfClientMfc: mfc, projectStartDate: start })
+                      }
+                      isSaving={saveMutation.isPending}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ProjectDatesTableRow({
+  project,
+  dates,
+  colours,
+  canEdit,
+  onSave,
+  isSaving,
+}: {
+  project: string;
+  dates: ProjectDatesRow | null;
+  colours: { mfcBatch: string; color: string }[];
+  canEdit: boolean;
+  onSave: (dateOfClientMfc: string, projectStartDate: string) => void;
+  isSaving: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [mfcDate, setMfcDate] = useState(dates?.dateOfClientMfc ?? "");
+  const [startDate, setStartDate] = useState(dates?.projectStartDate ?? "");
+
+  const handleEdit = () => {
+    setMfcDate(dates?.dateOfClientMfc ?? "");
+    setStartDate(dates?.projectStartDate ?? "");
+    setEditing(true);
+  };
+
+  const handleSave = () => {
+    onSave(mfcDate, startDate);
+    setEditing(false);
+  };
+
+  const missingMfc = !dates?.dateOfClientMfc;
+  const missingStart = !dates?.projectStartDate;
+
+  return (
+    <tr className={`hover:bg-muted/30 ${missingMfc || missingStart ? "bg-amber-50/40 dark:bg-amber-950/10" : ""}`}>
+      <td className="px-3 py-2 font-mono font-medium">{project}</td>
+      <td className="px-3 py-2">
+        <div className="flex flex-wrap gap-1.5 items-center">
+          {colours.map(({ mfcBatch, color }) => (
+            <span key={mfcBatch} className="flex items-center gap-1">
+              <span
+                className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${MFC_DOT_CSS[color] ?? "bg-gray-300"}`}
+              />
+              <span className="text-[10px] text-muted-foreground">{mfcBatch}</span>
+            </span>
+          ))}
+          {colours.length === 0 && <span className="text-muted-foreground">—</span>}
+        </div>
+      </td>
+      {editing ? (
+        <>
+          <td className="px-3 py-1.5">
+            <input
+              type="date"
+              value={mfcDate}
+              onChange={(e) => setMfcDate(e.target.value)}
+              className="h-7 rounded border border-border bg-background px-2 text-xs w-36"
+            />
+          </td>
+          <td className="px-3 py-1.5">
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="h-7 rounded border border-border bg-background px-2 text-xs w-36"
+            />
+          </td>
+          {canEdit && (
+            <td className="px-3 py-1.5">
+              <div className="flex gap-1">
+                <Button size="sm" className="h-6 text-[11px] px-2" onClick={handleSave} disabled={isSaving}>
+                  Save
+                </Button>
+                <Button size="sm" variant="outline" className="h-6 text-[11px] px-2" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </td>
+          )}
+        </>
+      ) : (
+        <>
+          <td className="px-3 py-2">
+            {dates?.dateOfClientMfc ? (
+              formatDate(dates.dateOfClientMfc)
+            ) : (
+              <span className="text-amber-600 dark:text-amber-400 font-semibold">Missing</span>
+            )}
+          </td>
+          <td className="px-3 py-2">
+            {dates?.projectStartDate ? (
+              formatDate(dates.projectStartDate)
+            ) : (
+              <span className="text-amber-600 dark:text-amber-400 font-semibold">Missing</span>
+            )}
+          </td>
+          {canEdit && (
+            <td className="px-3 py-2">
+              <Button size="sm" variant="outline" className="h-6 text-[11px] px-2" onClick={handleEdit}>
+                Edit
+              </Button>
+            </td>
+          )}
+        </>
+      )}
+    </tr>
   );
 }

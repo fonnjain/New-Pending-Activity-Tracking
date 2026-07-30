@@ -124,3 +124,28 @@ export type InsertInventoryMfcBatchColor = z.infer<
 >;
 export type InventoryMfcBatchColorRow =
   typeof inventoryMfcBatchColorTable.$inferSelect;
+
+// Per-PROJECT milestone dates — "Date of Client MFC" and "Project start date".
+//
+// IMPORTANT — UPLOAD-INDEPENDENT: this table is keyed on project only and is
+// NEVER truncated, rebuilt, or modified by any WIP import/upload.  Dates
+// entered here persist across imports permanently.  Do NOT add import_id
+// scoping or wholesale deletes.  The gate for leaving Pre-Bucket B is colour
+// alone (see inventory_mfc_batch_color); these dates are informational only.
+//
+// Note: colour is per (project, mfc_batch) in inventory_mfc_batch_color;
+// dates are per PROJECT here.  Both tables are upload-independent.
+export const inventoryProjectDatesTable = pgTable("inventory_project_dates", {
+  project: text("project").primaryKey(),
+  dateOfClientMfc: text("date_of_client_mfc"),
+  projectStartDate: text("project_start_date"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type InventoryProjectDatesRow =
+  typeof inventoryProjectDatesTable.$inferSelect;

@@ -10,6 +10,7 @@ import {
   inventoryManualETable,
   inventorySideOverrideTable,
   inventoryMfcBatchColorTable,
+  inventoryProjectDatesTable,
 } from "@workspace/db";
 import { requireAuth } from "./auth";
 import {
@@ -276,6 +277,13 @@ router.delete(
 // MFC batch colour assignments — keyed by (project, mfcBatch) pair.
 // Each entry stores a colour (white/yellow/green/blue) and optional milestone
 // dates.  Applied as Excel cell background fills on the bucket list export.
+//
+// IMPORTANT — UPLOAD-INDEPENDENT: this table is keyed on (project, mfc_batch)
+// only and is NEVER truncated, rebuilt, or modified by any WIP import/upload.
+// A colour assignment is permanent: once a (project, batch) has a colour it
+// must never revert to Pre-Bucket B, even if the pair disappears from a later
+// WIP file and returns later.  Do NOT add import_id scoping or wholesale
+// deletes here.  The Pre-Bucket B gate is colour alone — dates do not block it.
 // ---------------------------------------------------------------------------
 
 router.get("/inventory-manual/mfc-batch-colors", async (_req, res): Promise<void> => {
@@ -346,6 +354,56 @@ router.delete(
         ),
       );
     res.status(204).end();
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Per-project milestone dates — "Date of Client MFC" and "Project start date".
+//
+// IMPORTANT — UPLOAD-INDEPENDENT: this table is keyed on project only and is
+// NEVER truncated, rebuilt, or modified by any WIP import/upload.  Dates
+// entered here persist across imports permanently.  Do NOT add import_id
+// scoping or wholesale deletes.  The gate for leaving Pre-Bucket B is colour
+// alone; these dates are informational only.
+// ---------------------------------------------------------------------------
+
+router.get("/inventory-manual/project-dates", async (_req, res): Promise<void> => {
+  const rows = await db
+    .select()
+    .from(inventoryProjectDatesTable)
+    .orderBy(inventoryProjectDatesTable.project);
+  res.json(rows);
+});
+
+router.put(
+  "/inventory-manual/project-dates",
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const { project, dateOfClientMfc, projectStartDate } = req.body ?? {};
+    if (!project || typeof project !== "string" || !project.trim()) {
+      res.status(400).json({ error: "project is required" });
+      return;
+    }
+    const now = new Date();
+    const [row] = await db
+      .insert(inventoryProjectDatesTable)
+      .values({
+        project: project.trim(),
+        dateOfClientMfc: dateOfClientMfc || null,
+        projectStartDate: projectStartDate || null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: inventoryProjectDatesTable.project,
+        set: {
+          dateOfClientMfc: dateOfClientMfc || null,
+          projectStartDate: projectStartDate || null,
+          updatedAt: sql`now()`,
+        },
+      })
+      .returning();
+    res.json(row);
   },
 );
 

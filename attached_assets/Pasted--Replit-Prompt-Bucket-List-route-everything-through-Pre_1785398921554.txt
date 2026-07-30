@@ -1,0 +1,132 @@
+# Replit Prompt — Bucket List: route everything through Pre-Bucket B until a colour is assigned
+### Plus a new "Bucket List" tab on the Data page for the two dates
+
+**Scope, measured on the 30-Jul import (TLT):**
+
+| | |
+|---|---|
+| Distinct projects | 68 |
+| MFC batches present | A, B, C, D, TEST, Z |
+| **(project, batch) combinations** | **119** |
+| Projects with 1 batch | 38 |
+| Projects with 2–4 batches | 30 |
+
+So the Pre-Bucket B holding area starts at up to 119 entries, and colour assignment is a
+119-row job at most, not 68.
+
+> **One thing to confirm before building:** the colour is currently assigned *somewhere* —
+> the existing Pre-Bucket B gate tests colour plus two dates. The prompt asks the Agent to
+> state where. If colour turns out to have no assignment UI at all, that needs building too
+> and should be raised before work starts.
+
+---
+
+## The prompt
+
+```
+Two changes to the Bucket List, plus a new tab on the Data page.
+
+CHANGE 1 — Everything in Buckets B, C and D moves to Pre-Bucket B until a colour exists
+
+Right now structures are distributed across Buckets B, C and D by the existing rules. Please
+change this so that ALL of them land in Pre-Bucket B instead, and only leave it once an MFC
+Batch Colour has been assigned.
+
+  - Bucket A is NOT affected. Leave its rule exactly as it is.
+  - Buckets B, C, D: a structure only reaches these once its (project, MFC batch) has a
+    colour assigned. Until then it sits in Pre-Bucket B.
+  - Once a colour exists, apply the EXISTING B/C/D logic unchanged to decide which of the
+    three it goes to. Do not modify those rules.
+
+CHANGE 2 — The gate is the COLOUR ALONE, not colour plus the two dates
+
+The current Pre-Bucket B gate requires a colour AND both "Date of Client MFC" and "Project
+start date". Please drop the two dates from the gate. Colour alone is sufficient to leave
+Pre-Bucket B. The dates can be filled in later and must not block bucket movement.
+
+CHANGE 3 — Colour assignment is permanent and per (project, MFC batch)
+
+Once a colour is assigned to a batch of a project, that assignment is permanent. That
+(project, batch) must NEVER return to Pre-Bucket B, on any subsequent import.
+
+This is important and this codebase has a history of getting it wrong in the opposite
+direction. Both release_balance_wip and assignment_balance_wip were being DELETED and
+rebuilt wholesale on every upload, which we have just finished fixing. The colour table must
+behave the opposite way:
+
+  - It is keyed on (project, mfc_batch) — NOT on import_id.
+  - It is NEVER truncated, never recomputed, never rebuilt from a WIP file.
+  - An upload may ADD new (project, batch) rows that have appeared, but must never delete or
+    overwrite an existing colour.
+  - If a (project, batch) disappears from a later WIP file and returns, it keeps its
+    original colour.
+
+Please state explicitly in the code comment that this table is upload-independent, so nobody
+later "fixes" it to match the import-scoped pattern.
+
+Note: a project can have several batches, and they can be coloured at different times. 30 of
+68 projects have more than one batch. So a project may legitimately have some batches in
+B/C/D and others still in Pre-Bucket B. That is correct behaviour, not a bug — do not force
+a project into a single bucket.
+
+CHANGE 4 — New "Bucket List" tab on the Data page
+
+Add a tab alongside the existing Data page tabs. It manages the two dates that are no longer
+part of the gate:
+
+  - List projects that are missing "Date of Client MFC" and/or "Project start date".
+  - Allow both dates to be entered and saved, per project.
+  - After saving, show the project with its MFC batch colour.
+  - Allow the saved values to be edited afterwards.
+
+Points to get right:
+
+  a) The two dates are per PROJECT. The colour is per (project, MFC batch). If a project has
+     several batches, show the colours for all of them on that project's row.
+  b) Saved dates must persist across imports, same as the colours — never rebuilt from a WIP
+     file.
+  c) Show projects missing EITHER date, and make clear which one is missing rather than just
+     flagging the project.
+  d) Editing must be available whether or not the project currently appears in the
+     missing-dates list.
+
+QUESTIONS — please answer these before or alongside implementing
+
+  1. Where is the MFC Batch Colour assigned today? Which page or tab, and what table stores
+     it? Paste the schema. If there is no assignment UI at all, say so — that would need
+     building before any of this works, and I want to know before you start.
+  2. Is the existing colour keyed on project, or on (project, batch)? If it is per project,
+     changing to per (project, batch) is part of this work and I need to know the migration
+     impact.
+  3. Where are "Date of Client MFC" and "Project start date" currently stored?
+
+DATA SCOPE for your reference, 30-Jul import, TLT:
+  68 distinct projects
+  119 distinct (project, MFC batch) combinations
+  batches present: A (32 projects), B (24), C (12), D (1), Z (49), TEST (1)
+
+Note "Z" is the blank-batch placeholder — 49 projects have unbatched marks. Decide with me
+whether a Z batch can be assigned a colour or should be treated differently. Also note a
+batch literally named "TEST" exists (61 marks / 11.251 MT on one project), which looks like
+it should not be in production data.
+
+Do not change the Bucket A rule, and do not change the internal B/C/D logic — only when a
+structure becomes eligible to reach them.
+
+When done, paste the colour table schema, the changed gate condition, and the new tab's
+save/edit handlers.
+```
+
+---
+
+## What to check in the reply
+
+- **The colour table must not be import-scoped.** Given two tables were just fixed for the
+  opposite problem, there is a real risk the Agent applies the import_id pattern here by
+  analogy. It would silently reset colours on every upload — the precise failure the
+  requirement is written to prevent.
+- **An answer on where colour is assigned today.** If there is no UI, this work is larger
+  than it looks.
+- **That Bucket A is untouched** and the internal B/C/D rules are unchanged.
+- **The Z-batch decision.** 49 of 68 projects have unbatched marks, so whatever is decided
+  affects most of the portfolio.

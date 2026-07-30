@@ -1427,12 +1427,14 @@ export default function InventoryView() {
   // MFC batch colour assignments — keyed by "project\u0001mfcBatch".
   const { data: mfcBatchColors = [] } = useListInventoryMfcBatchColors();
 
-  // Pre-B gate: a pair is "complete" when colour + BOTH dates are present.
-  // Pairs without a complete record sit in Pre-B; complete pairs sit in B.
+  // Pre-B gate (CHANGE 2): colour alone is sufficient to leave Pre-Bucket B.
+  // The two dates (dateOfClientMfc, projectStartDate) are informational only
+  // and must NOT block bucket movement — they can be filled in later via the
+  // "Bucket List" tab on the Data page.
   const colourCompleteKeys = useMemo(() => {
     const set = new Set<string>();
     for (const c of mfcBatchColors) {
-      if (c.color && c.dateOfClientMfc && c.projectStartDate) {
+      if (c.color) {
         set.add(`${c.project}\u0001${c.mfcBatch}`);
       }
     }
@@ -1567,16 +1569,27 @@ export default function InventoryView() {
 
   // Raw (job-filtered) arrays — not affected by deletion hide; used for
   // determining which bucket a restored project returns to.
+  //
+  // CHANGE 1: ALL B/C/D rows go through the Pre-B gate, not just B rows.
+  // A structure only reaches B, C, or D once its (project, mfcBatch) has a
+  // colour assigned.  Until then it sits in Pre-Bucket B.
+  // Bucket A is unchanged.
   const bucketA_raw = applyJobFilter(buckets.a);
+  const hasColour = (r: InventoryStructureCard) =>
+    colourCompleteKeys.has(`${r.project}\u0001${r.mfcBatch}`);
+  // Full B/C/D pools before the gate (used by restore/delete logic).
   const allBRows_raw = applyJobFilter(buckets.b);
-  const preBRows_raw = allBRows_raw.filter(
-    (r) => !colourCompleteKeys.has(`${r.project}\u0001${r.mfcBatch}`),
-  );
-  const bRows_raw = allBRows_raw.filter((r) =>
-    colourCompleteKeys.has(`${r.project}\u0001${r.mfcBatch}`),
-  );
-  const cRows_raw = applyJobFilter(buckets.c);
-  const dRows_raw = applyJobFilter(buckets.d);
+  const allCRows_raw = applyJobFilter(buckets.c);
+  const allDRows_raw = applyJobFilter(buckets.d);
+  // Colour-gated splits: no colour → Pre-B; colour → destination bucket.
+  const preBRows_raw = [
+    ...allBRows_raw.filter((r) => !hasColour(r)),
+    ...allCRows_raw.filter((r) => !hasColour(r)),
+    ...allDRows_raw.filter((r) => !hasColour(r)),
+  ];
+  const bRows_raw = allBRows_raw.filter(hasColour);
+  const cRows_raw = allCRows_raw.filter(hasColour);
+  const dRows_raw = allDRows_raw.filter(hasColour);
 
   // Display arrays — hidden projects removed.
   const bucketA = bucketA_raw.filter((r) => !deletedProjectSet.has(r.project));
