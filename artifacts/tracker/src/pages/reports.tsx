@@ -594,6 +594,9 @@ function ReportBuilder() {
         columns: EXPORT_COLUMNS,
         sections: [
           { rows: [], summaryRows: activitySubtotals, blankRows: 1 },
+          // Column-header row re-inserted before the detail block so the reader
+          // sees "Mark No. | Section | …" labels directly above the data.
+          { rows: [], headerRow: true },
           ...summaryDataSections,
         ],
       },

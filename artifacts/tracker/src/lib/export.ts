@@ -96,10 +96,14 @@ function numFmt(decimals: number): string {
 // still sums across all sections' rows.
 // `blankRows` inserts that many blank/empty rows after this section's summary
 // rows, useful for a visual gap between the overview block and the detail data.
+// `headerRow` inserts a dark styled column-header row (identical to row 1)
+// before this section's data rows — used to label a second block of data after
+// an overview + gap at the top of the same sheet.
 export type XlsxSection = {
   rows: any[];
   summaryRows?: XlsxSummaryRow[];
   blankRows?: number;
+  headerRow?: boolean;
 };
 
 // A single worksheet definition for a multi-sheet export.
@@ -190,13 +194,31 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
   const summaryRowLevel = new Map<number, "subtotal" | "total">();
   // Track blank gap row numbers so the border loop can skip them entirely.
   const blankRowNums = new Set<number>();
+  // Track secondary header row numbers (same dark styling as row 1).
+  const secondaryHeaderRowNums = new Set<number>();
 
-  // Write each section: data rows, then that section's summary rows, then any
-  // blank gap rows (for visual spacing between the overview and detail blocks).
+  // Write each section: optional secondary-header row, data rows, summary rows,
+  // blank gap rows.
   // Track which Excel row numbers have a custom background color (MFC backfill).
   const rowBgColor = new Map<number, string>();
 
   for (const section of sections) {
+    // Secondary header row: dark band identical to row 1, inserted before the
+    // section's data to label a second block of data after an overview block.
+    if (section.headerRow) {
+      const headerObj: Record<string, any> = {};
+      for (const c of columns) headerObj[c.field] = c.label;
+      const hRow = ws.addRow(headerObj);
+      const hRowNum = hRow.number as number;
+      hRow.height = 20;
+      for (let ci = 1; ci <= columns.length; ci++) {
+        const cell = hRow.getCell(ci);
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+      }
+      secondaryHeaderRowNums.add(hRowNum);
+    }
     for (const r of section.rows) {
       const rowObj: Record<string, any> = {};
       for (const c of columns) {
@@ -263,13 +285,14 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
     if (blankRowNums.has(r)) continue;
     const row = ws.getRow(r);
     const level = summaryRowLevel.get(r);
+    const isHeader = r === 1 || secondaryHeaderRowNums.has(r);
     const side = level === "total" ? heavy : level === "subtotal" ? medDark : thin;
     const bgArgb = rowBgColor.get(r);
     for (let c = 1; c <= columns.length; c++) {
       const cell = row.getCell(c);
       cell.border = {
-        top:    r === totalsRowNum ? totalsTop : (r === 1 ? thin : side),
-        bottom: r === 1 ? headerBottom : side,
+        top:    r === totalsRowNum ? totalsTop : (isHeader ? thin : side),
+        bottom: isHeader ? headerBottom : side,
         left:   side,
         right:  side,
       };
