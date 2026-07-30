@@ -1,4 +1,4 @@
-import { pgTable, integer, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, integer, primaryKey, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { importsTable } from "./imports";
@@ -17,7 +17,12 @@ export const importRowsTable = pgTable(
       .references(() => recordPoolTable.id),
     copies: integer("copies").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.importId, t.poolId] })],
+  (t) => [
+    primaryKey({ columns: [t.importId, t.poolId] }),
+    // Standalone index on import_id so Postgres can range-scan efficiently for
+    // "WHERE import_id = ?" without a full sequential scan of 1M+ rows.
+    index("import_rows_import_id_idx").on(t.importId),
+  ],
 );
 
 export const insertImportRowSchema = createInsertSchema(importRowsTable);

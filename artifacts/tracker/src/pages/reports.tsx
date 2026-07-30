@@ -352,8 +352,9 @@ function ReportBuilder() {
     [enrichedRows],
   );
 
-  // Per-activity subtotals (Qty + Wt) appended to the Excel export, ordered by
-  // the canonical process sequence, under an "Activity-wise subtotal" heading.
+  // Per-activity subtotals (Qty + Wt) for both the Excel export and on-screen
+  // summary. Ordered by the canonical process sequence, with Release Bal. and
+  // Awaiting Assignment prepended as the first two rows (before C).
   const activitySubtotals = useMemo<XlsxSummaryRow[]>(() => {
     const groups = new Map<
       string,
@@ -371,9 +372,38 @@ function ReportBuilder() {
       groups.set(key, g);
     }
     const ordered = [...groups.keys()].sort(compareActivity);
-    if (!ordered.length) return [];
+    if (!ordered.length && !relBalEnriched.length && !assignBalEnriched.length) return [];
+
+    // Helper to aggregate a set of enriched rows into subtotal values.
+    function aggregateEnriched(arr: typeof enrichedRows) {
+      return arr.reduce(
+        (acc, r) => ({
+          balanceQty: acc.balanceQty + (r.balanceQty ?? 0),
+          balanceWt: acc.balanceWt + (r.balanceWt ?? 0),
+          ageSum: acc.ageSum + (r.ageingDays ?? 0),
+          ageCount: acc.ageCount + (r.ageingDays != null ? 1 : 0),
+        }),
+        { balanceQty: 0, balanceWt: 0, ageSum: 0, ageCount: 0 },
+      );
+    }
+
+    const specialRows: XlsxSummaryRow[] = [];
+    if (relBalEnriched.length) {
+      const g = aggregateEnriched(relBalEnriched);
+      const values: Record<string, number> = { balanceQty: g.balanceQty, balanceWt: g.balanceWt };
+      if (g.ageCount) values.ageingDays = Math.round(g.ageSum / g.ageCount);
+      specialRows.push({ label: "Release Bal.", values, level: "subtotal" });
+    }
+    if (assignBalEnriched.length) {
+      const g = aggregateEnriched(assignBalEnriched);
+      const values: Record<string, number> = { balanceQty: g.balanceQty, balanceWt: g.balanceWt };
+      if (g.ageCount) values.ageingDays = Math.round(g.ageSum / g.ageCount);
+      specialRows.push({ label: "Awaiting Assignment", values, level: "subtotal" });
+    }
+
     return [
       { label: "ACTIVITY-WISE SUBTOTAL", values: {} },
+      ...specialRows,
       ...ordered.map((act) => {
         const g = groups.get(act)!;
         const values: Record<string, number> = {
@@ -381,10 +411,10 @@ function ReportBuilder() {
           balanceWt: g.balanceWt,
         };
         if (g.ageCount) values.ageingDays = Math.round(g.ageSum / g.ageCount);
-        return { label: act, values };
+        return { label: act, values, level: "subtotal" as const };
       }),
     ];
-  }, [rows]);
+  }, [rows, relBalEnriched, assignBalEnriched, enrichedRows]);
 
   // Hole-operation breakdown (marks + Qty + Wt) for both the Excel Summary sheet
   // and the on-screen chips. Derived/display only — coalesce null -> NOT_SET.
@@ -417,7 +447,8 @@ function ReportBuilder() {
   }, [holeOpBreakdown]);
 
   // On-screen activity-wise subtotals (marks + Qty + Wt), process-ordered,
-  // shown at the top of the table above the itemwise rows.
+  // shown at the top of the table above the itemwise rows. Release Bal. and
+  // Awaiting Assignment are prepended as the first two rows (before C).
   const subtotalRows = useMemo(() => {
     const groups = new Map<
       string,
@@ -435,7 +466,7 @@ function ReportBuilder() {
       }
       groups.set(key, g);
     }
-    return [...groups.keys()].sort(compareActivity).map((activity) => {
+    const activityRows = [...groups.keys()].sort(compareActivity).map((activity) => {
       const g = groups.get(activity)!;
       return {
         activity,
@@ -445,7 +476,24 @@ function ReportBuilder() {
         avgAge: g.ageCount ? Math.round(g.ageSum / g.ageCount) : null,
       };
     });
-  }, [rows]);
+    // Prepend Release Bal. and Awaiting Assignment rows.
+    const special: typeof activityRows = [];
+    if (relBalEnriched.length) {
+      const qty = relBalEnriched.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
+      const wt  = relBalEnriched.reduce((s, r) => s + (r.balanceWt  ?? 0), 0);
+      const aged = relBalEnriched.filter((r) => r.ageingDays != null);
+      special.push({ activity: "Release Bal.", marks: relBalEnriched.length, qty, wt,
+        avgAge: aged.length ? Math.round(aged.reduce((s, r) => s + r.ageingDays!, 0) / aged.length) : null });
+    }
+    if (assignBalEnriched.length) {
+      const qty = assignBalEnriched.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
+      const wt  = assignBalEnriched.reduce((s, r) => s + (r.balanceWt  ?? 0), 0);
+      const aged = assignBalEnriched.filter((r) => r.ageingDays != null);
+      special.push({ activity: "Awaiting Assignment", marks: assignBalEnriched.length, qty, wt,
+        avgAge: aged.length ? Math.round(aged.reduce((s, r) => s + r.ageingDays!, 0) / aged.length) : null });
+    }
+    return [...special, ...activityRows];
+  }, [rows, relBalEnriched, assignBalEnriched]);
 
   const handleExcel = () => {
     if (!rows.length) return;
@@ -453,10 +501,10 @@ function ReportBuilder() {
       /[^\w-]+/g,
       "-",
     );
-    // First sheet: the full report with activity-wise subtotals + grand total.
-    // Then one worksheet per activity (process-ordered) with its own TOTAL row.
+    // Activity sheets: exclude Release Bal. and Awaiting Assignment (they get
+    // their own dedicated sheets placed before C).
     const byActivity = new Map<string, typeof enrichedRows>();
-    for (const r of enrichedRows) {
+    for (const r of otherEnriched) {
       const key = activityDisplayKey(r.activity, r.category);
       if (!byActivity.has(key)) byActivity.set(key, []);
       byActivity.get(key)!.push(r);
@@ -464,14 +512,30 @@ function ReportBuilder() {
     const activitySheets = [...byActivity.keys()]
       .sort(compareActivity)
       .map((act) => ({ name: act, columns: EXPORT_COLUMNS, rows: byActivity.get(act)! }));
+
+    // Release Bal. and Awaiting Assignment get their own sheets (before C).
+    const specialSheets = [
+      ...(relBalEnriched.length
+        ? [{ name: "Release Bal.", columns: EXPORT_COLUMNS, rows: relBalEnriched }]
+        : []),
+      ...(assignBalEnriched.length
+        ? [{ name: "Awaiting Assign.", columns: EXPORT_COLUMNS, rows: assignBalEnriched }]
+        : []),
+    ];
+
     const date = new Date().toISOString().slice(0, 10);
     void exportToXlsxSheets(`report_${tag}_${date}.xlsx`, [
       {
+        // Summary sheet: activity-wise subtotals pinned at the TOP (Section 1),
+        // then all data rows below (Section 2). Grand-total row auto-appended.
         name: "Summary",
         columns: EXPORT_COLUMNS,
-        rows: enrichedRows,
-        summaryRows: activitySubtotals,
+        sections: [
+          { rows: [], summaryRows: activitySubtotals },
+          { rows: enrichedRows },
+        ],
       },
+      ...specialSheets,
       ...activitySheets,
     ]).catch((err) => console.error("[Export] report failed", err));
   };
@@ -605,46 +669,6 @@ function ReportBuilder() {
         <div className="overflow-x-auto border border-border rounded-lg">
           <Table>
             <TableBody>
-              {(releaseBalComputedMt != null || assignmentBalMt != null) && (
-                <>
-                  {releaseBalComputedMt != null && (
-                    <TableRow className="bg-muted/20 font-semibold">
-                      <TableCell>
-                        <span className="text-xs font-semibold">Release Bal. Computed</span>
-                      </TableCell>
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                      <TableCell className="text-right tabular-nums font-bold">
-                        {releaseBalComputedMt.toFixed(3)} t
-                      </TableCell>
-                      {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
-                        <TableCell key={i} />
-                      ))}
-                    </TableRow>
-                  )}
-                  {assignmentBalMt != null && (
-                    <TableRow className="bg-muted/20 font-semibold">
-                      <TableCell>
-                        <span className="text-xs font-semibold">Awaiting Assignment</span>
-                      </TableCell>
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                      <TableCell />
-                      <TableCell className="text-right tabular-nums font-bold">
-                        {assignmentBalMt.toFixed(3)} t
-                      </TableCell>
-                      {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
-                        <TableCell key={i} />
-                      ))}
-                    </TableRow>
-                  )}
-                </>
-              )}
               {subtotalRows.length > 0 && (
                 <>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">

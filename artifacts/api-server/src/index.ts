@@ -5,6 +5,7 @@ import { backfillReleaseBalanceFromPool, backfillAssignmentBalanceFromPool } fro
 import { seedContractorCategories } from "./lib/seedContractorCategories";
 import { seedRsjThickness } from "./lib/seedRsjThickness";
 import { seedUsersIfEmpty } from "./lib/seedUsers";
+import { warmMembershipCaches } from "./routes/imports";
 
 const rawPort = process.env["PORT"];
 
@@ -91,5 +92,12 @@ app.listen(port, (err) => {
   // forget; skipped if the table already has rows (idempotent check first).
   seedUsersIfEmpty().catch((err) => {
     logger.error({ err }, "User seed failed");
+  });
+
+  // Pre-warm the in-process membership + identity-state caches for all imports
+  // so the first user request after a restart (cold-start) is served from cache
+  // rather than hitting the raw 1M-row SQL join. Fire-and-forget.
+  warmMembershipCaches().catch((err) => {
+    logger.error({ err }, "Membership cache warm-up failed");
   });
 });
