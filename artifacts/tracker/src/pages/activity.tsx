@@ -421,10 +421,14 @@ function ActivityPerformanceTable({
   activities,
   sortedActivities,
   moveWindow,
+  releaseBalanceComputedMt,
+  assignmentBalanceMt,
 }: {
   activities: Map<string, any[]>;
   sortedActivities: string[];
   moveWindow: { start: string; end: string };
+  releaseBalanceComputedMt: number | null;
+  assignmentBalanceMt: number | null;
 }) {
   const { settings } = useSettings();
 
@@ -474,6 +478,32 @@ function ActivityPerformanceTable({
             </TableRow>
           </TableHeader>
           <TableBody>
+            {releaseBalanceComputedMt != null && (
+              <TableRow className="bg-muted/20 hover:bg-muted/20">
+                <TableCell className="font-semibold text-xs">Release Bal. Computed</TableCell>
+                <TableCell />
+                <TableCell />
+                <TableCell className="text-right tabular-nums font-bold">
+                  {releaseBalanceComputedMt.toFixed(3)} t
+                </TableCell>
+                <TableCell />
+                <TableCell />
+                <TableCell />
+              </TableRow>
+            )}
+            {assignmentBalanceMt != null && (
+              <TableRow className="bg-muted/20 hover:bg-muted/20">
+                <TableCell className="font-semibold text-xs">Assignment Balance</TableCell>
+                <TableCell />
+                <TableCell />
+                <TableCell className="text-right tabular-nums font-bold">
+                  {assignmentBalanceMt.toFixed(3)} t
+                </TableCell>
+                <TableCell />
+                <TableCell />
+                <TableCell />
+              </TableRow>
+            )}
             {sortedActivities.map((act) => (
               <ActivityDrillRow
                 key={act}
@@ -885,6 +915,8 @@ function ActivityContent() {
             activities={activities}
             sortedActivities={sortedActivities}
             moveWindow={moveWindow}
+            releaseBalanceComputedMt={releaseBalanceComputedMt}
+            assignmentBalanceMt={assignmentBalanceMt}
           />
           <ActivityDailyMovementTable
             activities={activities}

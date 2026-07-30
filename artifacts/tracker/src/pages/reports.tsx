@@ -530,35 +530,45 @@ function ReportBuilder() {
           </div>
         )}
 
-        {(releaseBalComputedMt != null || assignmentBalMt != null) && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mr-1">
-              Balances
-            </span>
-            {releaseBalComputedMt != null && (
-              <div className="rounded-md border border-border bg-muted/30 px-3 py-1.5 text-xs">
-                <span className="font-semibold">Release Bal. Computed</span>
-                <span className="text-muted-foreground"> • </span>
-                <span className="font-bold text-foreground">
-                  {releaseBalComputedMt.toFixed(3)} t
-                </span>
-              </div>
-            )}
-            {assignmentBalMt != null && (
-              <div className="rounded-md border border-border bg-muted/30 px-3 py-1.5 text-xs">
-                <span className="font-semibold">Assignment Balance</span>
-                <span className="text-muted-foreground"> • </span>
-                <span className="font-bold text-foreground">
-                  {assignmentBalMt.toFixed(3)} t
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-
         <div className="overflow-x-auto border border-border rounded-lg">
           <Table>
             <TableBody>
+              {(releaseBalComputedMt != null || assignmentBalMt != null) && (
+                <>
+                  {releaseBalComputedMt != null && (
+                    <TableRow className="bg-muted/20 hover:bg-muted/20 font-semibold">
+                      <TableCell className="text-xs font-semibold">Release Bal. Computed</TableCell>
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell className="text-right tabular-nums font-bold">
+                        {releaseBalComputedMt.toFixed(3)} t
+                      </TableCell>
+                      {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
+                        <TableCell key={i} />
+                      ))}
+                    </TableRow>
+                  )}
+                  {assignmentBalMt != null && (
+                    <TableRow className="bg-muted/20 hover:bg-muted/20 font-semibold">
+                      <TableCell className="text-xs font-semibold">Assignment Balance</TableCell>
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell className="text-right tabular-nums font-bold">
+                        {assignmentBalMt.toFixed(3)} t
+                      </TableCell>
+                      {Array.from({ length: COL_COUNT - 7 }).map((_, i) => (
+                        <TableCell key={i} />
+                      ))}
+                    </TableRow>
+                  )}
+                </>
+              )}
               {subtotalRows.length > 0 && (
                 <>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
