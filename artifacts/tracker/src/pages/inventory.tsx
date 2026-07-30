@@ -41,6 +41,7 @@ import {
   CheckSquare,
   RotateCcw,
   X,
+  Pencil,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsxSheets, type XlsxSheet, type XlsxSummaryRow } from "@/lib/export";
@@ -1326,12 +1327,16 @@ function MfcBatchColorTable({
   entries,
   canEdit,
   onDelete,
+  onSave,
   deletingKey,
+  isSaving,
 }: {
   entries: InventoryMfcBatchColor[];
   canEdit: boolean;
   onDelete: (project: string, mfcBatch: string) => void;
+  onSave: (entry: { project: string; mfcBatch: string; color: MfcColorName; dateOfClientMfc?: string; projectStartDate?: string }) => void;
   deletingKey: string | null;
+  isSaving: boolean;
 }) {
   if (entries.length === 0) {
     return (
@@ -1355,52 +1360,174 @@ function MfcBatchColorTable({
             <th className="px-3 py-2 text-left font-medium text-muted-foreground">Colour</th>
             <th className="px-3 py-2 text-left font-medium text-muted-foreground">Date of Client MFC</th>
             <th className="px-3 py-2 text-left font-medium text-muted-foreground">Project Start Date</th>
-            {canEdit && <th className="px-2 py-2" />}
+            {canEdit && <th className="px-2 py-2 w-16" />}
           </tr>
         </thead>
         <tbody className="divide-y">
           {sorted.map((e) => {
-            const colorName = e.color as MfcColorName;
             const key = `${e.project}\u0001${e.mfcBatch}`;
             return (
-              <tr key={key} className="hover:bg-muted/20">
-                <td className="px-3 py-1.5 font-medium">{e.project}</td>
-                <td className="px-3 py-1.5">
-                  <span className="text-[10px] font-medium px-1 py-px rounded border border-border/60 text-muted-foreground">
-                    {e.mfcBatch}
-                  </span>
-                </td>
-                <td className="px-3 py-1.5">
-                  <span className="flex items-center gap-1.5">
-                    {colorName in MFC_COLOR_CSS && <ColorDot color={colorName} size="md" />}
-                    <span>{MFC_COLOR_LABEL[colorName] ?? colorName}</span>
-                  </span>
-                </td>
-                <td className="px-3 py-1.5 text-muted-foreground">
-                  {formatDateDisplay(e.dateOfClientMfc)}
-                </td>
-                <td className="px-3 py-1.5 text-muted-foreground">
-                  {formatDateDisplay(e.projectStartDate)}
-                </td>
-                {canEdit && (
-                  <td className="px-2 py-1.5">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      disabled={deletingKey === key}
-                      onClick={() => onDelete(e.project, e.mfcBatch)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                    </Button>
-                  </td>
-                )}
-              </tr>
+              <MfcBatchColorRow
+                key={key}
+                entry={e}
+                canEdit={canEdit}
+                isDeleting={deletingKey === key}
+                isSaving={isSaving}
+                onDelete={onDelete}
+                onSave={onSave}
+              />
             );
           })}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function MfcBatchColorRow({
+  entry,
+  canEdit,
+  isDeleting,
+  isSaving,
+  onDelete,
+  onSave,
+}: {
+  entry: InventoryMfcBatchColor;
+  canEdit: boolean;
+  isDeleting: boolean;
+  isSaving: boolean;
+  onDelete: (project: string, mfcBatch: string) => void;
+  onSave: (entry: { project: string; mfcBatch: string; color: MfcColorName; dateOfClientMfc?: string; projectStartDate?: string }) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [color, setColor] = useState<MfcColorName>(entry.color as MfcColorName);
+  const [mfcDate, setMfcDate] = useState(entry.dateOfClientMfc ?? "");
+  const [startDate, setStartDate] = useState(entry.projectStartDate ?? "");
+
+  const handleEdit = () => {
+    setColor(entry.color as MfcColorName);
+    setMfcDate(entry.dateOfClientMfc ?? "");
+    setStartDate(entry.projectStartDate ?? "");
+    setEditing(true);
+  };
+
+  const handleSave = () => {
+    onSave({
+      project: entry.project,
+      mfcBatch: entry.mfcBatch,
+      color,
+      dateOfClientMfc: mfcDate || undefined,
+      projectStartDate: startDate || undefined,
+    });
+    setEditing(false);
+  };
+
+  const colorName = entry.color as MfcColorName;
+
+  return (
+    <tr className="hover:bg-muted/20">
+      <td className="px-3 py-1.5 font-medium">{entry.project}</td>
+      <td className="px-3 py-1.5">
+        <span className="text-[10px] font-medium px-1 py-px rounded border border-border/60 text-muted-foreground">
+          {entry.mfcBatch}
+        </span>
+      </td>
+
+      {editing ? (
+        <>
+          {/* Colour picker */}
+          <td className="px-3 py-1.5">
+            <div className="flex gap-1 flex-wrap">
+              {MFC_COLOR_NAMES.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setColor(c)}
+                  title={MFC_COLOR_LABEL[c]}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] transition-colors
+                    ${color === c
+                      ? "border-primary bg-primary/10 font-semibold"
+                      : "border-border/60 hover:bg-muted/40"}`}
+                >
+                  <ColorDot color={c} size="md" />
+                  {MFC_COLOR_LABEL[c]}
+                </button>
+              ))}
+            </div>
+          </td>
+          {/* Date of Client MFC */}
+          <td className="px-3 py-1.5">
+            <input
+              type="date"
+              value={mfcDate}
+              onChange={(e) => setMfcDate(e.target.value)}
+              className="h-7 rounded border border-border bg-background px-2 text-xs w-36"
+            />
+          </td>
+          {/* Project Start Date */}
+          <td className="px-3 py-1.5">
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="h-7 rounded border border-border bg-background px-2 text-xs w-36"
+            />
+          </td>
+          {canEdit && (
+            <td className="px-2 py-1.5">
+              <div className="flex gap-1">
+                <Button size="sm" className="h-6 text-[11px] px-2" onClick={handleSave} disabled={isSaving}>
+                  Save
+                </Button>
+                <Button size="sm" variant="outline" className="h-6 text-[11px] px-2" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </td>
+          )}
+        </>
+      ) : (
+        <>
+          <td className="px-3 py-1.5">
+            <span className="flex items-center gap-1.5">
+              {colorName in MFC_COLOR_CSS && <ColorDot color={colorName} size="md" />}
+              <span>{MFC_COLOR_LABEL[colorName] ?? colorName}</span>
+            </span>
+          </td>
+          <td className="px-3 py-1.5 text-muted-foreground">
+            {formatDateDisplay(entry.dateOfClientMfc)}
+          </td>
+          <td className="px-3 py-1.5 text-muted-foreground">
+            {formatDateDisplay(entry.projectStartDate)}
+          </td>
+          {canEdit && (
+            <td className="px-2 py-1.5">
+              <div className="flex items-center gap-0.5">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={handleEdit}
+                  title="Edit"
+                >
+                  <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  disabled={isDeleting}
+                  onClick={() => onDelete(entry.project, entry.mfcBatch)}
+                  title="Delete"
+                >
+                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                </Button>
+              </div>
+            </td>
+          )}
+        </>
+      )}
+    </tr>
   );
 }
 
@@ -2126,7 +2253,9 @@ export default function InventoryView() {
                 entries={mfcBatchColors}
                 canEdit={canEdit}
                 onDelete={removeMfcBatchColor}
+                onSave={saveMfcBatchColor}
                 deletingKey={deletingColorKey}
+                isSaving={upsertMfcBatchColor.isPending}
               />
             </CardContent>
           </Card>
