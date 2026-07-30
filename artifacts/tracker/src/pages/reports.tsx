@@ -42,6 +42,8 @@ import {
   getListFabricationPrioritiesQueryKey,
   useGetContractorMovement,
   useGetFabricationProjectCompletionTlt,
+  useGetReleaseBalance,
+  getGetReleaseBalanceQueryKey,
   useGetImportProductionMovement,
   getGetImportProductionMovementQueryKey,
   useGetImportContractorMovement,
@@ -293,6 +295,26 @@ function ReportBuilder() {
   const totalQty = rows.reduce((s, r) => s + (r.balanceQty ?? 0), 0);
   const totalWt = rows.reduce((s, r) => s + (r.balanceWt ?? 0), 0);
 
+  // Release Balance Computed — scoped to the selected import.
+  const relBalParams = selectedImportId != null ? { importId: selectedImportId } : undefined;
+  const { data: relBalData } = useGetReleaseBalance(relBalParams, {
+    query: {
+      queryKey: getGetReleaseBalanceQueryKey(relBalParams),
+      enabled: selectedImportId != null,
+    },
+  });
+  const releaseBalComputedMt = relBalData?.totals?.releaseBalanceComputedMt ?? null;
+
+  // Assignment Balance — sum of assignmentBalanceCalcMt from Fab Completion rows.
+  const { data: fabData } = useGetFabricationProjectCompletionTlt();
+  const assignmentBalMt = useMemo(
+    () =>
+      fabData?.rows != null
+        ? fabData.rows.reduce((s, r) => s + (r.assignmentBalanceCalcMt ?? 0), 0)
+        : null,
+    [fabData],
+  );
+
   // Per-activity subtotals (Qty + Wt) appended to the Excel export, ordered by
   // the canonical process sequence, under an "Activity-wise subtotal" heading.
   const activitySubtotals = useMemo<XlsxSummaryRow[]>(() => {
@@ -505,6 +527,32 @@ function ReportBuilder() {
                 </span>
               </div>
             ))}
+          </div>
+        )}
+
+        {(releaseBalComputedMt != null || assignmentBalMt != null) && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mr-1">
+              Balances
+            </span>
+            {releaseBalComputedMt != null && (
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-1.5 text-xs">
+                <span className="font-semibold">Release Bal. Computed</span>
+                <span className="text-muted-foreground"> • </span>
+                <span className="font-bold text-foreground">
+                  {releaseBalComputedMt.toFixed(3)} t
+                </span>
+              </div>
+            )}
+            {assignmentBalMt != null && (
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-1.5 text-xs">
+                <span className="font-semibold">Assignment Balance</span>
+                <span className="text-muted-foreground"> • </span>
+                <span className="font-bold text-foreground">
+                  {assignmentBalMt.toFixed(3)} t
+                </span>
+              </div>
+            )}
           </div>
         )}
 
