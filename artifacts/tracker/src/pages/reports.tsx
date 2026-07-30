@@ -91,7 +91,7 @@ import {
   type XlsxGridBlock,
 } from "@/lib/export";
 import { formatWeight, formatWeightMT, formatDate } from "@/lib/utils";
-import { ageingCell, isActiveCutting, isCutting } from "@/lib/ageing";
+import { ageingCell, isActiveCutting, isAwaitingAssignment, isCutting } from "@/lib/ageing";
 import { getAgeingColor } from "./overview";
 import { AiTurnaroundReport } from "@/components/ai-turnaround-report";
 import PlantOperationView from "./plant-operation";
@@ -305,7 +305,7 @@ function ReportBuilder() {
   });
   const releaseBalComputedMt = relBalData?.totals?.releaseBalanceComputedMt ?? null;
 
-  // Assignment Balance — sum of assignmentBalanceCalcMt from Fab Completion rows.
+  // Awaiting Assignment — sum of assignmentBalanceCalcMt from Fab Completion rows.
   const { data: fabData } = useGetFabricationProjectCompletionTlt();
   const assignmentBalMt = useMemo(
     () =>
@@ -318,15 +318,22 @@ function ReportBuilder() {
   // Separate release-balance and assignment-balance records from the enriched set
   // so they can be rendered as named groups in the itemwise section above C.
   const relBalEnriched = useMemo(
-    () => enrichedRows.filter((r) => isCutting(r.activity) && !isActiveCutting(r)),
+    // NOT_RELEASED: activity C but neither CUTTING nor AWAITING_ASSIGNMENT (= initial cutting).
+    () => enrichedRows.filter((r) => isCutting(r.activity) && !isActiveCutting(r) && !isAwaitingAssignment(r)),
     [enrichedRows],
   );
   const assignBalEnriched = useMemo(
-    () => enrichedRows.filter((r) => isActiveCutting(r) && !r.contractor),
+    // AWAITING_ASSIGNMENT: JCNS+Authorized with no contractor — peer bucket to Cutting.
+    () => enrichedRows.filter((r) => isAwaitingAssignment(r)),
     [enrichedRows],
   );
   const otherEnriched = useMemo(
-    () => enrichedRows.filter((r) => !(isCutting(r.activity) && !isActiveCutting(r))),
+    // Exclude both NOT_RELEASED (initial cutting) and AWAITING_ASSIGNMENT (no contractor yet).
+    () => enrichedRows.filter(
+      (r) =>
+        !isAwaitingAssignment(r) &&
+        !(isCutting(r.activity) && !isActiveCutting(r) && !isAwaitingAssignment(r)),
+    ),
     [enrichedRows],
   );
 
@@ -668,7 +675,7 @@ function ReportBuilder() {
                   {assignmentBalMt != null && (
                     <TableRow className="bg-muted/20 font-semibold">
                       <TableCell>
-                        <span className="text-xs font-semibold">Assignment Balance</span>
+                        <span className="text-xs font-semibold">Awaiting Assignment</span>
                       </TableCell>
                       <TableCell />
                       <TableCell />
@@ -750,11 +757,11 @@ function ReportBuilder() {
                     </TableRow>
                   )}
                   {relBalEnriched.map((r, i) => renderItemRow(r, i, "rb"))}
-                  {/* Assignment Balance group — active-cutting marks with no contractor, above C */}
+                  {/* Awaiting Assignment group — JCNS+Authorized with no contractor, above C */}
                   {assignBalEnriched.length > 0 && (
                     <TableRow className="bg-muted/40 hover:bg-muted/40">
                       <TableCell colSpan={COL_COUNT} className="text-xs font-semibold text-muted-foreground pl-4">
-                        Assignment Balance — {assignBalEnriched.length.toLocaleString()} marks
+                        Awaiting Assignment — {assignBalEnriched.length.toLocaleString()} marks
                       </TableCell>
                     </TableRow>
                   )}
@@ -804,9 +811,11 @@ function fabLoadMatch(
   column: FabLoadColumn,
   r: ApiRecord,
 ): boolean {
-  // Initial Cutting marks (unreleased, counted as Release Balance) must not
+  // Initial Cutting marks (NOT_RELEASED, counted as Release Balance) must not
   // appear in any fabrication load figure — operational or in-hand.
-  if (isCutting(r.activity) && !isActiveCutting(r)) return false;
+  // AWAITING_ASSIGNMENT marks (no contractor yet) ARE included — they count
+  // as in-hand load (work queued to be cut).
+  if (isCutting(r.activity) && !isActiveCutting(r) && !isAwaitingAssignment(r)) return false;
   const act = normalizeActivity(r.activity);
   const rank = activityRank(r.activity);
   const sec = r.sectionType;
@@ -2004,18 +2013,22 @@ type FabSums = {
   bBalanceMt: number;
   habBalanceMt: number;
   wBalanceMt: number;
-  qualityCheckBalanceMt: number;
-  /** Release + Cutting + HG + RFI + NH + B + HAB + W + Quality.
-   *  Assignment Balance is deliberately excluded: it overlaps Release Balance
-   *  (Initial marks) and Cutting Balance (Authorized-JCNS marks) and adding it
-   *  would double-count those weights. */
+  qBalanceMt: number;
+  tsBalanceMt: number;
+  /** Release + Awaiting Assignment + Cutting + HG + RFI + NH + B + HAB + W + Q.
+   *  TS is shown for visibility but excluded from the total: work at TS has
+   *  finished fabrication and is awaiting test/sign-off before galvanising.
+   *  Awaiting Assignment is now a PEER bucket (not a subset of Cutting), so it
+   *  IS included — adding it does not double-count any weight. */
   totalFabBalanceMt: number;
 };
 
-/** Compute the non-double-counting total:
- *  Release + Cutting + HG + RFI + NH + B + HAB + W + Quality (skip Assignment). */
+/** Compute the fabrication total:
+ *  Release + Awaiting Assignment + Cutting + HG + RFI + NH + B + HAB + W + Q.
+ *  TS excluded (finished fabrication, awaiting sign-off). */
 function fabTotal(s: {
   releaseBalanceCalcMt: number;
+  assignmentBalanceCalcMt: number;
   cuttingBalanceMt: number;
   hgBalanceMt: number;
   rfiBalanceMt: number;
@@ -2023,10 +2036,11 @@ function fabTotal(s: {
   bBalanceMt: number;
   habBalanceMt: number;
   wBalanceMt: number;
-  qualityCheckBalanceMt: number;
+  qBalanceMt: number;
 }): number {
   return (
     s.releaseBalanceCalcMt +
+    s.assignmentBalanceCalcMt +
     s.cuttingBalanceMt +
     s.hgBalanceMt +
     s.rfiBalanceMt +
@@ -2034,7 +2048,7 @@ function fabTotal(s: {
     s.bBalanceMt +
     s.habBalanceMt +
     s.wBalanceMt +
-    s.qualityCheckBalanceMt
+    s.qBalanceMt
   );
 }
 
@@ -2049,7 +2063,8 @@ function sumRows(rs: FabricationProjectCompletionRow[]): FabSums {
     bBalanceMt:              rs.reduce((s, r) => s + r.bBalanceMt,              0),
     habBalanceMt:            rs.reduce((s, r) => s + r.habBalanceMt,            0),
     wBalanceMt:              rs.reduce((s, r) => s + r.wBalanceMt,              0),
-    qualityCheckBalanceMt:   rs.reduce((s, r) => s + r.qualityCheckBalanceMt,   0),
+    qBalanceMt:              rs.reduce((s, r) => s + r.qBalanceMt,              0),
+    tsBalanceMt:             rs.reduce((s, r) => s + r.tsBalanceMt,             0),
   };
   return { ...sums, totalFabBalanceMt: fabTotal(sums) };
 }
@@ -2244,7 +2259,7 @@ const FAB_COMP_COLUMNS: XlsxColumn[] = [
   { label: "Project",                                     field: "project" },
   { label: "MFC Batch",                                   field: "mfcBatch" },
   { label: "Release Balance Calc (MT)",                   field: "releaseBalanceCalcMt",    numeric: true, decimals: 3, total: true },
-  { label: "Assignment Balance Calc (MT)",                field: "assignmentBalanceCalcMt", numeric: true, decimals: 3, total: true },
+  { label: "Awaiting Assignment Calc (MT)",               field: "assignmentBalanceCalcMt", numeric: true, decimals: 3, total: true },
   { label: "Cutting Balance — C (MT)",                    field: "cuttingBalanceMt",        numeric: true, decimals: 3, total: true },
   { label: "HG Balance (MT)",                             field: "hgBalanceMt",             numeric: true, decimals: 3, total: true },
   { label: "RFI Balance (MT)",                            field: "rfiBalanceMt",            numeric: true, decimals: 3, total: true },
@@ -2252,10 +2267,11 @@ const FAB_COMP_COLUMNS: XlsxColumn[] = [
   { label: "B Balance (MT)",                              field: "bBalanceMt",              numeric: true, decimals: 3, total: true },
   { label: "HAB Balance (MT)",                            field: "habBalanceMt",            numeric: true, decimals: 3, total: true },
   { label: "W Balance (MT)",                              field: "wBalanceMt",              numeric: true, decimals: 3, total: true },
-  { label: "Quality Check — Q+TS (MT)",                   field: "qualityCheckBalanceMt",   numeric: true, decimals: 3, total: true },
-  // Total = Release + Cutting + HG + RFI + NH + B + HAB + W + Quality.
-  // Assignment Balance is EXCLUDED — it overlaps Release (Initial) and Cutting (Authorized-JCNS).
-  { label: "Total Fabrication Balance (excl. Assignment)", field: "totalFabBalanceMt",       numeric: true, decimals: 3, total: true },
+  { label: "Quality Check — Q (MT)",                      field: "qBalanceMt",              numeric: true, decimals: 3, total: true },
+  { label: "Test/Sign-off — TS (MT)",                     field: "tsBalanceMt",             numeric: true, decimals: 3, total: true },
+  // Total = Release + Awaiting Assignment + Cutting + HG + RFI + NH + B + HAB + W + Q.
+  // TS is shown for reference but excluded (finished fabrication, awaiting sign-off).
+  { label: "Total Fabrication Balance (MT)",              field: "totalFabBalanceMt",       numeric: true, decimals: 3, total: true },
 ];
 
 function FabCompletionReport() {
@@ -2318,7 +2334,8 @@ function FabCompletionReport() {
         r.bBalanceMt +
         r.habBalanceMt +
         r.wBalanceMt +
-        r.qualityCheckBalanceMt;
+        r.qBalanceMt +
+        r.tsBalanceMt;
       unknownCombined.set(r.project, (unknownCombined.get(r.project) ?? 0) + combined);
     }
     const visibleUnknownProjects = new Set(
@@ -2389,8 +2406,8 @@ function FabCompletionReport() {
       bBalanceMt:              s.bBalanceMt,
       habBalanceMt:            s.habBalanceMt,
       wBalanceMt:              s.wBalanceMt,
-      qualityCheckBalanceMt:   s.qualityCheckBalanceMt,
-      // Assignment excluded (double-counts Release + Cutting).
+      qBalanceMt:              s.qBalanceMt,
+      tsBalanceMt:             s.tsBalanceMt,
       totalFabBalanceMt:       s.totalFabBalanceMt,
     });
 
@@ -2501,11 +2518,12 @@ function FabCompletionReport() {
             const isMfcFirst = mfcViewMode === "view-by-mfc";
             // Flat mode has one fewer dim column (merged Project-MFC instead of Project + MFC).
             const dimCols   = isFlat ? 3 : 4;
-            const totalCols = dimCols + 2 + (specOpsExpanded ? 5 : 3) + 1; // pre-prod+fab+total
-            const fabGroupSpan = specOpsExpanded ? 8 : 6;
+            const totalCols = dimCols + 2 + (specOpsExpanded ? 6 : 4) + 1; // pre-prod+fab(incl TS)+total
+            const fabGroupSpan = specOpsExpanded ? 9 : 7;
             const TOTAL_COL_TOOLTIP =
-              "Total Fabrication Balance = Release + Cutting + HG + RFI + NH + B + HAB + W + Quality (Q/TS).\n" +
-              "Assignment Balance is excluded because it overlaps Release Balance (Initial marks) and Cutting Balance (Authorized-JCNS marks) — including it would double-count those weights.";
+              "Total Fabrication Balance = Release + Awaiting Assignment + Cutting + HG + RFI + NH + B + HAB + W + Q.\n" +
+              "TS is shown for visibility but excluded from the total: work at TS has finished fabrication and is awaiting test/sign-off before galvanising.\n" +
+              "Awaiting Assignment is now a PEER bucket to Cutting (disjoint: no mark appears in both), so including it does not double-count any weight.";
 
             // ── Shared helpers ────────────────────────────────────────────────
             /** Numeric data cells shared by every row/subtotal/total.
@@ -2540,7 +2558,10 @@ function FabCompletionReport() {
                     {fmt(specOps(s.bBalanceMt, s.habBalanceMt, s.wBalanceMt))}
                   </td>
                 )}
-                <td className={`px-2 ${py} text-right tabular-nums`}>{fmt(s.qualityCheckBalanceMt)}</td>
+                <td className={`px-2 ${py} text-right tabular-nums`}>{fmt(s.qBalanceMt)}</td>
+                <td className={`px-2 ${py} text-right tabular-nums text-muted-foreground`} title="TS: shown for reference, excluded from Total">
+                  {fmt(s.tsBalanceMt)}
+                </td>
                 <td className={`px-2 ${py} text-right tabular-nums font-semibold border-l-2 border-border/50 bg-emerald-50/40 dark:bg-emerald-950/10 text-emerald-900 dark:text-emerald-200`}>
                   {fmt(total)}
                 </td>
@@ -2585,14 +2606,14 @@ function FabCompletionReport() {
                     Pre-Production (MT)
                   </th>
                   <th className="text-center px-2 py-1.5 font-semibold text-amber-700 dark:text-amber-400" colSpan={fabGroupSpan}>
-                    Fabrication Stage Balance (MT) — C → HG → RFI → NH → {specOpsExpanded ? "B → HAB → W" : "Spec. Ops"} → Q/TS
+                    Fabrication Stage Balance (MT) — C → HG → RFI → NH → {specOpsExpanded ? "B → HAB → W" : "Spec. Ops"} → Q → TS
                   </th>
                   <th
                     className="text-right px-2 py-1.5 font-semibold min-w-[72px] leading-tight border-l-2 border-border/50 bg-emerald-50/60 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300 cursor-help"
                     rowSpan={2}
                     title={TOTAL_COL_TOOLTIP}
                   >
-                    Total Fab<br />Balance ⓘ<br /><span className="font-normal text-[10px] opacity-70">(excl. Assign.)</span>
+                    Total Fab<br />Balance ⓘ<br /><span className="font-normal text-[10px] opacity-70">(excl. TS)</span>
                   </th>
                 </tr>
                 <tr className="border-b-2 border-border bg-muted/40">
@@ -2600,7 +2621,7 @@ function FabCompletionReport() {
                     Release<br />Bal. Calc
                   </th>
                   <th className="text-right px-2 py-1.5 font-medium min-w-[72px] leading-tight border-r border-border/30 text-indigo-700 dark:text-indigo-400">
-                    Assign.<br />Bal. Calc
+                    Awaiting<br />Assign.
                   </th>
                   <th className="text-right px-2 py-1.5 font-medium min-w-[52px] leading-tight text-amber-700 dark:text-amber-400">
                     Cutting<br />(C)
@@ -2632,7 +2653,10 @@ function FabCompletionReport() {
                     </th>
                   )}
                   <th className="text-right px-2 py-1.5 font-medium min-w-[56px] leading-tight text-amber-700 dark:text-amber-400">
-                    Quality<br />(Q/TS)
+                    Quality<br />(Q)
+                  </th>
+                  <th className="text-right px-2 py-1.5 font-medium min-w-[44px] leading-tight text-muted-foreground" title="TS: shown for reference, excluded from Total">
+                    TS<br /><span className="text-[9px]">(excl.)</span>
                   </th>
                 </tr>
               </thead>
@@ -2947,7 +2971,8 @@ function DailyProductionMovementReport() {
   const { activities, sortedActivities } = useMemo(() => {
     const activities = new Map<string, any[]>();
     for (const r of records) {
-      if (isCutting(r.activity) && !isActiveCutting(r)) continue;
+      // Exclude NOT_RELEASED (initial cutting) but keep AWAITING_ASSIGNMENT in activity map.
+      if (isCutting(r.activity) && !isActiveCutting(r) && !isAwaitingAssignment(r)) continue;
       const act = activityDisplayKey(r.activity, r.category);
       if (!activities.has(act)) activities.set(act, []);
       activities.get(act)!.push(r);

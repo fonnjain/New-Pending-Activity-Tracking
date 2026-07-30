@@ -269,12 +269,14 @@ function JobDashboardContent() {
         const phases = emptyPhases();
         for (const r of recs) {
           // Use classifyWipCase to apply the Type guard:
-          //   CUTTING        → Cutting bucket (any activity, Type="Job Card Not Started")
+          //   CUTTING / AWAITING_ASSIGNMENT → Cutting bucket (pre-production, JCNS+Authorized)
           //   IN_PRODUCTION  → quality/galvanising by activity (Type="Job Card WIP")
           //   FINISHED_GOODS → dispatch bucket (regardless of activity code)
           //   NOT_RELEASED   → skip (counted as Release Balance, not here)
+          // Both CUTTING and AWAITING_ASSIGNMENT count toward the "Cutting" phase here
+          // so the dashboard always shows a non-zero figure even when no contractor is assigned.
           const wipCase = classifyWipCase(r);
-          if (wipCase === "CUTTING") {
+          if (wipCase === "CUTTING" || wipCase === "AWAITING_ASSIGNMENT") {
             phases.cutting.marks += 1;
             phases.cutting.weight += r.balanceWt;
           } else if (wipCase === "IN_PRODUCTION") {
@@ -911,7 +913,7 @@ function JobDetail({
         const phases = emptyPhases();
         for (const r of recs) {
           const wipCase = classifyWipCase(r);
-          if (wipCase === "CUTTING") {
+          if (wipCase === "CUTTING" || wipCase === "AWAITING_ASSIGNMENT") {
             phases.cutting.marks += 1;
             phases.cutting.weight += r.balanceWt;
           } else if (wipCase === "IN_PRODUCTION") {
@@ -970,7 +972,7 @@ function JobDetail({
         const phases = emptyPhases();
         for (const r of recs) {
           const wipCase = classifyWipCase(r);
-          if (wipCase === "CUTTING") {
+          if (wipCase === "CUTTING" || wipCase === "AWAITING_ASSIGNMENT") {
             phases.cutting.marks += 1;
             phases.cutting.weight += r.balanceWt;
           } else if (wipCase === "IN_PRODUCTION") {

@@ -1775,14 +1775,15 @@ export const GetFabricationProjectCompletionTltResponse = zod.object({
   "mfcBatch": zod.string().nullish().describe('MFC batch code for this row (null when mark has no batch).'),
   "releaseBalanceCalcMt": zod.number().describe('Release Balance Calculated (JCNS + Initial rows), in MT.'),
   "assignmentBalanceCalcMt": zod.number().describe('Assignment Balance Calculated (JCNS + blank contractor), in MT.'),
-  "cuttingBalanceMt": zod.number().describe('Cutting Balance (JCNS + Authorized, activity C), in MT.'),
+  "cuttingBalanceMt": zod.number().describe('Cutting Balance (JCNS + Authorized + non-blank contractor), in MT.'),
   "hgBalanceMt": zod.number().describe('Hot Galvanizing balance (activity HG), in MT.'),
   "rfiBalanceMt": zod.number().describe('RFI balance (activity RFI), in MT.'),
   "nhBalanceMt": zod.number().describe('NH balance (activity NH), in MT.'),
   "bBalanceMt": zod.number().describe('B balance (activity B), in MT.'),
   "habBalanceMt": zod.number().describe('HAB balance (activity HAB), in MT.'),
   "wBalanceMt": zod.number().describe('W balance (activity W), in MT.'),
-  "qualityCheckBalanceMt": zod.number().describe('Quality Check Balance (Q + TS), in MT.')
+  "qBalanceMt": zod.number().describe('Quality Check balance (activity Q only), in MT. Included in Total.'),
+  "tsBalanceMt": zod.number().describe('Test\/Sign-off balance (activity TS only), in MT. Shown separately but excluded from Total.')
 })).describe('One row per (project, BOM Label), sorted by project then BOM label.'),
   "totals": zod.object({
   "releaseBalanceCalcMt": zod.number(),
@@ -1794,7 +1795,8 @@ export const GetFabricationProjectCompletionTltResponse = zod.object({
   "bBalanceMt": zod.number(),
   "habBalanceMt": zod.number(),
   "wBalanceMt": zod.number(),
-  "qualityCheckBalanceMt": zod.number()
+  "qBalanceMt": zod.number(),
+  "tsBalanceMt": zod.number()
 }),
   "unknownCauses": zod.array(zod.object({
   "project": zod.string(),

@@ -129,7 +129,8 @@ router.get(
       bBalanceMt: 0,
       habBalanceMt: 0,
       wBalanceMt: 0,
-      qualityCheckBalanceMt: 0, // Q + TS only
+      qBalanceMt: 0,  // Quality Check — Q only
+      tsBalanceMt: 0, // Test/Sign-off — TS only (shown separately, excluded from Total)
     };
 
     // 1. Find the latest WIP import.
@@ -186,7 +187,10 @@ router.get(
           recordPoolTable.mfcBatch,
         ),
 
-      // Cutting balance = "Job Card Not Started" + "Authorized".
+      // Cutting balance = "Job Card Not Started" + "Authorized" + non-blank contractor.
+      // The contractor condition is what differentiates Cutting from Awaiting Assignment:
+      //   Cutting            = JCNS + Authorized + contractor NOT blank  (work actively being cut)
+      //   Awaiting Assignment = JCNS + Authorized + contractor blank     (released, not yet assigned)
       // Primary: job_card_type = 'Job Card Not Started' AND job_card_status = 'Authorized'
       //   (new-format files that store Col A; TLT and NTLT alike).
       // Fallback: upper(activity) = 'C' AND is_initial_cutting IS NOT TRUE
@@ -214,6 +218,8 @@ router.get(
             eq(importRowsTable.importId, latestImport.id),
             eq(recordPoolTable.category, "TLT"),
             sql`${recordPoolTable.isInitialCutting} IS NOT TRUE`,
+            // Contractor must be non-blank — blank contractor = Awaiting Assignment, not Cutting.
+            sql`(${recordPoolTable.contractor} IS NOT NULL AND trim(${recordPoolTable.contractor}) != '')`,
             sql`(
               (${recordPoolTable.jobCardType} = 'Job Card Not Started'
                AND ${recordPoolTable.jobCardStatus} = 'AUTHORIZED')
@@ -401,7 +407,8 @@ router.get(
         bBalanceMt: number;
         habBalanceMt: number;
         wBalanceMt: number;
-        qualityCheckBalanceMt: number; // Q + TS only
+        qBalanceMt: number;  // Q only
+        tsBalanceMt: number; // TS only (shown separately, excluded from total)
       }
     >();
     // unknownByProject: project → deduplicated list of WIP structure codes with no OR match
@@ -422,7 +429,8 @@ router.get(
       const bMt      = actMap("B",   bkey);
       const habMt    = actMap("HAB", bkey);
       const wMt      = actMap("W",   bkey);
-      const qcMt     = actMap("Q",   bkey) + actMap("TS", bkey); // Quality Check = Q + TS
+      const qMt      = actMap("Q",  bkey); // Quality Check = Q only
+      const tsMt     = actMap("TS", bkey); // Test/Sign-off = TS only (shown separately, NOT in total)
 
       const existing = grouped.get(gKey);
       if (!existing) {
@@ -437,7 +445,8 @@ router.get(
           bBalanceMt: bMt,
           habBalanceMt: habMt,
           wBalanceMt: wMt,
-          qualityCheckBalanceMt: qcMt,
+          qBalanceMt: qMt,
+          tsBalanceMt: tsMt,
         });
       } else {
         existing.releaseBalanceCalcMt += relMt;
@@ -449,7 +458,8 @@ router.get(
         existing.bBalanceMt += bMt;
         existing.habBalanceMt += habMt;
         existing.wBalanceMt += wMt;
-        existing.qualityCheckBalanceMt += qcMt;
+        existing.qBalanceMt += qMt;
+        existing.tsBalanceMt += tsMt;
       }
 
       if (bomLabel === "No BOM match") {
@@ -480,7 +490,8 @@ router.get(
         bBalanceMt:             acc.bBalanceMt             + r.bBalanceMt,
         habBalanceMt:           acc.habBalanceMt           + r.habBalanceMt,
         wBalanceMt:             acc.wBalanceMt             + r.wBalanceMt,
-        qualityCheckBalanceMt:  acc.qualityCheckBalanceMt  + r.qualityCheckBalanceMt,
+        qBalanceMt:             acc.qBalanceMt             + r.qBalanceMt,
+        tsBalanceMt:            acc.tsBalanceMt            + r.tsBalanceMt,
       }),
       ZERO_TOTALS,
     );

@@ -1,0 +1,249 @@
+# Replit Prompt — Cutting requires a contractor: five buckets become six
+### Assignment Balance changes from a subset of Cutting to a peer bucket
+
+**The change in one line:** Cutting means work actually being cut — a contractor is on it.
+Released work with nobody assigned sits in Assignment Balance instead. Nothing is lost;
+it moves.
+
+## Verified figures, 30-Jul import
+
+| Bucket | TLT | ALL (TLT+NTLT) |
+|---|---|---|
+| Release Balance | 2,112.271 MT / 9,806 | 2,112.271 MT / 9,806 |
+| **Assignment Balance** | **1,104.513 MT / 4,746** | **3,728.497 MT / 4,789** |
+| **Cutting** | **1,414.718 MT / 9,723** | **2,788.537 MT / 9,793** |
+| Quality Check | 1,867.583 MT / 15,227 | 1,979.811 MT / 15,237 |
+| Galvanising | 1,933.288 MT / 10,186 | 3,707.449 MT / 10,342 |
+| FG WIP | 2,280.720 MT / 8,633 | 2,880.044 MT / 8,663 |
+| **SUM** | **10,713.093 MT / 58,321** | **17,196.608 MT / 58,630** |
+| Unclassified | **0** | **0** |
+
+Both reconcile exactly to the file with zero unclassified marks.
+
+**The Fabrication Report grand total does not change.** Assignment (1,104.513) + new Cutting
+(1,414.718) = 2,519.232 = the old combined Cutting. So the total is invariant — a useful
+regression check.
+
+---
+
+## The prompt
+
+```
+A definition change to Cutting Balance, agreed. It converts the five-bucket model into a
+six-bucket model.
+
+THE CHANGE
+
+  Cutting Balance    = Type "Job Card Not Started" AND Status "Authorized"
+                       AND Contractor is NOT blank        <-- new condition
+  Assignment Balance = Type "Job Card Not Started" AND Status "Authorized"
+                       AND Contractor IS blank            <-- unchanged definition
+
+The intent: "Cutting" means work actually being cut, with a contractor on it. Released work
+with nobody assigned belongs in Assignment Balance. Nothing is lost — it moves between two
+buckets.
+
+CONSEQUENCE — Assignment Balance is no longer a subset of Cutting
+
+Until now Assignment Balance was Cutting plus one condition, so it was contained within it
+and had to be EXCLUDED from any total. That is now reversed. The two are disjoint and
+together they partition all Not-Started-Authorized work. Assignment Balance must now be
+INCLUDED in totals as a peer bucket.
+
+THIS IS THE SINGLE MOST IMPORTANT PART OF THIS CHANGE. Every place that currently excludes
+Assignment Balance from a sum must now include it, and any place that treated it as
+overlapping must stop.
+
+Specifically, the Fabrication Report "Total Fabrication Balance (excl. Assignment)" column:
+  currently  Total = SUM(D:M) - E     (E excluded because it was a subset)
+  becomes    Total = every column EXCEPT TS, including E
+Rename the column to drop "(excl. Assignment)" — see item 0 below for the full formula.
+
+Note the Cutting split alone is total-neutral: Assignment 1,104.513 + new Cutting 1,414.718
+= 2,519.232 = the old combined Cutting. So if the total changes, it must change ONLY by the
+removal of TS (321.158 MT). Any other movement means something was applied inconsistently.
+
+VERIFIED TARGET FIGURES — 30-Jul import
+
+  TLT:  Release 2,112.271 / Assignment 1,104.513 / Cutting 1,414.718 /
+        Quality Check 1,867.583 / Galvanising 1,933.288 / FG WIP 2,280.720
+        SUM = 10,713.093 MT, 58,321 marks, zero unclassified
+
+  ALL:  Release 2,112.271 / Assignment 3,728.497 / Cutting 2,788.537 /
+        Quality Check 1,979.811 / Galvanising 3,707.449 / FG WIP 2,880.044
+        SUM = 17,196.608 MT, 58,630 marks, zero unclassified
+
+Both must reconcile exactly with zero unclassified marks. Test under TLT, NTLT and All.
+
+GLOBAL SCOPE — THIS DEFINITION APPLIES EVERYWHERE, WITHOUT EXCEPTION
+
+The new Cutting definition is a GLOBAL definition. It must be identical on every page, every
+report, every export and every API route in the app. There must be exactly ONE
+implementation and every consumer must call it.
+
+Before changing anything, please produce a COMPLETE INVENTORY of every place Cutting Balance
+is computed today. Search semantically, not for a single string — look for every variant:
+
+    Type/Status based   : job_card_type = "Job Card Not Started" AND job_card_status = "Authorized"
+    activity based      : activity = 'C' AND is_initial_cutting = false
+    activity based      : upper(activity) = 'C' AND ...
+    classifier based    : classifyWipCase(...) === "CUTTING", isActiveCutting(...)
+    inline sets         : PROCESS_SEQUENCE / phase lookups that treat C as cutting
+    pre-computed tables  : anything storing a cutting figure at import time
+
+Report the full list BEFORE making changes, and tell me which variant each site currently
+uses. I expect this to span at minimum: the Project Wise page, the server-side Job Wise
+route, the Fabrication Report (API and frontend), the Activity Wise page, the Contractor
+Wise page, the Plant Operation Wise page, the Bucket List / inventory page, the Turn Around
+Time and Speed of Execution pages, the Data page tabs, the ERP rules, the Overview page, and
+every Excel export attached to those.
+
+Then: extract ONE shared function into @workspace/domain and have every site call it. Do not
+leave a second copy anywhere, and do not copy-paste the condition into a new site.
+
+This matters because this codebase has repeatedly had the same rule implemented in several
+places, and each time the fix landed in some of them and not others:
+
+  - Cutting itself was previously computed seven different ways
+  - the blank-activity label existed in five files under three different words
+  - the Total column was fixed on screen but not in the Excel export, twice
+  - the copies multiplier was correct in five files and missing in five others, so pages
+    silently disagreed with each other
+
+A partial application here is worse than no change, because Cutting would then mean
+"contractor assigned" on some pages and "all not-started-authorized" on others, with no
+error anywhere to reveal it.
+
+VERIFICATION — the same figure must appear on every surface
+
+After the change, TLT 30-Jul Cutting must read 1,414.718 MT / 9,723 marks on EVERY page,
+report and export that shows it. Please confirm you have checked each one, and list them.
+If any surface shows 2,519.232 (the old combined figure) the change did not land there.
+
+Test under all three Order Type settings. NTLT and All figures:
+
+    TLT   Cutting 1,414.718 MT /  9,723 marks
+    ALL   Cutting 2,788.537 MT /  9,793 marks
+
+FIVE KNOCK-ON CHANGES
+
+0. THE FABRICATION REPORT TOTAL — three separate corrections, please read carefully
+
+   a) SPLIT Q AND TS. The Quality column currently combines them as "Quality (Q/TS)".
+      Quality must now be Q ONLY. Show TS as its own separate column.
+
+           Q  =  252.508 MT / 1,938 marks
+           TS =  321.158 MT / 1,875 marks
+           (current combined Q/TS = 573.666 MT)
+
+      Update the stage sequence in the group header accordingly — it currently reads
+      "C -> HG -> RFI -> NH -> Spec. Ops -> Q/TS".
+
+   b) EXCLUDE TS FROM THE TOTAL. The Total column must not include TS. Work at TS has
+      finished fabrication and is awaiting test/sign-off before galvanising, so it does not
+      belong in a fabrication balance. Show the TS column for visibility, but leave it out
+      of the sum.
+
+   c) INCLUDE ASSIGNMENT IN THE TOTAL. This is the reversal described above. Under the new
+      Cutting definition, Assignment Balance is DISJOINT from Cutting, not a subset — so
+      including it is not double counting. It must now be in the total.
+
+   The resulting formula is:
+
+       Total = Release + Assignment + Cutting + HG + RFI + NH + B + HAB + W + Q
+               (every column EXCEPT TS)
+
+   Verified target, TLT 30-Jul, unfiltered:
+
+       including Assignment and TS   6,499.086 MT   <- today's basis
+       including Assignment, NO TS   6,177.928 MT   <- THE NEW TARGET
+       excluding Assignment, w/ TS   5,394.573 MT
+       excluding Assignment, NO TS   5,073.415 MT
+
+   The published export is filtered by the 1 MT "No BOM match" threshold and currently
+   reads 6,497.646 against an unfiltered 6,499.086, a difference of 1.440 MT. So after this
+   change the export grand total should land near 6,176.5, not exactly 6,177.928.
+
+   Please confirm which of the four figures you produce, and state whether the filtered or
+   unfiltered basis is being reported.
+
+   NO OVERLAPPING BALANCE MAY BE COUNTED TWICE. After this change every column in the total
+   is disjoint: Release and Assignment and Cutting partition Not-Started work by status and
+   contractor; HG/RFI/NH/B/HAB/W/Q are Job Card WIP rows and a mark carries exactly one
+   activity. Please assert this — no mark may contribute to two columns.
+
+1. ERP rule T8 currently reads "the five buckets partition the file exactly". It becomes SIX
+   buckets: Release + Assignment + Cutting + Quality Check + Galvanising + FG WIP = total
+   balance. Update the rule text and the check.
+
+2. The project 821 regression test must be RETIRED AND REPLACED. It currently asserts
+   "project 821 Cutting = 301 marks / 5.148 MT". Under the new definition 821 has NO
+   contractor on any mark, so it correctly becomes:
+       821 Cutting    = 0 marks / 0.000 MT
+       821 Assignment = 301 marks / 5.148 MT
+   Replace the assertion with the Assignment figure. Please also leave a comment explaining
+   this, because "821 Cutting = 0" was historically the signature of a real bug (requiring
+   Assign Date once wiped that project out) and someone will otherwise "fix" it back.
+
+3. Five projects now show zero Cutting, correctly, because none of their marks has a
+   contractor yet: 956 (107.078 MT), 963 (74.281), 962 (5.497), 821 (5.148), 937 (3.190) —
+   195.193 MT total. All of it appears in Assignment Balance instead. This is expected, not
+   data loss. Please make sure nothing in the UI treats a zero Cutting figure as missing
+   data.
+
+4. Rename "Assignment Balance" to "Awaiting Assignment" wherever it appears. Under the old
+   model it was a lens on Cutting; now it is the bucket holding released-but-unassigned
+   work, and the clearer name will stop people reading a zero in Cutting as an error.
+   Confirm before doing this if you think it breaks anything.
+
+Apply everywhere both buckets are computed. Do not leave an old copy anywhere. See the
+GLOBAL SCOPE section above — I want the full inventory of call sites before you start, and
+the confirmed list of surfaces after you finish.
+
+Do not change Release Balance, Quality Check, Galvanising or FG WIP.
+
+When done, paste:
+  - the two changed definitions
+  - the shared function and its location
+  - the full list of call sites, each confirmed to use it
+  - the new Fabrication Report total expression
+  - the updated T8 rule
+  - the six bucket totals for TLT, NTLT and All
+```
+
+---
+
+## What to check in the reply
+
+- **The call-site inventory, before any changes.** If it comes back with three or four
+  entries, push back. Cutting was previously computed seven different ways, and the copies
+  multiplier touched ten files. A short list means the search was textual rather than
+  semantic.
+- **One shared function, not a copy per site.** If the reply shows the condition written out
+  in several files, the same divergence will reappear within weeks.
+- **1,414.718 MT / 9,723 marks on every surface.** Any page still reading 2,519.232 is on
+  the old definition. This is the single fastest check — one number, every screen.
+- **The grand total must move by exactly the TS amount and nothing else.** The Cutting split
+  is total-neutral (Assignment + new Cutting = old Cutting), so the only legitimate change
+  is −321.158 MT for TS. On the filtered export that takes 6,497.646 to roughly 6,176.5.
+  Any other figure means the include/exclude flip landed inconsistently.
+- **That Q and TS are genuinely separate columns**, with TS visible but outside the total.
+- **That Assignment is now INCLUDED in totals, not excluded.** This is the reversal most
+  likely to be applied in only some of the places it needs to be.
+- **Zero unclassified under all three Order Type settings.** The six buckets must partition
+  the file exactly; any residual means one bucket is still using an old condition.
+- **That the 821 assertion was replaced, not deleted.** It remains a useful regression test —
+  it has just moved from Cutting to Assignment.
+
+## One thing to decide
+
+Excluding TS from the total means the Fabrication Report's total **no longer equals the sum
+of all fabrication-stage work** — 321.158 MT (4.9% of the report) sits in a visible column
+that nothing adds up. That is defensible if the intent is "balance still to be fabricated",
+since TS work has finished fabrication and is awaiting sign-off.
+
+But it does break the property that made this total easy to verify: it can no longer be
+reconciled against any bucket. Worth deciding explicitly whether TS should be dropped from
+the report altogether rather than shown-but-uncounted, since a column that is displayed and
+excluded invites the same "why doesn't this add up" question the reconciliation warning
+used to cause.

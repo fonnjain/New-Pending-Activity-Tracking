@@ -47,15 +47,30 @@ export function isCutting(activity: string | null | undefined): boolean {
 }
 
 // Active cutting: classifyWipCase returns "CUTTING" (Col A="Job Card Not Started"
-// + Col G="Authorized"). Initial marks (NOT_RELEASED) are excluded — they are
-// already counted as Release Balance and must NOT contribute to any Cutting figure.
-// Use this predicate everywhere a Cutting BALANCE figure is computed or displayed.
+// + Col G="Authorized" + non-blank contractor). Initial marks (NOT_RELEASED) are
+// excluded. Records with no contractor are AWAITING_ASSIGNMENT, not CUTTING.
+// Use this predicate only when you specifically need the "has contractor" cutting bucket.
 export function isActiveCutting(r: {
   activity?: string | null;
   isInitialCutting?: boolean | null;
   jobCardStatus?: string | null;
+  jobCardType?: string | null;
+  contractor?: string | null;
 }): boolean {
   return classifyWipCase(r) === "CUTTING";
+}
+
+// Awaiting Assignment: classifyWipCase returns "AWAITING_ASSIGNMENT"
+// (Col A="Job Card Not Started" + Col G="Authorized" + blank contractor).
+// These are released marks not yet assigned to a contractor — a peer bucket to CUTTING.
+export function isAwaitingAssignment(r: {
+  activity?: string | null;
+  isInitialCutting?: boolean | null;
+  jobCardStatus?: string | null;
+  jobCardType?: string | null;
+  contractor?: string | null;
+}): boolean {
+  return classifyWipCase(r) === "AWAITING_ASSIGNMENT";
 }
 
 // Label for a row with no ageing date:

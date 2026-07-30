@@ -4717,7 +4717,7 @@ components:
         cuttingBalanceMt:
           type: number
           format: double
-          description: Cutting Balance (JCNS + Authorized, activity C), in MT.
+          description: Cutting Balance (JCNS + Authorized + non-blank contractor), in MT.
         hgBalanceMt:
           type: number
           format: double
@@ -4742,10 +4742,14 @@ components:
           type: number
           format: double
           description: W balance (activity W), in MT.
-        qualityCheckBalanceMt:
+        qBalanceMt:
           type: number
           format: double
-          description: Quality Check Balance (Q + TS), in MT.
+          description: Quality Check balance (activity Q only), in MT. Included in Total.
+        tsBalanceMt:
+          type: number
+          format: double
+          description: Test/Sign-off balance (activity TS only), in MT. Shown separately but excluded from Total.
       required:
         - project
         - bomLabel
@@ -4759,7 +4763,8 @@ components:
         - bBalanceMt
         - habBalanceMt
         - wBalanceMt
-        - qualityCheckBalanceMt
+        - qBalanceMt
+        - tsBalanceMt
     FabricationProjectCompletionTotals:
       type: object
       properties:
@@ -4790,7 +4795,10 @@ components:
         wBalanceMt:
           type: number
           format: double
-        qualityCheckBalanceMt:
+        qBalanceMt:
+          type: number
+          format: double
+        tsBalanceMt:
           type: number
           format: double
       required:
@@ -4803,7 +4811,8 @@ components:
         - bBalanceMt
         - habBalanceMt
         - wBalanceMt
-        - qualityCheckBalanceMt
+        - qBalanceMt
+        - tsBalanceMt
     UnknownStructureCauseEntry:
       type: object
       description: Cause classification for a single WIP structure that has no Order Review match.

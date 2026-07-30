@@ -2200,7 +2200,7 @@ export interface FabricationProjectCompletionRow {
   releaseBalanceCalcMt: number;
   /** Assignment Balance Calculated (JCNS + blank contractor), in MT. */
   assignmentBalanceCalcMt: number;
-  /** Cutting Balance (JCNS + Authorized, activity C), in MT. */
+  /** Cutting Balance (JCNS + Authorized + non-blank contractor), in MT. */
   cuttingBalanceMt: number;
   /** Hot Galvanizing balance (activity HG), in MT. */
   hgBalanceMt: number;
@@ -2214,8 +2214,10 @@ export interface FabricationProjectCompletionRow {
   habBalanceMt: number;
   /** W balance (activity W), in MT. */
   wBalanceMt: number;
-  /** Quality Check Balance (Q + TS), in MT. */
-  qualityCheckBalanceMt: number;
+  /** Quality Check balance (activity Q only), in MT. Included in Total. */
+  qBalanceMt: number;
+  /** Test/Sign-off balance (activity TS only), in MT. Shown separately but excluded from Total. */
+  tsBalanceMt: number;
 }
 
 export interface FabricationProjectCompletionTotals {
@@ -2228,7 +2230,8 @@ export interface FabricationProjectCompletionTotals {
   bBalanceMt: number;
   habBalanceMt: number;
   wBalanceMt: number;
-  qualityCheckBalanceMt: number;
+  qBalanceMt: number;
+  tsBalanceMt: number;
 }
 
 /**

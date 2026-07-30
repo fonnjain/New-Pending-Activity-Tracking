@@ -433,14 +433,23 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
     })),
   );
 
-  // T8: Five buckets partition TLT exactly (zero unclassified).
-  // Buckets: Release (JCNS+Initial), Cutting (JCNS+Authorized), QC (WIP+QC-act), Galv (WIP+Galv-act), FG (FG+blank).
+  // T8: Six buckets partition TLT exactly (zero unclassified).
+  // Buckets: Release (JCNS+Initial), Awaiting Assignment (JCNS+Authorized+blank contractor),
+  //          Cutting (JCNS+Authorized+non-blank contractor), QC (WIP+QC-act),
+  //          Galv (WIP+Galv-act), FG (FG+blank).
+  // Awaiting Assignment and Cutting are disjoint peer buckets — together they partition
+  // all JCNS+Authorized work with zero overlap.
   const t8 = tlt.filter((r) => {
     const tp = jct(r);
     const st = jcs(r);
     const a = act(r);
     if (tp === "job card not started" && st === "initial") return false; // Release
-    if (tp === "job card not started" && st === "authorized") return false; // Cutting
+    if (tp === "job card not started" && st === "authorized") {
+      // Split by contractor: blank = Awaiting Assignment, non-blank = Cutting
+      const contr = (r.contractor ?? "").trim();
+      if (contr === "") return false; // Awaiting Assignment
+      return false;                   // Cutting
+    }
     if (tp === "job card wip" && QC_ACTS.has(a)) return false;            // QC
     if (tp === "job card wip" && GALV_ACTS.has(a)) return false;          // Galv
     if (tp === "fg pending for dispatch" && a === "") return false;        // FG
@@ -448,13 +457,14 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
   });
   const r_t8 = ruleResult(
     "T8",
-    "The five buckets partition the TLT file exactly: Release + Cutting + Quality Check + Galvanising + FG WIP = total TLT balance, with zero unclassified marks.",
+    "The six buckets partition the TLT file exactly: Release + Awaiting Assignment + Cutting + Quality Check + Galvanising + FG WIP = total TLT balance, with zero unclassified marks. Awaiting Assignment (JCNS+Authorized+blank contractor) and Cutting (JCNS+Authorized+non-blank contractor) are disjoint peer buckets.",
     "TLT",
     t8.map((r) => ({
       row: r,
       fields: {
         "Job Card Type": r.jobCardType,
         "Job Card Status": r.jobCardStatus,
+        Contractor: r.contractor,
         Activity: r.activity,
       },
     })),

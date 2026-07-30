@@ -194,16 +194,18 @@ export async function backfillReleaseBalanceFromPool(): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
-// Assignment Balance — Col A "Job Card Not Started" AND Col G "Authorized"
+// Awaiting Assignment Balance — Col A "Job Card Not Started" AND Col G "Authorized"
 // AND Col D (Contractor) blank.
 // ---------------------------------------------------------------------------
 // Definition: released-but-unassigned work. Excludes Initial (Not Started +
-// Initial) rows — those are already in Release Balance. By requiring
-// Status="Authorized" Assignment is now a strict subset of Cutting Balance
-// (Cutting = JCNS + Authorized regardless of contractor), which means it
-// cannot exceed Cutting and the Total column is not double-counted.
+// Initial) rows — those are already in Release Balance.
 //
-// Observable consequence: Assignment ≈ 37-42% of Cutting on 21-28 Jul data.
+// Under the new six-bucket model, Awaiting Assignment is a PEER bucket to
+// Cutting (JCNS + Authorized + non-blank contractor). They are disjoint and
+// together partition all JCNS+Authorized work. Both must be INCLUDED in totals —
+// neither is a subset of the other, and including both is NOT double-counting.
+//
+// Observable consequence: Awaiting Assign ≈ 44% of (Awaiting+Cutting) on 30-Jul data.
 
 export interface AssignmentBalanceStructureRow {
   project: string;

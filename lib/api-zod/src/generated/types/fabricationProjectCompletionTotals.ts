@@ -16,5 +16,6 @@ export interface FabricationProjectCompletionTotals {
   bBalanceMt: number;
   habBalanceMt: number;
   wBalanceMt: number;
-  qualityCheckBalanceMt: number;
+  qBalanceMt: number;
+  tsBalanceMt: number;
 }

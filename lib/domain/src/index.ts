@@ -2077,13 +2077,18 @@ export function resolveThickness(
 // -----------------------------------------------------------------------
 
 /**
- * The four mutually exclusive WIP production cases per the VTPL specification.
+ * The six mutually exclusive WIP production cases per the VTPL specification.
  *
- *   NOT_RELEASED   Col A="Job Card Not Started" + Col G="Initial"    → Release Balance
- *   CUTTING        Col A="Job Card Not Started" + Col G="Authorized"  → active Cutting
- *   IN_PRODUCTION  Col A="Job Card WIP"         + Col G="Authorized"  → post-cutting work
- *   FINISHED_GOODS Col A="FG Pending For Dispatch"                    → blank activity
- *   UNCLASSIFIED   unexpected Col A / Col G value (data quality alert)
+ *   NOT_RELEASED       Col A="Job Card Not Started" + Col G="Initial"             → Release Balance
+ *   AWAITING_ASSIGNMENT Col A="Job Card Not Started" + Col G="Authorized" + blank contractor → released, not yet assigned
+ *   CUTTING            Col A="Job Card Not Started" + Col G="Authorized" + non-blank contractor → actively being cut
+ *   IN_PRODUCTION      Col A="Job Card WIP"         + Col G="Authorized"           → post-cutting work
+ *   FINISHED_GOODS     Col A="FG Pending For Dispatch"                             → blank activity
+ *   UNCLASSIFIED       unexpected Col A / Col G value (data quality alert)
+ *
+ * AWAITING_ASSIGNMENT and CUTTING are disjoint peer buckets that together partition
+ * all JCNS+Authorized work. Neither is a subset of the other — both must be
+ * INCLUDED in any "total fabrication balance" figure. Do not exclude either.
  *
  * Every aggregation, page, report, export, summary and precomputed value must call
  * classifyWipCase() for Cutting / Release Balance / FG decisions.
@@ -2091,6 +2096,7 @@ export function resolveThickness(
  */
 export type WipCase =
   | "NOT_RELEASED"
+  | "AWAITING_ASSIGNMENT"
   | "CUTTING"
   | "IN_PRODUCTION"
   | "FINISHED_GOODS"
@@ -2107,7 +2113,7 @@ const JCNS_ACTIVITY_CODES = new Set<string>([
 ]);
 
 /**
- * Classify a mark into one of the four mutually exclusive WIP cases.
+ * Classify a mark into one of the six mutually exclusive WIP cases.
  *
  * Priority:
  *   1. jobCardType stored (new-format ≥ Jul-2026 files that include Col A) —
@@ -2120,14 +2126,29 @@ const JCNS_ACTIVITY_CODES = new Set<string>([
  *      JCNS_ACTIVITY_CODES (C + NTF/NTFSW/NTFW) as proxy for JCNS; covers both
  *      TLT (T1 guarantees JCNS = activity C) and NTLT not-started codes.
  *   3. Neither stored (oldest files) — isInitialCutting + JCNS_ACTIVITY_CODES proxy.
+ *
+ * For JCNS+Authorized rows the contractor field further splits into:
+ *   contractor provided and non-blank → CUTTING (work actively being cut)
+ *   contractor blank/null/undefined   → AWAITING_ASSIGNMENT (released, not yet assigned)
+ * When contractor is not included in the record (undefined key), CUTTING is returned
+ * for backwards compatibility with callers that pre-date this split.
  */
 export function classifyWipCase(r: {
   activity?: string | null;
   isInitialCutting?: boolean | null;
   jobCardType?: string | null;
   jobCardStatus?: string | null;
+  /** Col D — blank means not yet assigned; non-blank means contractor is on it. */
+  contractor?: string | null;
 }): WipCase {
   const act = (r.activity ?? "").trim().toUpperCase();
+
+  // Helper: true when a contractor string represents an actual assignment.
+  // "contractor" key absent (undefined) → treat as assigned (backwards compat).
+  const assigned =
+    r.contractor === undefined
+      ? true
+      : r.contractor != null && r.contractor.trim() !== "";
 
   if (r.jobCardType != null) {
     // Col A (Type) stored — authoritative discriminator.
@@ -2139,7 +2160,8 @@ export function classifyWipCase(r: {
       const isInitial = r.jobCardStatus != null
         ? r.jobCardStatus.trim().toUpperCase() === "INITIAL"
         : (r.isInitialCutting ?? false);
-      return isInitial ? "NOT_RELEASED" : "CUTTING";
+      if (isInitial) return "NOT_RELEASED";
+      return assigned ? "CUTTING" : "AWAITING_ASSIGNMENT";
     }
     return "UNCLASSIFIED";
   }
@@ -2149,14 +2171,18 @@ export function classifyWipCase(r: {
     // as JCNS proxy — covers C (TLT) and NTF/NTFSW/NTFW (NTLT not-started).
     const st = r.jobCardStatus.trim().toUpperCase();
     if (JCNS_ACTIVITY_CODES.has(act) && st === "INITIAL")    return "NOT_RELEASED";
-    if (JCNS_ACTIVITY_CODES.has(act) && st === "AUTHORIZED") return "CUTTING";
+    if (JCNS_ACTIVITY_CODES.has(act) && st === "AUTHORIZED")
+      return assigned ? "CUTTING" : "AWAITING_ASSIGNMENT";
     if (act !== "")                                           return "IN_PRODUCTION";
     return "FINISHED_GOODS";
   }
 
   // Legacy fallback (neither jobCardType nor jobCardStatus stored).
   // NTF/NTFSW/NTFW treated same as C — all are JCNS proxies.
-  if (JCNS_ACTIVITY_CODES.has(act)) return r.isInitialCutting ? "NOT_RELEASED" : "CUTTING";
+  if (JCNS_ACTIVITY_CODES.has(act)) {
+    if (r.isInitialCutting) return "NOT_RELEASED";
+    return assigned ? "CUTTING" : "AWAITING_ASSIGNMENT";
+  }
   if (!act) return "FINISHED_GOODS";
   return "IN_PRODUCTION";
 }

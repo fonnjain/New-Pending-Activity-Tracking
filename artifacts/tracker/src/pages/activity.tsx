@@ -10,7 +10,7 @@ import {
 } from "@workspace/api-client-react";
 import { NetBalanceMovementPanel } from "@/components/NetBalanceMovementPanel";
 import { EmptyState, getAgeingColor } from "./overview";
-import { ageingCell, isActiveCutting, isCutting } from "@/lib/ageing";
+import { ageingCell, isActiveCutting, isAwaitingAssignment, isCutting } from "@/lib/ageing";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter } from "@/components/ui/table";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -540,7 +540,7 @@ function ActivityPerformanceTable({
             )}
             {assignBalRecords.length > 0 && (
               <ActivityDrillRow
-                act="Assignment Balance"
+                act="Awaiting Assignment"
                 records={assignBalRecords}
                 idealDays={null}
                 moveWindow={moveWindow}
@@ -738,7 +738,7 @@ function ActivityContent() {
   });
   const releaseBalanceComputedMt = relBalData?.totals?.releaseBalanceComputedMt ?? null;
 
-  // Assignment Balance — sum of assignmentBalanceCalcMt across all Fab Completion rows.
+  // Awaiting Assignment — sum of assignmentBalanceCalcMt across all Fab Completion rows.
   const { data: fabData } = useGetFabricationProjectCompletionTlt();
   const assignmentBalanceMt = useMemo(
     () => fabData?.rows != null
@@ -796,20 +796,20 @@ function ActivityContent() {
 
   const { activities, sortedActivities, totalWt, totalMarks, avgAge, notAgedCount, notAgedWt, agedCount, relBalRecords, assignBalRecords } = useMemo(() => {
     const activities = new Map<string, any[]>();
-    const relBalRecords: any[] = [];   // isInitialCutting=true — Release Balance
-    const assignBalRecords: any[] = []; // active cutting + no contractor — Assignment Balance
+    const relBalRecords: any[] = [];    // NOT_RELEASED (initial cutting) — Release Balance
+    const assignBalRecords: any[] = []; // AWAITING_ASSIGNMENT (JCNS+Authorized+no contractor)
 
     records.forEach(r => {
-      if (isCutting(r.activity) && !isActiveCutting(r)) {
-        // Release Balance (initial cutting): excluded from activity rows but
-        // collected here so the drill-down can show the full hierarchy.
+      if (!isActiveCutting(r) && isCutting(r.activity)) {
+        // Release Balance (initial cutting / NOT_RELEASED): excluded from activity rows
+        // but collected for the drill-down hierarchy.
         relBalRecords.push(r);
         return;
       }
-      // Assignment Balance = active cutting with no contractor assigned yet.
+      // Awaiting Assignment = JCNS+Authorized with no contractor assigned yet.
       // Collected separately for the drill-down row; also kept in activities
-      // so it appears in the C row too (it is a subset, not a separate pool).
-      if (isActiveCutting(r) && !r.contractor) {
+      // so it appears in the C row (peer bucket, not a subset of Cutting).
+      if (isAwaitingAssignment(r)) {
         assignBalRecords.push(r);
       }
       const act = activityDisplayKey(r.activity, r.category);
@@ -951,7 +951,7 @@ function ActivityContent() {
           value={releaseBalanceComputedMt != null ? `${releaseBalanceComputedMt.toFixed(3)} t` : "..."}
         />
         <KpiTile
-          title="Assignment Balance"
+          title="Awaiting Assignment"
           value={assignmentBalanceMt != null ? `${assignmentBalanceMt.toFixed(3)} t` : "..."}
         />
       </div>
