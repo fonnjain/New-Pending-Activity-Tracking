@@ -1,0 +1,40 @@
+The Rule D backslash derivation produces structures that can never join to the Order
+Review. Measured on the 29-Jul import:
+
+  Rule D output (lastIndexOf slice)  :   0 of 266 distinct pairs match the Order Review
+  Inner segment instead              : 229 of 250 distinct pairs match  (91.6%)
+
+Zero, not a low rate. The lastIndexOf slice keeps the prefix:
+
+  '807 IS-807\4CVTJ\11X'   ->  Rule D: 'IS-807\4CVTJ'   (no OR match possible)
+                               inner:  '4CVTJ'           matches OR
+
+The Order Review stores 4CVTJ, 4G1, 7TA. It has no rows containing an 'IS-807\' prefix, so
+no normalisation can bridge this. Per project it is unambiguous — 807: Rule D 0/17, inner
+16/16. 866: 0/12, inner 12/12. 824: 0/12, inner 7/7.
+
+The source comment says "lastIndexOf is deliberate — the structure can itself contain
+backslashes." That inverts the data. Every Mark No. in this file has exactly three
+backslash-separated parts (project-prefix \ structure \ mark) and no structure contains a
+backslash. Guarding against embedded backslashes is what creates the contamination.
+
+Please:
+
+1. Change Rule D to take the segment AFTER the project prefix rather than a lastIndexOf
+   slice. If you believe a structure containing a backslash genuinely occurs, show me one
+   from any import 21-30 July before keeping the current form.
+
+2. Add SS and SR to Rule B's alias list. They are the same class of prefix as IS / SC / S
+   (projects 890 and 924 use them) but currently fall through to Rule D.
+
+3. Re-run the import-scoped OR join afterwards and tell me the match rate. It should move
+   from 885/915 to roughly 906/915. The residual ~20 are the genuine gaps worth chasing.
+
+4. Then reassess W5 — the 30 unmatched structures. Most are Rule D artefacts, not missing
+   Order Review coverage, so the counts and the "absent" classification will both change.
+   Hold ERP rule X2 until after this.
+
+Affects 934 marks / 24.493 MT across 27 projects. The weight is small, which is why it
+never surfaced — but it silently invalidates the join rate, which is a metric people trust.
+
+Paste the changed derivation and the new match rate.

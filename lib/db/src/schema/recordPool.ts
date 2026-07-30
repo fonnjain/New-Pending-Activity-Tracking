@@ -26,11 +26,12 @@ export const recordPoolTable = pgTable("record_pool", {
   //     optional "VT" prefix, and an inner numeric project token (proMno). Alias is
   //     used only to detect this rule class. Produces a 4-part markNumber.
   //
-  //   Rule D (backslash): Mark No. contains a "\". structure = everything before the
-  //     LAST "\" with any leading "<project> " stripped; mNo = everything after the
-  //     last "\". Multiple backslashes are handled by lastIndexOf — the structure
-  //     itself can therefore contain backslashes (e.g. "SS-890\2TA5P"). Alias is
-  //     ignored for structure derivation entirely.
+  //   Rule D (backslash): Mark No. contains a "\". Format is always three segments:
+  //     "<project prefix>\<structure>\<mNo>". Strip the leading "<project> " prefix,
+  //     then split on "\" and take segment[1] as structure, segment[2] as mNo.
+  //     The project-specific prefix (e.g. "CBOM-920") is discarded. Alias is ignored.
+  //     lastIndexOf was previously used here but kept the prefix inside the structure
+  //     (e.g. "CBOM-920\2CE" instead of "2CE"), making OR joins impossible.
   //
   //   Rule C (standard, fallback): Mark No. = "<project> <alias>-<mNo>". structure
   //     = col G (alias) used directly. This is the common case for most TLT marks.

@@ -465,7 +465,15 @@ export function deriveMark(
   }
 
   const gUpper = G.toUpperCase();
-  const isISSC = gUpper === "IS" || gUpper === "SC" || gUpper === "S";
+  // IS / SC / S / SS / SR are all "prefix-class" aliases: the Mark No. encodes a
+  // project-specific prefix (e.g. "IS-807", "SS-890", "SR-924") followed by the
+  // inner structure code. Rule B handles all of them to produce a 4-part markNumber.
+  const isISSC =
+    gUpper === "IS" ||
+    gUpper === "SC" ||
+    gUpper === "S" ||
+    gUpper === "SS" ||
+    gUpper === "SR";
 
   // RULE A — bare mark: no space, no backslash, and both col A and col G empty
   // (Earthing / General / RSJ Pole). markNumber = mNo (may be non-numeric).
@@ -473,8 +481,8 @@ export function deriveMark(
     return makeMark("", "", h, "");
   }
 
-  // RULE B — IS / SC / S rows: the only rows that get a proMno and a 4-part
-  // markNumber "project \ proMno \ structure \ mNo".
+  // RULE B — IS / SC / S / SS / SR rows: the only rows that get a proMno and a
+  // 4-part markNumber "project \ proMno \ structure \ mNo".
   if (isISSC) {
     // 1. Strip the "<A> <G>-" prefix to get the body.
     const prefix = `${A} ${G}-`;
@@ -523,16 +531,22 @@ export function deriveMark(
     return makeMark(A, structure, mNo, proMno);
   }
 
-  // RULE D — backslash form, non-IS/SC: structure = segment before the LAST
-  // backslash, mNo = segment after it (kept whole). 3-part markNumber.
+  // RULE D — backslash form (residual: any alias not in the IS/SC/S/SS/SR set).
+  // Source format: "<A> <prefix>\<structure>\<mNo>" — always exactly three
+  // backslash-separated segments; no structure value ever contains a backslash.
+  // Strip the leading "<A> " prefix, then discard segment[0] (the project-specific
+  // prefix, e.g. "CBOM-920") and take segment[1] as structure, segment[2] as mNo.
+  //
+  // Do NOT use lastIndexOf: that would keep the prefix inside the structure
+  // (e.g. "CBOM-920\2CE" instead of "2CE"), making it un-joinable to Order Review.
   if (h.includes("\\")) {
-    const idx = h.lastIndexOf("\\");
-    let structure = h.slice(0, idx).trim();
-    const mNo = h.slice(idx + 1).trim();
-    // Drop a leading "<A> " so the project is not duplicated inside structure.
-    if (A && structure.startsWith(`${A} `)) {
-      structure = structure.slice(A.length + 1).trim();
-    }
+    const body = A && h.startsWith(`${A} `) ? h.slice(A.length + 1).trim() : h;
+    const parts = body.split("\\");
+    // parts[0] = project-specific prefix — discarded
+    // parts[1] = structure (inner tower type code)
+    // parts[2..] = mNo (per-mark serial; join with "\" if multiple segments)
+    const structure = (parts[1] ?? "").trim();
+    const mNo = parts.slice(2).join("\\").trim();
     return makeMark(A, structure, mNo, "");
   }
 
