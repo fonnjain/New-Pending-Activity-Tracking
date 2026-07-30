@@ -472,18 +472,14 @@ function ActivityPerformanceTable({
   activities,
   sortedActivities,
   moveWindow,
-  releaseBalanceComputedMt,
-  assignmentBalanceMt,
-  releaseBalRows,
-  assignmentRows,
+  relBalRecords,
+  assignBalRecords,
 }: {
   activities: Map<string, any[]>;
   sortedActivities: string[];
   moveWindow: { start: string; end: string };
-  releaseBalanceComputedMt: number | null;
-  assignmentBalanceMt: number | null;
-  releaseBalRows: { project: string; releaseBalanceComputedMt: number | null }[];
-  assignmentRows: { project: string; assignmentBalanceCalcMt: number }[];
+  relBalRecords: any[];
+  assignBalRecords: any[];
 }) {
   const { settings } = useSettings();
 
@@ -511,31 +507,7 @@ function ActivityPerformanceTable({
     [activities, sortedActivities],
   );
 
-  // Group release balance rows by project, summing structure-level weights.
-  const relBalByProject = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of releaseBalRows) {
-      m.set(r.project, (m.get(r.project) ?? 0) + (r.releaseBalanceComputedMt ?? 0));
-    }
-    return [...m.entries()]
-      .map(([project, weightMt]) => ({ project, weightMt }))
-      .filter((p) => p.weightMt > 0)
-      .sort((a, b) => b.weightMt - a.weightMt);
-  }, [releaseBalRows]);
-
-  // Group assignment balance rows by project.
-  const assignByProject = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of assignmentRows) {
-      m.set(r.project, (m.get(r.project) ?? 0) + (r.assignmentBalanceCalcMt ?? 0));
-    }
-    return [...m.entries()]
-      .map(([project, weightMt]) => ({ project, weightMt }))
-      .filter((p) => p.weightMt > 0)
-      .sort((a, b) => b.weightMt - a.weightMt);
-  }, [assignmentRows]);
-
-  if (sortedActivities.length === 0) return null;
+  if (sortedActivities.length === 0 && relBalRecords.length === 0 && assignBalRecords.length === 0) return null;
 
   return (
     <Card>
@@ -557,18 +529,22 @@ function ActivityPerformanceTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {releaseBalanceComputedMt != null && (
-              <BalanceDrillRow
-                label="Release Bal. Computed"
-                totalMt={releaseBalanceComputedMt}
-                projectRows={relBalByProject}
+            {relBalRecords.length > 0 && (
+              <ActivityDrillRow
+                act="Release Bal. Computed"
+                records={relBalRecords}
+                idealDays={null}
+                moveWindow={moveWindow}
+                totalWt={totalWt}
               />
             )}
-            {assignmentBalanceMt != null && (
-              <BalanceDrillRow
-                label="Assignment Balance"
-                totalMt={assignmentBalanceMt}
-                projectRows={assignByProject}
+            {assignBalRecords.length > 0 && (
+              <ActivityDrillRow
+                act="Assignment Balance"
+                records={assignBalRecords}
+                idealDays={null}
+                moveWindow={moveWindow}
+                totalWt={totalWt}
               />
             )}
             {sortedActivities.map((act) => (
@@ -818,10 +794,24 @@ function ActivityContent() {
     return allDays.filter((d) => d.dayKey >= moveWindow.start && d.dayKey <= moveWindow.end);
   }, [productionMovement, isDateFiltered, moveWindow]);
 
-  const { activities, sortedActivities, totalWt, totalMarks, avgAge, notAgedCount, notAgedWt, agedCount } = useMemo(() => {
+  const { activities, sortedActivities, totalWt, totalMarks, avgAge, notAgedCount, notAgedWt, agedCount, relBalRecords, assignBalRecords } = useMemo(() => {
     const activities = new Map<string, any[]>();
+    const relBalRecords: any[] = [];   // isInitialCutting=true — Release Balance
+    const assignBalRecords: any[] = []; // active cutting + no contractor — Assignment Balance
+
     records.forEach(r => {
-      if (isCutting(r.activity) && !isActiveCutting(r)) return;
+      if (isCutting(r.activity) && !isActiveCutting(r)) {
+        // Release Balance (initial cutting): excluded from activity rows but
+        // collected here so the drill-down can show the full hierarchy.
+        relBalRecords.push(r);
+        return;
+      }
+      // Assignment Balance = active cutting with no contractor assigned yet.
+      // Collected separately for the drill-down row; also kept in activities
+      // so it appears in the C row too (it is a subset, not a separate pool).
+      if (isActiveCutting(r) && !r.contractor) {
+        assignBalRecords.push(r);
+      }
       const act = activityDisplayKey(r.activity, r.category);
       if (!activities.has(act)) activities.set(act, []);
       activities.get(act)!.push(r);
@@ -837,7 +827,7 @@ function ActivityContent() {
     const notAgedCount = notAged.length;
     const notAgedWt = notAged.reduce((s, r) => s + (r.balanceWt ?? 0), 0);
 
-    return { activities, sortedActivities, totalWt, totalMarks: records.length, avgAge, notAgedCount, notAgedWt, agedCount: aged.length };
+    return { activities, sortedActivities, totalWt, totalMarks: records.length, avgAge, notAgedCount, notAgedWt, agedCount: aged.length, relBalRecords, assignBalRecords };
   }, [records]);
 
   // Last 7 production dates in the data, shown chronologically (oldest → newest).
@@ -982,10 +972,8 @@ function ActivityContent() {
             activities={activities}
             sortedActivities={sortedActivities}
             moveWindow={moveWindow}
-            releaseBalanceComputedMt={releaseBalanceComputedMt}
-            assignmentBalanceMt={assignmentBalanceMt}
-            releaseBalRows={relBalData?.rows ?? []}
-            assignmentRows={fabData?.rows ?? []}
+            relBalRecords={relBalRecords}
+            assignBalRecords={assignBalRecords}
           />
           <ActivityDailyMovementTable
             activities={activities}
