@@ -1,0 +1,103 @@
+# Replit Prompt — Project Wise: remove two columns, and verify the new one actually appeared
+### The screenshot shows the Awaiting Assignment column is NOT there
+
+**What the screenshot shows.** Current Project Wise columns, TLT, 30-Jul:
+
+```
+Project | Work Order Qty | Dispatch Qty | Dispatch Balance | Release Balance |
+Release Balance Computed | FG (MT) | Cutting (C) | Quality Check | Galvanising |
+Finished Goods WIP (FG) | Total | Avg Ageing
+```
+
+**There is no "Awaiting Assignment" column.** The reply stated it *"appears automatically"*
+via `PROCESS_PHASES.map(...)` with no manual wiring. It has not appeared.
+
+The three visible project rows (VS-33, 807, 831) cannot distinguish pre- from post-change —
+all three have a contractor on every cutting mark, so their Cutting figures are identical
+under either definition. Projects that **would** show the difference: 935 (414.109 → 145.421),
+944 (199.288 → 77.914), 942 (145.325 → 39.488), 956 and 963 (both → 0.000).
+
+---
+
+## The prompt
+
+```
+Two things: a column removal, and a verification that the previous change actually landed.
+
+1. REMOVE TWO COLUMNS FROM PROJECT WISE
+
+Please remove these from the Project Wise page and its Excel export:
+
+   - "Release Balance"          (column E in the export — the Order Review Col S figure)
+   - "FG (MT)"                  (column G in the export — the Order-Review-derived
+                                 Progress Galvanising minus Progress Despatch)
+
+Keep these, which are the WIP-derived equivalents and the ones actually wanted:
+
+   - "Release Balance Computed" (from the WIP file)
+   - "Finished Goods WIP (FG)"  (from the WIP file)
+
+Both removed columns are Order-Review-derived and both have known data quality problems:
+Release Balance goes NEGATIVE on some projects (807 shows -1.6 t, 831 shows -943 kg on
+30-Jul), and the computed FG figure disagrees with the WIP figure by more than 5x at
+portfolio level with only about 66% per-structure agreement.
+
+Removing them must not change any other column or the Total.
+
+2. VERIFY THE AWAITING ASSIGNMENT COLUMN — it is not showing
+
+Your last reply said the new "Awaiting Assignment" column "appears automatically" through
+PROCESS_PHASES.map(...) with no manual wiring. It is not on the page. The current columns
+are:
+
+   Project | Work Order Qty | Dispatch Qty | Dispatch Balance | Release Balance |
+   Release Balance Computed | FG (MT) | Cutting (C) | Quality Check | Galvanising |
+   Finished Goods WIP (FG) | Total | Avg Ageing
+
+Please check whether the change is deployed to the surface I am looking at, and confirm the
+column renders. Note the three visible rows (VS-33, 807, 831) cannot tell me either way —
+every cutting mark on those projects has a contractor, so their Cutting figures are the same
+under both definitions. To see the difference, look at project 935: Cutting should read
+145.421 MT, not 414.109 MT, with 268.688 MT in Awaiting Assignment.
+
+3. DO NOT SPLIT Q AND TS ON THIS PAGE
+
+Important: the Q/TS split applies to the FABRICATION REPORT only. On Project Wise, Quality
+Check must keep the full set {HG, RFI, NH, B, HAB, W, Q, TS}. That page shows the six-bucket
+partition, and removing TS would break it — the buckets would no longer sum to Total Wt.
+
+The Fabrication Report is a fabrication-scope report and splits them; Project Wise is a
+bucket view and does not.
+
+VERIFICATION — please give me actual figures from the running app, 30-Jul import, TLT:
+
+   Release Balance Computed   2,112.271 MT
+   Awaiting Assignment        1,104.513 MT   (new column — confirm it renders)
+   Cutting                    1,414.718 MT / 9,723 marks
+   Quality Check              1,867.583 MT   (still includes TS)
+   Galvanising                1,933.288 MT
+   Finished Goods WIP         2,280.720 MT
+   Total Wt                  10,713.093 MT / 58,321 marks
+
+Total Wt must be UNCHANGED at 10,713.093. The split is total-neutral — Awaiting Assignment
+plus Cutting equals the old combined Cutting exactly. If Total Wt moved, the new column is
+being added on top of a total that already included that weight.
+
+Spot check, project 935: Cutting 145.421 MT, Awaiting Assignment 268.688 MT.
+
+Please also send a fresh Project Wise export. The previous export had 23 columns; after
+removing two and adding two (Awaiting Assignment weight and marks) it should have 23 again —
+confirm the header row.
+```
+
+---
+
+## What to check in the reply
+
+- **An actual figure for project 935.** 145.421 means the change landed; 414.109 means it did
+  not. The three rows visible in the screenshot cannot distinguish the two.
+- **Total Wt still 10,713.093.** Any movement means double counting.
+- **Quality Check still 1,867.583** — if it drops to about 1,546 the Q/TS split was wrongly
+  applied to this page and the six-bucket partition is broken.
+- **A real export**, not a description. Three fixes in this project have been reported
+  complete while the generated file still showed the old behaviour.

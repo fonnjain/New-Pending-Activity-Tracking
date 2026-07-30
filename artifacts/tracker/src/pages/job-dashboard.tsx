@@ -424,9 +424,7 @@ function JobDashboardContent() {
             { label: "Work Order (MT)", field: "workOrderMt", numeric: true, decimals: 3, total: true },
             { label: "Dispatch (MT)", field: "dispatchMt", numeric: true, decimals: 3, total: true },
             { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
-            { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
             { label: "Release Balance Computed (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
-            { label: "FG (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
             { label: "Awaiting Assignment Wt (MT)", field: "awaitingAssignmentWt", numeric: true, decimals: 3, total: true },
             { label: "Awaiting Assignment Marks", field: "awaitingAssignmentMarks", numeric: true, decimals: 0, total: true },
             { label: "Cutting Wt (MT)", field: "cuttingWt", numeric: true, decimals: 3, total: true },
@@ -451,9 +449,7 @@ function JobDashboardContent() {
             workOrderMt: orderByJob.get(p.job)?.wo ?? 0,
             dispatchMt: orderByJob.get(p.job)?.disp ?? 0,
             dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
-            releaseBalanceMt: orderByJob.get(p.job)?.fileBalRelease ?? 0,
             releaseBalanceComputedMt: relBalComputedByJob.get(p.job) ?? 0,
-            computedFgMt: fgWipForJob(p.job) / 1000,
             awaitingAssignmentWt: p.phases.awaitingAssignment.weight / 1000,
             awaitingAssignmentMarks: p.phases.awaitingAssignment.marks,
             cuttingWt: p.phases.cutting.weight / 1000,
@@ -624,9 +620,7 @@ function JobDashboardContent() {
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Work Order Qty</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Qty</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Balance</TableHead>
-                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Balance</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Balance Computed</TableHead>
-                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">FG (MT)</TableHead>
                   {headerPhases.map((ph) => (
                     <TableHead key={ph.key} className="text-right align-bottom">
                       <span className="block whitespace-normal leading-tight">{ph.label}</span>
@@ -671,13 +665,7 @@ function JobDashboardContent() {
                       {o ? formatWeight((o.wo - o.disp) * 1000) : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {o ? formatWeight(o.fileBalRelease * 1000) : <span className="text-muted-foreground">-</span>}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
                       {(() => { const v = relBalComputedByJob.get(p.job); return v ? formatWeight(v * 1000) : <span className="text-muted-foreground">-</span>; })()}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {(() => { const v = o?.computedFg; return v != null && v !== 0 ? formatWeight(v * 1000) : <span className="text-muted-foreground">-</span>; })()}
                     </TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       if (ph.key === "dispatch") {
@@ -724,7 +712,7 @@ function JobDashboardContent() {
                 })}
                 {byProject.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={PROCESS_PHASES.length + 8} className="text-center py-4 text-muted-foreground">
+                    <TableCell colSpan={PROCESS_PHASES.length + 6} className="text-center py-4 text-muted-foreground">
                       No data for the selected filters.
                     </TableCell>
                   </TableRow>
@@ -737,9 +725,7 @@ function JobDashboardContent() {
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.wo * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.disp * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.disp) * 1000)}</TableCell>
-                    <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.fileBalRelease * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(byProject.reduce((s, p) => s + (relBalComputedByJob.get(p.job) ?? 0), 0) * 1000)}</TableCell>
-                    <TableCell className="text-right tabular-nums font-bold">{orderTotals.computedFg !== 0 ? formatWeight(orderTotals.computedFg * 1000) : <span className="text-muted-foreground">-</span>}</TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       if (ph.key === "dispatch") {
                         const totalFgWt = byProject.reduce((s, p) => s + fgWipForJob(p.job), 0);
@@ -1149,7 +1135,7 @@ function JobDetail({
   }
 
   if (atMfcListLevel) {
-    const totalCols = 3 + (orderEntry ? 4 : 0) + headerPhases.length + 3;
+    const totalCols = 3 + (orderEntry ? 3 : 0) + headerPhases.length + 3;
     return (
       <div className="space-y-4">
         <div className="flex items-start gap-3">
@@ -1181,7 +1167,6 @@ function JobDetail({
                         <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Work Order Qty</TableHead>
                         <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Qty</TableHead>
                         <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Balance</TableHead>
-                        <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Balance</TableHead>
                       </>
                     )}
                     {headerPhases.map((ph) => (
@@ -1225,7 +1210,6 @@ function JobDetail({
                           <TableCell className="text-right tabular-nums">{formatWeight((moe?.wo ?? 0) * 1000)}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatWeight((moe?.disp ?? 0) * 1000)}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatWeight(((moe?.wo ?? 0) - (moe?.disp ?? 0)) * 1000)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatWeight((moe?.fileBalRelease ?? 0) * 1000)}</TableCell>
                         </>
                       )}
                       {PROCESS_PHASES.map((ph) => {
@@ -1284,7 +1268,6 @@ function JobDetail({
                           <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderEntry.wo * 1000)}</TableCell>
                           <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderEntry.disp * 1000)}</TableCell>
                           <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderEntry.wo - orderEntry.disp) * 1000)}</TableCell>
-                          <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderEntry.fileBalRelease * 1000)}</TableCell>
                         </>
                       )}
                       {PROCESS_PHASES.map((ph) => {
