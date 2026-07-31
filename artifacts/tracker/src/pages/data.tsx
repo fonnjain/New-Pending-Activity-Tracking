@@ -1,4 +1,4 @@
-import { useMemo, useState, Fragment } from "react";
+import { useMemo, useState, Fragment, useEffect } from "react";
 import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, useListInventoryMfcBatchColors, getListInventoryMfcBatchColorsQueryKey, useUpsertInventoryMfcBatchColor, useDeleteInventoryMfcBatchColor, useGetInventoryBuckets, getGetInventoryBucketsQueryKey, type InventoryMfcBatchColor, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow, type ErpRulesResponse, type ErpRuleResult } from "@workspace/api-client-react";
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
@@ -23,7 +23,8 @@ import { ContractorSetupContent } from "@/pages/contractor-setup";
 import { WarningParametersContent } from "@/pages/warning-parameters";
 import { ThicknessContent } from "@/pages/thickness";
 
-const ADMIN_TABS: Array<{ path: string; label: string; disabled?: boolean }> = [
+// Tabs visible only to admins.
+const ADMIN_ONLY_TABS: Array<{ path: string; label: string; disabled?: boolean }> = [
   { path: "/data", label: "Data" },
   { path: "/job-templates", label: "Job Templates", disabled: true },
   { path: "/computed-fg", label: "Computed FG" },
@@ -34,32 +35,80 @@ const ADMIN_TABS: Array<{ path: string; label: string; disabled?: boolean }> = [
   { path: "/warning-parameters", label: "Warning Parameters" },
   { path: "/thickness", label: "Thickness" },
   { path: "/erp-rules", label: "ERP Rules" },
-  { path: "/bucket-list-dates", label: "Bucket List Dates" },
   { path: "/users", label: "Users" },
 ];
+
+// Tabs visible to all authenticated users.
+const NORMAL_TABS: Array<{ path: string; label: string; disabled?: boolean }> = [
+  { path: "/bucket-list-dates", label: "Bucket List Dates" },
+];
+
+const ALL_TABS = [...ADMIN_ONLY_TABS, ...NORMAL_TABS];
 
 export default function DataView() {
   const { data: authStatus } = useGetAuthStatus({
     query: { queryKey: getGetAuthStatusQueryKey() },
   });
-  if (authStatus && authStatus.role !== "admin") {
-    return <AccessDenied />;
-  }
-  return <AdminTabbedPage />;
+  const isAdmin = authStatus?.role === "admin";
+  // All authenticated users may access this page; admins see all tabs, regular
+  // users only see the Normal section (Bucket List Dates).
+  return <TabbedPage isAdmin={isAdmin} />;
 }
 
-function AdminTabbedPage() {
+function TabbedPage({ isAdmin }: { isAdmin: boolean | undefined }) {
   const [location, setLocation] = useLocation();
-  const active = ADMIN_TABS.find((t) => t.path === location)?.path ?? "/data";
+
+  // Redirect non-admins away from admin-only paths (e.g. if they navigate
+  // directly via the URL bar). Wait until auth is resolved (isAdmin !== undefined).
+  const isAdminPath = ADMIN_ONLY_TABS.some((t) => t.path === location);
+  useEffect(() => {
+    if (isAdmin === false && isAdminPath) {
+      setLocation("/bucket-list-dates");
+    }
+  }, [isAdmin, isAdminPath, setLocation]);
+
+  const defaultPath = isAdmin ? "/data" : "/bucket-list-dates";
+  const active = ALL_TABS.find((t) => t.path === location)?.path ?? defaultPath;
+
+  // While auth resolves and a redirect may be pending, render nothing to avoid
+  // a flash of admin content.
+  if (isAdmin === false && isAdminPath) return null;
+
   return (
-    <div className="space-y-6">
-      <div className="overflow-x-auto -mx-1 px-1 pb-1">
-        <Segmented
-          value={active}
-          onChange={(v) => v && setLocation(v)}
-          options={ADMIN_TABS.map((t) => ({ value: t.path, label: t.label, disabled: t.disabled }))}
-        />
+    <div className="space-y-4">
+      {/* Admin section — only shown to admins */}
+      {isAdmin && (
+        <div className="space-y-1.5">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold px-1">
+            Admin
+          </div>
+          <div className="overflow-x-auto -mx-1 px-1 pb-1">
+            <Segmented
+              value={active}
+              onChange={(v) => v && setLocation(v)}
+              options={ADMIN_ONLY_TABS.map((t) => ({ value: t.path, label: t.label, disabled: t.disabled }))}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Normal section — visible to all users */}
+      <div className="space-y-1.5">
+        {isAdmin && (
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold px-1">
+            Normal
+          </div>
+        )}
+        <div className="overflow-x-auto -mx-1 px-1 pb-1">
+          <Segmented
+            value={active}
+            onChange={(v) => v && setLocation(v)}
+            options={NORMAL_TABS.map((t) => ({ value: t.path, label: t.label, disabled: t.disabled }))}
+          />
+        </div>
       </div>
+
+      {/* Content */}
       {active === "/job-templates" ? (
         <JobTemplatesContent />
       ) : active === "/computed-fg" ? (

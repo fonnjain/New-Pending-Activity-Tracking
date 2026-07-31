@@ -407,6 +407,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     location !== "/warning-parameters" &&
     location !== "/thickness" &&
     location !== "/users" &&
+    location !== "/bucket-list-dates" &&
     selectedImportId != null;
 
   // While the initial auth check is in-flight, show a blank screen so there
@@ -423,8 +424,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // Must change password → force the change before any page loads.
   if (mustChangePassword) return <ChangePasswordForm />;
 
-  // Admin-only Data nav link; regular users see everything else.
-  const visibleNavItems = isAdmin ? navItems : navItems.filter((i) => i.href !== "/data");
+  // Data page is accessible to all users (Bucket List Dates tab is the normal-user entry point).
+  const visibleNavItems = navItems;
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground pb-16 md:pb-0">

@@ -15,6 +15,7 @@ import {
   contractorCategoriesTable,
   rsjThicknessTable,
   manualThicknessTable,
+  inventoryProjectDatesTable,
   SETTINGS_SINGLETON_ID,
   type InsertRecordPool,
   type ChangeSummary,
@@ -294,6 +295,7 @@ function serializeRecord(
   importId: number,
   id: number,
   thicknessLookups: ThicknessLookups = {},
+  clientMfcDate?: string | null,
 ) {
   const { routeSteps, currentStepIndex } = computeRoute(r.operation, r.activity);
   const { thicknessMm, thicknessSource } = resolveThickness(
@@ -363,7 +365,28 @@ function serializeRecord(
     // NTLT "Job Card Not Started" records at G/TS/NTF/NTFSW/NTFW to Cutting
     // rather than Galvanising or Quality Check.
     jobCardType: r.jobCardType ?? null,
+    // Date of Client MFC for this mark's project (YYYY-MM-DD). When set, the
+    // TAT page uses today−clientMfcDate as the ageing baseline instead of the
+    // per-mark lastProductionDate ageing. The velocity engine injects this date
+    // as a synthetic anchor snapshot so pace is measured from project start.
+    // Null when no date has been entered in Bucket List Dates for this project.
+    clientMfcDate: clientMfcDate ?? null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Per-project Client MFC Date map. Sourced from inventory_project_dates. Used
+// to override the ageing baseline for TAT and the velocity pace anchor for
+// Speed of Execution. The table is upload-independent and changes only when
+// the user edits Bucket List Dates — not cached (cheap; small table).
+// ---------------------------------------------------------------------------
+async function loadProjectDates(): Promise<Map<string, string>> {
+  const rows = await db.select().from(inventoryProjectDatesTable);
+  const map = new Map<string, string>();
+  for (const r of rows) {
+    if (r.dateOfClientMfc) map.set(r.project, r.dateOfClientMfc);
+  }
+  return map;
 }
 
 // Load the two thickness config maps (RSJ lookup by group key + manual pins by
@@ -1653,19 +1676,20 @@ router.get("/imports/:id/records", async (req, res): Promise<void> => {
     return;
   }
 
-  // Fire both reads in parallel — membership join and thickness lookups are
-  // independent data sources.
-  const [rows, thicknessLookups] = await Promise.all([
+  // Fire all three reads in parallel — independent data sources.
+  const [rows, thicknessLookups, projectDates] = await Promise.all([
     loadMembership(db, params.data.id),
     loadThicknessLookups(),
+    loadProjectDates(),
   ]);
   rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
 
   const out: ReturnType<typeof serializeRecord>[] = [];
   let nextId = 1;
   for (const { pool, copies } of rows) {
+    const clientMfcDate = projectDates.get(pool.job) ?? null;
     for (let c = 0; c < copies; c++) {
-      out.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups));
+      out.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate));
     }
   }
 
@@ -1701,17 +1725,19 @@ router.post("/imports/:id/summary", async (req, res): Promise<void> => {
 
   // Serialize the full record set EXACTLY as /records does, then apply the same
   // shared filter + aggregators the client uses (byte-identical by construction).
-  // Fire both reads in parallel — independent data sources.
-  const [rows, thicknessLookups] = await Promise.all([
+  // Fire all three reads in parallel — independent data sources.
+  const [rows, thicknessLookups, projectDatesForSummary] = await Promise.all([
     loadMembership(db, params.data.id),
     loadThicknessLookups(),
+    loadProjectDates(),
   ]);
   rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
   const serialized: ReturnType<typeof serializeRecord>[] = [];
   let nextId = 1;
   for (const { pool, copies } of rows) {
+    const clientMfcDate = projectDatesForSummary.get(pool.job) ?? null;
     for (let c = 0; c < copies; c++) {
-      serialized.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups));
+      serialized.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate));
     }
   }
 
@@ -2002,7 +2028,10 @@ async function computeVelocityItems(
   target: typeof importsTable.$inferSelect,
   settings: TurnaroundSettings,
 ) {
-  const current = await loadVelocityStates(target.id);
+  const [current, projectDatesForVelocity] = await Promise.all([
+    loadVelocityStates(target.id),
+    loadProjectDates(),
+  ]);
   const currentMs = importDateMs(target.reportDate, target.createdAt);
 
   // Bound the history walk to the global WIP cutoff so velocity ignores
@@ -2060,6 +2089,24 @@ async function computeVelocityItems(
           stillMatching.delete(key);
         }
       }
+    }
+  }
+
+  // Client MFC Date anchor: for projects with a dateOfClientMfc set, inject a
+  // synthetic snapshot at that date with stageIndex=0. This anchors the pace
+  // window to the date the client committed the MFC rather than the first WIP
+  // upload, giving a more accurate "total project pace" for Speed of Execution.
+  // Only injected when the MFC date pre-dates the earliest existing snapshot
+  // (i.e. it actually extends the observation window backwards).
+  for (const [key, st] of current) {
+    const mfcDateStr = projectDatesForVelocity.get(st.job);
+    if (!mfcDateStr) continue;
+    const anchorMs = Date.parse(`${mfcDateStr}T00:00:00Z`);
+    if (!Number.isFinite(anchorMs)) continue;
+    const s = series.get(key)!;
+    const minMs = Math.min(...s.map((snap) => snap.importDate));
+    if (anchorMs < minMs) {
+      s.push({ importDate: anchorMs, stageIndex: 0, lastProductionDate: null });
     }
   }
 

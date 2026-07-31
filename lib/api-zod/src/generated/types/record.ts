@@ -117,4 +117,10 @@ export interface Record {
   /** True when Job Card Status (Col G) = "Initial", regardless of Activity. In the newer WIP format the Activity column holds the PLANNED activity for scheduling, not the current production stage — a mark at Activity=RFI with Status=Initial has NOT started RFI; it is unreleased raw material that belongs in Balance Release, not Balance Fabrication. Only Status="Authorized" marks have been physically released to the shop floor. Additive, not hashed. Defaults false for old-format rows without a Job Card Status column.
    */
   isInitialCutting: boolean;
+  /**
+     * Date of Client MFC for this mark's project (YYYY-MM-DD), sourced from inventory_project_dates. Null when no date has been entered for the project. When set, this date is used as the start of the turnaround time clock (replacing the per-mark lastProductionDate baseline) and as the anchor for the Speed of Execution pace window.
+
+     * @nullable
+     */
+  clientMfcDate?: string | null;
 }

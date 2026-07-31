@@ -37,7 +37,23 @@ function TurnaroundContent({ importId }: { importId: number }) {
   const { data: allRecords } = useGetImportRecords(importId, {
     query: { enabled: true, queryKey: getGetImportRecordsQueryKey(importId) },
   });
-  const records = useFilteredRecords(allRecords);
+  const rawRecords = useFilteredRecords(allRecords);
+
+  // Apply the Client MFC Date override once here so every sub-component —
+  // TurnaroundBreakdown, TurnaroundWarnings, and UrgencyWorklist — shares the
+  // same ageing baseline without duplicating the logic. When a mark's project
+  // has a clientMfcDate, ageingDays is replaced with today − dateOfClientMfc
+  // (total elapsed days since the client committed the MFC). Marks whose
+  // project has no date are passed through unchanged.
+  const records = useMemo(() => {
+    const todayMs = Date.now();
+    return rawRecords.map((r) => {
+      if (!r.clientMfcDate) return r;
+      const mfcMs = Date.parse(`${r.clientMfcDate}T00:00:00Z`);
+      if (!Number.isFinite(mfcMs)) return r;
+      return { ...r, ageingDays: Math.max(0, Math.floor((todayMs - mfcMs) / 86_400_000)) };
+    });
+  }, [rawRecords]);
 
   return (
     <div className="space-y-6">
@@ -122,7 +138,9 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
   const [openStage, setOpenStage] = useState<string | null>(null);
 
   // Classify every visible record once, then derive each rollup from it so the
-  // tabs always honour the active header filters.
+  // tabs always honour the active header filters. Records already have their
+  // ageingDays overridden at the TurnaroundContent level (clientMfcDate → today
+  // − dateOfClientMfc when set), so no further adjustment is needed here.
   const classified = useMemo(
     () =>
       records.map((r) => ({
