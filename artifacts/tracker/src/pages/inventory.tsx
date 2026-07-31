@@ -1570,7 +1570,7 @@ export default function InventoryView() {
 
   // "Assign colour" CTA navigates to the Bucket List Dates tab under Data page.
   const handleAssignColour = useCallback(() => {
-    navigate("~/production/data/bucket-list-dates");
+    navigate("~/production/bucket-list-dates");
   }, [navigate]);
 
   const mfcBatchColorMap = useMemo(

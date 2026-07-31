@@ -18,7 +18,7 @@ import JobDashboard from "@/pages/job-dashboard";
 import ActivityView from "@/pages/activity";
 import ContractorView from "@/pages/contractor";
 import PlantOperationView from "@/pages/plant-operation";
-import DataView from "@/pages/data";
+import DataView, { BucketListDatesPage } from "@/pages/data";
 import ReportsView from "@/pages/reports";
 import OrderStatusView from "@/pages/order-status";
 import InventoryView from "@/pages/inventory";
@@ -69,7 +69,7 @@ function ProductionTracker() {
         <Route path="/order-review-generated" component={DataView} />
         <Route path="/erp-rules" component={DataView} />
         <Route path="/job-templates" component={DataView} />
-        <Route path="/bucket-list-dates" component={DataView} />
+        <Route path="/bucket-list-dates" component={BucketListDatesPage} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

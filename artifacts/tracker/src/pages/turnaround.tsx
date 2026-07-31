@@ -8,7 +8,7 @@ import {
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
-import { formatWeight } from "@/lib/utils";
+import { formatWeight, formatDate } from "@/lib/utils";
 import { useSettings } from "@/lib/settings";
 import {
   lifecycleStatus,
@@ -561,7 +561,14 @@ function MarkDrill({
                 </span>
               </td>
               <td className="py-1.5 pr-3 text-right tabular-nums">
-                {r.ageingDays !== null ? `${r.ageingDays}d` : "-"}
+                <div className="inline-flex flex-col items-end gap-0.5">
+                  <span>{r.ageingDays !== null ? `${r.ageingDays}d` : "-"}</span>
+                  {r.clientMfcDate && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded px-1 py-0.5 whitespace-nowrap">
+                      📅 MFC: {formatDate(r.clientMfcDate)}
+                    </span>
+                  )}
+                </div>
               </td>
               <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
                 {res.target !== null ? `${res.target}d` : "-"}
@@ -648,7 +655,14 @@ function UrgencyWorklist({ records }: { records: ApiRecord[] }) {
                       </span>
                     </td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">
-                      {r.ageingDays !== null ? `${r.ageingDays}d` : "-"}
+                      <div className="inline-flex flex-col items-end gap-0.5">
+                        <span>{r.ageingDays !== null ? `${r.ageingDays}d` : "-"}</span>
+                        {r.clientMfcDate && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded px-1 py-0.5 whitespace-nowrap">
+                            📅 MFC: {formatDate(r.clientMfcDate)}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
                       {res.target !== null ? `${res.target}d` : "-"}

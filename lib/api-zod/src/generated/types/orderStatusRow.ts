@@ -78,6 +78,11 @@ export interface OrderStatusRow {
      * @nullable
      */
   balGalvMt: number | null;
+  /**
+     * Progress Inspection MT from the Order Review file (col O). Used by the OR consistency panel.
+     * @nullable
+     */
+  inspectionMt: number | null;
   /** Current order row absent from the latest Order Review file (kept, not deleted). */
   notInLatest: boolean;
 }

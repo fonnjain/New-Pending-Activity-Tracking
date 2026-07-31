@@ -12,7 +12,7 @@ import {
   inventoryMfcBatchColorTable,
   inventoryProjectDatesTable,
 } from "@workspace/db";
-import { requireAuth } from "./auth";
+import { requireAuth, requireAdmin } from "./auth";
 import {
   UpsertInventoryManualEBody,
   UpsertInventorySideOverrideBody,
@@ -161,7 +161,7 @@ router.get("/inventory-manual/e", async (_req, res): Promise<void> => {
   res.json(rows);
 });
 
-router.put("/inventory-manual/e", requireAuth, async (req, res): Promise<void> => {
+router.put("/inventory-manual/e", requireAuth, requireAdmin, async (req, res): Promise<void> => {
   const parsed = UpsertInventoryManualEBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -198,6 +198,7 @@ router.put("/inventory-manual/e", requireAuth, async (req, res): Promise<void> =
 router.delete(
   "/inventory-manual/e",
   requireAuth,
+  requireAdmin,
   async (req, res): Promise<void> => {
     const id = Number(req.query.id);
     if (!Number.isInteger(id) || id <= 0) {
@@ -227,6 +228,7 @@ router.get("/inventory-manual/side-overrides", async (_req, res): Promise<void> 
 router.put(
   "/inventory-manual/side-overrides",
   requireAuth,
+  requireAdmin,
   async (req, res): Promise<void> => {
     const parsed = UpsertInventorySideOverrideBody.safeParse(req.body);
     if (!parsed.success) {
@@ -254,6 +256,7 @@ router.put(
 router.delete(
   "/inventory-manual/side-overrides",
   requireAuth,
+  requireAdmin,
   async (req, res): Promise<void> => {
     const projectCode = String(req.query.projectCode ?? "").trim();
     const bucket = String(req.query.bucket ?? "").trim();
@@ -297,6 +300,7 @@ router.get("/inventory-manual/mfc-batch-colors", async (_req, res): Promise<void
 router.put(
   "/inventory-manual/mfc-batch-colors",
   requireAuth,
+  requireAdmin,
   async (req, res): Promise<void> => {
     const parsed = UpsertInventoryMfcBatchColorBody.safeParse(req.body);
     if (!parsed.success) {
@@ -338,6 +342,7 @@ router.put(
 router.delete(
   "/inventory-manual/mfc-batch-colors",
   requireAuth,
+  requireAdmin,
   async (req, res): Promise<void> => {
     const project = String(req.query.project ?? "").trim();
     const mfcBatch = String(req.query.mfcBatch ?? "").trim();
@@ -378,6 +383,7 @@ router.get("/inventory-manual/project-dates", async (_req, res): Promise<void> =
 router.put(
   "/inventory-manual/project-dates",
   requireAuth,
+  requireAdmin,
   async (req, res): Promise<void> => {
     const { project, dateOfClientMfc, projectStartDate } = req.body ?? {};
     if (!project || typeof project !== "string" || !project.trim()) {

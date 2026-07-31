@@ -1,5 +1,11 @@
 import { useMemo, useState, Fragment, useEffect } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, useListInventoryMfcBatchColors, getListInventoryMfcBatchColorsQueryKey, useUpsertInventoryMfcBatchColor, useDeleteInventoryMfcBatchColor, useGetInventoryBuckets, getGetInventoryBucketsQueryKey, type InventoryMfcBatchColor, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow, type ErpRulesResponse, type ErpRuleResult } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, useListInventoryMfcBatchColors, getListInventoryMfcBatchColorsQueryKey, useUpsertInventoryMfcBatchColor, useDeleteInventoryMfcBatchColor, useGetInventoryBuckets, getGetInventoryBucketsQueryKey, type InventoryMfcBatchColor, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow } from "@workspace/api-client-react";
+
+// ERP rules types are not part of the generated API contract (the endpoint is
+// not in the OpenAPI spec); define them locally to avoid import errors.
+type ErpRuleSampleRow = { project: string; structure: string; markNo: string; fields: Record<string, string | number | null> };
+type ErpRuleResult = { id: string; label: string; pass: boolean; scope: "UNIVERSAL" | "TLT"; violatingRowCount: number; violatingWeightMt: number; sampleRows: ErpRuleSampleRow[]; notApplicable?: boolean };
+type ErpRulesResponse = { rules: ErpRuleResult[]; asOnDate?: string | null; typeColumnMissing?: boolean };
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
@@ -23,8 +29,10 @@ import { ContractorSetupContent } from "@/pages/contractor-setup";
 import { WarningParametersContent } from "@/pages/warning-parameters";
 import { ThicknessContent } from "@/pages/thickness";
 
-// Tabs visible only to admins.
-const ADMIN_ONLY_TABS: Array<{ path: string; label: string; disabled?: boolean }> = [
+// All tabs are admin-only. The /bucket-list-dates route is served by a
+// dedicated standalone page (BucketListDatesPage) so non-admin users can view
+// MFC dates without accessing the admin surface here.
+const ALL_TABS: Array<{ path: string; label: string; disabled?: boolean }> = [
   { path: "/data", label: "Data" },
   { path: "/job-templates", label: "Job Templates", disabled: true },
   { path: "/computed-fg", label: "Computed FG" },
@@ -35,77 +43,39 @@ const ADMIN_ONLY_TABS: Array<{ path: string; label: string; disabled?: boolean }
   { path: "/warning-parameters", label: "Warning Parameters" },
   { path: "/thickness", label: "Thickness" },
   { path: "/erp-rules", label: "ERP Rules" },
+  { path: "/bucket-list-dates", label: "Bucket List Dates" },
   { path: "/users", label: "Users" },
 ];
-
-// Tabs visible to all authenticated users.
-const NORMAL_TABS: Array<{ path: string; label: string; disabled?: boolean }> = [
-  { path: "/bucket-list-dates", label: "Bucket List Dates" },
-];
-
-const ALL_TABS = [...ADMIN_ONLY_TABS, ...NORMAL_TABS];
 
 export default function DataView() {
   const { data: authStatus } = useGetAuthStatus({
     query: { queryKey: getGetAuthStatusQueryKey() },
   });
-  const isAdmin = authStatus?.role === "admin";
-  // All authenticated users may access this page; admins see all tabs, regular
-  // users only see the Normal section (Bucket List Dates).
-  return <TabbedPage isAdmin={isAdmin} />;
+  const [, setLocation] = useLocation();
+
+  // Redirect non-admins away from the admin Data area entirely.
+  useEffect(() => {
+    if (authStatus && authStatus.role !== "admin") {
+      setLocation("~/production");
+    }
+  }, [authStatus, setLocation]);
+
+  if (!authStatus || authStatus.role !== "admin") return null;
+  return <TabbedPage />;
 }
 
-function TabbedPage({ isAdmin }: { isAdmin: boolean | undefined }) {
+function TabbedPage() {
   const [location, setLocation] = useLocation();
-
-  // Redirect non-admins away from admin-only paths (e.g. if they navigate
-  // directly via the URL bar). Wait until auth is resolved (isAdmin !== undefined).
-  const isAdminPath = ADMIN_ONLY_TABS.some((t) => t.path === location);
-  useEffect(() => {
-    if (isAdmin === false && isAdminPath) {
-      setLocation("/bucket-list-dates");
-    }
-  }, [isAdmin, isAdminPath, setLocation]);
-
-  const defaultPath = isAdmin ? "/data" : "/bucket-list-dates";
-  const active = ALL_TABS.find((t) => t.path === location)?.path ?? defaultPath;
-
-  // While auth resolves and a redirect may be pending, render nothing to avoid
-  // a flash of admin content.
-  if (isAdmin === false && isAdminPath) return null;
+  const active = ALL_TABS.find((t) => t.path === location)?.path ?? "/data";
 
   return (
     <div className="space-y-4">
-      {/* Admin section — only shown to admins */}
-      {isAdmin && (
-        <div className="space-y-1.5">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold px-1">
-            Admin
-          </div>
-          <div className="overflow-x-auto -mx-1 px-1 pb-1">
-            <Segmented
-              value={active}
-              onChange={(v) => v && setLocation(v)}
-              options={ADMIN_ONLY_TABS.map((t) => ({ value: t.path, label: t.label, disabled: t.disabled }))}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Normal section — visible to all users */}
-      <div className="space-y-1.5">
-        {isAdmin && (
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold px-1">
-            Normal
-          </div>
-        )}
-        <div className="overflow-x-auto -mx-1 px-1 pb-1">
-          <Segmented
-            value={active}
-            onChange={(v) => v && setLocation(v)}
-            options={NORMAL_TABS.map((t) => ({ value: t.path, label: t.label, disabled: t.disabled }))}
-          />
-        </div>
+      <div className="overflow-x-auto -mx-1 px-1 pb-1">
+        <Segmented
+          value={active}
+          onChange={(v) => v && setLocation(v)}
+          options={ALL_TABS.map((t) => ({ value: t.path, label: t.label, disabled: t.disabled }))}
+        />
       </div>
 
       {/* Content */}
@@ -134,6 +104,24 @@ function TabbedPage({ isAdmin }: { isAdmin: boolean | undefined }) {
       ) : (
         <DataViewContent />
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Standalone Bucket List Dates page — accessible to all authenticated users
+// (read-only for non-admins; server enforces admin on mutations).
+// ---------------------------------------------------------------------------
+export function BucketListDatesPage() {
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Bucket List Dates</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          Client MFC dates and project start dates used as the Turnaround ageing baseline.
+        </p>
+      </div>
+      <BucketListDatesContent />
     </div>
   );
 }

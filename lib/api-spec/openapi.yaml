@@ -2759,11 +2759,11 @@ components:
         clientMfcDate:
           type: ["string", "null"]
           description: >
-            Date of Client MFC for this mark's project (YYYY-MM-DD), sourced from
-            inventory_project_dates. Null when no date has been entered for the project.
-            When set, this date is used as the start of the turnaround time clock
-            (replacing the per-mark lastProductionDate baseline) and as the anchor
-            for the Speed of Execution pace window.
+            Date of Client MFC for this mark's MFC batch (YYYY-MM-DD), sourced from
+            inventory_mfc_batch_color. Null when no date has been entered for the
+            project's MFC batch. When set, the Turnaround page uses today minus this
+            date as the ageing baseline (replacing the per-mark lastProductionDate
+            baseline). Does not affect velocity or Speed of Execution pace.
       required:
         - id
         - importId
@@ -4241,6 +4241,9 @@ components:
         balGalvMt:
           type: ["number", "null"]
           description: Balance Galvanising MT from the Order Review file (col U).
+        inspectionMt:
+          type: ["number", "null"]
+          description: Progress Inspection MT from the Order Review file (col O). Used by the OR consistency panel.
         notInLatest:
           type: boolean
           description: Current order row absent from the latest Order Review file (kept, not deleted).
@@ -4265,6 +4268,7 @@ components:
         - computedDispatchMt
         - balFabMt
         - balGalvMt
+        - inspectionMt
         - notInLatest
     DispatchReconciliationRow:
       type: object

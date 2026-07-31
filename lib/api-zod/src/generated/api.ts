@@ -1478,7 +1478,7 @@ export const GetImportRecordsResponseItem = zod.object({
   "fg": zod.string().nullish().describe('Finished Goods placeholder. Blank (null) everywhere for now — not in any process sequence\/bundle and not in the row hash. Reserved for future use.'),
   "jobCardType": zod.string().nullish().describe('Type (Col A) from the WIP file — \"Job Card Not Started\" | \"Job Card WIP\" | \"FG Pending For Dispatch\". Null for old-format files that pre-date the Type column. Required by classifyWipCase() for the authoritative phase-bucket classification: Quality Check and Galvanising must only count Type=\"Job Card WIP\" records; Cutting counts Type=\"Job Card Not Started\" + Authorized regardless of activity code (covers NTLT NTF\/NTFSW\/NTFW\/G\/TS).\n'),
   "isInitialCutting": zod.boolean().describe('True when Job Card Status (Col G) = \"Initial\", regardless of Activity. In the newer WIP format the Activity column holds the PLANNED activity for scheduling, not the current production stage — a mark at Activity=RFI with Status=Initial has NOT started RFI; it is unreleased raw material that belongs in Balance Release, not Balance Fabrication. Only Status=\"Authorized\" marks have been physically released to the shop floor. Additive, not hashed. Defaults false for old-format rows without a Job Card Status column.\n'),
-  "clientMfcDate": zod.string().nullish().describe('Date of Client MFC for this mark\'s project (YYYY-MM-DD), sourced from inventory_project_dates. Null when no date has been entered for the project. When set, this date is used as the start of the turnaround time clock (replacing the per-mark lastProductionDate baseline) and as the anchor for the Speed of Execution pace window.\n')
+  "clientMfcDate": zod.string().nullish().describe('Date of Client MFC for this mark\'s MFC batch (YYYY-MM-DD), sourced from inventory_mfc_batch_color. Null when no date has been entered for the project\'s MFC batch. When set, the Turnaround page uses today minus this date as the ageing baseline (replacing the per-mark lastProductionDate baseline). Does not affect velocity or Speed of Execution pace.\n')
 })
 export const GetImportRecordsResponse = zod.array(GetImportRecordsResponseItem)
 
@@ -1894,6 +1894,7 @@ export const GetOrderStatusResponse = zod.object({
   "computedDispatchMt": zod.number().describe('WIP-derived dispatch only (equals accruedMt). The Order Review file\/seed never contributes.'),
   "balFabMt": zod.number().nullable().describe('Balance Fabrication MT from the Order Review file (col T).'),
   "balGalvMt": zod.number().nullable().describe('Balance Galvanising MT from the Order Review file (col U).'),
+  "inspectionMt": zod.number().nullable().describe('Progress Inspection MT from the Order Review file (col O). Used by the OR consistency panel.'),
   "notInLatest": zod.boolean().describe('Current order row absent from the latest Order Review file (kept, not deleted).')
 }).describe('One (project, structure) order row joined to computed dispatch.')),
   "reconciliation": zod.object({

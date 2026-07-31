@@ -785,7 +785,7 @@ export interface Record {
    */
   isInitialCutting: boolean;
   /**
-     * Date of Client MFC for this mark's project (YYYY-MM-DD), sourced from inventory_project_dates. Null when no date has been entered for the project. When set, this date is used as the start of the turnaround time clock (replacing the per-mark lastProductionDate baseline) and as the anchor for the Speed of Execution pace window.
+     * Date of Client MFC for this mark's MFC batch (YYYY-MM-DD), sourced from inventory_mfc_batch_color. Null when no date has been entered for the project's MFC batch. When set, the Turnaround page uses today minus this date as the ageing baseline (replacing the per-mark lastProductionDate baseline). Does not affect velocity or Speed of Execution pace.
 
      * @nullable
      */
@@ -1821,6 +1821,11 @@ export interface OrderStatusRow {
      * @nullable
      */
   balGalvMt: number | null;
+  /**
+     * Progress Inspection MT from the Order Review file (col O). Used by the OR consistency panel.
+     * @nullable
+     */
+  inspectionMt: number | null;
   /** Current order row absent from the latest Order Review file (kept, not deleted). */
   notInLatest: boolean;
 }

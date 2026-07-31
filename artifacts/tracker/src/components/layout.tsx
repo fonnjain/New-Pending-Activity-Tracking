@@ -424,8 +424,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // Must change password → force the change before any page loads.
   if (mustChangePassword) return <ChangePasswordForm />;
 
-  // Data page is accessible to all users (Bucket List Dates tab is the normal-user entry point).
-  const visibleNavItems = navItems;
+  // Data page is admin-only. Regular users reach Bucket List Dates via its own route.
+  const visibleNavItems = isAdmin ? navItems : navItems.filter((n) => n.href !== "/data");
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground pb-16 md:pb-0">
