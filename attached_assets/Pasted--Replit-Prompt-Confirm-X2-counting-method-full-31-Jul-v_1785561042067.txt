@@ -1,0 +1,51 @@
+# Replit Prompt — Confirm X2 counting method; full 31-Jul verification
+
+**Context.** I independently re-ran all 17 base ERP rules plus X1 and X2 against
+`WIP_31-07-2026.xls` and `Order_Review_31-07-2026.xlsx`. Everything passes and matches the
+app's 18/19 result (X2 correctly failing), with one discrepancy in X2's reported scale that
+looks like a granularity difference, not an error — worth confirming rather than assuming.
+
+---
+
+## The prompt
+
+```
+Verification request on the ERP tab and the six-bucket figures, 31-Jul import.
+
+1. X2 GRANULARITY
+
+The ERP tab shows X2 FAIL with 73 rows / 2.515 MT. My independent check of distinct
+(project, structure) pairs against the Order Review gives 15 unmatched pairs, not 73.
+
+Please confirm: does X2 count distinct (project, structure) pairs, or every individual MARK
+within an unmatched structure? If it is per-mark, 73 marks spread across roughly 15
+structures would reconcile both figures, and there is nothing to fix. Please give me the
+per-structure breakdown (project, structure, mark count, weight) for the 15-ish distinct
+structures so I can confirm the totals tie out.
+
+2. FULL SIX-BUCKET VERIFICATION — please confirm these exact figures, TLT, 31-Jul import:
+
+     Release Balance       2,075.584 MT   9,603 marks
+     Awaiting Assignment   1,088.786 MT   4,926 marks
+     Cutting               1,335.260 MT   8,818 marks
+     Quality Check         1,965.002 MT  15,866 marks
+     Galvanising           1,872.330 MT  10,017 marks
+     FG WIP                2,332.093 MT   8,663 marks
+     TOTAL                10,669.055 MT  57,893 marks, zero unclassified
+
+   These are measured directly from the WIP file. If any figure differs from what the app
+   shows, tell me which one and by how much — do not adjust anything without telling me
+   first.
+
+3. U4 sanity check — no action needed, just confirming alignment. I want to state plainly
+   that U4 (FG always has a blank activity) passes on my independent check: 0 of 8,696 FG
+   rows have a non-blank activity on the 31-Jul file. This matches your 18 of 19 base-plus-X1
+   passing. No discrepancy here — just documenting agreement.
+
+4. Please also confirm the Project Wise page and export show the same six figures above for
+   the 31-Jul import, and that Total Wt is unchanged at 10,669.055 (the six-bucket split
+   must not move the total).
+
+When done, paste the X2 per-structure violation list and confirm or correct the six figures
+above.
+```
