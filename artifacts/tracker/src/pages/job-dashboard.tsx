@@ -424,6 +424,7 @@ function JobDashboardContent() {
             { label: "Work Order (MT)", field: "workOrderMt", numeric: true, decimals: 3, total: true },
             { label: "Dispatch (MT)", field: "dispatchMt", numeric: true, decimals: 3, total: true },
             { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
+            { label: "FG Overview Computed (MT)", field: "fgOverviewComputedMt", numeric: true, decimals: 3, total: true },
             { label: "Release Balance Computed (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
             { label: "Awaiting Assignment Wt (MT)", field: "awaitingAssignmentWt", numeric: true, decimals: 3, total: true },
             { label: "Awaiting Assignment Marks", field: "awaitingAssignmentMarks", numeric: true, decimals: 0, total: true },
@@ -449,6 +450,7 @@ function JobDashboardContent() {
             workOrderMt: orderByJob.get(p.job)?.wo ?? 0,
             dispatchMt: orderByJob.get(p.job)?.disp ?? 0,
             dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
+            fgOverviewComputedMt: orderByJob.get(p.job)?.computedFg ?? 0,
             releaseBalanceComputedMt: relBalComputedByJob.get(p.job) ?? 0,
             awaitingAssignmentWt: p.phases.awaitingAssignment.weight / 1000,
             awaitingAssignmentMarks: p.phases.awaitingAssignment.marks,
@@ -620,6 +622,7 @@ function JobDashboardContent() {
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Work Order Qty</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Qty</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Balance</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">FG Overview Computed</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Balance Computed</TableHead>
                   {headerPhases.map((ph) => (
                     <TableHead key={ph.key} className="text-right align-bottom">
@@ -663,6 +666,9 @@ function JobDashboardContent() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {o ? formatWeight((o.wo - o.disp) * 1000) : <span className="text-muted-foreground">-</span>}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {o ? formatWeight(o.computedFg * 1000) : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {(() => { const v = relBalComputedByJob.get(p.job); return v ? formatWeight(v * 1000) : <span className="text-muted-foreground">-</span>; })()}
