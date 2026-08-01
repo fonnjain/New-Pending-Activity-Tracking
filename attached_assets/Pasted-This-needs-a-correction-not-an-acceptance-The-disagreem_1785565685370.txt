@@ -1,0 +1,36 @@
+This needs a correction, not an acceptance. The disagreement is not an 85-mark boundary case
+— it's 4,926 marks / 1,088.786 MT, and it runs in exactly one direction every time: Col G
+(Job Card Status) says "Authorized", the proxy says "Initial". Sample: job card 000000790338,
+Status = Authorized, blank Assign Date, blank Contractor.
+
+There is no reason to use a proxy here. Col G (job_card_status) is the ground truth for
+Initial vs Authorized — this has been established and verified across eleven days of files
+in this audit. Please replace whatever is using
+    activity = 'C' AND assign_date IS NULL AND contractor IS NULL
+to distinguish Initial from Authorized, with a direct read of job_card_status. That is what
+is_initial_cutting is supposed to represent, and it should be set directly from Col G at
+parse time, not derived from three other fields.
+
+This affects Release Balance and Awaiting Assignment specifically:
+
+  Release Balance (Col G = Initial, ground truth) :  9,603 marks / 2,075.584 MT
+  Release Balance (current proxy)                  :  9,518 marks / 2,056.680 MT  -- WRONG
+                                                              (actually 14,529 / 3,164.370
+                                                               before your 85-mark note --
+                                                               please recheck this figure,
+                                                               it does not match either)
+
+  Awaiting Assignment (ground truth: Authorized + blank contractor) :
+                                        4,926 marks / 1,088.786 MT
+  Awaiting Assignment (current proxy)                                :
+                                        5,011 marks / 1,107.691 MT  -- WRONG
+
+Please also check whether this proxy is used anywhere else — Cutting, the ERP rules, or any
+other bucket that depends on distinguishing Initial from Authorized. If it is only used in
+Release/Awaiting Assignment, that narrows the fix; if it also touches Cutting, the numbers
+you reported as "byte-identical" need re-checking, because Cutting is also downstream of the
+same Initial/Authorized split.
+
+This is the same failure mode as the Assign-Date bug documented for project 821 — deriving
+status from other fields instead of reading Col G directly. Please fix it at the source
+rather than patching around the proxy.
