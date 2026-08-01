@@ -169,8 +169,10 @@ export async function backfillReleaseBalanceFromPool(): Promise<number> {
       .where(
         and(
           eq(importRowsTable.importId, importId),
-          eq(recordPoolTable.isInitialCutting, true),
           eq(recordPoolTable.category, "TLT"),
+          // Use per-import status when available; fall back to pool flag for
+          // pre-migration imports where import_rows.job_card_status is null.
+          sql`COALESCE(upper(${importRowsTable.jobCardStatus}) = 'INITIAL', ${recordPoolTable.isInitialCutting}, false)`,
         ),
       )
       .groupBy(recordPoolTable.job, recordPoolTable.structure);
@@ -309,8 +311,10 @@ export async function backfillAssignmentBalanceFromPool(): Promise<number> {
     .where(
       and(
         eq(importRowsTable.importId, latest.id),
-        sql`${recordPoolTable.jobCardType} = 'Job Card Not Started'`,
-        sql`(${recordPoolTable.jobCardStatus} IS NULL OR upper(${recordPoolTable.jobCardStatus}) = 'AUTHORIZED')`,
+        sql`COALESCE(${importRowsTable.jobCardType}, ${recordPoolTable.jobCardType}) = 'Job Card Not Started'`,
+        // IS NULL allows for marks whose type row lacks a status (transitional).
+        // Per-import status takes precedence over pool value.
+        sql`(COALESCE(${importRowsTable.jobCardStatus}, ${recordPoolTable.jobCardStatus}) IS NULL OR upper(COALESCE(${importRowsTable.jobCardStatus}, ${recordPoolTable.jobCardStatus})) = 'AUTHORIZED')`,
         sql`(${recordPoolTable.contractor} IS NULL OR trim(${recordPoolTable.contractor}) = '')`,
       ),
     )

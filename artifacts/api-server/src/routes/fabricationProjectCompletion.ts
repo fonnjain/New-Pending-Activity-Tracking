@@ -217,14 +217,15 @@ router.get(
           and(
             eq(importRowsTable.importId, latestImport.id),
             eq(recordPoolTable.category, "TLT"),
-            sql`${recordPoolTable.isInitialCutting} IS NOT TRUE`,
+            // Exclude Initial marks — use per-import status when available.
+            sql`NOT COALESCE(upper(${importRowsTable.jobCardStatus}) = 'INITIAL', ${recordPoolTable.isInitialCutting}, false)`,
             // Contractor must be non-blank — blank contractor = Awaiting Assignment, not Cutting.
             sql`(${recordPoolTable.contractor} IS NOT NULL AND trim(${recordPoolTable.contractor}) != '')`,
             sql`(
-              (${recordPoolTable.jobCardType} = 'Job Card Not Started'
-               AND ${recordPoolTable.jobCardStatus} = 'AUTHORIZED')
+              (COALESCE(${importRowsTable.jobCardType}, ${recordPoolTable.jobCardType}) = 'Job Card Not Started'
+               AND COALESCE(${importRowsTable.jobCardStatus}, ${recordPoolTable.jobCardStatus}) = 'AUTHORIZED')
               OR
-              (${recordPoolTable.jobCardType} IS NULL
+              (COALESCE(${importRowsTable.jobCardType}, ${recordPoolTable.jobCardType}) IS NULL
                AND upper(${recordPoolTable.activity}) = 'C')
             )`,
           ),
@@ -286,7 +287,8 @@ router.get(
           and(
             eq(importRowsTable.importId, latestImport.id),
             eq(recordPoolTable.category, "TLT"),
-            eq(recordPoolTable.isInitialCutting, true),
+            // Use per-import status when available; fall back to pool flag.
+            sql`COALESCE(upper(${importRowsTable.jobCardStatus}) = 'INITIAL', ${recordPoolTable.isInitialCutting}, false)`,
           ),
         )
         .groupBy(
@@ -295,10 +297,9 @@ router.get(
           recordPoolTable.mfcBatch,
         ),
 
-      // Assignment balance (JCNS + Authorized + blank contractor) — computed inline
-      // from the pool, grouped by (project, structure, mfcBatch).
-      // job_card_status = 'AUTHORIZED' already excludes Initial marks; no
-      // is_initial_cutting filter needed here.
+      // Assignment balance (JCNS + Authorized + blank contractor) — computed inline,
+      // grouped by (project, structure, mfcBatch).
+      // Per-import job_card_status = 'AUTHORIZED' already excludes Initial marks.
       db
         .select({
           project: recordPoolTable.job,
@@ -316,8 +317,8 @@ router.get(
           and(
             eq(importRowsTable.importId, latestImport.id),
             eq(recordPoolTable.category, "TLT"),
-            sql`${recordPoolTable.jobCardType} = 'Job Card Not Started'`,
-            sql`${recordPoolTable.jobCardStatus} = 'AUTHORIZED'`,
+            sql`COALESCE(${importRowsTable.jobCardType}, ${recordPoolTable.jobCardType}) = 'Job Card Not Started'`,
+            sql`COALESCE(${importRowsTable.jobCardStatus}, ${recordPoolTable.jobCardStatus}) = 'AUTHORIZED'`,
             sql`(${recordPoolTable.contractor} IS NULL OR trim(${recordPoolTable.contractor}) = '')`,
           ),
         )

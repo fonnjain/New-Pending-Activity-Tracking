@@ -1,4 +1,4 @@
-import { pgTable, integer, primaryKey, index } from "drizzle-orm/pg-core";
+import { pgTable, integer, text, primaryKey, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { importsTable } from "./imports";
@@ -16,6 +16,18 @@ export const importRowsTable = pgTable(
       .notNull()
       .references(() => recordPoolTable.id),
     copies: integer("copies").notNull(),
+    // Per-import snapshot of Col G (Job Card Status) — "INITIAL" | "AUTHORIZED" | null.
+    // Null for imports uploaded before this column was added (old-format WIP files
+    // that predate the Type/Status columns) and for any pool row that had no Status
+    // in the parsed file.  Stored per-import so that a newer upload that changes a
+    // mark's status (INITIAL→AUTHORIZED) does NOT retroactively corrupt views of
+    // older imports — the pool-level job_card_status would be overwritten, but
+    // import_rows.job_card_status always reflects the value from THIS import's file.
+    jobCardStatus: text("job_card_status"),
+    // Per-import snapshot of Col A (Job Card Type) — "Job Card Not Started" |
+    // "Job Card WIP" | "FG Pending For Dispatch" | null.  Same isolation guarantee
+    // as job_card_status above.  Null for pre-migration imports.
+    jobCardType: text("job_card_type"),
   },
   (t) => [
     primaryKey({ columns: [t.importId, t.poolId] }),

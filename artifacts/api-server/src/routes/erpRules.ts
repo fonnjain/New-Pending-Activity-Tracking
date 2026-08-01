@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, importRowsTable, recordPoolTable, importsTable, orderReviewRowsTable } from "@workspace/db";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -124,8 +124,9 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
       structure: recordPoolTable.structure,
       markNo: recordPoolTable.markNo,
       alias: recordPoolTable.alias,
-      jobCardType: recordPoolTable.jobCardType,
-      jobCardStatus: recordPoolTable.jobCardStatus,
+      // Prefer per-import import_rows snapshots; fall back to pool for pre-migration imports.
+      jobCardType: sql<string | null>`COALESCE(${importRowsTable.jobCardType}, ${recordPoolTable.jobCardType})`,
+      jobCardStatus: sql<string | null>`COALESCE(${importRowsTable.jobCardStatus}, ${recordPoolTable.jobCardStatus})`,
       contractor: recordPoolTable.contractor,
       activity: recordPoolTable.activity,
       balanceWt: recordPoolTable.balanceWt,
@@ -133,7 +134,7 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
       lastProductionDate: recordPoolTable.lastProductionDate,
       category: recordPoolTable.category,
       orderNature: recordPoolTable.orderNature,
-      isInitialCutting: recordPoolTable.isInitialCutting,
+      isInitialCutting: sql<boolean>`COALESCE(upper(${importRowsTable.jobCardStatus}) = 'INITIAL', ${recordPoolTable.isInitialCutting}, false)`,
     })
     .from(importRowsTable)
     .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))

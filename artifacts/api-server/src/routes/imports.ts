@@ -123,7 +123,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 // ---------------------------------------------------------------------------
 const membershipCache = new Map<
   number,
-  { pool: RecordPoolRow; copies: number }[]
+  { pool: RecordPoolRow; copies: number; irJobCardStatus: string | null; irJobCardType: string | null }[]
 >();
 // Same immutability guarantee: velocity states and identity signatures for a
 // given import never change once the import is committed, so caching is safe.
@@ -170,7 +170,7 @@ function poolToLite(r: RecordPoolRow): PoolRowLite {
 async function loadMembership(
   executor: typeof db | Tx,
   importId: number,
-): Promise<{ pool: RecordPoolRow; copies: number }[]> {
+): Promise<{ pool: RecordPoolRow; copies: number; irJobCardStatus: string | null; irJobCardType: string | null }[]> {
   // Only cache top-level db calls, not mid-transaction reads.
   const useCache = executor === db;
   if (useCache) {
@@ -178,7 +178,13 @@ async function loadMembership(
     if (cached) return cached;
   }
   const rows = await executor
-    .select({ pool: recordPoolTable, copies: importRowsTable.copies })
+    .select({
+      pool: recordPoolTable,
+      copies: importRowsTable.copies,
+      // Per-import snapshots. Null for imports uploaded before this column was added.
+      irJobCardStatus: importRowsTable.jobCardStatus,
+      irJobCardType: importRowsTable.jobCardType,
+    })
     .from(importRowsTable)
     .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
     .where(eq(importRowsTable.importId, importId));
@@ -296,6 +302,10 @@ function serializeRecord(
   id: number,
   thicknessLookups: ThicknessLookups = {},
   clientMfcDate?: string | null,
+  /** Per-import Col G snapshot from import_rows; null for pre-migration imports. */
+  irJobCardStatus?: string | null,
+  /** Per-import Col A snapshot from import_rows; null for pre-migration imports. */
+  irJobCardType?: string | null,
 ) {
   const { routeSteps, currentStepIndex } = computeRoute(r.operation, r.activity);
   const { thicknessMm, thicknessSource } = resolveThickness(
@@ -354,17 +364,20 @@ function serializeRecord(
     holeOperation: hole.holeOperation,
     // Finished Goods placeholder — currently blank everywhere (nothing writes it).
     fg: r.fg ?? null,
-    // Initial Cutting exclusion: true when Type="Job Card Not Started" AND
-    // Job Card Status="Initial". These marks must NOT contribute to any Cutting
-    // balance figure — they are already counted as Release Balance.
-    isInitialCutting: r.isInitialCutting,
+    // Initial Cutting exclusion: true when Col G (Job Card Status) = "Initial"
+    // for THIS import.  Uses the per-import import_rows.job_card_status when
+    // available (all new uploads after the migration), falling back to the
+    // pool-level is_initial_cutting for pre-migration imports where the column
+    // was not yet stored per-row.  This prevents a later upload from retroactively
+    // changing the classification of an earlier import's view.
+    isInitialCutting:
+      irJobCardStatus != null
+        ? irJobCardStatus.trim().toUpperCase() === "INITIAL"
+        : (r.isInitialCutting ?? false),
     // Type (Col A) — "Job Card Not Started" | "Job Card WIP" |
-    // "FG Pending For Dispatch" | null (old-format files).  Required by
-    // classifyWipCase() on the frontend to apply the correct Type guard for the
-    // Quality Check and Galvanising phase buckets, and to correctly attribute
-    // NTLT "Job Card Not Started" records at G/TS/NTF/NTFSW/NTFW to Cutting
-    // rather than Galvanising or Quality Check.
-    jobCardType: r.jobCardType ?? null,
+    // "FG Pending For Dispatch" | null (old-format files).  Prefer the per-import
+    // value; fall back to pool for pre-migration rows.
+    jobCardType: (irJobCardType !== undefined ? irJobCardType : r.jobCardType) ?? null,
     // Date of Client MFC for this mark's project (YYYY-MM-DD). When set, the
     // TAT page uses today−clientMfcDate as the ageing baseline instead of the
     // per-mark lastProductionDate ageing. Null when no date has been entered in
@@ -526,11 +539,16 @@ async function mergeImport(
     }
 
     // Record this import's membership with multiplicities.
+    // job_card_status and job_card_type are stored per-import so that a later
+    // upload's onConflictDoUpdate cannot retroactively change the classification
+    // of an earlier import's view.
     const memberships = Array.from(multiset.entries()).map(
-      ([hash, { count }]) => ({
+      ([hash, { count, row }]) => ({
         importId: imp.id,
         poolId: poolIdByHash.get(hash)!,
         copies: count,
+        jobCardStatus: (row as InsertRecordPool).jobCardStatus ?? null,
+        jobCardType: (row as InsertRecordPool).jobCardType ?? null,
       }),
     );
     for (let i = 0; i < memberships.length; i += chunk) {
@@ -1687,10 +1705,10 @@ router.get("/imports/:id/records", async (req, res): Promise<void> => {
 
   const out: ReturnType<typeof serializeRecord>[] = [];
   let nextId = 1;
-  for (const { pool, copies } of rows) {
+  for (const { pool, copies, irJobCardStatus, irJobCardType } of rows) {
     const clientMfcDate = projectDates.get(`${pool.job}|${pool.mfcBatch ?? "Z"}`) ?? null;
     for (let c = 0; c < copies; c++) {
-      out.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate));
+      out.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate, irJobCardStatus, irJobCardType));
     }
   }
 
@@ -1735,10 +1753,10 @@ router.post("/imports/:id/summary", async (req, res): Promise<void> => {
   rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
   const serialized: ReturnType<typeof serializeRecord>[] = [];
   let nextId = 1;
-  for (const { pool, copies } of rows) {
+  for (const { pool, copies, irJobCardStatus, irJobCardType } of rows) {
     const clientMfcDate = projectDatesForSummary.get(`${pool.job}|${pool.mfcBatch ?? "Z"}`) ?? null;
     for (let c = 0; c < copies; c++) {
-      serialized.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate));
+      serialized.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate, irJobCardStatus, irJobCardType));
     }
   }
 

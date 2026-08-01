@@ -1,70 +1,83 @@
 ---
 name: WIP case classification, is_initial_cutting, and Cutting balance correctness
-description: The four mutually exclusive WIP cases (Col A x Col G), classifyWipCase() in domain, job_card_status schema column, and the date-filter null-assignDate bug history.
+description: The four mutually exclusive WIP cases (Col A x Col G), classifyWipCase() in domain, job_card_status schema, and the per-import isolation migration.
 ---
 
-## The bug: assignDate null-check in date filter
+## The WIP case classification
 
-Two places incorrectly excluded null-assignDate records when a date window was active:
-
-1. `lib/domain/src/aggregate.ts` — `filterRecords` used `if (k === null || k < win.start || k >= win.end)`.  
-   Fixed to: `if (k !== null && (k < win.start || k >= win.end))`.  
-   Null-assignDate records now always pass the date window filter.
-
-2. `artifacts/tracker/src/pages/job-dashboard.tsx` lines 221-222 — local `dateFrom`/`dateTo` checks had `r.assignDate == null ||` that excluded null-assignDate records.  
-   Fixed to: `r.assignDate != null && String(r.assignDate) < dateFrom`.
-
-**Why:** For Activity=C (Cutting), many Authorized marks have no Assign Date yet (pending assignment). The date filter was wrongly treating null assignDate as "outside the window" and excluding them.
-
-## The merge code bug: pre-check skipped existing pool rows
-
-`artifacts/api-server/src/routes/imports.ts` had `if (poolIdByHash.has(hash)) continue;` that prevented `onConflictDoUpdate` from updating `is_initial_cutting` on re-upload. Fixed by removing the pre-check so ALL rows from the current upload go through `INSERT ... ON CONFLICT DO UPDATE`.
-
-**Why:** The `onConflictDoUpdate` comment said it "updates is_initial_cutting on re-upload" but the pre-check made it a no-op for existing rows. Now any re-upload correctly refreshes the flag.
-
-## classifyWipCase() — the canonical classification function
-
-Added to `lib/domain/src/index.ts`. Returns `WipCase` = `NOT_RELEASED | CUTTING | IN_PRODUCTION | FINISHED_GOODS | UNCLASSIFIED`.
+`classifyWipCase()` in `lib/domain/src/index.ts`. Returns `WipCase` = `NOT_RELEASED | CUTTING | IN_PRODUCTION | FINISHED_GOODS | UNCLASSIFIED`.
 
 Logic (two-path):
 1. **When `jobCardStatus != null` (new-format files):** uses Col G directly — no proxies.
-2. **Legacy fallback (`jobCardStatus = null`):** uses `isInitialCutting` + activity (structural facts verified: Initial always C, FG always blank activity).
+2. **Legacy fallback (`jobCardStatus = null`):** uses `isInitialCutting` + activity (structural facts: Initial always C, FG always blank activity).
 
-`isActiveCutting()` in `ageing.ts` now delegates to `classifyWipCase(r) === "CUTTING"`. All existing call sites unchanged (they all go through `isActiveCutting()`).
+`isActiveCutting()` in `ageing.ts` delegates to `classifyWipCase(r) === "CUTTING"`. All call sites unchanged.
 
-`job_card_status TEXT` column added to `record_pool` schema. Populated by parse.ts from "Job Card Status" (Col G). Null for old-format rows. NOT part of the hash. Enables exact classification on re-upload without proxies.
+## Schema (post-Aug 2026 migration)
 
-## The is_initial_cutting DB state issue
+Three classification fields exist at two levels:
 
-A DB reset on 2026-07-21 cleared all `is_initial_cutting` flags to false. Because:
-- The pre-check bug prevented re-upload from restoring them
-- The original WIP file is no longer in `upload_staging`
+**`record_pool` (shared across all imports — global latest state):**
+- `is_initial_cutting BOOLEAN NOT NULL DEFAULT false` — pool-level flag; reflects most-recent upload; fallback for pre-migration imports
+- `job_card_status TEXT` — Col G value; overwritten by each upload's `onConflictDoUpdate`
+- `job_card_type TEXT` — Col A value; same
 
-A best-effort corrective SQL was run using `release_balance_wip JOIN`:
+**`import_rows` (per-import snapshots — isolation layer):**
+- `job_card_status TEXT` — NULLABLE; Col G as of THIS import's file upload; null for pre-migration rows
+- `job_card_type TEXT` — NULLABLE; Col A as of THIS import; null for pre-migration rows
+
+**Why the per-import layer exists:** `record_pool` rows are shared via hash. When import N+1 uploads the same mark with a different status (INITIAL→AUTHORIZED), `onConflictDoUpdate` overwrites the pool columns, retroactively corrupting views of import N. Storing per-import snapshots prevents this.
+
+## COALESCE pattern (canonical — apply at every SQL query site)
+
 ```sql
-UPDATE record_pool rp SET is_initial_cutting = true
-WHERE rp.activity = 'C' AND rp.assign_date IS NULL AND rp.contractor IS NULL
-  AND rp.job IS NOT NULL AND rp.job != '(Unassigned)'
-  AND EXISTS (SELECT 1 FROM release_balance_wip rb WHERE rb.project = rp.job AND rb.structure = rp.structure);
+-- is this mark Initial in THIS import?
+COALESCE(upper(ir.job_card_status) = 'INITIAL', rp.is_initial_cutting, false)
+
+-- effective type for this import
+COALESCE(ir.job_card_type, rp.job_card_type)
+
+-- effective status for this import
+COALESCE(ir.job_card_status, rp.job_card_status)
 ```
 
-**This proxy over-counts by ~2,764 marks** (flags Authorized null-assign marks in the same project+structure as Initial marks). Result: cutting shows ~12,373 marks vs target 15,137.
+COALESCE null-propagation: `'AUTHORIZED' = 'INITIAL'` = false (non-null) → returns false immediately.
+`null = 'INITIAL'` = null → falls through to next arg.
 
-**Exact target requires re-uploading the WIP file** — with the fixed merge code, `onConflictDoUpdate` will correctly set `is_initial_cutting = true` for real Initial marks.
+## History: the date-filter null-assignDate bug (fixed)
+
+`lib/domain/src/aggregate.ts` `filterRecords` and `job-dashboard.tsx` incorrectly excluded
+null-assignDate records when a date window was active. Fixed to treat null as "always passes".
+
+**Why:** For Activity=C, many Authorized marks have no Assign Date yet (pending assignment).
+The filter was wrongly treating null assignDate as "outside the window."
+
+## History: the merge pre-check bug (fixed)
+
+`imports.ts` had `if (poolIdByHash.has(hash)) continue;` that prevented `onConflictDoUpdate`
+from running for existing pool rows on re-upload. Removed — now ALL rows go through upsert.
+
+## History: the retroactive-corruption incident (root cause of the per-import migration)
+
+Root cause: `onConflictDoUpdate` unconditionally overwrote `is_initial_cutting`, `job_card_status`,
+and `job_card_type` on the shared pool whenever a newer upload touched the same hash.
+Effect: 85 marks that changed INITIAL→AUTHORIZED between 31-Jul and 01-Aug showed up as
+AUTHORIZED in the 31-Jul view after the 01-Aug upload — 9,518 shown vs 9,603 actual.
+
+Fix: per-import `import_rows.job_card_status` + COALESCE pattern at all query sites.
+Verified: after re-upload of 31-Jul and 01-Aug files, 31-Jul shows exactly 9,603 / 2,075.584 MT.
 
 ## What distinguishes Initial from Authorized null-assign marks
 
-- ONLY the "Job Card Status" column ("Initial" vs "Authorized") from the Excel file
-- NOT distinguishable by: assign_date, contractor, last_production_date, mfc_batch, work_order_no, order_nature
-- The job_card_no has two prefix groups (`0000` and `P000`) but neither cleanly maps to Initial vs Authorized
-- The release_balance_wip JOIN proxy over-counts by ~2,764 marks
+- ONLY the "Job Card Status" column (Col G) from the Excel file
+- NOT distinguishable by: assign_date, contractor, last_production_date, mfc_batch, work_order_no
+- The pool-level proxy (activity=C AND assign_date IS NULL AND contractor IS NULL) over-counts
+  because some Authorized marks also have null assign_date. Do NOT rely on this proxy for accuracy;
+  always use the per-import `ir.job_card_status` when available.
 
-## Data shapes (import 30, Activity=C)
+## Boot backfill (still applies to old-format imports)
 
-Total Activity=C marks: 26,590 copies
-- With assign_date: 10,894 copies (1,611.919 MT) — definitively Authorized
-- Null assign_date: 15,696 copies (3,523.996 MT) — split:
-  - Target Initial: 11,453 copies (2,538.863 MT) — proxy flagged 14,217 instead
-  - Target Authorized null-assign: 4,243 copies (985.133 MT) — proxy leaves 1,479 instead
-
-Release Balance (from release_balance_wip table): 2,538.863 MT — computed separately from is_initial_cutting, not affected by the DB reset.
+`backfillInitialCutting()` in `index.ts` — sets `rp.is_initial_cutting = true` for
+`activity=C AND assign_date IS NULL AND contractor IS NULL`. Still needed for imports 5–32
+(old WIP format, no Type/Status columns) where `ir.job_card_status` is always null. The COALESCE
+fallback to `rp.is_initial_cutting` handles those imports correctly.

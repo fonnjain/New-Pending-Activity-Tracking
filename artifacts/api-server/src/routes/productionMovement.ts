@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { eq, lt, desc, inArray } from "drizzle-orm";
+import { eq, lt, desc, inArray, sql } from "drizzle-orm";
 import {
   db,
   importsTable,
@@ -289,7 +289,8 @@ router.get("/imports/:id/production-movement", async (req, res): Promise<void> =
       balanceWt: recordPoolTable.balanceWt,
       copies: importRowsTable.copies,
       orderNature: recordPoolTable.orderNature,
-      isInitialCutting: recordPoolTable.isInitialCutting,
+      // Per-import status takes precedence; fall back to pool flag for pre-migration imports.
+      isInitialCutting: sql<boolean>`COALESCE(upper(${importRowsTable.jobCardStatus}) = 'INITIAL', ${recordPoolTable.isInitialCutting}, false)`,
     })
     .from(importRowsTable)
     .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
