@@ -998,9 +998,9 @@ function FilterBar() {
         </div>
       )}
 
-      {/* MFC View mode — global, shown on every page with the filter bar */}
+      {/* MFC View mode — hidden on the Data admin page, shown everywhere else */}
       {/* "View by MFC" and "Project Then MFC" are only active on the Contractor Wise page */}
-      <div className="flex items-center gap-3 px-3 md:px-6 py-2 border-t bg-muted/20">
+      <div className={`flex items-center gap-3 px-3 md:px-6 py-2 border-t bg-muted/20${location.includes("/data") ? " hidden" : ""}`}>
         <Segmented
           value={mfcViewMode}
           onChange={(v) => setMfcViewMode(v as MfcViewMode)}
