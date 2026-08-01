@@ -34,7 +34,7 @@ import { ThicknessContent } from "@/pages/thickness";
 // MFC dates without accessing the admin surface here.
 const ALL_TABS: Array<{ path: string; label: string; disabled?: boolean }> = [
   { path: "/data", label: "Data" },
-  { path: "/job-templates", label: "Job Templates", disabled: true },
+  { path: "/job-templates", label: "Job Templates" },
   { path: "/computed-fg", label: "Computed FG" },
   { path: "/order-reconciliation", label: "Order Reconciliation" },
   { path: "/release-balance", label: "Release Balance" },

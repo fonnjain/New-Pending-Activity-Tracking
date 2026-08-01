@@ -300,7 +300,6 @@ router.get("/inventory-manual/mfc-batch-colors", async (_req, res): Promise<void
 router.put(
   "/inventory-manual/mfc-batch-colors",
   requireAuth,
-  requireAdmin,
   async (req, res): Promise<void> => {
     const parsed = UpsertInventoryMfcBatchColorBody.safeParse(req.body);
     if (!parsed.success) {
@@ -342,7 +341,6 @@ router.put(
 router.delete(
   "/inventory-manual/mfc-batch-colors",
   requireAuth,
-  requireAdmin,
   async (req, res): Promise<void> => {
     const project = String(req.query.project ?? "").trim();
     const mfcBatch = String(req.query.mfcBatch ?? "").trim();
@@ -383,7 +381,6 @@ router.get("/inventory-manual/project-dates", async (_req, res): Promise<void> =
 router.put(
   "/inventory-manual/project-dates",
   requireAuth,
-  requireAdmin,
   async (req, res): Promise<void> => {
     const { project, dateOfClientMfc, projectStartDate } = req.body ?? {};
     if (!project || typeof project !== "string" || !project.trim()) {
