@@ -1121,15 +1121,14 @@ function FabricationLoadReport() {
       const { blocks } = buildSectionGrid(s.value);
       const gridBlocks: XlsxGridBlock[] = blocks.map(({ c, cell, rows: rs }) => ({
         title: c.label,
-        headers: ["Project", "Wt (t)", "Priority"],
-        numeric: [false, true, false],
+        headers: ["Project", "Wt (t)"],
+        numeric: [false, true],
         decimals: 2,
         rows: rs.map((r) => [
           r.project,
           toTonnes(r.weightKg),
-          priorityMap.get(priKey(s.value, c.value, r.project)) ?? "",
         ]),
-        totals: ["G. Total", toTonnes(cell.totalKg), ""],
+        totals: ["G. Total", toTonnes(cell.totalKg)],
       }));
       return { name: s.label, blocks: gridBlocks };
     });
@@ -1163,17 +1162,9 @@ function FabricationLoadReport() {
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
           TLT only. Weight is Balance Wt in tonnes. Respects the header filters
-          (contractor, dates, job). Priority is saved automatically.
+          (contractor, dates, job).
         </p>
         <div className="flex items-center gap-2 shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8"
-            onClick={() => setSortByPriority((v) => !v)}
-          >
-            Sort: {sortByPriority ? "Priority" : "Weight"}
-          </Button>
           <Button size="sm" className="h-8 gap-2" onClick={exportExcel}>
             <FileSpreadsheet className="w-4 h-4" /> Export Excel
           </Button>
@@ -1219,63 +1210,22 @@ function FabricationLoadReport() {
                               <TableCell className="px-1.5 py-1.5 text-right font-medium">
                                 Weight
                               </TableCell>
-                              <TableCell className="px-1.5 py-1.5 font-medium">
-                                Priority
-                              </TableCell>
                             </TableRow>
-                            {rows.map((r) => {
-                              const key = priKey(s.value, c.value, r.project);
-                              const current =
-                                priorityMap.get(key) ?? NONE_PRIORITY;
-                              return (
-                                <TableRow key={r.project}>
-                                  <TableCell className="font-medium py-1.5 px-1.5 text-xs">
-                                    {r.project}
-                                  </TableCell>
-                                  <TableCell className="text-right tabular-nums py-1.5 px-1.5 text-xs">
-                                    {fmtTonnes(r.weightKg)}
-                                  </TableCell>
-                                  <TableCell className="py-1.5 px-1.5">
-                                    <Select
-                                      value={current}
-                                      onValueChange={(v) =>
-                                        setPriority(
-                                          s.value,
-                                          c.value,
-                                          r.project,
-                                          v,
-                                        )
-                                      }
-                                    >
-                                      <SelectTrigger className="h-7 text-xs">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent
-                                        position="popper"
-                                        side="bottom"
-                                        avoidCollisions={false}
-                                      >
-                                        <SelectItem value={NONE_PRIORITY}>
-                                          —
-                                        </SelectItem>
-                                        {FAB_PRIORITIES.map((p) => (
-                                          <SelectItem key={p} value={p}>
-                                            {p}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
+                            {rows.map((r) => (
+                              <TableRow key={r.project}>
+                                <TableCell className="font-medium py-1.5 px-1.5 text-xs">
+                                  {r.project}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums py-1.5 px-1.5 text-xs">
+                                  {fmtTonnes(r.weightKg)}
+                                </TableCell>
+                              </TableRow>
+                            ))}
                             <TableRow className="border-t-2 font-semibold">
                               <TableCell className="py-1.5 px-1.5 text-xs">G. Total</TableCell>
-                              <TableCell className="py-1.5 px-1.5" />
                               <TableCell className="text-right tabular-nums py-1.5 px-1.5 text-xs">
                                 {fmtTonnes(cell.totalKg)}
                               </TableCell>
-                              <TableCell className="py-1.5 px-1.5" />
                             </TableRow>
                           </TableBody>
                         </Table>

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useMemo, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useListImports, useListContractorCategories, useGetCurrentJobs, type Record } from "@workspace/api-client-react";
 import { getActivityBundle, normalizeContractorName, filterRecords, parseAssignDateMs, dateToDayKey, type RecordFilters } from "@workspace/domain";
@@ -105,37 +105,16 @@ const defaultFilters: Filters = {
   plantLocations: [],
 };
 
-// ---------------------------------------------------------------------------
-// Job filter persistence — saves the active job filter to localStorage so the
-// same template (or single-job) filter is restored on the next page load.
-// ---------------------------------------------------------------------------
-const JOB_FILTER_KEY = "vtpl:jobFilter";
-
-function readSavedJobFilter(): string | null {
-  try { return localStorage.getItem(JOB_FILTER_KEY); } catch { return null; }
-}
-function saveJobFilter(v: string | null) {
-  try {
-    if (v !== null) localStorage.setItem(JOB_FILTER_KEY, v);
-    else localStorage.removeItem(JOB_FILTER_KEY);
-  } catch { /* ignore */ }
-}
-
 const TrackerContext = createContext<TrackerContextType | undefined>(undefined);
 
 export function TrackerProvider({ children }: { children: ReactNode }) {
   const [selectedImportId, setSelectedImportId] = useState<number | null>(null);
-  const [filters, setFilters] = useState<Filters>(() => ({
-    ...defaultFilters,
-    // Restore the persisted job filter (e.g. a template sentinel) so the user
-    // sees the same project scope they left off on.
-    job: readSavedJobFilter(),
-  }));
+  const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [mfcViewMode, setMfcViewMode] = useState<MfcViewMode>("project-with-mfc");
   const { data: imports } = useListImports();
-  // Used for auto-activating the first template on first-ever page load.
-  const templates = useJobTemplates();
-  const autoActivatedRef = useRef(false);
+
+  // Clear any previously-persisted job filter so the default stays "All Jobs".
+  useEffect(() => { try { localStorage.removeItem("vtpl:jobFilter"); } catch { /* ignore */ } }, []);
 
   // Default to the newest import, and recover if the selected one is removed.
   useEffect(() => {
@@ -164,24 +143,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
     setFilters((prev) => ({ ...prev, plantLocations: locations }));
   };
 
-  // Auto-activate the first template when the app is opened for the first time
-  // (no saved job-filter preference in localStorage).  Subsequent page loads
-  // restore from localStorage, so this only fires once per browser.
-  useEffect(() => {
-    if (autoActivatedRef.current) return;
-    if (templates.length === 0) return;
-    autoActivatedRef.current = true;
-    const saved = readSavedJobFilter();
-    if (!saved) {
-      const val = templateFilterValue(templates[0].id);
-      saveJobFilter(val);
-      setFilters((prev) => ({ ...prev, job: val, mfcBatch: null, structure: null, mark: null, selectedJobs: [] }));
-    }
-  }, [templates]);
-
   const setFilter = (key: keyof Filters, value: string | null) => {
-    // Persist the job filter so the same scope is restored on next page load.
-    if (key === "job") saveJobFilter(value);
     setFilters((prev) => {
       const next = { ...prev, [key]: value };
       // Cascading logic
