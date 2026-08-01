@@ -8,29 +8,17 @@ const router: IRouter = Router();
 // Name generation helpers
 // ---------------------------------------------------------------------------
 
-/** Convert 0-based index to Excel-style label: 0→A, 1→B, …, 25→Z, 26→AA … */
-function indexToLabel(i: number): string {
-  let label = "";
-  let n = i + 1;
-  while (n > 0) {
-    n--;
-    label = String.fromCharCode(65 + (n % 26)) + label;
-    n = Math.floor(n / 26);
-  }
-  return label;
-}
-
-/** Generate the next available name for a category (TLT|NTLT). */
+/** Generate the next available name for a category (TLT|NTLT). Uses P1, P2, P3… */
 function nextName(category: string, existingNames: string[]): string {
-  const prefix = category === "TLT" ? "TLT Job " : "NTLT Job ";
+  const prefix = category === "TLT" ? "TLT Job P" : "NTLT Job P";
   const used = new Set(
     existingNames
       .filter((n) => n.startsWith(prefix))
-      .map((n) => n.slice(prefix.length)),
+      .map((n) => parseInt(n.slice(prefix.length), 10))
+      .filter((n) => !isNaN(n)),
   );
-  for (let i = 0; ; i++) {
-    const label = indexToLabel(i);
-    if (!used.has(label)) return prefix + label;
+  for (let i = 1; ; i++) {
+    if (!used.has(i)) return prefix + i;
   }
 }
 

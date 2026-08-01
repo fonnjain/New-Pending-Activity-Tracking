@@ -2547,11 +2547,14 @@ async function fetchErpRules(): Promise<ErpRulesResponse> {
 interface JTTemplate { id: number; name: string; category: string; sortOrder: number; members: string[] }
 interface JTProjects { tlt: string[]; ntlt: string[] }
 
-function indexToAlphaLabel(i: number): string {
-  let label = "";
-  let n = i + 1;
-  while (n > 0) { n--; label = String.fromCharCode(65 + (n % 26)) + label; n = Math.floor(n / 26); }
-  return label;
+/** Returns the next available P-number label (P1, P2, …) for a category's template list. */
+function nextPLabel(templates: JTTemplate[]): string {
+  const used = new Set(
+    templates
+      .map((t) => { const m = t.name.match(/P(\d+)$/); return m ? parseInt(m[1], 10) : NaN; })
+      .filter((n) => !isNaN(n)),
+  );
+  for (let i = 1; ; i++) { if (!used.has(i)) return `P${i}`; }
 }
 
 function JobTemplatesContent() {
@@ -2651,7 +2654,7 @@ function JobTemplatesContent() {
     setDropTarget(null);
   }
 
-  const nextLabel = indexToAlphaLabel(catTemplates.length);
+  const nextLabel = nextPLabel(catTemplates);
 
   return (
     <div className="space-y-5">
