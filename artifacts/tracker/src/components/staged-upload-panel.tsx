@@ -29,6 +29,7 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { formatDate } from "@/lib/utils";
 
 type Phase = "idle" | "staged" | "validating" | "validated";
 
@@ -715,7 +716,7 @@ function OrderReviewSummary({ info }: { info: OrderReviewStageInfo }) {
           Order Review file
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Stat label="As-on date" value={info.asOnDate ?? "—"} />
+          <Stat label="As-on date" value={info.asOnDate ? formatDate(info.asOnDate) : "—"} />
           <Stat
             label="Rows read"
             value={s ? s.rowsRead.toLocaleString() : "—"}

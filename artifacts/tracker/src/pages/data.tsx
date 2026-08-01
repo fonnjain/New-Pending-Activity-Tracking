@@ -2436,9 +2436,7 @@ function sessionStatus(s: UserSessionEntry, now: number): {
 function DayBlock({ date, sessions, now }: { date: string; sessions: UserSessionEntry[]; now: number }) {
   const [open, setOpen] = useState(true);
 
-  // Parse date for display (YYYY-MM-DD → dd-mm-yyyy)
-  const [y, m, d] = date.split("-");
-  const displayDate = `${d}-${m}-${y}`;
+  const displayDate = formatDate(date);
 
   const uniqueUsers = new Set(sessions.map((s) => s.userId)).size;
 
@@ -2891,7 +2889,7 @@ function ErpRulesContent() {
                     <CircleCheck className="h-4 w-4 shrink-0" />
                     <span className="text-sm font-medium">
                       {visiblePassing} of {allVisible.length} ERP rules holding
-                      {data.asOnDate ? ` — import ${data.asOnDate}` : ""}
+                      {data.asOnDate ? ` — import ${formatDate(data.asOnDate)}` : ""}
                     </span>
                   </div>
                 ) : (

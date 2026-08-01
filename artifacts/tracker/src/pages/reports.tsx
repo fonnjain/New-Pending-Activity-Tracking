@@ -652,7 +652,7 @@ function ReportBuilder() {
       <TableCell>{r.activity ?? "-"}</TableCell>
       <TableCell>{r.contractor ?? "Unassigned"}</TableCell>
       <TableCell className="text-xs text-muted-foreground tabular-nums">
-        {r.lastProductionDate ?? "-"}
+        {r.lastProductionDate ? formatDate(r.lastProductionDate) : "-"}
       </TableCell>
       <TableCell className={`text-right font-bold ${getAgeingColor(r.ageingDays)}`}>
         {ageingCell(r)}
@@ -3118,7 +3118,7 @@ function DailyProductionMovementReport() {
 
   const handleExport = () => {
     const dateCols: XlsxColumn[] = moveDates.map((d, i) => ({
-      label: fmtMoveDateRpt(d),
+      label: formatDate(d),
       field: `d${i}`,
       numeric: true,
       decimals: 3,
@@ -3224,7 +3224,7 @@ function DailyProductionMovementReport() {
                     <th className="text-left px-4 py-2.5 font-semibold min-w-[90px]">Activity</th>
                     {moveDates.map((d) => (
                       <th key={d} className="text-right px-4 py-2.5 font-semibold text-primary/80 whitespace-nowrap min-w-[80px]">
-                        {fmtMoveDateRpt(d)}
+                        {formatDate(d)}
                       </th>
                     ))}
                     <th className="text-right px-4 py-2.5 font-semibold min-w-[80px]">Total</th>

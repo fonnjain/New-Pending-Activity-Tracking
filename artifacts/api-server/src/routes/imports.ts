@@ -130,15 +130,38 @@ const membershipCache = new Map<
 const velocityStateCache = new Map<number, Map<string, VelocityState>>();
 const identityStateCache = new Map<number, Map<string, IdentityState>>();
 
+// Caches the fully-serialized WipRecord[] per importId so neither /records nor
+// /summary has to re-run the O(57k) serializeRecord + sort loop on every request.
+// Evicted alongside membershipCache — the two share the same immutability guarantee.
+// Thickness lookups and MFC project dates change rarely; the evict-on-delete
+// contract is the primary safety gate.
+const serializedRecordsCache = new Map<number, ReturnType<typeof serializeRecord>[]>();
+
+// Caches the full /movement response per importId. Movement for import N depends
+// only on identity states of all imports ≤ N, which are immutable once committed.
+// Cleared on ANY import deletion because removing a prior import changes the chain
+// for every later import's movement calculation.
+const movementResponseCache = new Map<number, {
+  importId: number;
+  hasHistory: boolean;
+  items: { markId: string; jobCardNo: string | null; daysSinceLastMovement: number | null }[];
+}>();
+
 function evictMembershipCache(importId?: number) {
   if (importId === undefined) {
     membershipCache.clear();
     velocityStateCache.clear();
     identityStateCache.clear();
+    serializedRecordsCache.clear();
+    movementResponseCache.clear();
   } else {
     membershipCache.delete(importId);
     velocityStateCache.delete(importId);
     identityStateCache.delete(importId);
+    serializedRecordsCache.delete(importId);
+    // Removing any import from the history chain invalidates movement for all
+    // later imports, so clear the whole response cache (it rebuilds quickly).
+    movementResponseCache.clear();
   }
 }
 
@@ -1695,6 +1718,13 @@ router.get("/imports/:id/records", async (req, res): Promise<void> => {
     return;
   }
 
+  // Serve from cache if available — avoids the O(57k) serialize+sort on hot paths.
+  const cachedRecords = serializedRecordsCache.get(params.data.id);
+  if (cachedRecords) {
+    res.json(cachedRecords);
+    return;
+  }
+
   // Fire all three reads in parallel — independent data sources.
   const [rows, thicknessLookups, projectDates] = await Promise.all([
     loadMembership(db, params.data.id),
@@ -1711,6 +1741,7 @@ router.get("/imports/:id/records", async (req, res): Promise<void> => {
       out.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate, irJobCardStatus, irJobCardType));
     }
   }
+  serializedRecordsCache.set(params.data.id, out);
 
   res.json(out);
 });
@@ -1742,22 +1773,29 @@ router.post("/imports/:id/summary", async (req, res): Promise<void> => {
     return;
   }
 
-  // Serialize the full record set EXACTLY as /records does, then apply the same
-  // shared filter + aggregators the client uses (byte-identical by construction).
-  // Fire all three reads in parallel — independent data sources.
-  const [rows, thicknessLookups, projectDatesForSummary] = await Promise.all([
-    loadMembership(db, params.data.id),
-    loadThicknessLookups(),
-    loadProjectDates(),
-  ]);
-  rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
-  const serialized: ReturnType<typeof serializeRecord>[] = [];
-  let nextId = 1;
-  for (const { pool, copies, irJobCardStatus, irJobCardType } of rows) {
-    const clientMfcDate = projectDatesForSummary.get(`${pool.job}|${pool.mfcBatch ?? "Z"}`) ?? null;
-    for (let c = 0; c < copies; c++) {
-      serialized.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate, irJobCardStatus, irJobCardType));
+  // Reuse the serialized records array from cache (populated by /records) to
+  // avoid a redundant O(57 k) serialize+sort when the Overview dashboard loads
+  // summary and records in parallel on the same import.
+  let serialized = serializedRecordsCache.get(params.data.id);
+  if (!serialized) {
+    // Serialize the full record set EXACTLY as /records does, then apply the same
+    // shared filter + aggregators the client uses (byte-identical by construction).
+    // Fire all three reads in parallel — independent data sources.
+    const [rows, thicknessLookups, projectDatesForSummary] = await Promise.all([
+      loadMembership(db, params.data.id),
+      loadThicknessLookups(),
+      loadProjectDates(),
+    ]);
+    rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
+    serialized = [];
+    let nextId = 1;
+    for (const { pool, copies, irJobCardStatus, irJobCardType } of rows) {
+      const clientMfcDate = projectDatesForSummary.get(`${pool.job}|${pool.mfcBatch ?? "Z"}`) ?? null;
+      for (let c = 0; c < copies; c++) {
+        serialized.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate, irJobCardStatus, irJobCardType));
+      }
     }
+    serializedRecordsCache.set(params.data.id, serialized);
   }
 
   // Contractor sub-category overlay (normalized name -> category + tags), matching
@@ -1884,6 +1922,14 @@ router.get("/imports/:id/movement", async (req, res): Promise<void> => {
     return;
   }
 
+  // Serve from cache — movement for import N is immutable once N is committed
+  // (it only depends on identity states of imports ≤ N, all of which are cached).
+  const cachedMovement = movementResponseCache.get(params.data.id);
+  if (cachedMovement) {
+    res.json(cachedMovement);
+    return;
+  }
+
   const [target] = await db
     .select()
     .from(importsTable)
@@ -1928,11 +1974,13 @@ router.get("/imports/:id/movement", async (req, res): Promise<void> => {
     daysSinceLastMovement: days.get(key) ?? null,
   }));
 
-  res.json({
+  const movementResponse = {
     importId: target.id,
     hasHistory: priorImports.length > 0,
     items,
-  });
+  };
+  movementResponseCache.set(target.id, movementResponse);
+  res.json(movementResponse);
 });
 
 // Per-identity velocity projection for ONE import (no full record expansion).
@@ -2301,15 +2349,26 @@ router.get("/contractor-movement", async (_req, res): Promise<void> => {
 const WARM_LIMIT = 3;
 
 export async function warmMembershipCaches(): Promise<void> {
-  const recent = await db
+  const allImports = await db
     .select({ id: importsTable.id })
     .from(importsTable)
-    .orderBy(desc(importsTable.id))
-    .limit(WARM_LIMIT);
+    .orderBy(desc(importsTable.id));
 
+  // Warm identity states for EVERY import — these are needed by the movement
+  // endpoint which walks the full history chain for each request. Identity
+  // state rows are small (~100 bytes per mark) so loading all imports costs
+  // ~125 MB at current data volumes, well within the available heap.
+  for (const imp of allImports) {
+    await loadIdentityStates(imp.id);
+  }
+
+  // Membership and velocity only for the most recent WARM_LIMIT imports —
+  // full membership rows are ~500 bytes each and storing all imports would
+  // exhaust memory (previous OOM at 21 imports × 55k rows).
+  const recent = allImports.slice(0, WARM_LIMIT);
   for (const imp of recent) {
     await loadMembership(db, imp.id);
-    await loadIdentityStates(imp.id);
+    await loadVelocityStates(imp.id);
   }
 }
 

@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsxSheets, type XlsxSheet, type XlsxSummaryRow } from "@/lib/export";
+import { formatDate } from "@/lib/utils";
 
 function mt(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "-";
@@ -1973,7 +1974,7 @@ export default function InventoryView() {
         </h1>
         <div className="flex items-center gap-3">
           {asOnDate && (
-            <span className="text-xs text-muted-foreground">Order Review as on {asOnDate}</span>
+            <span className="text-xs text-muted-foreground">Order Review as on {formatDate(asOnDate)}</span>
           )}
           {isDeleteMode ? (
             <>

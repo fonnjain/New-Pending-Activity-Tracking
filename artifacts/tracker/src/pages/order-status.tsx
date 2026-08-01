@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { formatDate } from "@/lib/utils";
 import { useTracker } from "@/lib/store";
 import {
   useGetOrderStatus,
@@ -415,7 +416,7 @@ export default function OrderStatusView() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            Structures{order?.asOnDate ? ` — file as on ${order.asOnDate}` : ""}
+            Structures{order?.asOnDate ? ` — file as on ${formatDate(order.asOnDate)}` : ""}
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
