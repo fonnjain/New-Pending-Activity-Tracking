@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo, ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useListImports, useListContractorCategories, useGetCurrentJobs, type Record } from "@workspace/api-client-react";
 import { getActivityBundle, normalizeContractorName, filterRecords, parseAssignDateMs, dateToDayKey, type RecordFilters } from "@workspace/domain";
@@ -108,24 +108,53 @@ const defaultFilters: Filters = {
 const TrackerContext = createContext<TrackerContextType | undefined>(undefined);
 
 export function TrackerProvider({ children }: { children: ReactNode }) {
-  const [selectedImportId, setSelectedImportId] = useState<number | null>(null);
+  const [selectedImportId, setSelectedImportIdState] = useState<number | null>(null);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [mfcViewMode, setMfcViewMode] = useState<MfcViewMode>("project-with-mfc");
   const { data: imports } = useListImports();
 
+  // When true the selection always tracks imports[0] (the newest upload).
+  // Flips to false only when the user explicitly clicks a specific import in
+  // the list (pinning). Flips back to true when the pinned import is deleted
+  // or when the user resets to null.
+  const followingLatest = useRef(true);
+
+  // Public setter exposed via context.
+  // Passing null means "go back to following latest".
+  // Passing a specific id means "pin to this import".
+  const setSelectedImportId = (id: number | null) => {
+    if (id === null) {
+      followingLatest.current = true;
+      setSelectedImportIdState(null);
+    } else {
+      followingLatest.current = false;
+      setSelectedImportIdState(id);
+    }
+  };
+
   // Clear any previously-persisted job filter so the default stays "All Jobs".
   useEffect(() => { try { localStorage.removeItem("vtpl:jobFilter"); } catch { /* ignore */ } }, []);
 
-  // Default to the newest import, and recover if the selected one is removed.
+  // Keep the selection in sync with the imports list.
+  // • When following latest: always track imports[0] so a fresh upload is
+  //   reflected immediately once the list refreshes (avoids the race where
+  //   setSelectedImportId(newId) fires before the list includes that id).
+  // • When pinned: only recover if the pinned import was deleted.
   useEffect(() => {
     if (!imports) return;
     if (imports.length === 0) {
-      if (selectedImportId !== null) setSelectedImportId(null);
+      followingLatest.current = true;
+      if (selectedImportId !== null) setSelectedImportIdState(null);
       return;
     }
-    const exists = imports.some((s) => s.id === selectedImportId);
-    if (!exists) {
-      setSelectedImportId(imports[0].id);
+    if (followingLatest.current) {
+      if (imports[0].id !== selectedImportId) setSelectedImportIdState(imports[0].id);
+    } else {
+      const exists = imports.some((s) => s.id === selectedImportId);
+      if (!exists) {
+        followingLatest.current = true;
+        setSelectedImportIdState(imports[0].id);
+      }
     }
   }, [imports, selectedImportId]);
 

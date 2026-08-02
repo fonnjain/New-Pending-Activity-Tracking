@@ -205,7 +205,9 @@ function DataViewContent() {
       description: `${res.import.summary.rowsKept.toLocaleString()} rows kept. ${c.addedRows.toLocaleString()} new, ${c.completed.toLocaleString()} completed since the last upload.`,
     });
     refetch();
-    setSelectedImportId(res.import.id);
+    // Don't pin to the new import ID here — the store is in "follow latest" mode
+    // and will auto-advance to imports[0] once the list refreshes, avoiding the
+    // race where the new ID isn't in the list yet and the effect resets to yesterday.
     queryClient.invalidateQueries({ queryKey: getListImportsQueryKey() });
     queryClient.invalidateQueries({ queryKey: getGetOrderStatusQueryKey() });
     // Navigate straight to Project Wise after a WIP upload so the user
