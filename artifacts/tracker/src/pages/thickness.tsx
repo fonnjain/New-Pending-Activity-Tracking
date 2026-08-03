@@ -7,10 +7,13 @@ import {
   useUpsertManualThickness,
   useDeleteManualThickness,
   useGetImportRecords,
+  useListItemMasterThicknessRows,
   getListRsjThicknessQueryKey,
   getListManualThicknessQueryKey,
   getGetImportRecordsQueryKey,
+  getListItemMasterThicknessRowsQueryKey,
   type Record as TrackerRecord,
+  type ItemMasterThicknessGroup,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTracker, useFilteredRecords } from "@/lib/store";
@@ -27,7 +30,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Layers, Trash2, Check } from "lucide-react";
+import { Layers, Trash2, Check, ChevronDown, ChevronRight, BookOpen } from "lucide-react";
 
 const SOURCE_LABEL: Record<string, string> = {
   tlt_angle: "Angle (section)",
@@ -74,6 +77,9 @@ export function ThicknessContent() {
   const { data: manualRows } = useListManualThickness({
     query: { queryKey: getListManualThicknessQueryKey() },
   });
+  const { data: masterGroups } = useListItemMasterThicknessRows({
+    query: { queryKey: getListItemMasterThicknessRowsQueryKey() },
+  });
   const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
     query: {
       enabled: !!selectedImportId,
@@ -108,6 +114,8 @@ export function ThicknessContent() {
         <LogoutButton />
       </div>
 
+      <ItemMasterThicknessCard groups={masterGroups ?? []} />
+
       <RsjThicknessCard
         rsjRows={rsjRows ?? []}
         records={records}
@@ -121,6 +129,81 @@ export function ThicknessContent() {
         onChanged={invalidateAll}
       />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Item Master — read-only, collapsible by group
+// ---------------------------------------------------------------------------
+function ItemMasterThicknessCard({ groups }: { groups: ItemMasterThicknessGroup[] }) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+
+  const toggle = (name: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
+  const totalRows = groups.reduce((s, g) => s + g.items.length, 0);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <BookOpen className="w-4 h-4 text-primary" />
+          Item Master Thickness Reference
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          {totalRows > 0
+            ? `${totalRows} entries across ${groups.length} categories from the VTPL item master. Read-only — re-upload via the Data tab to update.`
+            : "No item master loaded. Upload the VTPL item master XLS on the Data tab."}
+        </p>
+      </CardHeader>
+      {groups.length > 0 && (
+        <CardContent className="space-y-1 pt-0">
+          {groups.map((g) => {
+            const isOpen = open.has(g.groupName);
+            return (
+              <div key={g.groupName} className="rounded-md border border-border overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggle(g.groupName)}
+                  className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/30 hover:bg-muted/60 transition-colors text-left"
+                >
+                  <span className="font-medium text-sm">{g.groupName}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">{g.items.length} item{g.items.length === 1 ? "" : "s"}</span>
+                    {isOpen
+                      ? <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                      : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                  </div>
+                </button>
+                {isOpen && (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="pl-4">Item name</TableHead>
+                        <TableHead className="text-right pr-4 w-36">Thickness (mm)</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {g.items.map((item) => (
+                        <TableRow key={item.itemCode}>
+                          <TableCell className="font-mono text-sm pl-4">{item.itemName}</TableCell>
+                          <TableCell className="text-right pr-4 tabular-nums">{item.thicknessMm}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+            );
+          })}
+        </CardContent>
+      )}
+    </Card>
   );
 }
 

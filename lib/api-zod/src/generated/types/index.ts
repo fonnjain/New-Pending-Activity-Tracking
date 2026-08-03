@@ -101,6 +101,8 @@ export * from './inventorySideOverrideInputBucket';
 export * from './inventorySideOverrideInputSide';
 export * from './inventorySideOverrideSide';
 export * from './itemMasterStats';
+export * from './itemMasterThicknessGroup';
+export * from './itemMasterThicknessRow';
 export * from './itemMasterUploadResult';
 export * from './listImportsParams';
 export * from './listUsers200';

@@ -67,6 +67,7 @@ import type {
   InventorySideOverride,
   InventorySideOverrideInput,
   ItemMasterStats,
+  ItemMasterThicknessGroup,
   ItemMasterUploadResult,
   ListImportsParams,
   ListUsers200,
@@ -569,6 +570,85 @@ export const useUploadItemMaster = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getUploadItemMasterMutationOptions(options));
     }
+
+export const getListItemMasterThicknessRowsUrl = () => {
+
+
+
+
+  return `/api/item-master/thickness-rows`
+}
+
+/**
+ * Returns all item_master rows that have a thickness value (excluding FG JOB WORK), grouped by group_name and sorted alphabetically within each group. Used by the Thickness page to display a read-only reference table. Public (read-only).
+
+ * @summary Item master thickness rows grouped by category
+ */
+export const listItemMasterThicknessRows = async ( options?: RequestInit): Promise<ItemMasterThicknessGroup[]> => {
+
+  return customFetch<ItemMasterThicknessGroup[]>(getListItemMasterThicknessRowsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListItemMasterThicknessRowsQueryKey = () => {
+    return [
+    `/api/item-master/thickness-rows`
+    ] as const;
+    }
+
+
+export const getListItemMasterThicknessRowsQueryOptions = <TData = Awaited<ReturnType<typeof listItemMasterThicknessRows>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listItemMasterThicknessRows>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListItemMasterThicknessRowsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listItemMasterThicknessRows>>> = ({ signal }) => listItemMasterThicknessRows({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listItemMasterThicknessRows>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListItemMasterThicknessRowsQueryResult = NonNullable<Awaited<ReturnType<typeof listItemMasterThicknessRows>>>
+export type ListItemMasterThicknessRowsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Item master thickness rows grouped by category
+ */
+
+export function useListItemMasterThicknessRows<TData = Awaited<ReturnType<typeof listItemMasterThicknessRows>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listItemMasterThicknessRows>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListItemMasterThicknessRowsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetItemMasterStatsUrl = () => {
 

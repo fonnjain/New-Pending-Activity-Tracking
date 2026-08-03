@@ -2814,7 +2814,7 @@ function JobTemplatesContent() {
 
         {/* Available pool — left panel */}
         <div
-          className={`shrink-0 w-52 rounded-lg border-2 transition-colors ${
+          className={`shrink-0 w-64 rounded-lg border-2 transition-colors ${
             dropTarget === "pool" ? "border-primary bg-primary/5" : "border-border bg-muted/20"
           }`}
           onDragOver={(e) => { e.preventDefault(); setDropTarget("pool"); }}
@@ -2822,7 +2822,7 @@ function JobTemplatesContent() {
           onDrop={(e) => { e.preventDefault(); onDrop("pool"); }}
         >
           <div className="px-3 py-2.5 border-b">
-            <h3 className="text-sm font-semibold">Available Projects</h3>
+            <h3 className="text-sm font-semibold">Available Batches</h3>
             <p className="text-xs text-muted-foreground">{available.length} unassigned</p>
           </div>
           <div className="p-2 space-y-1 max-h-[58vh] overflow-y-auto">
@@ -2852,14 +2852,14 @@ function JobTemplatesContent() {
 
         {/* Template columns */}
         {catTemplates.length === 0 ? (
-          <div className="flex items-center justify-center border-2 border-dashed rounded-lg w-52 h-32 text-sm text-muted-foreground self-center text-center px-3">
+          <div className="flex items-center justify-center border-2 border-dashed rounded-lg w-64 h-32 text-sm text-muted-foreground self-center text-center px-3">
             Click Add to create a template
           </div>
         ) : (
           catTemplates.map((template) => (
             <div
               key={template.id}
-              className={`shrink-0 w-52 rounded-lg border-2 transition-colors ${
+              className={`shrink-0 w-64 rounded-lg border-2 transition-colors ${
                 dropTarget === template.id ? "border-primary bg-primary/5" : "border-border bg-background"
               }`}
               onDragOver={(e) => { e.preventDefault(); setDropTarget(template.id); }}
@@ -2870,7 +2870,7 @@ function JobTemplatesContent() {
                 <div className="min-w-0">
                   <h3 className="text-sm font-semibold truncate">{template.name}</h3>
                   <p className="text-xs text-muted-foreground">
-                    {template.members.length} project{template.members.length !== 1 ? "s" : ""}
+                    {template.members.length} batch{template.members.length !== 1 ? "es" : ""}
                   </p>
                 </div>
                 <button
@@ -2884,7 +2884,7 @@ function JobTemplatesContent() {
               <div className="p-2 space-y-1 max-h-[58vh] overflow-y-auto">
                 {template.members.length === 0 ? (
                   <p className="text-xs text-muted-foreground text-center py-6">
-                    Drop projects here
+                    Drop batches here
                   </p>
                 ) : (
                   template.members.map((code) => (
@@ -2915,7 +2915,7 @@ function JobTemplatesContent() {
 
       {dragState && (
         <p className="text-xs text-muted-foreground">
-          Dragging <span className="font-mono font-medium">{dragState.code}</span> — drop it onto a template to assign, or onto "Available Projects" to unassign.
+          Dragging <span className="font-mono font-medium">{dragState.code}</span> — drop it onto a template to assign, or onto "Available Batches" to unassign.
         </p>
       )}
     </div>

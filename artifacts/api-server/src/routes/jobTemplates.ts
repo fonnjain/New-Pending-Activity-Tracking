@@ -76,6 +76,7 @@ router.get("/job-templates/projects", async (_req, res): Promise<void> => {
     .selectDistinct({
       job: recordPoolTable.job,
       category: recordPoolTable.category,
+      mfcBatch: recordPoolTable.mfcBatch,
     })
     .from(importRowsTable)
     .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
@@ -85,17 +86,27 @@ router.get("/job-templates/projects", async (_req, res): Promise<void> => {
         sql`${recordPoolTable.job} IS NOT NULL`,
       ),
     )
-    .orderBy(recordPoolTable.job);
+    .orderBy(recordPoolTable.job, recordPoolTable.mfcBatch);
 
   const tlt: string[] = [];
   const ntlt: string[] = [];
   for (const r of rows) {
     if (!r.job) continue;
-    if (r.category === "TLT") tlt.push(r.job);
-    else ntlt.push(r.job);
+    if (r.category === "TLT") {
+      // Use "job - mfcBatch" combo so each batch is a distinct selectable unit.
+      // Records with no batch (null or the "Z" sentinel for blank) are keyed as
+      // the plain job code.
+      const batch = r.mfcBatch && r.mfcBatch !== "Z" ? r.mfcBatch : null;
+      tlt.push(batch ? `${r.job} - ${batch}` : r.job);
+    } else {
+      ntlt.push(r.job);
+    }
   }
+  // Deduplicate while preserving order (selectDistinct already deduplicates at DB
+  // level but the mfcBatch=null grouping can still produce duplicates after formatting).
+  const dedup = (arr: string[]) => [...new Set(arr)];
 
-  res.json({ tlt, ntlt });
+  res.json({ tlt: dedup(tlt), ntlt: dedup(ntlt) });
 });
 
 // ---------------------------------------------------------------------------

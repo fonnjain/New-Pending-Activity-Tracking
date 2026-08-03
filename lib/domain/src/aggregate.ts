@@ -188,7 +188,16 @@ export function filterRecords<T extends AggRecord>(
     if (r.active === false) return false;
     if (filters.ntltSubtype && r.ntltSubtype !== filters.ntltSubtype) return false;
     if (filters.job && r.job !== filters.job) return false;
-    if (filters.jobIn && (!r.job || !filters.jobIn.has(r.job))) return false;
+    if (filters.jobIn) {
+      if (!r.job) return false;
+      // Check both the plain job code (used by "Current Jobs" and legacy templates)
+      // and the "job - mfcBatch" combo key (used by MFC-aware job templates).
+      // "Z" is the sentinel for no-batch records — treat it the same as null so
+      // those records match a plain job-code entry in the set.
+      const realBatch = r.mfcBatch && r.mfcBatch !== "Z" ? r.mfcBatch : null;
+      const comboKey = realBatch ? `${r.job} - ${realBatch}` : null;
+      if (!filters.jobIn.has(r.job) && !(comboKey && filters.jobIn.has(comboKey))) return false;
+    }
     if (filters.section && r.groupKey !== filters.section) return false;
     if (filters.mfcBatch && (r.mfcBatch || "Z") !== filters.mfcBatch) return false;
     if (filters.structure && r.structure !== filters.structure) return false;

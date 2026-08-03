@@ -1040,6 +1040,18 @@ export interface CategorySettings {
   perSection?: CategorySettingsPerSection;
 }
 
+export interface ItemMasterThicknessRow {
+  itemCode: string;
+  itemName: string;
+  thicknessMm: number;
+}
+
+export interface ItemMasterThicknessGroup {
+  /** The group_name value (e.g. "PIPE", "RSJ POLE", "FLAT"). */
+  groupName: string;
+  items: ItemMasterThicknessRow[];
+}
+
 export interface ItemMasterUploadResult {
   /** Total data rows parsed from the uploaded file. */
   totalRows: number;

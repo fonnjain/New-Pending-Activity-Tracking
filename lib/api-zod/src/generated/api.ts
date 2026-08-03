@@ -677,6 +677,22 @@ export const UploadItemMasterResponse = zod.object({
 
 
 /**
+ * Returns all item_master rows that have a thickness value (excluding FG JOB WORK), grouped by group_name and sorted alphabetically within each group. Used by the Thickness page to display a read-only reference table. Public (read-only).
+
+ * @summary Item master thickness rows grouped by category
+ */
+export const ListItemMasterThicknessRowsResponseItem = zod.object({
+  "groupName": zod.string().describe('The group_name value (e.g. \"PIPE\", \"RSJ POLE\", \"FLAT\").'),
+  "items": zod.array(zod.object({
+  "itemCode": zod.string(),
+  "itemName": zod.string(),
+  "thicknessMm": zod.number()
+}))
+})
+export const ListItemMasterThicknessRowsResponse = zod.array(ListItemMasterThicknessRowsResponseItem)
+
+
+/**
  * Returns summary statistics for the currently loaded item master: total row count, rows with a thickness value (non-JW, non-FG JOB WORK), and the timestamp of the most recently upserted row. Used by the admin upload card to show whether a master is loaded and when it was last updated. Public (read-only).
 
  * @summary Item master statistics

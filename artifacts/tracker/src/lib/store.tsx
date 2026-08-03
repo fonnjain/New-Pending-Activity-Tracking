@@ -18,6 +18,9 @@ export const CURRENT_JOBS_FILTER_VALUE = "__CURRENT_JOBS__";
 // The actual selected codes live in `filters.selectedJobs` (string[]). Resolved
 // into `RecordFilters.jobIn` by resolveActiveFilters.
 export const MULTI_JOBS_FILTER_VALUE = "__MULTI_JOBS__";
+// Multi-template sentinel: job filter is a union of several named templates.
+// The checked template ids live in filters.selectedTemplateIds.
+export const MULTI_TEMPLATES_FILTER_VALUE = "__MULTI_TEMPLATES__";
 
 // Job Templates — named project sets managed via the Job Templates admin page.
 // Each template filter value embeds the template DB id so resolution is O(1).
@@ -33,7 +36,10 @@ export function extractTemplateId(v: string): number {
 }
 /** True when the filter is any kind of named project set (old current-jobs or new template). */
 export function isNamedJobSetFilter(v: string | null | undefined): boolean {
-  return v === CURRENT_JOBS_FILTER_VALUE || isTemplateFilter(v);
+  // Check string-equality branches before the type-guard call (isTemplateFilter
+  // narrows v to `never`/`null|undefined` in the trailing else branch, causing
+  // TS2367 if we compare v to another string literal after it).
+  return v === CURRENT_JOBS_FILTER_VALUE || v === MULTI_TEMPLATES_FILTER_VALUE || isTemplateFilter(v);
 }
 
 /** Global view mode controlling how MFC Batch relates to Project in all grouping tables.
@@ -69,6 +75,9 @@ export interface Filters {
   // Active only when job === MULTI_JOBS_FILTER_VALUE. Stores the user's checked
   // project codes. Cleared whenever job is changed to anything else.
   selectedJobs: string[];
+  // Active only when job === MULTI_TEMPLATES_FILTER_VALUE. Stores the checked
+  // template ids whose members are unioned to form the active job set.
+  selectedTemplateIds: number[];
   // Plant location multi-select: [] means "all locations"; ["unit_1"] filters to
   // only contractors assigned to Unit 1 in the contractor-categories overlay.
   plantLocations: string[];
@@ -80,6 +89,7 @@ interface TrackerContextType {
   filters: Filters;
   setFilter: (key: keyof Filters, value: string | null) => void;
   setSelectedJobs: (jobs: string[]) => void;
+  setSelectedTemplates: (ids: number[]) => void;
   setPlantLocations: (locations: string[]) => void;
   clearFilters: () => void;
   mfcViewMode: MfcViewMode;
@@ -102,6 +112,7 @@ const defaultFilters: Filters = {
   dateRange: null,
   search: "",
   selectedJobs: [],
+  selectedTemplateIds: [],
   plantLocations: [],
 };
 
@@ -162,9 +173,22 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
     setFilters((prev) => ({
       ...prev,
       selectedJobs: jobs,
+      selectedTemplateIds: [],
       // Enter MULTI_JOBS mode when any job is checked; exit to "All Jobs" when
       // every checkbox is cleared so the label reverts to "All Jobs".
       job: jobs.length > 0 ? MULTI_JOBS_FILTER_VALUE : null,
+    }));
+  };
+
+  const setSelectedTemplates = (ids: number[]) => {
+    setFilters((prev) => ({
+      ...prev,
+      selectedTemplateIds: ids,
+      selectedJobs: [],
+      mfcBatch: null,
+      structure: null,
+      mark: null,
+      job: ids.length > 0 ? MULTI_TEMPLATES_FILTER_VALUE : null,
     }));
   };
 
@@ -198,8 +222,9 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
         next.mfcBatch = null;
         next.structure = null;
         next.mark = null;
-        // Clear the multi-select checked list whenever leaving multi-jobs mode.
+        // Clear both multi-select lists whenever leaving their respective modes.
         if (value !== MULTI_JOBS_FILTER_VALUE) next.selectedJobs = [];
+        if (value !== MULTI_TEMPLATES_FILTER_VALUE) next.selectedTemplateIds = [];
       } else if (key === "mfcBatch") {
         // MFC sits between Project and Structure in TLT; narrowing it drops any
         // stale structure/mark selection from a different batch.
@@ -232,7 +257,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
     setFilters((prev) => ({ ...defaultFilters, category: prev.category }));
 
   return (
-    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, setPlantLocations, clearFilters, mfcViewMode, setMfcViewMode }}>
+    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, setSelectedTemplates, setPlantLocations, clearFilters, mfcViewMode, setMfcViewMode }}>
       {children}
     </TrackerContext.Provider>
   );
@@ -394,12 +419,22 @@ export function useActiveJobSet(): ReadonlySet<string> {
   return useMemo(() => {
     if (filters.job === CURRENT_JOBS_FILTER_VALUE) return currentJobsSet;
     if (isTemplateFilter(filters.job)) {
+      // Single-template (legacy path — kept for backward compat).
       const id = extractTemplateId(filters.job);
       const tpl = templates.find((t) => t.id === id);
       return new Set<string>(tpl?.members ?? []);
     }
+    if (filters.job === MULTI_TEMPLATES_FILTER_VALUE) {
+      // Union of all checked template member sets.
+      const union = new Set<string>();
+      for (const id of filters.selectedTemplateIds) {
+        const tpl = templates.find((t) => t.id === id);
+        if (tpl) tpl.members.forEach((m) => union.add(m));
+      }
+      return union;
+    }
     return new Set<string>();
-  }, [filters.job, currentJobsSet, templates]);
+  }, [filters.job, filters.selectedTemplateIds, currentJobsSet, templates]);
 }
 
 // Resolve the active filters into the shared RecordFilters shape plus the

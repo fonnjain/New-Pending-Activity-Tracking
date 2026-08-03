@@ -123,6 +123,50 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
+// GET /item-master/thickness-rows
+// Returns all item-master rows that have a thickness value (non-FG JOB WORK),
+// grouped by group_name and sorted alphabetically within each group.
+// ---------------------------------------------------------------------------
+router.get("/item-master/thickness-rows", async (_req, res): Promise<void> => {
+  const rows = await db
+    .select({
+      itemCode: itemMasterTable.itemCode,
+      itemName: itemMasterTable.itemName,
+      groupName: itemMasterTable.groupName,
+      thicknessMm: itemMasterTable.thicknessMm,
+    })
+    .from(itemMasterTable)
+    .where(
+      sql`${itemMasterTable.thicknessMm} is not null
+          and ${itemMasterTable.thicknessMm} > 0
+          and coalesce(${itemMasterTable.groupName}, '') <> 'FG JOB WORK'`,
+    )
+    .orderBy(
+      sql`coalesce(${itemMasterTable.groupName}, '')`,
+      itemMasterTable.itemName,
+    );
+
+  // Group by groupName
+  const groupMap = new Map<string, { itemCode: string; itemName: string; thicknessMm: number }[]>();
+  for (const row of rows) {
+    const key = row.groupName ?? "(Other)";
+    if (!groupMap.has(key)) groupMap.set(key, []);
+    groupMap.get(key)!.push({
+      itemCode: row.itemCode,
+      itemName: row.itemName,
+      thicknessMm: row.thicknessMm!,
+    });
+  }
+
+  const groups = Array.from(groupMap.entries()).map(([groupName, items]) => ({
+    groupName,
+    items,
+  }));
+
+  res.json(groups);
+});
+
+// ---------------------------------------------------------------------------
 // GET /item-master/stats
 // Returns summary statistics about the loaded item master (no auth required —
 // this is display-only data used by the admin upload card).

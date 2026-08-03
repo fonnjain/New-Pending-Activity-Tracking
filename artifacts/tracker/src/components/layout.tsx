@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes, ChevronsUpDown } from "lucide-react";
-import { useTracker, dateRangeWindow, useActiveJobSet, useJobTemplates, MULTI_JOBS_FILTER_VALUE, isTemplateFilter, extractTemplateId, templateFilterValue, isNamedJobSetFilter, type JobTemplate, type MfcViewMode } from "@/lib/store";
+import { useTracker, dateRangeWindow, useActiveJobSet, useJobTemplates, MULTI_JOBS_FILTER_VALUE, MULTI_TEMPLATES_FILTER_VALUE, isTemplateFilter, extractTemplateId, templateFilterValue, isNamedJobSetFilter, type JobTemplate, type MfcViewMode } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useGetImportRecords, useGetAuthStatus, useListContractorCategories, getGetImportRecordsQueryKey, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
 import { LoginForm, ChangePasswordForm, LogoutButton } from "@/components/login-gate";
@@ -21,63 +21,75 @@ import {
 } from "@/lib/contractorFilter";
 
 // Job picker with checkbox multi-select. Renders "All Jobs" at the top,
-// then any named Job Templates (from the Job Templates admin page), then
-// individual project codes with multi-select checkboxes.
+// then named Job Templates (each with a checkbox for multi-select),
+// then individual project/batch codes with checkboxes.
 function MultiJobPicker({
   jobs,
   filterJob,
   selectedJobs,
+  selectedTemplateIds,
   onAllJobs,
-  onTemplate,
-  onSingleJob,
   onSelectedJobsChange,
+  onSelectedTemplatesChange,
   templates,
 }: {
   jobs: string[];
   filterJob: string | null;
   selectedJobs: string[];
+  selectedTemplateIds: number[];
   onAllJobs: () => void;
-  onTemplate: (id: number) => void;
-  onSingleJob: (job: string) => void;
   onSelectedJobsChange: (jobs: string[]) => void;
+  onSelectedTemplatesChange: (ids: number[]) => void;
   templates: JobTemplate[];
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const selected = useMemo(() => new Set(selectedJobs), [selectedJobs]);
+
+  const selectedJobSet = useMemo(() => new Set(selectedJobs), [selectedJobs]);
+  const selectedTplSet = useMemo(() => new Set(selectedTemplateIds), [selectedTemplateIds]);
+
   const filtered = useMemo(
     () => (search ? jobs.filter((j) => j.toLowerCase().includes(search.toLowerCase())) : jobs),
     [jobs, search],
   );
 
-  const toggle = (job: string) => {
-    // When in single-job mode, carry the existing selection forward so that
-    // transitioning to multi-select doesn't silently drop the previous job.
-    const base = isSingleJob ? new Set([filterJob!]) : new Set(selected);
+  const isMultiJobs = filterJob === MULTI_JOBS_FILTER_VALUE;
+  const isMultiTemplates = filterJob === MULTI_TEMPLATES_FILTER_VALUE;
+
+  // Toggle a template checkbox — multiple templates can be active simultaneously.
+  const toggleTemplate = (id: number) => {
+    const next = new Set(selectedTplSet);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    onSelectedTemplatesChange(Array.from(next));
+  };
+
+  // Toggle an individual project/batch checkbox.
+  const toggleJob = (job: string) => {
+    const base = new Set(isMultiJobs ? selectedJobSet : []);
     if (base.has(job)) base.delete(job); else base.add(job);
     onSelectedJobsChange(Array.from(base).sort());
-    // Clear the search so the full project list reappears for the next pick.
     setSearch("");
   };
 
-  const isActiveTemplate = isTemplateFilter(filterJob);
-  const activeTemplateId = isActiveTemplate ? extractTemplateId(filterJob!) : null;
-  const isMultiJobs = filterJob === MULTI_JOBS_FILTER_VALUE;
-  // filterJob holds a direct project code when neither sentinel applies.
-  const isSingleJob = filterJob !== null && !isActiveTemplate && !isMultiJobs;
-
-  const activeTemplateName = isActiveTemplate
-    ? (templates.find((t) => t.id === activeTemplateId)?.name ?? "Template")
-    : null;
-
-  const label = activeTemplateName
-    ?? (isSingleJob
-      ? filterJob!
-      : isMultiJobs && selectedJobs.length === 1
-        ? selectedJobs[0]
-        : isMultiJobs && selectedJobs.length > 1
-          ? `${selectedJobs.length} Jobs`
-          : "All Jobs");
+  // Label shown on the trigger button.
+  const label = (() => {
+    if (!filterJob) return "All Jobs";
+    if (isMultiTemplates) {
+      if (selectedTemplateIds.length === 1) {
+        return templates.find((t) => t.id === selectedTemplateIds[0])?.name ?? "1 Template";
+      }
+      return `${selectedTemplateIds.length} Templates`;
+    }
+    // Legacy single-template path (backward compat).
+    if (isTemplateFilter(filterJob)) {
+      return templates.find((t) => t.id === extractTemplateId(filterJob))?.name ?? "Template";
+    }
+    if (isMultiJobs) {
+      if (selectedJobs.length === 1) return selectedJobs[0];
+      if (selectedJobs.length > 1) return `${selectedJobs.length} Batches`;
+    }
+    return filterJob; // direct job code
+  })();
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -91,9 +103,9 @@ function MultiJobPicker({
           <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0 ml-1" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[240px] p-2" align="start">
+      <PopoverContent className="w-[260px] p-2" align="start">
         <div className="space-y-2">
-          {/* Special-mode rows */}
+          {/* All Jobs */}
           <div className="space-y-0.5">
             <button
               onClick={() => { onAllJobs(); setOpen(false); }}
@@ -101,56 +113,68 @@ function MultiJobPicker({
             >
               All Jobs
             </button>
-            {/* Named templates from the Job Templates admin page */}
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => { onTemplate(t.id); setOpen(false); }}
-                className={`w-full text-left px-2 py-1.5 rounded text-sm hover:bg-accent ${activeTemplateId === t.id ? "bg-accent font-medium" : ""}`}
-              >
-                {t.name}
-                <span className="ml-1.5 text-xs text-muted-foreground">({t.members.length})</span>
-              </button>
-            ))}
           </div>
+
+          {/* Named templates — checkbox multi-select */}
+          {templates.length > 0 && (
+            <div className="border-t pt-2 space-y-0.5">
+              {templates.map((t) => (
+                <div
+                  key={t.id}
+                  className={`flex items-center gap-1.5 px-1 rounded text-sm hover:bg-accent ${isMultiTemplates && selectedTplSet.has(t.id) ? "bg-accent/60" : ""}`}
+                >
+                  <Checkbox
+                    checked={isMultiTemplates && selectedTplSet.has(t.id)}
+                    onCheckedChange={() => toggleTemplate(t.id)}
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    className="shrink-0"
+                  />
+                  <button
+                    className="flex-1 text-left py-1.5 truncate cursor-pointer"
+                    onClick={() => toggleTemplate(t.id)}
+                  >
+                    {t.name}
+                    <span className="ml-1.5 text-xs text-muted-foreground">({t.members.length})</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Individual project/batch codes — checkbox multi-select */}
           <div className="border-t pt-2 space-y-1.5">
             <div className="flex items-center justify-between text-xs px-0.5">
-              <span className="text-muted-foreground font-medium">Projects</span>
+              <span className="text-muted-foreground font-medium">Batches</span>
               <div className="flex gap-2">
                 <button className="text-primary hover:underline" onClick={() => onSelectedJobsChange([...jobs])}>All</button>
                 <button className="text-muted-foreground hover:underline" onClick={() => onSelectedJobsChange([])}>None</button>
               </div>
             </div>
-            {/* Searchable input — type a project code to narrow the list */}
             <input
               type="text"
-              placeholder="Type to search projects..."
+              placeholder="Search..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full rounded border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring bg-background"
             />
             <div className="max-h-52 overflow-y-auto space-y-0.5 pr-0.5">
               {filtered.length === 0 && (
-                <p className="text-xs text-muted-foreground text-center py-2">No projects found</p>
+                <p className="text-xs text-muted-foreground text-center py-2">No batches found</p>
               )}
               {filtered.map((job) => (
                 <div
                   key={job}
-                  className={`flex items-center gap-1 px-1 rounded text-sm ${isSingleJob && filterJob === job ? "bg-accent font-medium" : "hover:bg-accent"}`}
+                  className={`flex items-center gap-1 px-1 rounded text-sm hover:bg-accent`}
                 >
-                  {/* Checkbox — toggles multi-select without closing */}
                   <Checkbox
-                    checked={isMultiJobs ? selected.has(job) : isSingleJob && filterJob === job}
-                    onCheckedChange={() => toggle(job)}
+                    checked={isMultiJobs && selectedJobSet.has(job)}
+                    onCheckedChange={() => toggleJob(job)}
                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
                     className="shrink-0"
                   />
-                  {/* Label — toggles the job in/out of multi-select (same as checkbox).
-                      Clicking the row text adds it to the selection and keeps
-                      the popover open so more projects can be picked. */}
                   <button
                     className="flex-1 text-left py-1.5 truncate cursor-pointer"
-                    onClick={() => toggle(job)}
+                    onClick={() => toggleJob(job)}
                   >
                     {job}
                   </button>
@@ -620,7 +644,7 @@ function PlantLocationPicker({
 
 function FilterBar() {
   const [location] = useLocation();
-  const { filters, setFilter, setSelectedJobs, setPlantLocations, clearFilters, selectedImportId, mfcViewMode, setMfcViewMode } = useTracker();
+  const { filters, setFilter, setSelectedJobs, setSelectedTemplates, setPlantLocations, clearFilters, selectedImportId, mfcViewMode, setMfcViewMode } = useTracker();
   const { data: contractorCategoriesData = [] } = useListContractorCategories();
   const [isOpen, setIsOpen] = useState(false);
   const { data: records = [] } = useGetImportRecords(selectedImportId as number, {
@@ -839,10 +863,10 @@ function FilterBar() {
                 jobs={jobs as string[]}
                 filterJob={filters.job}
                 selectedJobs={filters.selectedJobs}
+                selectedTemplateIds={filters.selectedTemplateIds}
                 onAllJobs={() => setFilter("job", null)}
-                onTemplate={(id) => setFilter("job", templateFilterValue(id))}
-                onSingleJob={(job) => setFilter("job", job)}
                 onSelectedJobsChange={setSelectedJobs}
+                onSelectedTemplatesChange={setSelectedTemplates}
                 templates={templates}
               />
             )}

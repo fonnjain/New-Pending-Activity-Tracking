@@ -165,6 +165,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /item-master/thickness-rows:
+    get:
+      operationId: listItemMasterThicknessRows
+      tags: [thickness]
+      summary: Item master thickness rows grouped by category
+      description: >
+        Returns all item_master rows that have a thickness value (excluding FG
+        JOB WORK), grouped by group_name and sorted alphabetically within each
+        group. Used by the Thickness page to display a read-only reference table.
+        Public (read-only).
+      responses:
+        "200":
+          description: Grouped thickness rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ItemMasterThicknessGroup"
   /item-master/stats:
     get:
       operationId: getItemMasterStats
@@ -3238,6 +3257,27 @@ components:
             activity code. Only overridden cells/fields are stored.
       required:
         - activities
+    ItemMasterThicknessGroup:
+      type: object
+      properties:
+        groupName:
+          type: string
+          description: The group_name value (e.g. "PIPE", "RSJ POLE", "FLAT").
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ItemMasterThicknessRow"
+      required: [groupName, items]
+    ItemMasterThicknessRow:
+      type: object
+      properties:
+        itemCode:
+          type: string
+        itemName:
+          type: string
+        thicknessMm:
+          type: number
+      required: [itemCode, itemName, thicknessMm]
     ItemMasterUploadResult:
       type: object
       properties:
