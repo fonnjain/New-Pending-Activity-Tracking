@@ -1,0 +1,39 @@
+The client has supplied their item master (item_master-thickness.xls) with 78 RSJ POLE rows
+carrying authoritative Thickness values. It should replace the current 6-entry RSJ lookup
+table.
+
+Three of your six current values disagree with it:
+
+  RSJ 100X116X10   app 6.0mm   client master 8.0mm    (33% error)
+  RSJ 204X206X11   app 7.6mm   client master 8.0mm
+  RSJ 203X203X16   app 7.6mm   client master has no 203X203X16; 203X203X12/13/14 all = 8.0mm
+
+Because these feed rsj_base, the wrong values propagate to every mark sharing that base —
+240 marks / 5,604.8 MT by your own breakdown. In particular the 152X152 base currently
+inherits 7.9mm from RSJ 152X152X15, where the client master shows every 152X152 variant at
+8.0mm.
+
+Good news on the mechanics: your cleanRsjGroupKey() already strips exactly the annotations
+that differ between the two sources — the [37.1] / (30.44) weight brackets, MS, MTR. The
+client master confirms these don't affect thickness (RSJ 150X150X10 appears at [30.0],
+[34.1] and [37.1], all 8.0mm). So the client rows should collapse cleanly onto your existing
+groupKey format with the same cleaning applied.
+
+Please:
+
+1. Load the client's RSJ POLE rows as the lookup table, applying cleanRsjGroupKey() to the
+   Item Name so the keys match your existing format. Where multiple client rows collapse to
+   the same groupKey with the same thickness, dedupe. Where they collapse to DIFFERENT
+   thicknesses, tell me — that's a genuine ambiguity I need to resolve with the client
+   rather than have you pick.
+
+2. Leave resolveThickness()'s control flow untouched (manual > TLT section parse > rsj_exact
+   > rsj_base > rsj_default). The logic is sound; this is a data replacement only.
+
+3. Report how many marks change thickness and the before/after for each affected groupKey.
+
+One thing to be aware of but NOT act on: the client master distinguishes "(JW)" job-work
+variants with different thicknesses (e.g. RSJ 200X100X13 = 8.0mm vs RSJ 200X100X13 (JW) =
+5.7mm). No WIP mark on 31-Jul or 01-Aug carries a JW marker in Section, so this distinction
+is currently unrepresentable and harmless. Just exclude the (JW) rows when loading the table,
+and flag it if JW ever starts appearing in the WIP Section column.
