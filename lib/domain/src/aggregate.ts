@@ -192,10 +192,9 @@ export function filterRecords<T extends AggRecord>(
       if (!r.job) return false;
       // Check both the plain job code (used by "Current Jobs" and legacy templates)
       // and the "job - mfcBatch" combo key (used by MFC-aware job templates).
-      // "Z" is the sentinel for no-batch records — treat it the same as null so
-      // those records match a plain job-code entry in the set.
-      const realBatch = r.mfcBatch && r.mfcBatch !== "Z" ? r.mfcBatch : null;
-      const comboKey = realBatch ? `${r.job} - ${realBatch}` : null;
+      // "Z" is a real batch label shown in the pool — template members like
+      // "848 - Z" must match records where mfcBatch === "Z".
+      const comboKey = r.mfcBatch ? `${r.job} - ${r.mfcBatch}` : null;
       if (!filters.jobIn.has(r.job) && !(comboKey && filters.jobIn.has(comboKey))) return false;
     }
     if (filters.section && r.groupKey !== filters.section) return false;

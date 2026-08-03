@@ -94,10 +94,9 @@ router.get("/job-templates/projects", async (_req, res): Promise<void> => {
     if (!r.job) continue;
     if (r.category === "TLT") {
       // Use "job - mfcBatch" combo so each batch is a distinct selectable unit.
-      // Records with no batch (null or the "Z" sentinel for blank) are keyed as
-      // the plain job code.
-      const batch = r.mfcBatch && r.mfcBatch !== "Z" ? r.mfcBatch : null;
-      tlt.push(batch ? `${r.job} - ${batch}` : r.job);
+      // "Z" is a real batch label (marks not assigned to any batch) — show it as-is.
+      // Only truly null/empty mfcBatch falls back to the plain job code.
+      tlt.push(r.mfcBatch ? `${r.job} - ${r.mfcBatch}` : r.job);
     } else {
       ntlt.push(r.job);
     }
