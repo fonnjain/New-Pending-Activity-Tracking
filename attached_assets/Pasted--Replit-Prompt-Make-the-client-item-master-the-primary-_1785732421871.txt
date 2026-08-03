@@ -1,0 +1,201 @@
+# Replit Prompt — Make the client item master the primary thickness source
+### Applies to ALL material groups, not just RSJ
+
+**This supersedes the RSJ-only change in scope.** That prompt fixed six lookup values. This
+one changes where thickness comes from for every material type.
+
+## Why
+
+The app currently parses thickness from the Section string for all TLT and Earthing marks.
+That works for angles (`100X100X10 MS` → 10 mm) but fails systematically for every other
+profile, because those profiles don't carry thickness in their names:
+
+| Section | Parser returns | Client master | Error |
+|---|---|---|---|
+| `ISMC 150X75 MS` | **75.0 mm** | 6.0 mm | 12.5× |
+| `ISMC 100X50 MS` | **50.0 mm** | 6.0 mm | 8.3× |
+| `ISMB 300X140 MS` | **140.0 mm** | 8.0 mm | 17.5× |
+| `ISMB 175X85 MS` | **85.0 mm** | 8.0 mm | 10.6× |
+| `FLAT 40X5 FE 410` | **410.0 mm** | 5.0 mm | 82× |
+| `PIPE 300 N.B [OD 323.9 & THK 6.3] MS` | 6.3 mm | 6.0 mm | minor |
+
+`ISMC 150X75` is depth × flange width; the parser returns the flange width. `FE 410` is a
+steel grade; the parser reads it as a 410 mm thickness.
+
+**Scale today:** 174 marks / 25.809 MT are provably wrong where the master has an entry. Low
+because these profiles are rare in the current mix — but every one of them is wrong, and the
+mix will change.
+
+**Master file quality — verified before writing this:** 710 rows carry a Thickness value,
+**710 distinct Item Names, zero names mapping to more than one thickness.** No dedupe or
+conflict resolution needed.
+
+| Group | Rows | Thickness range |
+|---|---|---|
+| ANGLE | 242 | 3.0 – 25.0 |
+| FLAT | 128 | 3.0 – 25.0 |
+| PLATE | 91 | 1.0 – 70.0 |
+| RSJ POLE | 77 | 5.7 – 9.0 |
+| FG JOB WORK | 56 | 3.0 – 24.0 |
+| PIPE | 34 | 4.0 – 11.5 |
+| ROUND | 33 | 6.0 – 80.0 |
+| CHANNEL | 20 | 6.0 – 90.0 |
+| BEAM | 15 | 8.0 – 180.0 |
+| BAR | 8 | 8.0 – 50.0 |
+| GRATING | 5 | 3.0 – 6.0 |
+| FG NON TLT | 1 | 8.0 |
+
+---
+
+## The prompt
+
+```
+Please make the client's item master the primary thickness source for ALL material groups,
+not just RSJ. This extends the RSJ change you just made.
+
+THE PROBLEM
+
+resolveThickness() currently parses thickness out of the Section string for every TLT and
+Earthing mark. That is correct for angles (100X100X10 MS -> 10mm) but wrong for every other
+profile type, because those profiles do not carry thickness in their names:
+
+  ISMC 150X75 MS        parser returns 75.0mm    actual 6.0mm   (depth x flange width)
+  ISMC 100X50 MS        parser returns 50.0mm    actual 6.0mm
+  ISMB 300X140 MS       parser returns 140.0mm   actual 8.0mm
+  ISMB 175X85 MS        parser returns 85.0mm    actual 8.0mm
+  FLAT 40X5 FE 410      parser returns 410.0mm   actual 5.0mm   (FE 410 is a steel GRADE)
+  PIPE 50 N.B MS        parser returns 50.0mm    actual 6.0mm   (N.B = nominal bore)
+
+Measured on the 01-Aug import: 174 marks / 25.809 MT are wrong where the master has an
+entry. Small today because channels, beams and pipes are rare in the current mix — but every
+one of them is wrong, and it will grow.
+
+THE CHANGE
+
+Store the client's item master as a proper table in the database, keeping ALL columns from
+the source file, then use it as the primary thickness source.
+
+STORE THE FULL FILE, NOT JUST THE THICKNESS ROWS
+
+Create an item_master table holding all 25,321 rows with every column:
+
+    item_code        text  PRIMARY KEY   -- unique across all 25,321 rows, verified
+    item_name        text                -- 25,320 distinct (ONE duplicate name exists,
+                                            which is why item_code is the key, not name)
+    sub_group        text                -- 197 distinct
+    group_name       text                -- 46 distinct (ANGLE, FLAT, RSJ POLE, PIPE, ...)
+    category         text                -- 10 distinct (RAW MATERIAL, FINISH GOODS, ...)
+    grade            text                -- nullable, 955 rows populated, 33 distinct
+                                            (MS, HT, FE 410, FE 490, S 275, ...)
+    section_wt_mm_m2 numeric             -- nullable, 1,864 rows populated
+    thickness_mm     numeric             -- nullable, 710 rows populated, 56 distinct
+
+Ignore the "Select" column — it is a UI artefact, all 25,321 rows have the same value.
+
+Storing the whole file rather than a thickness-only extract means Grade, Section Weight,
+Category and Group are available for future use — Grade in particular is likely to matter,
+since WIP Section values carry MS / HT / FE 410 suffixes that currently have no structured
+counterpart anywhere in the app.
+
+Make it re-importable: the client will send updated versions of this file. An upload should
+upsert on item_code, not truncate and rebuild, and it must be independent of WIP imports —
+never rebuilt or cleared when a WIP file is uploaded.
+
+THEN CHANGE THE RESOLUTION ORDER in resolveThickness() to:
+
+  1. manual pin (per markId)          -- unchanged, still highest priority
+  2. MASTER LOOKUP (all groups)       -- NEW, becomes the primary automatic source
+  3. section parse                    -- DEMOTED to fallback, only when the master has no
+                                         entry for that section
+  4. RSJ base inheritance             -- keep, for RSJ sections the master doesn't cover
+  5. RSJ default 6.0mm                -- keep as last resort for RSJ
+  6. unset                            -- non-RSJ sections with no master entry and no
+                                         parseable value
+
+Key points:
+
+- Thickness resolution uses the 710 rows where thickness_mm is populated, across all 12
+  material groups that have it — ANGLE (242), FLAT (128), PLATE (91), RSJ POLE (77),
+  FG JOB WORK (56), PIPE (34), ROUND (33), CHANNEL (20), BEAM (15), BAR (8), GRATING (5),
+  FG NON TLT (1). The other ~24,600 rows are stored but simply have no thickness to offer.
+
+- Among those 710 rows the data is clean: 710 distinct Item Names, ZERO names mapping to more
+  than one thickness. No dedupe or conflict resolution is needed for the thickness lookup. If
+  your load produces any conflict, something is wrong with the matching — tell me rather than
+  picking a winner. (Note the ONE duplicate Item Name in the full 25,321-row file is not in
+  the thickness subset.)
+
+- Match WIP Section to master Item Name after normalising both the same way. Apply the same
+  cleaning you already use in cleanRsjGroupKey() (strip [37.1] / (30.44) weight brackets, MS,
+  MTR, trailing separators) so RSJ keeps working, and apply consistent trim + uppercase for
+  all groups.
+
+- EXCLUDE the 38 rows whose Item Name contains "(JW)". These are job-work variants with
+  genuinely different thicknesses (RSJ 200X100X13 = 8.0mm vs RSJ 200X100X13 (JW) = 5.7mm),
+  but no WIP mark on 31-Jul or 01-Aug carries a JW marker in Section, so they are currently
+  unmatchable and would only create false collisions. Flag it if JW ever appears in a WIP
+  Section value.
+
+- Add a thicknessSource value for the new path (e.g. "master") so the Thickness tab can show
+  where each value came from, alongside the existing manual / section / rsj_exact / rsj_base
+  / rsj_default / unset.
+
+- Do NOT store thickness on the pool row. Keep it resolving at read time in serializeRecord
+  as it does now, so master updates take effect without re-import.
+
+WHAT I NEED BACK
+
+1. How many marks change thickness as a result, total weight affected, and a per-section
+   before/after list for anything that moves.
+
+2. The count and weight of marks that now fall through to "unset" — sections with no master
+   entry and no usable parse. I expect this to include 18 TLT sections / 609 marks /
+   659.678 MT that have no master entry today, including several with a stray leading "A "
+   prefix (A 200X200X20 MS, A 75X75X8 MS, A 50X50X6 MS and similar — these look like they
+   should match the un-prefixed master rows, but I want to see the gap surfaced rather than
+   silently patched, so DO NOT strip a leading "A " without telling me first).
+
+3. Confirmation that NTLT GENERAL (7 marks / 78.796 MT on 01-Aug) still resolves to unset
+   unless manually pinned, or tell me if the master now covers it.
+
+Please report the gap list before assuming any fuzzy matching. I would rather see 660 MT
+flagged as unresolved and take it back to the client than have it silently matched to the
+wrong row.
+```
+
+---
+
+## What to check in the reply
+
+- **All 25,321 rows stored, not just the 710 with thickness.** A thickness-only extract
+  throws away Grade, Section Weight and Category, and the file will have to be re-imported
+  from scratch the first time any of those is needed.
+- **Keyed on `item_code`, not `item_name`.** There is one duplicate Item Name in the full
+  file. It isn't in the thickness subset, so it won't break the lookup — but it will break a
+  primary key.
+- **Upsert on re-import, never truncate-and-rebuild, and fully independent of WIP uploads.**
+  Two tables in this system were previously being wiped on every WIP import
+  (`release_balance_wip`, `assignment_balance_wip`); this one must not join them.
+- **The unresolved-gap list, not a fuzzy-matched fix.** The `"A "` prefix sections almost
+  certainly *should* match their un-prefixed master rows, but that's a question for VTPL —
+  if the Agent strips the prefix on its own initiative, a data-entry problem gets hidden
+  instead of fixed.
+- **Zero load conflicts** in the thickness subset. Verified clean at 710 unique names; any
+  conflict reported means the matching or normalisation is wrong.
+- **That section-parse still runs as a fallback.** It must not be deleted — it correctly
+  handles angles, which are the bulk of TLT tonnage, and covers sections the master lacks.
+- **A before/after list.** This changes values people read daily; the delta needs to be
+  visible, not just asserted.
+
+---
+
+## Two things to settle with VTPL alongside this
+
+1. **The 18 unmatched TLT sections (609 marks / 659.678 MT).** Are the `"A "`-prefixed ones
+   (`A 200X200X20 MS`, `A 75X75X8 MS`, `A 130X130X12 MS`, `A 50X50X6 MS`, `A 100X100X10 MS`,
+   `A 150X150X12 MS`, `A 130X130X10 MS`) data-entry variants of the un-prefixed master rows,
+   or genuinely distinct items needing their own master entries? Also genuinely missing:
+   `100X100X15 MS`, `130X130X9 MS`, `130X130X16 HT`, `200X200X22 HT`, `250X250X35 HT`.
+2. **NTLT GENERAL** — 7 marks / 78.796 MT currently resolve to no thickness at all unless
+   manually pinned. Does VTPL want these covered by the master, or are they genuinely
+   one-off items?
