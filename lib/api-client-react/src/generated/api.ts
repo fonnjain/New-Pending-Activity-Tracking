@@ -66,6 +66,8 @@ import type {
   InventoryMfcBatchColorInput,
   InventorySideOverride,
   InventorySideOverrideInput,
+  ItemMasterStats,
+  ItemMasterUploadResult,
   ListImportsParams,
   ListUsers200,
   ManualThickness,
@@ -90,6 +92,7 @@ import type {
   SummaryRequest,
   TurnaroundSettings,
   UpdateUserRole200,
+  UploadItemMasterBody,
   UploadResult,
   UserActivityResponse,
   ValidateRequest,
@@ -491,6 +494,160 @@ export const useDeleteRsjThickness = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getDeleteRsjThicknessMutationOptions(options));
     }
+
+export const getUploadItemMasterUrl = () => {
+
+
+
+
+  return `/api/item-master/upload`
+}
+
+/**
+ * Parses the VTPL item master spreadsheet (XLS or XLSX, data from row 5 onward, columns: Select / ItemCode / ItemName / SubGroup / GroupName / Category / Grade / SectionWt / ThicknessMM). Upserts all rows into the item_master table (keyed on item_code) and clears the thickness cache so the new lookup takes effect immediately. Requires authentication.
+
+ * @summary Upload item master XLS/XLSX
+ */
+export const uploadItemMaster = async (uploadItemMasterBody: UploadItemMasterBody, options?: RequestInit): Promise<ItemMasterUploadResult> => {
+    const formData = new FormData();
+formData.append(`file`, uploadItemMasterBody.file);
+
+  return customFetch<ItemMasterUploadResult>(getUploadItemMasterUrl(),
+  {
+    ...options,
+    method: 'POST'
+    ,
+    body:
+      formData,
+  }
+);}
+
+
+
+
+export const getUploadItemMasterMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadItemMaster>>, TError,{data: BodyType<UploadItemMasterBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadItemMaster>>, TError,{data: BodyType<UploadItemMasterBody>}, TContext> => {
+
+const mutationKey = ['uploadItemMaster'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadItemMaster>>, {data: BodyType<UploadItemMasterBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  uploadItemMaster(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadItemMasterMutationResult = NonNullable<Awaited<ReturnType<typeof uploadItemMaster>>>
+    export type UploadItemMasterMutationBody = BodyType<UploadItemMasterBody>
+    export type UploadItemMasterMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Upload item master XLS/XLSX
+ */
+export const useUploadItemMaster = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadItemMaster>>, TError,{data: BodyType<UploadItemMasterBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof uploadItemMaster>>,
+        TError,
+        {data: BodyType<UploadItemMasterBody>},
+        TContext
+      > => {
+      return useMutation(getUploadItemMasterMutationOptions(options));
+    }
+
+export const getGetItemMasterStatsUrl = () => {
+
+
+
+
+  return `/api/item-master/stats`
+}
+
+/**
+ * Returns summary statistics for the currently loaded item master: total row count, rows with a thickness value (non-JW, non-FG JOB WORK), and the timestamp of the most recently upserted row. Used by the admin upload card to show whether a master is loaded and when it was last updated. Public (read-only).
+
+ * @summary Item master statistics
+ */
+export const getItemMasterStats = async ( options?: RequestInit): Promise<ItemMasterStats> => {
+
+  return customFetch<ItemMasterStats>(getGetItemMasterStatsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetItemMasterStatsQueryKey = () => {
+    return [
+    `/api/item-master/stats`
+    ] as const;
+    }
+
+
+export const getGetItemMasterStatsQueryOptions = <TData = Awaited<ReturnType<typeof getItemMasterStats>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getItemMasterStats>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetItemMasterStatsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getItemMasterStats>>> = ({ signal }) => getItemMasterStats({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getItemMasterStats>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetItemMasterStatsQueryResult = NonNullable<Awaited<ReturnType<typeof getItemMasterStats>>>
+export type GetItemMasterStatsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Item master statistics
+ */
+
+export function useGetItemMasterStats<TData = Awaited<ReturnType<typeof getItemMasterStats>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getItemMasterStats>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetItemMasterStatsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getListManualThicknessUrl = () => {
 

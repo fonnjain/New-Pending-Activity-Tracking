@@ -639,6 +639,7 @@ export const RecordThicknessSource = {
   rsj_exact: 'rsj_exact',
   rsj_base: 'rsj_base',
   rsj_default: 'rsj_default',
+  master: 'master',
   manual: 'manual',
   unset: 'unset',
 } as const;
@@ -1037,6 +1038,27 @@ export interface CategorySettings {
   /** Sparse per-section overrides keyed by section (group_key) then activity code. Only overridden cells/fields are stored.
    */
   perSection?: CategorySettingsPerSection;
+}
+
+export interface ItemMasterUploadResult {
+  /** Total data rows parsed from the uploaded file. */
+  totalRows: number;
+  /** Number of rows successfully upserted into item_master. */
+  upserted: number;
+  /** Rows that have a non-null positive thickness_mm value. */
+  rowsWithThickness: number;
+}
+
+export interface ItemMasterStats {
+  /** Total rows in the item_master table. */
+  totalRows: number;
+  /** Rows with a non-null positive thickness (non-JW, non-FG JOB WORK). */
+  rowsWithThickness: number;
+  /**
+     * ISO timestamp of the most recently updated row, or null when the table is empty.
+     * @nullable
+     */
+  lastUploadedAt: string | null;
 }
 
 export interface RsjThickness {
@@ -2432,6 +2454,10 @@ export interface ImportDeletionLogEntry {
 
 export type DeleteRsjThicknessParams = {
 groupKey: string;
+};
+
+export type UploadItemMasterBody = {
+  file: Blob;
 };
 
 export type DeleteManualThicknessParams = {

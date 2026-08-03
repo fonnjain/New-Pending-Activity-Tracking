@@ -18,6 +18,7 @@ export const RecordThicknessSource = {
   rsj_exact: 'rsj_exact',
   rsj_base: 'rsj_base',
   rsj_default: 'rsj_default',
+  master: 'master',
   manual: 'manual',
   unset: 'unset',
 } as const;

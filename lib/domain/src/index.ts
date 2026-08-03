@@ -1809,6 +1809,7 @@ export type ThicknessSource =
   | "rsj_exact"
   | "rsj_base"
   | "rsj_default"
+  | "master"
   | "manual"
   | "unset";
 
@@ -1988,6 +1989,14 @@ export interface ThicknessLookups {
   rsjBaseByKey?: Map<string, number>;
   // Bases that map to >1 distinct thickness in the table -- never guessed.
   ambiguousRsjBases?: Set<string>;
+  // Item master lookup maps (primary source for all section types).
+  // exactKey  = trim + uppercase + collapse whitespace (no stripping).
+  // strippedKey = brackets/unit tokens stripped (RSJ-style, no prefix forced).
+  // Only non-JW rows with a non-null positive thickness are included.
+  // FG JOB WORK rows are excluded so finished-goods entries never collide with
+  // raw-material RSJ POLE entries.
+  masterExactMap?: Map<string, number>;
+  masterStrippedMap?: Map<string, number>;
 }
 
 // Base of a cleaned RSJ type = its first two dimensions only ("RSJ <A>X<B>"),
@@ -2027,21 +2036,76 @@ export function buildRsjBaseIndex(rsjByKey: Map<string, number>): {
   return { rsjBaseByKey, ambiguousRsjBases };
 }
 
-// The single resolver: decide a row's thickness + source. A manual pin (keyed by
-// mark_id) always wins (explicit user intent). Otherwise resolve by category:
-//   TLT            -> section (angle last-dim / plate number)
-//   NTLT/EARTHING  -> section (same as TLT)
-//   NTLT/RSJ       -> exact table match -> base match (first two dims) -> 6.0
-//                     default (NOT the section dims)
-//   NTLT/GENERAL   -> manual only; unset until entered
-// Anything else / unparseable -> null + "unset" (never guessed, surfaced as a gap).
+// ---------------------------------------------------------------------------
+// Item-master key normalisers (also used by the API server to build lookup maps)
+// ---------------------------------------------------------------------------
+
+// Exact key: trim + uppercase + collapse whitespace. No bracket stripping.
+// Matches WIP Section values against master Item Names when they carry the same
+// bracket text (e.g. "PIPE 300 N.B [OD 323.9 & THK 6.3] MS").
+export function normalizeItemExactKey(value: string | null | undefined): string {
+  return (value ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+// Stripped key: brackets and unit tokens removed (same rules as cleanRsjGroupKey
+// in parse.ts but WITHOUT forcing an "RSJ" prefix). Used as a fallback when the
+// WIP Section doesn't carry bracket text that matches the master's full item name.
+export function normalizeItemStrippedKey(
+  value: string | null | undefined,
+): string {
+  let s = (value ?? "").trim();
+  if (!s) return "";
+  s = s.replace(/\[[^\]]*\]/g, " ").replace(/\([^)]*\)/g, " ");
+  s = s.replace(/\b(MS|MTR|MTRS|MTR\.|MM|KG|NOS?)\b/gi, " ");
+  s = s.replace(/[-\u2013]+\s*$/g, " ");
+  s = s.replace(/\s+/g, " ").trim().toUpperCase();
+  return s;
+}
+
+// The single resolver: decide a row's thickness + source.
+//
+// Resolution order (first match wins):
+//   1. manual pin (mark_id)       → "manual"
+//   2. item-master exact key      → "master"   (trim+uppercase, no stripping)
+//   3. item-master stripped key   → "master"   (bracket/unit tokens removed)
+//   4a. TLT / NTLT/EARTHING       → section parse (angle last-dim / plate MM)
+//   4b. NTLT/RSJ                  → rsj_thickness admin table (exact groupKey)
+//                                 → rsj_base (first two dims, from combined table)
+//                                 → rsj_default (6.0 mm)
+//   5. NTLT/GENERAL               → unset (manual only)
+//   6. everything else            → unset
+//
+// The item-master lookup covers ALL section types (TLT channels/beams/pipes,
+// NTLT/RSJ with bracket-variant resolution, NTLT/GENERAL with master entries).
+// Section parse and the RSJ admin table are fallbacks for marks the master
+// doesn't cover.
 export function resolveThickness(
   row: ThicknessInput,
   lookups: ThicknessLookups = {},
 ): ThicknessResult {
+  // 1. Manual pin always wins.
   const manual = lookups.manualByMarkId?.get(row.markId);
   if (manual != null && Number.isFinite(manual) && manual > 0) {
     return { thicknessMm: manual, thicknessSource: "manual" };
+  }
+
+  // 2 & 3. Item-master lookup (exact key first, stripped-key fallback).
+  if (lookups.masterExactMap || lookups.masterStrippedMap) {
+    const exactKey = normalizeItemExactKey(row.section);
+    const masterExact = lookups.masterExactMap?.get(exactKey);
+    if (masterExact != null && Number.isFinite(masterExact) && masterExact > 0) {
+      return { thicknessMm: masterExact, thicknessSource: "master" };
+    }
+    const strippedKey = normalizeItemStrippedKey(row.section);
+    const masterStripped =
+      strippedKey ? lookups.masterStrippedMap?.get(strippedKey) : undefined;
+    if (
+      masterStripped != null &&
+      Number.isFinite(masterStripped) &&
+      masterStripped > 0
+    ) {
+      return { thicknessMm: masterStripped, thicknessSource: "master" };
+    }
   }
 
   const cat = (row.category ?? "").toUpperCase();
@@ -2053,12 +2117,12 @@ export function resolveThickness(
     if (sub === "EARTHING") return sectionThickness(row.section);
     if (sub === "RSJ") {
       const key = row.groupKey ?? "";
-      // 1) Exact cleaned-type match in the lookup table.
+      // 4b-i) Exact match in the rsj_thickness admin table.
       const exact = lookups.rsjByKey?.get(key);
       if (exact != null && Number.isFinite(exact) && exact > 0) {
         return { thicknessMm: exact, thicknessSource: "rsj_exact" };
       }
-      // 2) Base match: inherit from any listed type sharing the first two dims
+      // 4b-ii) Base match: inherit from any listed type sharing the first two dims
       // (skip ambiguous bases that map to >1 thickness).
       const base = rsjBase(key);
       if (base && !lookups.ambiguousRsjBases?.has(base)) {
@@ -2067,7 +2131,7 @@ export function resolveThickness(
           return { thicknessMm: bv, thicknessSource: "rsj_base" };
         }
       }
-      // 3) Default.
+      // 4b-iii) Default.
       return {
         thicknessMm: RSJ_DEFAULT_THICKNESS_MM,
         thicknessSource: "rsj_default",

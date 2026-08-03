@@ -661,6 +661,34 @@ export const DeleteRsjThicknessQueryParams = zod.object({
 
 
 /**
+ * Parses the VTPL item master spreadsheet (XLS or XLSX, data from row 5 onward, columns: Select / ItemCode / ItemName / SubGroup / GroupName / Category / Grade / SectionWt / ThicknessMM). Upserts all rows into the item_master table (keyed on item_code) and clears the thickness cache so the new lookup takes effect immediately. Requires authentication.
+
+ * @summary Upload item master XLS/XLSX
+ */
+export const UploadItemMasterBody = zod.object({
+  "file": zod.instanceof(File)
+})
+
+export const UploadItemMasterResponse = zod.object({
+  "totalRows": zod.number().describe('Total data rows parsed from the uploaded file.'),
+  "upserted": zod.number().describe('Number of rows successfully upserted into item_master.'),
+  "rowsWithThickness": zod.number().describe('Rows that have a non-null positive thickness_mm value.')
+})
+
+
+/**
+ * Returns summary statistics for the currently loaded item master: total row count, rows with a thickness value (non-JW, non-FG JOB WORK), and the timestamp of the most recently upserted row. Used by the admin upload card to show whether a master is loaded and when it was last updated. Public (read-only).
+
+ * @summary Item master statistics
+ */
+export const GetItemMasterStatsResponse = zod.object({
+  "totalRows": zod.number().describe('Total rows in the item_master table.'),
+  "rowsWithThickness": zod.number().describe('Rows with a non-null positive thickness (non-JW, non-FG JOB WORK).'),
+  "lastUploadedAt": zod.string().nullable().describe('ISO timestamp of the most recently updated row, or null when the table is empty.')
+})
+
+
+/**
  * Returns manual thickness values keyed by mark_id (used for NTLT/GENERAL and any hand-pinned mark). These survive re-imports. Public (read-only).
 
  * @summary List manual thickness pins
@@ -1472,7 +1500,7 @@ export const GetImportRecordsResponseItem = zod.object({
   "groupKey": zod.string().nullable().describe('Resolved grouping key (TLT = job; NTLT = cleaned section \/ \"RSJ <dims>\").'),
   "active": zod.boolean().describe('Whether the mark participates in workflow metrics (false for FOUNDATION BOLT).'),
   "thicknessMm": zod.number().nullish().describe('Live-resolved galvanizing thickness (mm). Null when unset\/unparseable. Never stored on the pool row, never in the hash.'),
-  "thicknessSource": zod.enum(['tlt_angle', 'tlt_plate', 'rsj_exact', 'rsj_base', 'rsj_default', 'manual', 'unset']).optional().describe('How thicknessMm was derived (or \"unset\" when not yet resolved).'),
+  "thicknessSource": zod.enum(['tlt_angle', 'tlt_plate', 'rsj_exact', 'rsj_base', 'rsj_default', 'master', 'manual', 'unset']).optional().describe('How thicknessMm was derived (or \"unset\" when not yet resolved).'),
   "sectionType": zod.union([zod.literal('ANGLE'),zod.literal('PLATE'),zod.literal('CHANNEL'),zod.literal('BEAM'),zod.literal('RSJ'),zod.literal('FLAT'),zod.literal('PIPE'),zod.literal('ROUND'),zod.literal('GRATING'),zod.literal('OTHER'),zod.literal(null)]).nullish().describe('Derived section family from the Section string. Null only on legacy rows pending backfill.'),
   "holeOperation": zod.union([zod.literal('PUNCHING'),zod.literal('DRILLING'),zod.literal('NOT_SET'),zod.literal(null)]).nullish().describe('Derived hole operation. Channel\/Beam\/RSJ always DRILLING; Angle\/Plate by thickness (<=12 PUNCHING, >12 DRILLING); else NOT_SET. Not in the row hash.'),
   "fg": zod.string().nullish().describe('Finished Goods placeholder. Blank (null) everywhere for now — not in any process sequence\/bundle and not in the row hash. Reserved for future use.'),

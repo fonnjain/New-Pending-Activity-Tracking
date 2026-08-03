@@ -1,0 +1,53 @@
+Answers, plus one thing your PIPE proposal doesn't cover.
+
+3. PIPE — YES, retain brackets. Confirmed from the WIP file: pipe Section values carry the
+   full bracket text on both 31-Jul and 01-Aug. All 49 pipe marks, verbatim:
+
+     PIPE 300 N.B [OD 323.9 & THK 6.3] MS    16 marks  6.258 MT
+     PIPE 200 N.B. MS                         1 mark   2.149 MT
+     PIPE 50 N.B. [MEDIUM 3.6 THK] MS         7 marks  0.820 MT
+     PIPE 50 N.B MS                           3 marks  0.792 MT
+     PIPE 350 N.B [THK 8.0] MS                3 marks  0.694 MT
+     PIPE 150NB [168.3 OD & 6.3 THK] MS       1 mark   0.468 MT
+     PIPE 40 N.B MS                           7 marks  0.248 MT
+     PIPE 50 N.B. [HVY CLASS] MS              1 mark   0.087 MT
+     PIPE 65 N.B MS                          10 marks  0.020 MT
+
+   So make bracket-stripping RSJ-only, not global. For PIPE match on the full string.
+
+   BUT NOTE: bracket-retention will leave two WIP pipe sections unmatched, and that is the
+   CORRECT result — do not fuzzy-match them:
+
+     PIPE 150NB [168.3 OD & 6.3 THK] MS  — master has 165.1 OD / 4.8 THK and 4.8MM THK.
+                                            Different OD and different wall. Not the same pipe.
+     PIPE 350 N.B [THK 8.0] MS           — no master entry at all.
+
+   Report these as gaps. They go back to VTPL for master rows, not to a matching rule.
+
+1. RSJ 152X152X11 / X13 / X9.1 — do NOT pick between 8 mm and 9 mm. The [34.5] / [34.6]
+   bracket is a genuinely different section weight and, per your own finding, a different
+   thickness. Treat this the same way as PIPE: for these keys the bracket is meaningful.
+
+   Cleanest approach: keep the existing ambiguity guard. If a stripped key maps to more than
+   one thickness, do not silently pick — fall through to the next resolution level and count
+   it. Then tell me how many WIP marks land on those three keys so I can size the problem.
+
+   From the 31-Jul WIP, the relevant sections are RSJ 152X152X11 - ([37.1) (87 marks,
+   1,461 MT), RSJ 152X152X13 - [37.1] (44 marks, 1,973 MT) and RSJ 152X152X9.1 - [37.1]
+   (7 marks, 48 MT). All three carry [37.1] in the WIP, which maps to 8 mm unambiguously in
+   the master. So if you match RSJ on the FULL string like PIPE, rather than the stripped
+   key, all three resolve correctly to 8 mm and the conflict disappears entirely.
+
+   That is my preferred answer: match on the full raw Section string first, and only fall
+   back to the stripped key when the full string has no match.
+
+2. RSJ 150X150 — use 9 mm, the RAW MATERIAL row (RM08010063). The finished-goods row
+   (FG04090008, "MS RSJ 150X150") is from FG JOB WORK and should not be in the RSJ lookup
+   at all. Better still: scope the thickness lookup by Group Name so FG JOB WORK rows can
+   never collide with RSJ POLE rows. That removes this class of conflict rather than
+   arbitrating it.
+
+Summary of what I'd change in your approach: stop stripping brackets before matching. Match
+on the full Section string first (which resolves RSJ and PIPE conflicts alike), and use the
+stripped key only as a fallback. And scope lookups by Group Name so raw material and finished
+goods entries don't collide.

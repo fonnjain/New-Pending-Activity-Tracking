@@ -35,6 +35,7 @@ const SOURCE_LABEL: Record<string, string> = {
   rsj_exact: "RSJ exact",
   rsj_base: "RSJ base match",
   rsj_default: "RSJ default 6.0",
+  master: "Item master",
   manual: "Manual",
   unset: "Not set",
 };

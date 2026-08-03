@@ -1,4 +1,4 @@
-import { useMemo, useState, Fragment, useEffect } from "react";
+import React, { useMemo, useState, Fragment, useEffect } from "react";
 import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, useListInventoryMfcBatchColors, getListInventoryMfcBatchColorsQueryKey, useUpsertInventoryMfcBatchColor, useDeleteInventoryMfcBatchColor, useGetInventoryBuckets, getGetInventoryBucketsQueryKey, type InventoryMfcBatchColor, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow } from "@workspace/api-client-react";
 
 // ERP rules types are not part of the generated API contract (the endpoint is
@@ -349,6 +349,8 @@ function DataViewContent() {
           takenDates={takenOrDates}
         />
       </div>
+
+      <ItemMasterUploadCard />
 
       {selectedImportId && <AiSanitizePanel importId={selectedImportId} />}
 
@@ -701,6 +703,131 @@ function CutoffCard() {
             Active: imports dated before {cutoff} are hidden everywhere.
           </p>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Item Master upload card — a direct (non-staged) XLS/XLSX upload that populates
+// the item_master table used as the primary thickness source. Independent of WIP
+// imports; can be updated any time without re-uploading balance files.
+// ---------------------------------------------------------------------------
+interface ItemMasterStats {
+  totalRows: number;
+  rowsWithThickness: number;
+  lastUploadedAt: string | null;
+}
+
+function ItemMasterUploadCard() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const STATS_KEY = ["/api/item-master/stats"];
+
+  const { data: stats, isLoading: statsLoading } = useQuery<ItemMasterStats>({
+    queryKey: STATS_KEY,
+    queryFn: () =>
+      fetch("/api/item-master/stats", { credentials: "include" }).then((r) => r.json()),
+  });
+
+  const upload = useMutation<
+    { totalRows: number; upserted: number; rowsWithThickness: number },
+    Error,
+    File
+  >({
+    mutationFn: async (file) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch("/api/item-master/upload", {
+        method: "POST",
+        body: fd,
+        credentials: "include",
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: r.statusText }));
+        throw new Error(err.error ?? "Upload failed");
+      }
+      return r.json();
+    },
+    onSuccess: (res) => {
+      toast({
+        title: "Item master uploaded",
+        description: `${res.upserted.toLocaleString()} rows upserted, ${res.rowsWithThickness.toLocaleString()} with thickness. Thickness cache cleared.`,
+      });
+      queryClient.invalidateQueries({ queryKey: STATS_KEY });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Upload failed", description: err.message });
+    },
+  });
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) upload.mutate(file);
+    e.target.value = "";
+  };
+
+  return (
+    <Card className="border-border">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+          Item Master (Thickness Source)
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Upload the VTPL item master XLS/XLSX. All rows are upserted (keyed on Item Code).
+          Non-JW rows with a thickness value become the primary thickness source for all section
+          types (channels, beams, pipes, RSJ, etc.), taking priority over section parsing.
+        </p>
+        {statsLoading ? (
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        ) : stats && stats.totalRows > 0 ? (
+          <div className="flex flex-wrap gap-4 text-sm">
+            <div>
+              <span className="block text-muted-foreground text-xs uppercase mb-1">Total Rows</span>
+              <span className="font-bold tabular-nums">{stats.totalRows.toLocaleString()}</span>
+            </div>
+            <div>
+              <span className="block text-muted-foreground text-xs uppercase mb-1">Rows with Thickness</span>
+              <span className="font-bold tabular-nums text-primary">{stats.rowsWithThickness.toLocaleString()}</span>
+            </div>
+            {stats.lastUploadedAt && (
+              <div>
+                <span className="block text-muted-foreground text-xs uppercase mb-1">Last Updated</span>
+                <span className="font-bold tabular-nums">
+                  {formatDate(stats.lastUploadedAt.slice(0, 10))}
+                </span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            No item master loaded — thickness falls back to section parsing.
+          </p>
+        )}
+        <div className="flex items-center gap-3">
+          <label className="cursor-pointer">
+            <input
+              type="file"
+              accept=".xls,.xlsx"
+              className="sr-only"
+              onChange={handleFile}
+              disabled={upload.isPending}
+            />
+            <span
+              className={`inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent transition-colors ${
+                upload.isPending ? "opacity-50 pointer-events-none" : "cursor-pointer"
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              {upload.isPending ? "Uploading…" : stats && stats.totalRows > 0 ? "Re-upload" : "Upload XLS/XLSX"}
+            </span>
+          </label>
+          {upload.isPending && (
+            <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />
+          )}
+        </div>
       </CardContent>
     </Card>
   );

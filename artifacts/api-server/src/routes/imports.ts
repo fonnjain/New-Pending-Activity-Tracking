@@ -16,6 +16,7 @@ import {
   rsjThicknessTable,
   manualThicknessTable,
   inventoryMfcBatchColorTable,
+  itemMasterTable,
   SETTINGS_SINGLETON_ID,
   type InsertRecordPool,
   type ChangeSummary,
@@ -440,17 +441,89 @@ export function clearThicknessCache(): void {
 
 async function loadThicknessLookups(): Promise<ThicknessLookups> {
   if (_thicknessCache) return _thicknessCache;
-  const [rsjRows, manualRows] = await Promise.all([
+  const [rsjRows, manualRows, masterRows] = await Promise.all([
     db.select().from(rsjThicknessTable),
     db.select().from(manualThicknessTable),
+    // Only rows that have a positive thickness and are not JW items and are not
+    // from the FG JOB WORK group (which would collide with RSJ POLE entries
+    // after stripping). The SQL filter mirrors the same exclusions applied when
+    // building lookup maps at load time.
+    db
+      .select({
+        itemName: itemMasterTable.itemName,
+        groupName: itemMasterTable.groupName,
+        thicknessMm: itemMasterTable.thicknessMm,
+        exactKey: itemMasterTable.exactKey,
+        strippedKey: itemMasterTable.strippedKey,
+      })
+      .from(itemMasterTable)
+      .where(
+        sql`${itemMasterTable.thicknessMm} is not null
+          and ${itemMasterTable.thicknessMm} > 0
+          and ${itemMasterTable.itemName} not ilike '%(JW)%'
+          and coalesce(${itemMasterTable.groupName}, '') <> 'FG JOB WORK'`,
+      ),
   ]);
+
+  // Build RSJ lookup maps from the admin table.
   const rsjByKey = new Map(rsjRows.map((r) => [r.groupKey, r.thicknessMm]));
-  const { rsjBaseByKey, ambiguousRsjBases } = buildRsjBaseIndex(rsjByKey);
+
+  // Build item-master exact map: exactKey -> thickness.
+  // When two rows share the same exactKey but have different thicknesses the key
+  // is ambiguous — omit it from the map (fall through to section parse / RSJ chain).
+  const masterExactMap = new Map<string, number>();
+  const exactConflict = new Set<string>();
+  for (const r of masterRows) {
+    if (!r.thicknessMm) continue;
+    const key = r.exactKey;
+    if (exactConflict.has(key)) continue;
+    if (masterExactMap.has(key)) {
+      if (masterExactMap.get(key) !== r.thicknessMm) {
+        masterExactMap.delete(key);
+        exactConflict.add(key);
+      }
+    } else {
+      masterExactMap.set(key, r.thicknessMm);
+    }
+  }
+
+  // Build item-master stripped map: strippedKey -> thickness.
+  // Same conflict guard — omit ambiguous stripped keys rather than guessing.
+  const masterStrippedMap = new Map<string, number>();
+  const strippedConflict = new Set<string>();
+  for (const r of masterRows) {
+    if (!r.thicknessMm || !r.strippedKey) continue;
+    const key = r.strippedKey;
+    if (strippedConflict.has(key)) continue;
+    if (masterStrippedMap.has(key)) {
+      if (masterStrippedMap.get(key) !== r.thicknessMm) {
+        masterStrippedMap.delete(key);
+        strippedConflict.add(key);
+      }
+    } else {
+      masterStrippedMap.set(key, r.thicknessMm);
+    }
+  }
+
+  // Build RSJ base index from the combined pool: master RSJ entries give us
+  // coverage beyond the 6-entry admin table, while admin entries fill any gaps
+  // the master doesn't cover. Feed both sets into buildRsjBaseIndex.
+  const rsjByKeyCombined = new Map<string, number>(rsjByKey);
+  for (const [k, v] of masterExactMap) {
+    if (k.startsWith("RSJ ") && !rsjByKeyCombined.has(k)) {
+      rsjByKeyCombined.set(k, v);
+    }
+  }
+  const { rsjBaseByKey, ambiguousRsjBases } =
+    buildRsjBaseIndex(rsjByKeyCombined);
+
   _thicknessCache = {
     rsjByKey,
     manualByMarkId: new Map(manualRows.map((r) => [r.markId, r.thicknessMm])),
     rsjBaseByKey,
     ambiguousRsjBases,
+    masterExactMap,
+    masterStrippedMap,
   };
   return _thicknessCache;
 }

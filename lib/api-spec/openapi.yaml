@@ -130,6 +130,59 @@ paths:
       responses:
         "204":
           description: Deleted
+  /item-master/upload:
+    post:
+      operationId: uploadItemMaster
+      tags: [thickness]
+      summary: Upload item master XLS/XLSX
+      description: >
+        Parses the VTPL item master spreadsheet (XLS or XLSX, data from row 5
+        onward, columns: Select / ItemCode / ItemName / SubGroup / GroupName /
+        Category / Grade / SectionWt / ThicknessMM). Upserts all rows into the
+        item_master table (keyed on item_code) and clears the thickness cache so
+        the new lookup takes effect immediately. Requires authentication.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        "200":
+          description: Upload summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemMasterUploadResult"
+        "400":
+          description: Invalid file or no data rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /item-master/stats:
+    get:
+      operationId: getItemMasterStats
+      tags: [thickness]
+      summary: Item master statistics
+      description: >
+        Returns summary statistics for the currently loaded item master: total
+        row count, rows with a thickness value (non-JW, non-FG JOB WORK), and
+        the timestamp of the most recently upserted row. Used by the admin
+        upload card to show whether a master is loaded and when it was last
+        updated. Public (read-only).
+      responses:
+        "200":
+          description: Item master statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemMasterStats"
   /manual-thickness:
     get:
       operationId: listManualThickness
@@ -2724,7 +2777,7 @@ components:
           description: Live-resolved galvanizing thickness (mm). Null when unset/unparseable. Never stored on the pool row, never in the hash.
         thicknessSource:
           type: string
-          enum: [tlt_angle, tlt_plate, rsj_exact, rsj_base, rsj_default, manual, unset]
+          enum: [tlt_angle, tlt_plate, rsj_exact, rsj_base, rsj_default, master, manual, unset]
           description: How thicknessMm was derived (or "unset" when not yet resolved).
         sectionType:
           type: ["string", "null"]
@@ -3185,6 +3238,32 @@ components:
             activity code. Only overridden cells/fields are stored.
       required:
         - activities
+    ItemMasterUploadResult:
+      type: object
+      properties:
+        totalRows:
+          type: integer
+          description: Total data rows parsed from the uploaded file.
+        upserted:
+          type: integer
+          description: Number of rows successfully upserted into item_master.
+        rowsWithThickness:
+          type: number
+          description: Rows that have a non-null positive thickness_mm value.
+      required: [totalRows, upserted, rowsWithThickness]
+    ItemMasterStats:
+      type: object
+      properties:
+        totalRows:
+          type: integer
+          description: Total rows in the item_master table.
+        rowsWithThickness:
+          type: integer
+          description: Rows with a non-null positive thickness (non-JW, non-FG JOB WORK).
+        lastUploadedAt:
+          type: ["string", "null"]
+          description: ISO timestamp of the most recently updated row, or null when the table is empty.
+      required: [totalRows, rowsWithThickness, lastUploadedAt]
     RsjThickness:
       type: object
       properties:
