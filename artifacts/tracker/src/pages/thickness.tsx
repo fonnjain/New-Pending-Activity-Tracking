@@ -1,14 +1,10 @@
 import { useMemo, useState } from "react";
 import {
-  useListRsjThickness,
-  useUpsertRsjThickness,
-  useDeleteRsjThickness,
   useListManualThickness,
   useUpsertManualThickness,
   useDeleteManualThickness,
   useGetImportRecords,
   useListItemMasterThicknessRows,
-  getListRsjThicknessQueryKey,
   getListManualThicknessQueryKey,
   getGetImportRecordsQueryKey,
   getListItemMasterThicknessRowsQueryKey,
@@ -29,8 +25,8 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Layers, Trash2, Check, ChevronDown, ChevronRight, BookOpen } from "lucide-react";
+import { Layers, Trash2, Check, ChevronDown, ChevronRight, BookOpen, Download } from "lucide-react";
+// Note: Trash2 and Check are still used in UnsetWorklistCard; useMemo used in ManualRow.
 
 const SOURCE_LABEL: Record<string, string> = {
   tlt_angle: "Angle (section)",
@@ -71,9 +67,6 @@ export function ThicknessContent() {
   const { selectedImportId } = useTracker();
   const queryClient = useQueryClient();
 
-  const { data: rsjRows } = useListRsjThickness({
-    query: { queryKey: getListRsjThicknessQueryKey() },
-  });
   const { data: manualRows } = useListManualThickness({
     query: { queryKey: getListManualThicknessQueryKey() },
   });
@@ -89,7 +82,6 @@ export function ThicknessContent() {
   const records = useFilteredRecords(allRecords);
 
   const invalidateAll = () => {
-    queryClient.invalidateQueries({ queryKey: getListRsjThicknessQueryKey() });
     queryClient.invalidateQueries({ queryKey: getListManualThicknessQueryKey() });
     if (selectedImportId) {
       queryClient.invalidateQueries({
@@ -107,20 +99,14 @@ export function ThicknessContent() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Galvanizing thickness (mm). TLT and Earthing derive from the section;
-            RSJ uses the lookup table below; General is entered manually. Nothing
-            here changes quantities, activity, or ageing.
+            General is entered manually. Nothing here changes quantities, activity,
+            or ageing.
           </p>
         </div>
         <LogoutButton />
       </div>
 
       <ItemMasterThicknessCard groups={masterGroups ?? []} />
-
-      <RsjThicknessCard
-        rsjRows={rsjRows ?? []}
-        records={records}
-        onChanged={invalidateAll}
-      />
 
       <UnsetWorklistCard
         records={records}
@@ -133,8 +119,27 @@ export function ThicknessContent() {
 }
 
 // ---------------------------------------------------------------------------
-// Item Master — read-only, collapsible by group
+// Item Master — read-only, collapsible by group, with CSV export
 // ---------------------------------------------------------------------------
+function exportItemMasterCsv(groups: ItemMasterThicknessGroup[]) {
+  const lines = ["Category,Item Name,Item Code,Thickness (mm)"];
+  for (const g of groups) {
+    for (const item of g.items) {
+      const cat = `"${g.groupName.replace(/"/g, '""')}"`;
+      const name = `"${item.itemName.replace(/"/g, '""')}"`;
+      const code = `"${(item.itemCode ?? "").replace(/"/g, '""')}"`;
+      lines.push(`${cat},${name},${code},${item.thicknessMm}`);
+    }
+  }
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "item_master_thickness.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function ItemMasterThicknessCard({ groups }: { groups: ItemMasterThicknessGroup[] }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
 
@@ -151,15 +156,30 @@ function ItemMasterThicknessCard({ groups }: { groups: ItemMasterThicknessGroup[
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg flex items-center gap-2">
-          <BookOpen className="w-4 h-4 text-primary" />
-          Item Master Thickness Reference
-        </CardTitle>
-        <p className="text-sm text-muted-foreground">
-          {totalRows > 0
-            ? `${totalRows} entries across ${groups.length} categories from the VTPL item master. Read-only — re-upload via the Data tab to update.`
-            : "No item master loaded. Upload the VTPL item master XLS on the Data tab."}
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-primary" />
+              Item Master Thickness Reference
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              {totalRows > 0
+                ? `${totalRows} entries across ${groups.length} categories from the VTPL item master. Read-only — re-upload via the Data tab to update.`
+                : "No item master loaded. Upload the VTPL item master XLS on the Data tab."}
+            </p>
+          </div>
+          {groups.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => exportItemMasterCsv(groups)}
+            >
+              <Download className="w-3.5 h-3.5 mr-1.5" />
+              Export CSV
+            </Button>
+          )}
+        </div>
       </CardHeader>
       {groups.length > 0 && (
         <CardContent className="space-y-1 pt-0">
@@ -204,220 +224,6 @@ function ItemMasterThicknessCard({ groups }: { groups: ItemMasterThicknessGroup[
         </CardContent>
       )}
     </Card>
-  );
-}
-
-function RsjThicknessCard({
-  rsjRows,
-  records,
-  onChanged,
-}: {
-  rsjRows: { groupKey: string; thicknessMm: number }[];
-  records: TrackerRecord[];
-  onChanged: () => void;
-}) {
-  const upsert = useUpsertRsjThickness();
-  const del = useDeleteRsjThickness();
-  const [newKey, setNewKey] = useState("");
-  const [newMm, setNewMm] = useState<number | null>(null);
-
-  // How each RSJ group key in the current data resolved (live), so the user can
-  // see which types inherited from a base and which fell back to the 6.0 default.
-  const { baseKeys, defaultKeys } = useMemo(() => {
-    const base = new Set<string>();
-    const def = new Set<string>();
-    for (const r of records) {
-      if (r.ntltSubtype !== "RSJ" || !r.groupKey) continue;
-      if (r.thicknessSource === "rsj_base") base.add(r.groupKey);
-      else if (r.thicknessSource === "rsj_default") def.add(r.groupKey);
-    }
-    return {
-      baseKeys: Array.from(base).sort(),
-      defaultKeys: Array.from(def).sort(),
-    };
-  }, [records]);
-
-  const save = (groupKey: string, thicknessMm: number) => {
-    if (!groupKey.trim() || !(thicknessMm > 0)) return;
-    upsert.mutate(
-      { data: { groupKey: groupKey.trim().toUpperCase(), thicknessMm } },
-      { onSuccess: onChanged },
-    );
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">RSJ Types &amp; Thickness</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          Maps each cleaned &quot;RSJ &lt;dims&gt;&quot; section type to a
-          thickness. RSJ marks auto-fill from this table (never derived from the
-          section dimensions).
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-end gap-2 rounded-md border border-border p-3">
-          <div className="space-y-1">
-            <label className="text-xs font-semibold uppercase text-muted-foreground">
-              RSJ type (group key)
-            </label>
-            <Input
-              value={newKey}
-              onChange={(e) => setNewKey(e.target.value)}
-              placeholder="RSJ 150X150"
-              className="w-56"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-semibold uppercase text-muted-foreground">
-              Thickness (mm)
-            </label>
-            <NumberInput
-              value={newMm ?? ""}
-              onValueChange={(raw) => setNewMm(raw === "" ? null : Number(raw))}
-              className="w-32"
-              min={0}
-            />
-          </div>
-          <Button
-            onClick={() => {
-              if (newKey.trim() && newMm && newMm > 0) {
-                save(newKey, newMm);
-                setNewKey("");
-                setNewMm(null);
-              }
-            }}
-            disabled={!newKey.trim() || !newMm || newMm <= 0 || upsert.isPending}
-          >
-            Add / update
-          </Button>
-        </div>
-
-        {baseKeys.length > 0 && (
-          <div className="rounded-md border border-sky-500/40 bg-sky-500/5 p-3">
-            <div className="text-sm font-medium mb-2">
-              {baseKeys.length} RSJ type{baseKeys.length === 1 ? "" : "s"} in the
-              current data inherited a thickness from a base match (first two
-              dims). Add an exact type below to override.
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {baseKeys.map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => setNewKey(k)}
-                  className="rounded bg-secondary px-2 py-1 text-xs font-mono hover:bg-secondary/70"
-                >
-                  {k}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {defaultKeys.length > 0 && (
-          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
-            <div className="text-sm font-medium mb-2">
-              {defaultKeys.length} RSJ type{defaultKeys.length === 1 ? "" : "s"}{" "}
-              in the current data fell back to the 6.0 mm default (no exact or
-              base match). Add a precise type or pin a manual value where it
-              matters.
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {defaultKeys.map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => setNewKey(k)}
-                  className="rounded bg-secondary px-2 py-1 text-xs font-mono hover:bg-secondary/70"
-                >
-                  {k}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {rsjRows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No RSJ types configured yet.
-          </p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>RSJ type</TableHead>
-                <TableHead className="text-right">Thickness (mm)</TableHead>
-                <TableHead className="w-20" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rsjRows.map((r) => (
-                <RsjRow
-                  key={r.groupKey}
-                  row={r}
-                  onSave={save}
-                  onDelete={() =>
-                    del.mutate(
-                      { params: { groupKey: r.groupKey } },
-                      { onSuccess: onChanged },
-                    )
-                  }
-                />
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function RsjRow({
-  row,
-  onSave,
-  onDelete,
-}: {
-  row: { groupKey: string; thicknessMm: number };
-  onSave: (groupKey: string, mm: number) => void;
-  onDelete: () => void;
-}) {
-  const [mm, setMm] = useState<number | null>(row.thicknessMm);
-  const dirty = mm !== row.thicknessMm && mm != null && mm > 0;
-  return (
-    <TableRow>
-      <TableCell className="font-mono">{row.groupKey}</TableCell>
-      <TableCell className="text-right">
-        <div className="flex items-center justify-end gap-2">
-          <NumberInput
-            value={mm ?? ""}
-            onValueChange={(raw) => setMm(raw === "" ? null : Number(raw))}
-            className="w-28"
-            min={0}
-          />
-          {dirty && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8"
-              onClick={() => mm != null && onSave(row.groupKey, mm)}
-            >
-              <Check className="w-4 h-4" />
-            </Button>
-          )}
-        </div>
-      </TableCell>
-      <TableCell>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 text-destructive"
-          onClick={onDelete}
-        >
-          <Trash2 className="w-4 h-4" />
-        </Button>
-      </TableCell>
-    </TableRow>
   );
 }
 
