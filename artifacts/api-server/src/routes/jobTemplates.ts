@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, jobTemplatesTable, jobTemplateMembersTable, importRowsTable, recordPoolTable, importsTable } from "@workspace/db";
+import { db, jobTemplatesTable, jobTemplateMembersTable, importRowsTable, recordPoolTable, importsTable, orderReviewRowsTable } from "@workspace/db";
 import { eq, and, desc, inArray, sql } from "drizzle-orm";
 
 const router: IRouter = Router();
@@ -72,40 +72,91 @@ router.get("/job-templates/projects", async (_req, res): Promise<void> => {
     return;
   }
 
-  const rows = await db
-    .selectDistinct({
-      job: recordPoolTable.job,
-      category: recordPoolTable.category,
-      mfcBatch: recordPoolTable.mfcBatch,
-    })
-    .from(importRowsTable)
-    .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
-    .where(
-      and(
-        eq(importRowsTable.importId, latestImport.id),
-        sql`${recordPoolTable.job} IS NOT NULL`,
+  // Three queries in parallel:
+  //   1. Distinct (job, category, mfcBatch) combos for the pool display
+  //   2. Distinct (job, structure, mfcBatch) to map structure → mfc for TLT
+  //   3. All order_review_rows for (project, structure) → woOrderQtyMt
+  //
+  // WO qty mirrors the frontend job-dashboard approach: sum woOrderQtyMt from the
+  // Order Review file, grouped by mfcBatch via the structure→mfc mapping from WIP.
+  const [rows, structRows, orRows] = await Promise.all([
+    db
+      .selectDistinct({
+        job: recordPoolTable.job,
+        category: recordPoolTable.category,
+        mfcBatch: recordPoolTable.mfcBatch,
+      })
+      .from(importRowsTable)
+      .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+      .where(
+        and(
+          eq(importRowsTable.importId, latestImport.id),
+          sql`${recordPoolTable.job} IS NOT NULL`,
+        ),
+      )
+      .orderBy(recordPoolTable.job, recordPoolTable.mfcBatch),
+
+    // Distinct (job, structure, mfcBatch) — gives us structure→mfc mapping.
+    db
+      .selectDistinct({
+        job: recordPoolTable.job,
+        structure: recordPoolTable.structure,
+        mfcBatch: recordPoolTable.mfcBatch,
+      })
+      .from(importRowsTable)
+      .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+      .where(
+        and(
+          eq(importRowsTable.importId, latestImport.id),
+          sql`${recordPoolTable.job} IS NOT NULL`,
+          sql`${recordPoolTable.category} = 'TLT'`,
+          sql`${recordPoolTable.structure} IS NOT NULL`,
+        ),
       ),
-    )
-    .orderBy(recordPoolTable.job, recordPoolTable.mfcBatch);
+
+    // woOrderQtyMt per (project, structure) from the Order Review snapshot.
+    db
+      .select({
+        project: orderReviewRowsTable.project,
+        structure: orderReviewRowsTable.structure,
+        woOrderQtyMt: orderReviewRowsTable.woOrderQtyMt,
+      })
+      .from(orderReviewRowsTable),
+  ]);
+
+  // Build lookup: "project|structure" → woOrderQtyMt (MT).
+  const orMap = new Map<string, number>();
+  for (const r of orRows) {
+    if (r.woOrderQtyMt != null) {
+      orMap.set(`${r.project}|${r.structure}`, r.woOrderQtyMt);
+    }
+  }
+
+  // Aggregate woOrderQtyMt per (job, mfcBatch) combo key — same logic as
+  // the frontend's orderByMfc: one structure maps to one mfcBatch, so we sum
+  // the OR qty for each distinct (job, structure) once, credited to its mfc.
+  const tltQty: Record<string, number> = {};
+  for (const s of structRows) {
+    if (!s.job || !s.structure) continue;
+    const mfc = s.mfcBatch || "Z";
+    const orQty = orMap.get(`${s.job}|${s.structure}`) ?? 0;
+    const comboKey = s.mfcBatch ? `${s.job} - ${s.mfcBatch}` : s.job;
+    tltQty[comboKey] = (tltQty[comboKey] ?? 0) + orQty;
+  }
 
   const tlt: string[] = [];
   const ntlt: string[] = [];
   for (const r of rows) {
     if (!r.job) continue;
     if (r.category === "TLT") {
-      // Use "job - mfcBatch" combo so each batch is a distinct selectable unit.
-      // "Z" is a real batch label (marks not assigned to any batch) — show it as-is.
-      // Only truly null/empty mfcBatch falls back to the plain job code.
       tlt.push(r.mfcBatch ? `${r.job} - ${r.mfcBatch}` : r.job);
     } else {
       ntlt.push(r.job);
     }
   }
-  // Deduplicate while preserving order (selectDistinct already deduplicates at DB
-  // level but the mfcBatch=null grouping can still produce duplicates after formatting).
   const dedup = (arr: string[]) => [...new Set(arr)];
 
-  res.json({ tlt: dedup(tlt), ntlt: dedup(ntlt) });
+  res.json({ tlt: dedup(tlt), ntlt: dedup(ntlt), tltQty });
 });
 
 // ---------------------------------------------------------------------------

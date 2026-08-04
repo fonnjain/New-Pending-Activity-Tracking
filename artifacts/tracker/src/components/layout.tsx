@@ -141,10 +141,10 @@ function MultiJobPicker({
             </div>
           )}
 
-          {/* Individual project/batch codes — checkbox multi-select */}
+          {/* Individual Job / Batch combos — checkbox multi-select */}
           <div className="border-t pt-2 space-y-1.5">
             <div className="flex items-center justify-between text-xs px-0.5">
-              <span className="text-muted-foreground font-medium">Batches</span>
+              <span className="text-muted-foreground font-medium">Job / Batch</span>
               <div className="flex gap-2">
                 <button className="text-primary hover:underline" onClick={() => onSelectedJobsChange([...jobs])}>All</button>
                 <button className="text-muted-foreground hover:underline" onClick={() => onSelectedJobsChange([])}>None</button>
@@ -663,9 +663,20 @@ function FilterBar() {
     [records, filters.category, isAll]
   );
 
-  // TLT primary dimension = Project (job).
+  // TLT primary dimension = Project / Batch combo.
+  // Each selectable unit is "job - mfcBatch" (e.g. "824 - A") for records that
+  // carry a batch, or just the plain job code for the rare null-mfcBatch case.
+  // This makes Job Templates work naturally: a template's members ARE these combos,
+  // so selecting the template and selecting individual combos use the same key space.
   const jobs = useMemo(
-    () => Array.from(new Set(modeRecords.map(r => r.job).filter(Boolean))).sort(),
+    () => {
+      const comboSet = new Set<string>();
+      for (const r of modeRecords) {
+        if (!r.job) continue;
+        comboSet.add(r.mfcBatch ? `${r.job} - ${r.mfcBatch}` : r.job);
+      }
+      return Array.from(comboSet).sort();
+    },
     [modeRecords]
   );
 
@@ -675,11 +686,18 @@ function FilterBar() {
   const templates = useJobTemplates();
 
   // Helper: does a record match the current job filter (handles sentinels).
-  const matchesJobFilter = (rJob: string | null | undefined) => {
+  // Both named-set (templates) and multi-jobs filters now use "job - mfcBatch"
+  // combo keys, so we check both the plain job code AND the combo.
+  const matchesJobFilter = (rJob: string | null | undefined, rMfcBatch?: string | null | undefined) => {
     if (!filters.job) return true;
-    if (isNamedJobSetFilter(filters.job)) return activeJobSet.has(rJob ?? "");
+    const comboKey = rMfcBatch ? `${rJob} - ${rMfcBatch}` : null;
+    if (isNamedJobSetFilter(filters.job)) {
+      return activeJobSet.has(rJob ?? "") || (comboKey ? activeJobSet.has(comboKey) : false);
+    }
     if (filters.job === MULTI_JOBS_FILTER_VALUE) {
-      return filters.selectedJobs.length === 0 || filters.selectedJobs.includes(rJob ?? "");
+      if (filters.selectedJobs.length === 0) return true;
+      return filters.selectedJobs.includes(rJob ?? "") ||
+        (comboKey ? filters.selectedJobs.includes(comboKey) : false);
     }
     return rJob === filters.job;
   };
@@ -691,10 +709,9 @@ function FilterBar() {
     () => modeRecords.filter(r => isNtlt
       ? (!filters.ntltSubtype || r.ntltSubtype === filters.ntltSubtype) &&
         (!filters.section || r.groupKey === filters.section)
-      : matchesJobFilter(r.job) &&
-        (!filters.mfcBatch || (r.mfcBatch || "Z") === filters.mfcBatch) &&
+      : matchesJobFilter(r.job, r.mfcBatch) &&
         (!filters.structure || r.structure === filters.structure)),
-    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.selectedJobs, filters.mfcBatch, filters.structure, activeJobSet]
+    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.selectedJobs, filters.structure, activeJobSet]
   );
   // isMultiJobs = job filter is in checkbox multi-select mode.
   const isMultiJobs = filters.job === MULTI_JOBS_FILTER_VALUE;
@@ -708,24 +725,13 @@ function FilterBar() {
     [modeRecords, filters.ntltSubtype]
   );
 
-  // TLT sub-level = MFC batch (WO Batch No.), between Project and Structure.
-  // Narrowed to the active project; sorted A..Z so the blank-origin "Z" bucket
-  // always lands last.
-  const mfcBatches = useMemo(
-    () => Array.from(new Set(modeRecords
-      .filter(r => matchesJobFilter(r.job))
-      .map(r => r.mfcBatch || "Z")
-    )).sort(),
-    [modeRecords, filters.job, filters.selectedJobs, activeJobSet]
-  );
-
   const structures = useMemo(
     () => Array.from(new Set(modeRecords
-      .filter(r => matchesJobFilter(r.job) && (!filters.mfcBatch || (r.mfcBatch || "Z") === filters.mfcBatch))
+      .filter(r => matchesJobFilter(r.job, r.mfcBatch))
       .map(r => r.structure)
       .filter(Boolean)
     )).sort(),
-    [modeRecords, filters.job, filters.selectedJobs, filters.mfcBatch, activeJobSet]
+    [modeRecords, filters.job, filters.selectedJobs, activeJobSet]
   );
 
   const marks = useMemo(
@@ -800,6 +806,7 @@ function FilterBar() {
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => {
     if (k === "category") return false; // Order Type is a mode, not a filter
     if (k === "selectedJobs") return false; // accounted for via filters.job
+    if (k === "mfcBatch") return false; // MFC is now embedded in the Job/Batch combo picker
     if (k === "plantLocations") return (v as string[]).length > 0;
     if (v === null || v === "") return false;
     if (Array.isArray(v)) return false; // empty or not — arrays handled via their owning key
@@ -871,18 +878,7 @@ function FilterBar() {
               />
             )}
           </div>
-          {/* 4. MFC batch (TLT sub-level). Hidden in NTLT mode. */}
-          {!isNtlt && (
-            <div className="w-[150px]">
-              <SearchableSelect
-                value={filters.mfcBatch}
-                onChange={(v) => setFilter("mfcBatch", v)}
-                options={mfcBatches}
-                allLabel="All MFC"
-                searchPlaceholder="Search MFC..."
-              />
-            </div>
-          )}
+          {/* MFC batch is now embedded in the Job / Batch combo picker above. */}
           {/* 5. Contractor */}
           <div className="flex-1 min-w-[180px] max-w-[340px]">
             <SearchableSelect

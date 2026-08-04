@@ -2688,7 +2688,7 @@ async function fetchErpRules(): Promise<ErpRulesResponse> {
 // Job Templates — named project sets for the global Jobs filter
 // ---------------------------------------------------------------------------
 interface JTTemplate { id: number; name: string; category: string; sortOrder: number; members: string[] }
-interface JTProjects { tlt: string[]; ntlt: string[] }
+interface JTProjects { tlt: string[]; ntlt: string[]; tltQty?: Record<string, number> }
 
 /** Returns the next available P-number label (P1, P2, …) for a category's template list. */
 function nextPLabel(templates: JTTemplate[]): string {
@@ -2724,6 +2724,8 @@ function JobTemplatesContent() {
   const allProjectsForCategory = localCategory === "TLT" ? (projects?.tlt ?? []) : (projects?.ntlt ?? []);
   const assignedSet = new Set(catTemplates.flatMap((t) => t.members));
   const available = allProjectsForCategory.filter((p) => !assignedSet.has(p));
+  // WO qty map for TLT batches (qty → number of pieces for that job-batch combo).
+  const tltQty = projects?.tltQty ?? {};
 
   async function saveMembers(templateId: number, members: string[]) {
     setSaving(true);
@@ -2855,9 +2857,14 @@ function JobTemplatesContent() {
                   draggable
                   onDragStart={() => onDragStart(code, null)}
                   onDragEnd={() => { setDragState(null); setDropTarget(null); }}
-                  className="px-2 py-1 rounded text-xs font-mono bg-background border cursor-grab hover:bg-accent select-none"
+                  className="px-2 py-1 rounded text-xs font-mono bg-background border cursor-grab hover:bg-accent select-none flex items-center justify-between gap-1"
                 >
-                  {code}
+                  <span className="truncate">{code}</span>
+                  {tltQty[code] != null && (
+                    <span className="text-muted-foreground shrink-0 tabular-nums">
+                      {Math.round(tltQty[code]).toLocaleString()}
+                    </span>
+                  )}
                 </div>
               ))
             )}
@@ -2909,9 +2916,14 @@ function JobTemplatesContent() {
                       onDragEnd={() => { setDragState(null); setDropTarget(null); }}
                       className="px-2 py-1 rounded text-xs font-mono bg-primary/10 border border-primary/20 cursor-grab hover:bg-primary/15 select-none flex items-center gap-1"
                     >
-                      <span className="flex-1 truncate">{code}</span>
+                      <span className="truncate">{code}</span>
+                      {tltQty[code] != null && (
+                        <span className="text-primary/60 shrink-0 tabular-nums">
+                          {Math.round(tltQty[code]).toLocaleString()}
+                        </span>
+                      )}
                       <button
-                        className="text-muted-foreground hover:text-destructive shrink-0 leading-none text-base"
+                        className="text-muted-foreground hover:text-destructive shrink-0 leading-none text-base ml-auto"
                         onClick={(e) => { e.stopPropagation(); saveMembers(template.id, template.members.filter((m) => m !== code)); }}
                         onMouseDown={(e) => e.stopPropagation()}
                         title="Remove from template"
