@@ -17,7 +17,7 @@ export function formatWeight(kg: number): string {
   return `${(kg / 1000).toLocaleString(undefined, {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
-  })} t`;
+  })}t`;
 }
 
 // Format a weight (in kilograms) always in metric tons (MT), with two decimal
