@@ -178,7 +178,7 @@ function JobDashboardContent() {
     if (!isAll && !rowIsNtlt(r)) {
       if (mfcViewMode === "view-by-mfc") return mfcOf(r);
       if (mfcViewMode === "project-then-mfc")
-        return `${r.job || "Unknown"} / Batch ${mfcOf(r)}`;
+        return `${r.job || "Unknown"} / ${mfcOf(r)}`;
     }
     const base = (rowIsNtlt(r) ? r.groupKey : r.job) || "Unknown";
     return isAll ? `${rowIsNtlt(r) ? "NTLT" : "TLT"}: ${base}` : base;
@@ -731,6 +731,7 @@ function JobDashboardContent() {
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.wo * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.disp * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.disp) * 1000)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.computedFg * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(byProject.reduce((s, p) => s + (relBalComputedByJob.get(p.job) ?? 0), 0) * 1000)}</TableCell>
                     {PROCESS_PHASES.map((ph) => {
                       if (ph.key === "dispatch") {
