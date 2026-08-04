@@ -1021,14 +1021,15 @@ interface GenStageSpec {
   key: string; label: string; shortLabel: string;
   genField: keyof GenStructRowData;
   orField: "releaseMt"|"fileFabMt"|"fileGalvMt"|"inspectionMt"|"fileDespatchMt"|null;
-  tier: ConfTier;
+  /** Matching field name on GenStructRowData (orProg*). Used for diff + stats. */
+  structOrField: keyof GenStructRowData;
 }
 const GEN_STAGES: GenStageSpec[] = [
-  { key:"rel",  label:"Progress Release",     shortLabel:"Rel",  genField:"genProgRelease", orField:"releaseMt",     tier:"high"   },
-  { key:"fab",  label:"Progress Fabrication", shortLabel:"Fab",  genField:"genProgFab",    orField:"fileFabMt",     tier:"high"   },
-  { key:"galv", label:"Progress Galvanising", shortLabel:"Galv", genField:"genProgGalv",   orField:"fileGalvMt",    tier:"medium" },
-  { key:"insp", label:"Progress Inspection",  shortLabel:"Insp", genField:"genProgInsp",   orField:"inspectionMt",  tier:"low"    },
-  { key:"desp", label:"Progress Despatch",    shortLabel:"Desp", genField:"genProgDesp",   orField:"fileDespatchMt",tier:"low"    },
+  { key:"rel",  label:"Progress Release",     shortLabel:"Rel",  genField:"genProgRelease", orField:"releaseMt",      structOrField:"orProgRelease" },
+  { key:"fab",  label:"Progress Fabrication", shortLabel:"Fab",  genField:"genProgFab",     orField:"fileFabMt",      structOrField:"orProgFab"     },
+  { key:"galv", label:"Progress Galvanising", shortLabel:"Galv", genField:"genProgGalv",    orField:"fileGalvMt",     structOrField:"orProgGalv"    },
+  { key:"insp", label:"Progress Inspection",  shortLabel:"Insp", genField:"genProgInsp",    orField:"inspectionMt",   structOrField:"orProgInsp"    },
+  { key:"desp", label:"Progress Despatch",    shortLabel:"Desp", genField:"genProgDesp",    orField:"fileDespatchMt", structOrField:"orProgDesp"    },
 ];
 const TIER_CLS: Record<ConfTier,{badge:string;flag:string}> = {
   high:   { badge:"bg-emerald-500/15 text-emerald-700 dark:text-emerald-400", flag:"text-red-600 dark:text-red-400 font-semibold" },
@@ -1181,22 +1182,31 @@ function GeneratedOrderReviewContent() {
     return groups;
   }, [allRecordsRaw, orByKey, orProjSummary]);
 
-  // Per-stage match % summary (structures where |gen - or| <= 0.5 MT and OR is present)
+  // Per-stage match % summary (structures where |gen - or| <= 0.5 MT and OR is present).
+  // Tier is derived from the actual measured match rate, not hardcoded:
+  //   ≥ 90% → high   |   ≥ 65% → medium   |   < 65% → low
   const stageStats = useMemo(() => {
     const allStructs = projectGroups.flatMap((g) => g.structures);
     return GEN_STAGES.map((stage) => {
       const withOr = allStructs.filter((s) => {
-        const or = s[stage.orField as keyof GenStructRowData];
+        const or = s[stage.structOrField] as number | null | undefined;
         return typeof or === "number" && or !== null;
       });
       const matching = withOr.filter((s) => {
-        const gen = s[stage.genField] as number | null;
-        const or  = s[stage.orField as keyof GenStructRowData] as number | null;
+        const gen = s[stage.genField]    as number | null;
+        const or  = s[stage.structOrField] as number | null;
         return gen != null && or != null && Math.abs(gen - or) <= 0.5;
       });
-      return { key: stage.key, total: withOr.length, matching: matching.length };
+      const pct: number | null = withOr.length > 0 ? (matching.length / withOr.length) * 100 : null;
+      const tier: ConfTier = pct == null ? "low" : pct >= 90 ? "high" : pct >= 65 ? "medium" : "low";
+      return { key: stage.key, total: withOr.length, matching: matching.length, tier };
     });
   }, [projectGroups]);
+  // Fast lookup map used throughout the render.
+  const stageStatsByKey = useMemo(
+    () => new Map(stageStats.map((s) => [s.key, s])),
+    [stageStats],
+  );
 
   const handleExport = () => {
     const rows = projectGroups.flatMap((pg) =>
@@ -1288,15 +1298,15 @@ function GeneratedOrderReviewContent() {
           </div>
           <div className="grid grid-cols-5 gap-3">
             {GEN_STAGES.map((stage) => {
-              const stat = stageStats.find((s) => s.key === stage.key)!;
+              const stat = stageStatsByKey.get(stage.key)!;
               const pct  = stat.total > 0 ? (stat.matching / stat.total) * 100 : null;
-              const tierMeta = TIER_CLS[stage.tier];
+              const tierMeta = TIER_CLS[stat.tier];
               return (
                 <div key={stage.key} className="space-y-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-xs font-semibold">{stage.shortLabel}</span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${tierMeta.badge}`}>
-                      {stage.tier}
+                      {stat.tier}
                     </span>
                   </div>
                   <div className="text-lg font-bold tabular-nums">
@@ -1358,14 +1368,17 @@ function GeneratedOrderReviewContent() {
                       <th className="px-3 py-2 text-left font-semibold min-w-[90px]" rowSpan={2}>Structure</th>
                       <th className="px-3 py-2 text-left font-semibold min-w-[50px]" rowSpan={2}>MFC</th>
                       <th className="px-3 py-2 text-right font-semibold min-w-[45px]" rowSpan={2}>Marks</th>
-                      {GEN_STAGES.map((stage) => (
-                        <th key={stage.key} className="px-3 py-1.5 text-center font-semibold border-l min-w-[90px]">
-                          <div>{stage.shortLabel}</div>
-                          <div className={`text-[10px] font-normal px-1 py-0.5 rounded mt-0.5 inline-block ${TIER_CLS[stage.tier].badge}`}>
-                            {stage.tier}
-                          </div>
-                        </th>
-                      ))}
+                      {GEN_STAGES.map((stage) => {
+                        const st = stageStatsByKey.get(stage.key)!;
+                        return (
+                          <th key={stage.key} className="px-3 py-1.5 text-center font-semibold border-l min-w-[90px]">
+                            <div>{stage.shortLabel}</div>
+                            <div className={`text-[10px] font-normal px-1 py-0.5 rounded mt-0.5 inline-block ${TIER_CLS[st.tier].badge}`}>
+                              {st.tier}
+                            </div>
+                          </th>
+                        );
+                      })}
                     </tr>
                     <tr className="bg-muted/40 border-b text-[10px] text-muted-foreground">
                       {/* spacer cells for fixed cols */}
@@ -1382,8 +1395,8 @@ function GeneratedOrderReviewContent() {
                       <Fragment key={pg.project}>
                         {pg.structures.map((s, si) => {
                           const anyDiff = GEN_STAGES.some((stage) => {
-                            const gen = s[stage.genField] as number | null;
-                            const or  = s[stage.orField as keyof GenStructRowData] as number | null;
+                            const gen = s[stage.genField]     as number | null;
+                            const or  = s[stage.structOrField] as number | null;
                             return gen != null && or != null && Math.abs(gen - or) > 0.5;
                           });
                           return (
@@ -1410,13 +1423,14 @@ function GeneratedOrderReviewContent() {
                               <td className="px-3 py-1.5 text-muted-foreground text-[10px]">{s.mfcBatch}</td>
                               <td className="px-3 py-1.5 text-right tabular-nums">{s.markCount}</td>
                               {GEN_STAGES.map((stage) => {
-                                const gen = s[stage.genField] as number | null;
-                                const or  = s[stage.orField as keyof GenStructRowData] as number | null;
+                                const gen = s[stage.genField]     as number | null;
+                                const or  = s[stage.structOrField] as number | null;
                                 const diff = gen != null && or != null ? Math.abs(gen - or) : null;
                                 const flagged = diff != null && diff > 0.5;
+                                const flagCls = TIER_CLS[stageStatsByKey.get(stage.key)!.tier].flag;
                                 return (
                                   <td key={stage.key} className="px-3 py-1.5 text-right tabular-nums border-l">
-                                    <span className={flagged ? TIER_CLS[stage.tier].flag : ""}>
+                                    <span className={flagged ? flagCls : ""}>
                                       {mt3(gen)}
                                     </span>
                                     {or != null && (
