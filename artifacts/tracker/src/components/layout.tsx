@@ -696,8 +696,10 @@ function FilterBar() {
   //   filters.selectedJobs — "job - batch" combo multi-select
   const matchesJobFilter = (rJob: string | null | undefined, rMfcBatch?: string | null | undefined) => {
     // 1. Named set / template filter (uses activeJobSet).
+    // activeJobSet may contain combo keys ("821 - Z") or plain codes; check both.
     if (isNamedJobSetFilter(filters.job)) {
-      if (!activeJobSet.has(rJob ?? "")) return false;
+      const comboKey = rMfcBatch ? `${rJob} - ${rMfcBatch}` : null;
+      if (!activeJobSet.has(rJob ?? "") && !(comboKey && activeJobSet.has(comboKey))) return false;
     } else if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) {
       // 2. Plain job code filter.
       if (rJob !== filters.job) return false;

@@ -1348,7 +1348,9 @@ export function ContractorPerformanceReport() {
       if (e.project === "(Unassigned)") return false;
       if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) {
         if (isNamedJobSetFilter(filters.job)) {
-          if (!activeJobSet.has(e.project)) return false;
+          // activeJobSet may contain combo keys ("821 - Z"); ledger rows have no
+          // mfcBatch so accept if any member belongs to this project.
+          if (!activeJobSet.has(e.project) && ![...activeJobSet].some(c => c.startsWith(`${e.project} - `))) return false;
         } else if (e.project !== filters.job) {
           return false;
         }

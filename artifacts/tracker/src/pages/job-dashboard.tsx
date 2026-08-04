@@ -207,7 +207,9 @@ function JobDashboardContent() {
           if (filters.section && r.groupKey !== filters.section) return false;
         } else {
           if (isNamedJobSetFilter(filters.job)) {
-            if (!activeJobSet.has(r.job ?? "")) return false;
+            // activeJobSet may contain combo keys ("821 - Z") or plain codes
+            const comboKey = r.mfcBatch ? `${r.job} - ${r.mfcBatch}` : null;
+            if (!activeJobSet.has(r.job ?? "") && !(comboKey && activeJobSet.has(comboKey))) return false;
           } else if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) {
             if (r.job !== filters.job) return false;
           }

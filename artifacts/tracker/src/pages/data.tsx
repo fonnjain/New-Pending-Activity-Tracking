@@ -846,7 +846,10 @@ function ReleaseBalanceContent() {
   const { filters } = useTracker();
   const namedJobSet = useActiveJobSet();
   const activeJobSet = useMemo(() => {
-    if (isNamedJobSetFilter(filters.job)) return namedJobSet;
+    if (isNamedJobSetFilter(filters.job)) {
+      // namedJobSet may contain combo keys ("821 - Z"); rows use plain project codes
+      return new Set([...namedJobSet].map(c => c.includes(' - ') ? c.split(' - ')[0] : c));
+    }
     // Combo keys like "920 - C" — extract the plain job code for project-level rows
     if (filters.selectedJobs.length > 0)
       return new Set(filters.selectedJobs.map(c => c.includes(' - ') ? c.split(' - ')[0] : c));
