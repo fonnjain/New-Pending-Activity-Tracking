@@ -847,9 +847,10 @@ function ReleaseBalanceContent() {
   const namedJobSet = useActiveJobSet();
   const activeJobSet = useMemo(() => {
     if (isNamedJobSetFilter(filters.job)) return namedJobSet;
-    if (filters.job === MULTI_JOBS_FILTER_VALUE)
-      return filters.selectedJobs.length > 0 ? new Set(filters.selectedJobs) : null;
-    if (filters.job) return new Set([filters.job]);
+    // Combo keys like "920 - C" — extract the plain job code for project-level rows
+    if (filters.selectedJobs.length > 0)
+      return new Set(filters.selectedJobs.map(c => c.includes(' - ') ? c.split(' - ')[0] : c));
+    if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) return new Set([filters.job]);
     return null;
   }, [filters.job, filters.selectedJobs, namedJobSet]);
   const allRows = useMemo(() => data?.rows ?? [], [data]);
@@ -1899,9 +1900,10 @@ function OrderReconciliationContent() {
   const namedJobSet2 = useActiveJobSet();
   const activeJobSet = useMemo(() => {
     if (isNamedJobSetFilter(filters.job)) return namedJobSet2;
-    if (filters.job === MULTI_JOBS_FILTER_VALUE)
-      return filters.selectedJobs.length > 0 ? new Set(filters.selectedJobs) : null;
-    if (filters.job) return new Set([filters.job]);
+    // Combo keys like "920 - C" — extract the plain job code for project-level rows
+    if (filters.selectedJobs.length > 0)
+      return new Set(filters.selectedJobs.map(c => c.includes(' - ') ? c.split(' - ')[0] : c));
+    if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) return new Set([filters.job]);
     return null;
   }, [filters.job, filters.selectedJobs, namedJobSet2]);
 

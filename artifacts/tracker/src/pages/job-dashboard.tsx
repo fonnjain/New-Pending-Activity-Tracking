@@ -208,10 +208,15 @@ function JobDashboardContent() {
         } else {
           if (isNamedJobSetFilter(filters.job)) {
             if (!activeJobSet.has(r.job ?? "")) return false;
-          } else if (filters.job === MULTI_JOBS_FILTER_VALUE) {
-            if (filters.selectedJobs.length > 0 && !filters.selectedJobs.includes(r.job ?? "")) return false;
-          } else if (filters.job) {
+          } else if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) {
             if (r.job !== filters.job) return false;
+          }
+          // Combo filter (Job/Batch picker) — independent of plain job filter.
+          // selectedJobs holds "job - batch" combo keys (e.g. "920 - C"); match
+          // both the plain job code (for backward compat) and the combo key.
+          if (filters.selectedJobs.length > 0) {
+            const comboKey = r.mfcBatch ? `${r.job} - ${r.mfcBatch}` : null;
+            if (!filters.selectedJobs.includes(r.job ?? "") && !(comboKey && filters.selectedJobs.includes(comboKey))) return false;
           }
         }
         if (!isNtlt && filters.mfcBatch && mfcOf(r) !== filters.mfcBatch) return false;

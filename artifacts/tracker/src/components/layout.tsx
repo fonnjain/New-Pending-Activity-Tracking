@@ -53,7 +53,6 @@ function MultiJobPicker({
     [jobs, search],
   );
 
-  const isMultiJobs = filterJob === MULTI_JOBS_FILTER_VALUE;
   const isMultiTemplates = filterJob === MULTI_TEMPLATES_FILTER_VALUE;
 
   // Toggle a template checkbox — multiple templates can be active simultaneously.
@@ -63,9 +62,10 @@ function MultiJobPicker({
     onSelectedTemplatesChange(Array.from(next));
   };
 
-  // Toggle an individual project/batch checkbox.
+  // Toggle an individual project/batch combo checkbox. Always accumulates from
+  // the current selectedJobs set (selectedJobs is independent of filterJob now).
   const toggleJob = (job: string) => {
-    const base = new Set(isMultiJobs ? selectedJobSet : []);
+    const base = new Set(selectedJobSet);
     if (base.has(job)) base.delete(job); else base.add(job);
     onSelectedJobsChange(Array.from(base).sort());
     setSearch("");
@@ -73,7 +73,6 @@ function MultiJobPicker({
 
   // Label shown on the trigger button.
   const label = (() => {
-    if (!filterJob) return "All Jobs";
     if (isMultiTemplates) {
       if (selectedTemplateIds.length === 1) {
         return templates.find((t) => t.id === selectedTemplateIds[0])?.name ?? "1 Template";
@@ -81,14 +80,12 @@ function MultiJobPicker({
       return `${selectedTemplateIds.length} Templates`;
     }
     // Legacy single-template path (backward compat).
-    if (isTemplateFilter(filterJob)) {
+    if (filterJob && isTemplateFilter(filterJob)) {
       return templates.find((t) => t.id === extractTemplateId(filterJob))?.name ?? "Template";
     }
-    if (isMultiJobs) {
-      if (selectedJobs.length === 1) return selectedJobs[0];
-      if (selectedJobs.length > 1) return `${selectedJobs.length} Batches`;
-    }
-    return filterJob; // direct job code
+    if (selectedJobs.length === 1) return selectedJobs[0];
+    if (selectedJobs.length > 1) return `${selectedJobs.length} Batches`;
+    return "All Combos";
   })();
 
   return (
@@ -105,13 +102,13 @@ function MultiJobPicker({
       </PopoverTrigger>
       <PopoverContent className="w-[260px] p-2" align="start">
         <div className="space-y-2">
-          {/* All Jobs */}
+          {/* Clear all combos */}
           <div className="space-y-0.5">
             <button
-              onClick={() => { onAllJobs(); setOpen(false); }}
-              className={`w-full text-left px-2 py-1.5 rounded text-sm hover:bg-accent ${!filterJob ? "bg-accent font-medium" : ""}`}
+              onClick={() => { onSelectedJobsChange([]); setOpen(false); }}
+              className={`w-full text-left px-2 py-1.5 rounded text-sm hover:bg-accent ${selectedJobs.length === 0 && !isMultiTemplates ? "bg-accent font-medium" : ""}`}
             >
-              All Jobs
+              All Combos
             </button>
           </div>
 
@@ -167,7 +164,7 @@ function MultiJobPicker({
                   className={`flex items-center gap-1 px-1 rounded text-sm hover:bg-accent`}
                 >
                   <Checkbox
-                    checked={isMultiJobs && selectedJobSet.has(job)}
+                    checked={selectedJobSet.has(job)}
                     onCheckedChange={() => toggleJob(job)}
                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
                     className="shrink-0"
@@ -663,20 +660,27 @@ function FilterBar() {
     [records, filters.category, isAll]
   );
 
-  // TLT primary dimension = Project / Batch combo.
-  // Each selectable unit is "job - mfcBatch" (e.g. "824 - A") for records that
-  // carry a batch, or just the plain job code for the rare null-mfcBatch case.
-  // This makes Job Templates work naturally: a template's members ARE these combos,
-  // so selecting the template and selecting individual combos use the same key space.
+  // Three independent TLT filter dimensions:
+  //   jobs   = plain job codes for the "Jobs" single-select picker
+  //   combos = "job - batch" pairs for the "Job/Batch" multi-checkbox picker
+  //   mfcBatches = distinct batch letters for the "MFC Batch" single-select
   const jobs = useMemo(
+    () => Array.from(new Set(modeRecords.map(r => r.job).filter((j): j is string => Boolean(j)))).sort(),
+    [modeRecords]
+  );
+  const combos = useMemo(
     () => {
-      const comboSet = new Set<string>();
+      const set = new Set<string>();
       for (const r of modeRecords) {
         if (!r.job) continue;
-        comboSet.add(r.mfcBatch ? `${r.job} - ${r.mfcBatch}` : r.job);
+        set.add(r.mfcBatch ? `${r.job} - ${r.mfcBatch}` : r.job);
       }
-      return Array.from(comboSet).sort();
+      return Array.from(set).sort();
     },
+    [modeRecords]
+  );
+  const mfcBatches = useMemo(
+    () => Array.from(new Set(modeRecords.map(r => r.mfcBatch).filter((b): b is string => Boolean(b)))).sort(),
     [modeRecords]
   );
 
@@ -685,21 +689,27 @@ function FilterBar() {
   const activeJobSet = useActiveJobSet();
   const templates = useJobTemplates();
 
-  // Helper: does a record match the current job filter (handles sentinels).
-  // Both named-set (templates) and multi-jobs filters now use "job - mfcBatch"
-  // combo keys, so we check both the plain job code AND the combo.
+  // Helper: does a record match all active job-related filters?
+  // Three independent filters ANDed together:
+  //   filters.job        — plain job code (single select)
+  //   filters.mfcBatch   — MFC batch letter (single select)
+  //   filters.selectedJobs — "job - batch" combo multi-select
   const matchesJobFilter = (rJob: string | null | undefined, rMfcBatch?: string | null | undefined) => {
-    if (!filters.job) return true;
-    const comboKey = rMfcBatch ? `${rJob} - ${rMfcBatch}` : null;
+    // 1. Named set / template filter (uses activeJobSet).
     if (isNamedJobSetFilter(filters.job)) {
-      return activeJobSet.has(rJob ?? "") || (comboKey ? activeJobSet.has(comboKey) : false);
+      if (!activeJobSet.has(rJob ?? "")) return false;
+    } else if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) {
+      // 2. Plain job code filter.
+      if (rJob !== filters.job) return false;
     }
-    if (filters.job === MULTI_JOBS_FILTER_VALUE) {
-      if (filters.selectedJobs.length === 0) return true;
-      return filters.selectedJobs.includes(rJob ?? "") ||
-        (comboKey ? filters.selectedJobs.includes(comboKey) : false);
+    // 3. MFC batch filter (single select).
+    if (filters.mfcBatch && (rMfcBatch || "Z") !== filters.mfcBatch) return false;
+    // 4. Job/Batch combo multi-select.
+    if (filters.selectedJobs.length > 0) {
+      const comboKey = rMfcBatch ? `${rJob} - ${rMfcBatch}` : null;
+      if (!filters.selectedJobs.includes(rJob ?? "") && !(comboKey && filters.selectedJobs.includes(comboKey))) return false;
     }
-    return rJob === filters.job;
+    return true;
   };
 
   // Rows narrowed by the active PRIMARY-dimension selection(s), so the
@@ -713,9 +723,6 @@ function FilterBar() {
         (!filters.structure || r.structure === filters.structure)),
     [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.selectedJobs, filters.structure, activeJobSet]
   );
-  // isMultiJobs = job filter is in checkbox multi-select mode.
-  const isMultiJobs = filters.job === MULTI_JOBS_FILTER_VALUE;
-
   // NTLT primary dimension = Section (the cleaned group_key), narrowed to the
   // active sub-category so only relevant sections are offered.
   const sections = useMemo(
@@ -805,13 +812,13 @@ function FilterBar() {
 
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => {
     if (k === "category") return false; // Order Type is a mode, not a filter
-    if (k === "selectedJobs") return false; // accounted for via filters.job
-    if (k === "mfcBatch") return false; // MFC is now embedded in the Job/Batch combo picker
+    if (k === "selectedJobs") return (v as string[]).length > 0; // combo picker — independent
+    if (k === "selectedTemplateIds") return false; // counted via job
     if (k === "plantLocations") return (v as string[]).length > 0;
     if (v === null || v === "") return false;
-    if (Array.isArray(v)) return false; // empty or not — arrays handled via their owning key
-    // MULTI_JOBS_FILTER_VALUE with nothing selected = effectively "All Jobs"
-    if (k === "job" && v === MULTI_JOBS_FILTER_VALUE && filters.selectedJobs.length === 0) return false;
+    if (Array.isArray(v)) return false;
+    // MULTI_JOBS_FILTER_VALUE is a legacy sentinel that should no longer be set
+    if (k === "job" && v === MULTI_JOBS_FILTER_VALUE) return false;
     if (k === "dateRange") return dateRangeWindow(v) !== null;
     return true;
   }).length;
@@ -854,9 +861,8 @@ function FilterBar() {
               onChange={setPlantLocations}
             />
           </div>
-          {/* 3. Jobs / Section — In ALL mode isNtlt is false, so defaults to the
-              Job picker (TLT primary dimension). NTLT mode swaps it for Section. */}
-          <div className="w-full sm:w-[220px]">
+          {/* 3. Jobs / Section — plain job code (TLT) or group section (NTLT). */}
+          <div className="w-full sm:w-[160px]">
             {isNtlt ? (
               <SearchableSelect
                 value={filters.section}
@@ -866,8 +872,32 @@ function FilterBar() {
                 searchPlaceholder="Search sections..."
               />
             ) : (
+              <SearchableSelect
+                value={filters.job === MULTI_JOBS_FILTER_VALUE ? null : filters.job}
+                onChange={(v) => setFilter("job", v)}
+                options={jobs}
+                allLabel="All Jobs"
+                searchPlaceholder="Search jobs..."
+              />
+            )}
+          </div>
+          {/* 4a. MFC Batch — single-select batch letter (TLT only). */}
+          {!isNtlt && (
+            <div className="w-[130px]">
+              <SearchableSelect
+                value={filters.mfcBatch}
+                onChange={(v) => setFilter("mfcBatch", v)}
+                options={mfcBatches}
+                allLabel="All Batches"
+                searchPlaceholder="Search batches..."
+              />
+            </div>
+          )}
+          {/* 4b. Job / Batch combo picker — multi-checkbox for exact job+batch combos (TLT only). */}
+          {!isNtlt && (
+            <div className="w-full sm:w-[180px]">
               <MultiJobPicker
-                jobs={jobs as string[]}
+                jobs={combos}
                 filterJob={filters.job}
                 selectedJobs={filters.selectedJobs}
                 selectedTemplateIds={filters.selectedTemplateIds}
@@ -876,9 +906,8 @@ function FilterBar() {
                 onSelectedTemplatesChange={setSelectedTemplates}
                 templates={templates}
               />
-            )}
-          </div>
-          {/* MFC batch is now embedded in the Job / Batch combo picker above. */}
+            </div>
+          )}
           {/* 5. Contractor */}
           <div className="flex-1 min-w-[180px] max-w-[340px]">
             <SearchableSelect
@@ -933,8 +962,8 @@ function FilterBar() {
           </div>
         </div>
 
-        {/* Selected-job chip strip — shows which jobs are pinned when multi-select is active */}
-        {isMultiJobs && filters.selectedJobs.length > 0 && (
+        {/* Selected-job chip strip — shows which combo selections are active */}
+        {filters.selectedJobs.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-3 md:px-6 pb-2">
             {filters.selectedJobs.map((job) => (
               <span

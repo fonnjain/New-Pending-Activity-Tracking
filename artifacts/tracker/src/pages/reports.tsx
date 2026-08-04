@@ -1346,14 +1346,17 @@ export function ContractorPerformanceReport() {
       // milestones and the Fabrication Load guard: "(Unassigned)" is not a
       // real project and clutters a per-project contractor report.
       if (e.project === "(Unassigned)") return false;
-      if (filters.job) {
+      if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) {
         if (isNamedJobSetFilter(filters.job)) {
           if (!activeJobSet.has(e.project)) return false;
-        } else if (filters.job === MULTI_JOBS_FILTER_VALUE) {
-          if (!filters.selectedJobs?.includes(e.project)) return false;
         } else if (e.project !== filters.job) {
           return false;
         }
+      }
+      // Combo filter: selectedJobs holds "job - batch" keys; ledger rows have no
+      // mfcBatch so match if any selected combo belongs to this project.
+      if (filters.selectedJobs.length > 0) {
+        if (!filters.selectedJobs.some(c => c === e.project || c.startsWith(`${e.project} - `))) return false;
       }
 
       if (filters.contractor && contractorLabel(e.contractor) !== filters.contractor) return false;

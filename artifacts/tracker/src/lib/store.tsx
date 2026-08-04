@@ -174,9 +174,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
       ...prev,
       selectedJobs: jobs,
       selectedTemplateIds: [],
-      // Enter MULTI_JOBS mode when any job is checked; exit to "All Jobs" when
-      // every checkbox is cleared so the label reverts to "All Jobs".
-      job: jobs.length > 0 ? MULTI_JOBS_FILTER_VALUE : null,
+      // job (plain code) and mfcBatch are independent — do not change them here.
     }));
   };
 
@@ -222,8 +220,8 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
         next.mfcBatch = null;
         next.structure = null;
         next.mark = null;
-        // Clear both multi-select lists whenever leaving their respective modes.
-        if (value !== MULTI_JOBS_FILTER_VALUE) next.selectedJobs = [];
+        // selectedJobs (combo picker) is independent — do not clear it here.
+        // Clear template list when leaving template mode.
         if (value !== MULTI_TEMPLATES_FILTER_VALUE) next.selectedTemplateIds = [];
       } else if (key === "mfcBatch") {
         // MFC sits between Project and Structure in TLT; narrowing it drops any
@@ -452,15 +450,20 @@ export function resolveActiveFilters(
 } {
   const win = dateRangeWindow(filters.dateRange);
   const isNamedSet = isNamedJobSetFilter(filters.job);
-  const isMultiJobs = filters.job === MULTI_JOBS_FILTER_VALUE;
   return {
     filters: {
       category: filters.category,
       ntltSubtype: filters.ntltSubtype,
-      job: (isNamedSet || isMultiJobs) ? null : filters.job,
+      // Named-set filters expand to jobIn (set membership); everything else is
+      // a plain job code or null (= all). MULTI_JOBS_FILTER_VALUE is a legacy
+      // sentinel that is no longer set by setSelectedJobs; guard it for safety.
+      job: isNamedSet ? null : (filters.job === MULTI_JOBS_FILTER_VALUE ? null : filters.job),
+      // jobIn: named-set wins; otherwise combo-picker selections (combo keys like
+      // "920 - C") are used — the domain filterRecords checks both the plain job
+      // code and the "job - mfcBatch" form so these match correctly.
       jobIn: isNamedSet
         ? (namedJobSet ?? new Set<string>())
-        : isMultiJobs
+        : filters.selectedJobs.length > 0
           ? new Set(filters.selectedJobs)
           : null,
       section: filters.section,
