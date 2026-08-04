@@ -525,7 +525,7 @@ function ContractorStructureGroup({ structure, records }: { structure: string; r
 function ContractorMfcGroup({ mfcRaw, records, labelOverride }: { mfcRaw: string; records: any[]; labelOverride?: string }) {
   const [open, setOpen] = useState(false);
 
-  const label = labelOverride ?? `Batch ${mfcRaw}`;
+  const label = labelOverride ?? `${mfcRaw}`;
   const wt = records.reduce((s, r) => s + r.balanceWt, 0);
   const structureCount = new Set(records.map(r => r.structure).filter(Boolean)).size;
 

@@ -190,7 +190,7 @@ function JobDashboardContent() {
   const [projectSort, setProjectSort] = useState<ProjectSortKey>("assignDate");
 
   const primaryLabel = isAll ? "Group" : isNtlt ? "Section"
-    : mfcViewMode === "view-by-mfc" ? "MFC Batch"
+    : mfcViewMode === "view-by-mfc" ? "MFC"
     : mfcViewMode === "project-then-mfc" ? "Project / MFC"
     : "Project";
 
@@ -1024,7 +1024,7 @@ function JobDetail({
             <ChevronLeft className="w-4 h-4" />
             Back
           </button>
-          <h2 className="text-xl font-bold tracking-tight truncate">Batch {job}</h2>
+          <h2 className="text-xl font-bold tracking-tight truncate">{job}</h2>
         </div>
         <Card>
           <CardHeader className="pb-2">
