@@ -263,6 +263,77 @@ paths:
       responses:
         "204":
           description: Deleted
+  /manual-thickness/apply-item-master:
+    post:
+      operationId: applyItemMasterThickness
+      tags: [thickness]
+      summary: Bulk-apply item master thickness to unset marks
+      description: >
+        For all marks in the given import that are not already manually pinned,
+        runs the item-master exact→stripped key lookup and bulk-upserts any
+        matches into manual_thickness. Clears the thickness and serialised-records
+        caches so the next /records fetch reflects the new pins. Requires auth.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                importId:
+                  type: integer
+              required: [importId]
+      responses:
+        "200":
+          description: Apply result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyItemMasterResult"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /manual-thickness/import-xlsx:
+    post:
+      operationId: importThicknessXlsx
+      tags: [thickness]
+      summary: Bulk-import thickness pins from an Excel file
+      description: >
+        Accepts a multipart .xlsx/.xls file. Detects a header row containing
+        "mark" and "thickness" columns (case-insensitive); falls back to
+        col-0=markId, col-1=thickness when no header is found. Bulk-upserts all
+        valid rows into manual_thickness and clears the thickness cache.
+        Requires auth.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                importId:
+                  type: integer
+                  description: Optional — when supplied, only that import's records cache is evicted; otherwise all are evicted.
+              required: [file]
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportThicknessXlsxResult"
+        "400":
+          description: Invalid file or no valid rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /fabrication-priorities:
     get:
       operationId: listFabricationPriorities
@@ -3352,6 +3423,34 @@ components:
       required:
         - markId
         - thicknessMm
+    ApplyItemMasterResult:
+      type: object
+      properties:
+        applied:
+          type: integer
+          description: Number of marks that were matched by the item master and pinned.
+        noMatch:
+          type: integer
+          description: Number of marks that had no item master match and remain unset.
+        alreadyPinned:
+          type: integer
+          description: Number of marks skipped because they already had a manual pin.
+      required: [applied, noMatch, alreadyPinned]
+    ImportThicknessXlsxResult:
+      type: object
+      properties:
+        imported:
+          type: integer
+          description: Number of rows successfully imported and upserted.
+        skipped:
+          type: integer
+          description: Number of rows skipped due to missing or invalid thickness.
+        errors:
+          type: array
+          items:
+            type: string
+          description: Up to 20 per-row error messages for skipped rows.
+      required: [imported, skipped, errors]
     ContractorCategory:
       type: object
       properties:

@@ -1,17 +1,18 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   useListManualThickness,
   useUpsertManualThickness,
   useDeleteManualThickness,
   useGetImportRecords,
   useListItemMasterThicknessRows,
+  useApplyItemMasterThickness,
   getListManualThicknessQueryKey,
   getGetImportRecordsQueryKey,
   getListItemMasterThicknessRowsQueryKey,
   type Record as TrackerRecord,
   type ItemMasterThicknessGroup,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { useTracker, useFilteredRecords } from "@/lib/store";
 import { LoginGate, LogoutButton } from "@/components/login-gate";
 import { NumberInput } from "@/components/ui/number-input";
@@ -25,7 +26,8 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Layers, Trash2, Check, ChevronDown, ChevronRight, BookOpen, Download } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { Layers, Trash2, Check, ChevronDown, ChevronRight, BookOpen, Download, Wand2, Upload } from "lucide-react";
 // Note: Trash2 and Check are still used in UnsetWorklistCard; useMemo used in ManualRow.
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -66,6 +68,7 @@ export default function ThicknessView() {
 export function ThicknessContent() {
   const { selectedImportId } = useTracker();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: manualRows } = useListManualThickness({
     query: { queryKey: getListManualThicknessQueryKey() },
@@ -112,7 +115,10 @@ export function ThicknessContent() {
         records={records}
         manualRows={manualRows ?? []}
         hasImport={!!selectedImportId}
+        importId={selectedImportId ?? null}
+        masterGroupCount={masterGroups?.length ?? 0}
         onChanged={invalidateAll}
+        toast={toast}
       />
     </div>
   );
@@ -231,15 +237,76 @@ function UnsetWorklistCard({
   records,
   manualRows,
   hasImport,
+  importId,
+  masterGroupCount,
   onChanged,
+  toast,
 }: {
   records: TrackerRecord[];
   manualRows: { markId: string; thicknessMm: number }[];
   hasImport: boolean;
+  importId: number | null;
+  masterGroupCount: number;
   onChanged: () => void;
+  toast: (opts: { title: string; description?: string; variant?: "default" | "destructive" }) => void;
 }) {
   const upsert = useUpsertManualThickness();
   const del = useDeleteManualThickness();
+  const applyMaster = useApplyItemMasterThickness();
+  const xlsxFileRef = useRef<HTMLInputElement>(null);
+
+  // Bulk-apply item master: calls the apply-item-master endpoint then refreshes.
+  const handleApplyMaster = () => {
+    if (!importId) return;
+    applyMaster.mutate(
+      { data: { importId } },
+      {
+        onSuccess: (res) => {
+          onChanged();
+          toast({
+            title: "Item master applied",
+            description: `${res.applied} mark${res.applied !== 1 ? "s" : ""} auto-populated, ${res.noMatch} still unresolved, ${res.alreadyPinned} already pinned.`,
+          });
+        },
+        onError: (err) => {
+          toast({ variant: "destructive", title: "Failed", description: String((err as any).message ?? err) });
+        },
+      },
+    );
+  };
+
+  // Excel import: multipart upload, then refresh.
+  const xlsxUpload = useMutation<
+    { imported: number; skipped: number; errors: string[] },
+    Error,
+    File
+  >({
+    mutationFn: async (file) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (importId) fd.append("importId", String(importId));
+      const r = await fetch("/api/manual-thickness/import-xlsx", {
+        method: "POST",
+        body: fd,
+        credentials: "include",
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: r.statusText }));
+        throw new Error((err as any).error ?? "Upload failed");
+      }
+      return r.json();
+    },
+    onSuccess: (res) => {
+      onChanged();
+      toast({
+        title: "Excel imported",
+        description: `${res.imported} row${res.imported !== 1 ? "s" : ""} imported${res.skipped ? `, ${res.skipped} skipped` : ""}.`,
+      });
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", title: "Import failed", description: err.message });
+    },
+  });
 
   const manualByMark = useMemo(
     () => new Map(manualRows.map((m) => [m.markId, m.thicknessMm])),
@@ -288,13 +355,52 @@ function UnsetWorklistCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">Thickness not set</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          {counts.total} mark{counts.total === 1 ? "" : "s"} in the current view
-          have no thickness ({counts.general} General &middot; {counts.other}{" "}
-          other). RSJ marks always resolve (exact, base match, or the 6.0
-          default); General and anything unparseable can be pinned manually here.
-        </p>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="space-y-1">
+            <CardTitle className="text-lg">Thickness not set</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              {counts.total} mark{counts.total === 1 ? "" : "s"} in the current view
+              have no thickness ({counts.general} General &middot; {counts.other}{" "}
+              other). RSJ marks always resolve (exact, base match, or the 6.0
+              default); General and anything unparseable can be pinned manually here.
+            </p>
+          </div>
+          {/* Action buttons */}
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            {/* Auto-populate from item master */}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!importId || masterGroupCount === 0 || applyMaster.isPending}
+              onClick={handleApplyMaster}
+              title={masterGroupCount === 0 ? "No item master loaded — upload via the Data tab first" : "Run item master lookup for all unresolved marks"}
+            >
+              <Wand2 className="w-3.5 h-3.5 mr-1.5" />
+              {applyMaster.isPending ? "Applying…" : "Auto-populate from Item Master"}
+            </Button>
+            {/* Excel import */}
+            <input
+              ref={xlsxFileRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) xlsxUpload.mutate(file);
+                e.target.value = "";
+              }}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!importId || xlsxUpload.isPending}
+              onClick={() => xlsxFileRef.current?.click()}
+            >
+              <Upload className="w-3.5 h-3.5 mr-1.5" />
+              {xlsxUpload.isPending ? "Importing…" : "Import Excel"}
+            </Button>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
         {unset.length === 0 ? (

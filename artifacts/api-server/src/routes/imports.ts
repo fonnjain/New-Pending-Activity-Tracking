@@ -439,7 +439,18 @@ export function clearThicknessCache(): void {
   _thicknessCache = null;
 }
 
-async function loadThicknessLookups(): Promise<ThicknessLookups> {
+/** Evict the serialised records cache for one import (or all if importId omitted).
+ *  Call after any operation that changes how records resolve (thickness pins, etc.)
+ *  so the next /records fetch rebuilds from scratch with the updated lookups. */
+export function evictSerializedRecordsCache(importId?: number): void {
+  if (importId === undefined) {
+    serializedRecordsCache.clear();
+  } else {
+    serializedRecordsCache.delete(importId);
+  }
+}
+
+export async function loadThicknessLookups(): Promise<ThicknessLookups> {
   if (_thicknessCache) return _thicknessCache;
   const [rsjRows, manualRows, masterRows] = await Promise.all([
     db.select().from(rsjThicknessTable),

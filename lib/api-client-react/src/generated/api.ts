@@ -22,6 +22,8 @@ import type {
 import type {
   AdminRecomputeResult,
   AiStatus,
+  ApplyItemMasterResult,
+  ApplyItemMasterThicknessBody,
   AuthCredentials,
   AuthHeartbeat200,
   AuthStatus,
@@ -58,6 +60,8 @@ import type {
   Import,
   ImportDeletionLogEntry,
   ImportSummary,
+  ImportThicknessXlsxBody,
+  ImportThicknessXlsxResult,
   ImportUpload,
   InventoryBucketsResponse,
   InventoryManualEntry,
@@ -958,6 +962,157 @@ export const useDeleteManualThickness = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteManualThicknessMutationOptions(options));
+    }
+
+export const getApplyItemMasterThicknessUrl = () => {
+
+
+
+
+  return `/api/manual-thickness/apply-item-master`
+}
+
+/**
+ * For all marks in the given import that are not already manually pinned, runs the item-master exact→stripped key lookup and bulk-upserts any matches into manual_thickness. Clears the thickness and serialised-records caches so the next /records fetch reflects the new pins. Requires auth.
+
+ * @summary Bulk-apply item master thickness to unset marks
+ */
+export const applyItemMasterThickness = async (applyItemMasterThicknessBody: ApplyItemMasterThicknessBody, options?: RequestInit): Promise<ApplyItemMasterResult> => {
+
+  return customFetch<ApplyItemMasterResult>(getApplyItemMasterThicknessUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      applyItemMasterThicknessBody,)
+  }
+);}
+
+
+
+
+export const getApplyItemMasterThicknessMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyItemMasterThickness>>, TError,{data: BodyType<ApplyItemMasterThicknessBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyItemMasterThickness>>, TError,{data: BodyType<ApplyItemMasterThicknessBody>}, TContext> => {
+
+const mutationKey = ['applyItemMasterThickness'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyItemMasterThickness>>, {data: BodyType<ApplyItemMasterThicknessBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  applyItemMasterThickness(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyItemMasterThicknessMutationResult = NonNullable<Awaited<ReturnType<typeof applyItemMasterThickness>>>
+    export type ApplyItemMasterThicknessMutationBody = BodyType<ApplyItemMasterThicknessBody>
+    export type ApplyItemMasterThicknessMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Bulk-apply item master thickness to unset marks
+ */
+export const useApplyItemMasterThickness = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyItemMasterThickness>>, TError,{data: BodyType<ApplyItemMasterThicknessBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof applyItemMasterThickness>>,
+        TError,
+        {data: BodyType<ApplyItemMasterThicknessBody>},
+        TContext
+      > => {
+      return useMutation(getApplyItemMasterThicknessMutationOptions(options));
+    }
+
+export const getImportThicknessXlsxUrl = () => {
+
+
+
+
+  return `/api/manual-thickness/import-xlsx`
+}
+
+/**
+ * Accepts a multipart .xlsx/.xls file. Detects a header row containing "mark" and "thickness" columns (case-insensitive); falls back to col-0=markId, col-1=thickness when no header is found. Bulk-upserts all valid rows into manual_thickness and clears the thickness cache. Requires auth.
+
+ * @summary Bulk-import thickness pins from an Excel file
+ */
+export const importThicknessXlsx = async (importThicknessXlsxBody: ImportThicknessXlsxBody, options?: RequestInit): Promise<ImportThicknessXlsxResult> => {
+    const formData = new FormData();
+formData.append(`file`, importThicknessXlsxBody.file);
+if(importThicknessXlsxBody.importId !== undefined) {
+ formData.append(`importId`, importThicknessXlsxBody.importId.toString())
+ }
+
+  return customFetch<ImportThicknessXlsxResult>(getImportThicknessXlsxUrl(),
+  {
+    ...options,
+    method: 'POST'
+    ,
+    body:
+      formData,
+  }
+);}
+
+
+
+
+export const getImportThicknessXlsxMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importThicknessXlsx>>, TError,{data: BodyType<ImportThicknessXlsxBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importThicknessXlsx>>, TError,{data: BodyType<ImportThicknessXlsxBody>}, TContext> => {
+
+const mutationKey = ['importThicknessXlsx'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importThicknessXlsx>>, {data: BodyType<ImportThicknessXlsxBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importThicknessXlsx(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportThicknessXlsxMutationResult = NonNullable<Awaited<ReturnType<typeof importThicknessXlsx>>>
+    export type ImportThicknessXlsxMutationBody = BodyType<ImportThicknessXlsxBody>
+    export type ImportThicknessXlsxMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Bulk-import thickness pins from an Excel file
+ */
+export const useImportThicknessXlsx = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importThicknessXlsx>>, TError,{data: BodyType<ImportThicknessXlsxBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importThicknessXlsx>>,
+        TError,
+        {data: BodyType<ImportThicknessXlsxBody>},
+        TContext
+      > => {
+      return useMutation(getImportThicknessXlsxMutationOptions(options));
     }
 
 export const getListFabricationPrioritiesUrl = () => {

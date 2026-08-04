@@ -1099,6 +1099,24 @@ export interface ManualThicknessInput {
   thicknessMm: number;
 }
 
+export interface ApplyItemMasterResult {
+  /** Number of marks that were matched by the item master and pinned. */
+  applied: number;
+  /** Number of marks that had no item master match and remain unset. */
+  noMatch: number;
+  /** Number of marks skipped because they already had a manual pin. */
+  alreadyPinned: number;
+}
+
+export interface ImportThicknessXlsxResult {
+  /** Number of rows successfully imported and upserted. */
+  imported: number;
+  /** Number of rows skipped due to missing or invalid thickness. */
+  skipped: number;
+  /** Up to 20 per-row error messages for skipped rows. */
+  errors: string[];
+}
+
 /**
  * Contractor sub-category.
  */
@@ -2474,6 +2492,16 @@ export type UploadItemMasterBody = {
 
 export type DeleteManualThicknessParams = {
 markId: string;
+};
+
+export type ApplyItemMasterThicknessBody = {
+  importId: number;
+};
+
+export type ImportThicknessXlsxBody = {
+  file: Blob;
+  /** Optional — when supplied, only that import's records cache is evicted; otherwise all are evicted. */
+  importId?: number;
 };
 
 export type DeleteFabricationPriorityParams = {

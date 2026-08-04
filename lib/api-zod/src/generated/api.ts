@@ -745,6 +745,39 @@ export const DeleteManualThicknessQueryParams = zod.object({
 
 
 /**
+ * For all marks in the given import that are not already manually pinned, runs the item-master exact→stripped key lookup and bulk-upserts any matches into manual_thickness. Clears the thickness and serialised-records caches so the next /records fetch reflects the new pins. Requires auth.
+
+ * @summary Bulk-apply item master thickness to unset marks
+ */
+export const ApplyItemMasterThicknessBody = zod.object({
+  "importId": zod.number()
+})
+
+export const ApplyItemMasterThicknessResponse = zod.object({
+  "applied": zod.number().describe('Number of marks that were matched by the item master and pinned.'),
+  "noMatch": zod.number().describe('Number of marks that had no item master match and remain unset.'),
+  "alreadyPinned": zod.number().describe('Number of marks skipped because they already had a manual pin.')
+})
+
+
+/**
+ * Accepts a multipart .xlsx/.xls file. Detects a header row containing "mark" and "thickness" columns (case-insensitive); falls back to col-0=markId, col-1=thickness when no header is found. Bulk-upserts all valid rows into manual_thickness and clears the thickness cache. Requires auth.
+
+ * @summary Bulk-import thickness pins from an Excel file
+ */
+export const ImportThicknessXlsxBody = zod.object({
+  "file": zod.instanceof(File),
+  "importId": zod.number().optional().describe('Optional — when supplied, only that import\'s records cache is evicted; otherwise all are evicted.')
+})
+
+export const ImportThicknessXlsxResponse = zod.object({
+  "imported": zod.number().describe('Number of rows successfully imported and upserted.'),
+  "skipped": zod.number().describe('Number of rows skipped due to missing or invalid thickness.'),
+  "errors": zod.array(zod.string()).describe('Up to 20 per-row error messages for skipped rows.')
+})
+
+
+/**
  * Returns the per-row priorities (P1..P10) for the "Fabrication Load for TLT" report, keyed by (section, column, project). Display/planning overlay only; never changes parsing, ageing, dedup, qty, the row hash, classification, or alert math. Public (read-only).
 
  * @summary List Fabrication-Load priorities

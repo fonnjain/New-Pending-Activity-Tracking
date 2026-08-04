@@ -1,13 +1,20 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import multer from "multer";
+import * as XLSX from "xlsx";
 import {
   db,
   rsjThicknessTable,
   manualThicknessTable,
+  importRowsTable,
+  recordPoolTable,
 } from "@workspace/db";
 import { UpsertRsjThicknessBody, UpsertManualThicknessBody } from "@workspace/api-zod";
+import { normalizeItemExactKey, normalizeItemStrippedKey } from "@workspace/domain";
 import { requireAuth } from "./auth";
-import { clearThicknessCache } from "./imports";
+import { clearThicknessCache, loadThicknessLookups, evictSerializedRecordsCache } from "./imports";
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const router: IRouter = Router();
 
@@ -104,6 +111,180 @@ router.delete(
       .where(eq(manualThicknessTable.markId, markId));
     clearThicknessCache();
     res.status(204).end();
+  },
+);
+
+// ---------------------------------------------------------------------------
+// POST /manual-thickness/apply-item-master
+// For all marks in the given import that are NOT already manually pinned,
+// run the item-master exact→stripped key lookup and bulk-upsert any matches
+// into manual_thickness, then clear the thickness + serialised-records caches
+// so the next /records fetch reflects the new pins. Requires auth.
+// ---------------------------------------------------------------------------
+router.post(
+  "/manual-thickness/apply-item-master",
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const importId = Number(req.body?.importId);
+    if (!Number.isInteger(importId) || importId <= 0) {
+      res.status(400).json({ error: "importId must be a positive integer" });
+      return;
+    }
+
+    // Load item-master lookup maps (uses the shared in-process cache).
+    const lookups = await loadThicknessLookups();
+
+    // Fetch all already-pinned markIds so we can skip them.
+    const pinned = await db.select({ markId: manualThicknessTable.markId }).from(manualThicknessTable);
+    const pinnedSet = new Set(pinned.map((p) => p.markId));
+
+    // Distinct (markId, section) pairs for this import, excluding already-pinned marks.
+    const rows = await db
+      .selectDistinct({
+        markId: recordPoolTable.markId,
+        section: recordPoolTable.section,
+      })
+      .from(importRowsTable)
+      .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+      .where(eq(importRowsTable.importId, importId));
+
+    const toInsert: { markId: string; thicknessMm: number }[] = [];
+    let alreadyPinned = 0;
+    let noMatch = 0;
+
+    for (const r of rows) {
+      if (pinnedSet.has(r.markId)) { alreadyPinned++; continue; }
+      const section = r.section ?? "";
+      // Exact key first.
+      const exactKey = normalizeItemExactKey(section);
+      const exactHit = lookups.masterExactMap?.get(exactKey);
+      if (exactHit != null && exactHit > 0) {
+        toInsert.push({ markId: r.markId, thicknessMm: exactHit });
+        continue;
+      }
+      // Stripped key fallback.
+      const strippedKey = normalizeItemStrippedKey(section);
+      const strippedHit = strippedKey ? lookups.masterStrippedMap?.get(strippedKey) : undefined;
+      if (strippedHit != null && strippedHit > 0) {
+        toInsert.push({ markId: r.markId, thicknessMm: strippedHit });
+        continue;
+      }
+      noMatch++;
+    }
+
+    // Bulk-upsert in chunks.
+    const CHUNK = 500;
+    for (let i = 0; i < toInsert.length; i += CHUNK) {
+      await db
+        .insert(manualThicknessTable)
+        .values(toInsert.slice(i, i + CHUNK).map((v) => ({ markId: v.markId, thicknessMm: v.thicknessMm })))
+        .onConflictDoUpdate({
+          target: manualThicknessTable.markId,
+          set: { thicknessMm: sql`excluded.thickness_mm`, updatedAt: new Date() },
+        });
+    }
+
+    clearThicknessCache();
+    evictSerializedRecordsCache(importId);
+
+    res.json({ applied: toInsert.length, noMatch, alreadyPinned });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// POST /manual-thickness/import-xlsx
+// Accepts a multipart .xlsx/.xls file. Scans the first sheet for a header row
+// containing "mark" and "thickness" (case-insensitive), then bulk-upserts the
+// data rows into manual_thickness.  If no header is found, falls back to
+// col-0 = markId, col-1 = thickness.  Requires auth.
+// ---------------------------------------------------------------------------
+router.post(
+  "/manual-thickness/import-xlsx",
+  requireAuth,
+  upload.single("file"),
+  async (req, res): Promise<void> => {
+    if (!req.file) {
+      res.status(400).json({ error: "No file uploaded" });
+      return;
+    }
+    const importIdRaw = req.body?.importId ? Number(req.body.importId) : null;
+
+    let wb: XLSX.WorkBook;
+    try {
+      wb = XLSX.read(req.file.buffer, { type: "buffer" });
+    } catch {
+      res.status(400).json({ error: "Could not parse file — ensure it is a valid .xlsx or .xls" });
+      return;
+    }
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) {
+      res.status(400).json({ error: "Workbook has no sheets" });
+      return;
+    }
+    const rawRows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+    if (!rawRows.length) {
+      res.status(400).json({ error: "Sheet is empty" });
+      return;
+    }
+
+    // Detect header row: scan first 5 rows for one containing "mark" token.
+    let headerIdx = -1;
+    let markCol = 0;
+    let thicknessCol = 1;
+    for (let ri = 0; ri < Math.min(5, rawRows.length); ri++) {
+      const row = rawRows[ri].map((c) => String(c ?? "").toLowerCase().trim());
+      const mIdx = row.findIndex((c) => c === "mark" || c === "mark id" || c === "markid" || c === "mark_id");
+      const tIdx = row.findIndex((c) => c.includes("thick") || c === "mm" || c === "thickness mm");
+      if (mIdx >= 0 && tIdx >= 0) {
+        headerIdx = ri;
+        markCol = mIdx;
+        thicknessCol = tIdx;
+        break;
+      }
+    }
+
+    const dataRows = headerIdx >= 0 ? rawRows.slice(headerIdx + 1) : rawRows;
+    const toInsert: { markId: string; thicknessMm: number }[] = [];
+    const errors: string[] = [];
+
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i];
+      const markRaw = row[markCol];
+      const thickRaw = row[thicknessCol];
+      const markId = String(markRaw ?? "").trim();
+      if (!markId) continue;
+      const thicknessMm = parseFloat(String(thickRaw ?? ""));
+      if (!Number.isFinite(thicknessMm) || thicknessMm <= 0) {
+        errors.push(`Row ${i + (headerIdx >= 0 ? headerIdx + 2 : 1)}: "${markId}" — thickness "${thickRaw}" is not a valid positive number`);
+        continue;
+      }
+      toInsert.push({ markId, thicknessMm });
+    }
+
+    if (!toInsert.length) {
+      res.status(400).json({ error: "No valid rows found in file", details: errors.slice(0, 20) });
+      return;
+    }
+
+    const CHUNK = 500;
+    for (let i = 0; i < toInsert.length; i += CHUNK) {
+      await db
+        .insert(manualThicknessTable)
+        .values(toInsert.slice(i, i + CHUNK).map((v) => ({ markId: v.markId, thicknessMm: v.thicknessMm })))
+        .onConflictDoUpdate({
+          target: manualThicknessTable.markId,
+          set: { thicknessMm: sql`excluded.thickness_mm`, updatedAt: new Date() },
+        });
+    }
+
+    clearThicknessCache();
+    if (importIdRaw && Number.isInteger(importIdRaw) && importIdRaw > 0) {
+      evictSerializedRecordsCache(importIdRaw);
+    } else {
+      evictSerializedRecordsCache(); // clear all if no importId supplied
+    }
+
+    res.json({ imported: toInsert.length, skipped: errors.length, errors: errors.slice(0, 20) });
   },
 );
 
