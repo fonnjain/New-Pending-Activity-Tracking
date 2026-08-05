@@ -1,0 +1,125 @@
+# Replit Prompt — Contractor name deduplication (AI-assisted, review-gated)
+
+## Key finding before you send this
+
+**The Phoenix duplicates are not in the WIP file.** The 05-Aug WIP contains 46 distinct
+contractor names and **none of them contain "Phoenix"**. So those three variants live in the
+app's own contractor table — accumulated from earlier imports — not in current source data.
+
+That means sanitising WIP at parse time would not fix them. The fix has to work on the stored
+contractor list and on future imports.
+
+**Also: several names that look like duplicates are genuinely distinct sites.** Any fuzzy
+merge must not collapse these:
+
+```
+DASHMESH ENTERPRISES              DASHMESH ENTERPRISES (UNIT-II)      DASHMESH ENTERPRISES GP-2
+SRIJAN ENTERPRISES                SRIJAN ENTERPRISES (UNIT-II)
+METAL PARK (UNIT-II)              METAL PARK (UNIT-II - JAIN PLATE)
+METAL PARK (UNIT-II - JAIN ASSOCIATES)                METAL PARK (UNIT-II - KANNAN ENGINEERING)
+SARLA TRADING COMAPNY (ASHTHA ENTERPRISES)            SARLA TRADING COMAPNY (BDM)
+CNC APM 2020                      CNC APM 2020 (A)
+```
+
+`UNIT-II`, `GP-2` and the bracketed sub-names are real operational distinctions. Note also
+`COMAPNY` and `TOWRS` — genuine typos in the source that must be preserved as matching keys,
+not silently corrected.
+
+---
+
+## The prompt
+
+```
+The contractor list has duplicate entries for the same company. Example from the app:
+
+    PHOENIX STRUCTURAL & ENGINEERING PVT. LTD.
+    PHOENIX STRUCTURAL & ENGINEERING PVT.LTD.
+    PHOENIX STRUCTURAL & ENGINEERING PVT.LTD. (NGP)
+
+These three are the same contractor. Please build deduplication, but read the constraints
+below carefully — a naive fuzzy merge will do real damage here.
+
+IMPORTANT CONTEXT
+
+These Phoenix variants are NOT in the current WIP file. The 05-Aug WIP has 46 distinct
+contractor names and none contain "Phoenix". So they are in the app's stored contractor table,
+accumulated from earlier imports. Fixing this at WIP parse time alone will not clean them up —
+you need to handle both the existing stored list and future imports.
+
+WHAT MUST NOT BE MERGED
+
+Several contractor names look like duplicates but are genuinely different sites or units.
+Merging these would be a data loss, not a cleanup:
+
+    DASHMESH ENTERPRISES / DASHMESH ENTERPRISES (UNIT-II) / DASHMESH ENTERPRISES GP-2
+    SRIJAN ENTERPRISES / SRIJAN ENTERPRISES (UNIT-II)
+    METAL PARK (UNIT-II) / (UNIT-II - JAIN PLATE) / (UNIT-II - JAIN ASSOCIATES) /
+        (UNIT-II - KANNAN ENGINEERING)
+    SARLA TRADING COMAPNY (ASHTHA ENTERPRISES) / SARLA TRADING COMAPNY (BDM)
+    CNC APM 2020 / CNC APM 2020 (A)
+
+UNIT-II, GP-2, (A) and the bracketed sub-names are real operational distinctions.
+
+Note also that "COMAPNY" and "TOWRS" are genuine typos in the source data. Do NOT auto-correct
+spelling — the misspelled string is the actual key that arrives in every WIP file, and
+correcting it would break matching on the next import.
+
+WHAT SHOULD BE MERGED
+
+Only differences that carry no operational meaning:
+    - punctuation and spacing: "PVT. LTD." vs "PVT.LTD." vs "PVT LTD"
+    - trailing/multiple whitespace
+    - case
+    - a location suffix that denotes the same legal entity, e.g. "(NGP)" on Phoenix
+
+The third case is the hard one and is exactly why this needs judgement rather than a rule.
+
+HOW TO BUILD IT
+
+1. Add a canonical contractor concept: a canonical_name plus a set of aliases that map to it.
+   Every WIP contractor string resolves through the alias table to a canonical contractor.
+   Store the raw string as it arrived — never overwrite it — so a mis-merge can be undone.
+
+2. Use AI to PROPOSE merges, not to apply them. Generate candidate groups with a confidence
+   score and a stated reason, then present them for human review with approve/reject per
+   group. Nothing merges without approval. Given the UNIT-II style distinctions above, an
+   unattended merge will get some of these wrong.
+
+3. Once approved, an alias mapping is permanent and applies to all future imports
+   automatically — a new WIP row with a known alias resolves to the canonical contractor
+   without re-review.
+
+4. Never rebuild or clear the alias table on a WIP upload. It is reference data, like the
+   contractor Type and Plant Location settings.
+
+5. When a NEW contractor string appears that is similar to an existing canonical name, flag it
+   for review rather than either auto-merging or silently creating a new contractor. Surface
+   the count of pending review items somewhere visible.
+
+WHERE IT MUST APPLY
+
+Everywhere a contractor is grouped or displayed — the Contractor Setup page, Contractor Wise,
+the contractor filter dropdown on every page, Contractor Performance, Contractor Wise Net
+Balance Movement, Daily Production Movement drill-downs, and every Excel export from those.
+Use one shared resolution function, not a copy per page.
+
+Also confirm: the Type and Plant Location settings should attach to the CANONICAL contractor,
+not to each alias — otherwise the three Phoenix rows can each carry a different Type.
+
+When done, tell me how many canonical contractors exist after review, how many aliases map to
+them, and paste the resolution function.
+```
+
+---
+
+## What to check in the reply
+
+- **That merges are proposed and approved, not applied automatically.** The `UNIT-II` and
+  `GP-2` cases will trip an unattended matcher.
+- **That the raw string is preserved** alongside the canonical mapping, so a wrong merge is
+  reversible.
+- **That the alias table survives WIP uploads.** Two tables in this project were previously
+  being rebuilt on every import.
+- **That Type and Plant Location attach to the canonical contractor**, not per alias.
+- **One shared resolution function.** Contractor grouping appears on at least six surfaces
+  plus their exports.
