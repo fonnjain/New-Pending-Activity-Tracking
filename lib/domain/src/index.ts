@@ -192,7 +192,7 @@ export const PROCESS_PHASES: ProcessPhase[] = [
   },
   {
     key: "dispatch",
-    label: "Finished Goods WIP",
+    label: "FG (WIP file)",
     // Reports FG Pending For Dispatch weight from the WIP file's "Type" column
     // (new ≥Jul-2026 format, Col A). Summed per project in parseSummary.fgWipByJob
     // and shown directly — not activity-based (no WIP record activity routes here).
