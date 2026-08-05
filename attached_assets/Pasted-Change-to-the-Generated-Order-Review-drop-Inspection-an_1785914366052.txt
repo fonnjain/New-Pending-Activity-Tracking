@@ -1,0 +1,46 @@
+Change to the Generated Order Review: drop Inspection and Despatch, add Finished Goods.
+
+WHY: WIP does not capture Inspection or Despatch at all. Those two stages were being
+reconstructed by subtraction and are meaningless — they show 50.6% and 71.9% match rates
+because there is nothing real behind them. What WIP DOES capture is Finished Goods, and the
+Order Review has a comparable figure, so that is the honest last comparison.
+
+THE CHANGE
+
+Remove these columns entirely from the UI and the Excel export:
+   Gen Progress Inspection / OR Progress Inspection
+   Gen Progress Despatch   / OR Progress Despatch
+
+Add as the last two columns:
+   Gen Finished Goods (MT)  = WIP marks with Type = "FG Pending For Dispatch", per structure
+   OR Finished Goods (MT)   = Order Review Progress Galvanising minus Progress Despatch
+
+So the chain becomes: Release -> Fabrication -> Galvanising -> Finished Goods, with gen and
+OR side by side at each stage, matching the existing format.
+
+EXPECT A LARGE GAP ON THE FG COLUMNS — THIS IS CORRECT, NOT A BUG
+
+Measured on the 04-Aug import:
+   WIP FG      2,439.518 MT across 397 structures
+   OR FG       4,302.903 MT across the same 397
+   agreement   187/397 = 47.1% within 0.5 MT
+
+The two answer different questions. OR Galvanising-minus-Despatch is cumulative over the
+project's life, so material that was dispatched but never marked despatched in the order book
+stays in that figure permanently. WIP FG is only what is physically in the yard right now.
+This is the same asymmetry that makes Inspection and Despatch unreliable — it does not
+disappear, it just becomes visible in a place where it is meaningful.
+
+Please label the FG confidence honestly based on the measured rate rather than assuming high.
+And note 6 structures compute a NEGATIVE OR FG (despatch exceeds galvanising, which is
+impossible for stock on hand) — surface those rather than clamping them to zero.
+
+FORMAT
+
+Keep the UI and Excel export in the same format as the current Order Review view — same
+column grouping, same gen/OR pairing, same subtotal-per-project structure. Only the stage
+set changes.
+
+Also still outstanding from my last message: the match-rate panel shows 0/0 for every stage.
+After this change it should show four stages with real counts. On the 04-Aug data the first
+three are Release 755/768 (98.3%), Fabrication 499/608 (82.1%), Galvanising 414/585 (70.8%).
