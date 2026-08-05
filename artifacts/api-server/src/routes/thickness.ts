@@ -148,29 +148,36 @@ router.post(
       .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
       .where(eq(importRowsTable.importId, importId));
 
-    const toInsert: { markId: string; thicknessMm: number }[] = [];
+    // Use a Map to deduplicate by markId — selectDistinct returns (markId,section)
+    // pairs, so the same markId can appear with multiple sections. Inserting
+    // duplicate PKs in a single INSERT … ON CONFLICT DO UPDATE causes PostgreSQL
+    // to throw "command cannot affect row a second time". First match wins.
+    const toInsertMap = new Map<string, number>();
     let alreadyPinned = 0;
     let noMatch = 0;
 
     for (const r of rows) {
       if (pinnedSet.has(r.markId)) { alreadyPinned++; continue; }
+      if (toInsertMap.has(r.markId)) continue; // already resolved via another section row
       const section = r.section ?? "";
       // Exact key first.
       const exactKey = normalizeItemExactKey(section);
       const exactHit = lookups.masterExactMap?.get(exactKey);
       if (exactHit != null && exactHit > 0) {
-        toInsert.push({ markId: r.markId, thicknessMm: exactHit });
+        toInsertMap.set(r.markId, exactHit);
         continue;
       }
       // Stripped key fallback.
       const strippedKey = normalizeItemStrippedKey(section);
       const strippedHit = strippedKey ? lookups.masterStrippedMap?.get(strippedKey) : undefined;
       if (strippedHit != null && strippedHit > 0) {
-        toInsert.push({ markId: r.markId, thicknessMm: strippedHit });
+        toInsertMap.set(r.markId, strippedHit);
         continue;
       }
       noMatch++;
     }
+
+    const toInsert = Array.from(toInsertMap, ([markId, thicknessMm]) => ({ markId, thicknessMm }));
 
     // Bulk-upsert in chunks.
     const CHUNK = 500;
@@ -307,12 +314,18 @@ router.post(
         return;
       }
 
+      // Deduplicate by markId before inserting — same markId appearing twice in a
+      // single INSERT … ON CONFLICT DO UPDATE causes PostgreSQL to error.
+      const deduped = Array.from(
+        new Map(toInsert.map((v) => [v.markId, v])).values(),
+      );
+
       const CHUNK = 500;
-      for (let i = 0; i < toInsert.length; i += CHUNK) {
+      for (let i = 0; i < deduped.length; i += CHUNK) {
         await db
           .insert(manualThicknessTable)
           .values(
-            toInsert
+            deduped
               .slice(i, i + CHUNK)
               .map((v) => ({ markId: v.markId, thicknessMm: v.thicknessMm })),
           )
@@ -329,7 +342,7 @@ router.post(
         evictSerializedRecordsCache(); // clear all if no importId supplied
       }
 
-      res.json({ imported: toInsert.length, skipped: errors.length, errors: errors.slice(0, 20) });
+      res.json({ imported: deduped.length, skipped: errors.length, errors: errors.slice(0, 20) });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       res.status(500).json({ error: `Import failed: ${msg}` });
