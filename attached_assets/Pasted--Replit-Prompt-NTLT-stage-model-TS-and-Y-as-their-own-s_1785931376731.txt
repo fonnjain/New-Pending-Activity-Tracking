@@ -1,0 +1,109 @@
+# Replit Prompt — NTLT stage model: TS and Y as their own stages
+
+## Verified before writing this
+
+The model partitions NTLT **exactly, zero unclassified**, on three separate days:
+
+| Stage | 05-Aug | 04-Aug | 01-Aug |
+|---|---|---|---|
+| Not Started | 4,057.948 | 4,208.453 | 3,895.494 |
+| TS | 119.981 | 116.309 | 79.580 |
+| Galvanising (G, GB) | 877.780 | 886.487 | 1,132.454 |
+| Y | 876.056 | 862.997 | 719.754 |
+| Finished Goods | 791.567 | 768.533 | 627.319 |
+| **TOTAL** | **6,723.332** | **6,842.779** | **6,454.600** |
+| **Unclassified** | **0** | **0** | **0** |
+
+Full NTLT activity vocabulary: **`BL, G, GB, NTF, NTFSW, TS, Y`** — seven codes. `NTFW` does
+not exist in any file checked.
+
+---
+
+## The prompt
+
+```
+Please implement a proper NTLT stage model. NTLT currently borrows TLT's stage definitions and
+that is wrong — the two natures have different process chains and different activity
+vocabularies.
+
+THE NTLT CHAIN
+
+    Not Started  ->  TS  ->  Galvanising (G, GB)  ->  Y  ->  Finished Goods
+
+TS comes BEFORE galvanising. Y comes AFTER. Both are their own stages — do NOT fold TS into a
+fabrication bucket and do NOT fold Y into Galvanising.
+
+THE RULES (all require the Type guard — see the warning below)
+
+    Not Started     = Type "Job Card Not Started"                      (any activity)
+    TS              = Type "Job Card WIP" AND activity = TS
+    Galvanising     = Type "Job Card WIP" AND activity in {G, GB}
+    Y               = Type "Job Card WIP" AND activity = Y
+    Finished Goods  = Type "FG Pending For Dispatch"                   (activity blank)
+
+THE TYPE GUARD IS NOT OPTIONAL
+
+G and TS appear under BOTH "Job Card Not Started" and "Job Card WIP". On the 05-Aug import
+there are 695.194 MT of not-started G and 21.570 MT of not-started TS. Keyed on activity alone
+that 717 MT lands in the wrong stage. This is the same failure that inflated Quality Check on
+the All view previously — please do not reintroduce it.
+
+VERIFIED FIGURES — this model partitions NTLT exactly with ZERO unclassified marks on three
+separate days:
+
+                     05-Aug      04-Aug      01-Aug
+    Not Started    4,057.948   4,208.453   3,895.494
+    TS               119.981     116.309      79.580
+    Galvanising      877.780     886.487   1,132.454
+    Y                876.056     862.997     719.754
+    Finished Goods   791.567     768.533     627.319
+    TOTAL          6,723.332   6,842.779   6,454.600
+    unclassified           0           0           0
+
+If your implementation produces any unclassified NTLT marks, a rule is wrong.
+
+NOTE THE STAGE COUNTS DIFFER BY NATURE
+
+TLT has six buckets (Release, Awaiting Assignment, Cutting, Quality Check, Galvanising,
+FG WIP). NTLT has five, and they are NOT parallel — NTLT has no Awaiting Assignment split and
+no fabrication chain beyond TS. Please define them separately rather than trying to map NTLT
+onto the TLT stage set. Where a page shows both natures, the stages should be presented per
+nature, not merged into one column set.
+
+WHAT CHANGES VISIBLY
+
+Y is currently folded into Galvanising. Separating it nearly halves the NTLT galvanising
+figure — 877.780 instead of 1,753.836 on 05-Aug. Y at 876.056 MT is 13% of all NTLT weight, so
+this is a material change to what "NTLT galvanising load" means. Expect people to notice.
+
+ACTIVITY VOCABULARY
+
+The complete NTLT set is: BL, G, GB, NTF, NTFSW, TS, Y — seven codes, matching the existing
+NTLT_ACTIVITIES constant. Three points:
+
+  - NTFW does NOT exist. I checked 01, 04 and 05 August: zero occurrences. Do not add it.
+  - BL exists but is tiny (1 mark / 0.500 MT, present every day). It is a Not Started activity
+    and is covered by the Not Started rule, but make sure nothing drops it.
+  - Blank activity is Finished Goods, not a fabrication activity. All 37 blank NTLT marks
+    (791.567 MT) are Type = FG Pending For Dispatch, consistent with ERP rule U4.
+
+Please apply this everywhere NTLT stages are computed — Project Wise, Activity Wise, Plant
+Operation Wise, the ERP rules and every Excel export. Use one shared definition, not a copy
+per page.
+
+When done, paste the stage definitions and give me the five NTLT figures for the latest
+import.
+```
+
+---
+
+## What to check in the reply
+
+- **Zero unclassified NTLT marks.** The model is verified to partition exactly; any residual
+  means a rule was mistyped.
+- **That Y is a separate column, not merged back into Galvanising.** This is the change most
+  likely to be quietly undone, since every other view in the app groups `G, GB, Y` together.
+- **That the Type guard is on all three WIP-stage rules.** Without it, 717 MT moves to the
+  wrong stage and the totals still look plausible.
+- **One shared definition.** The same rule copied per page is what produced the recurring
+  regressions throughout this project.

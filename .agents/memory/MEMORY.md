@@ -45,3 +45,4 @@
 - [Inventory MFC backfill colour](tracker-inventory-mfc-color.md) — per-MFC-batch colour (green/white/yellow) stored in `inventory_mfc_color` table; shown as dot+swatch-picker in MfcTopRow; `_bgColor` ARGB field on export rows picked up by writeSheet to apply cell fill.
 - [Generated OR chain + OR consistency panel](tracker-generated-or-v2.md) — 5-stage chain (BalRelease→ProgRelease→BalFab→ProgFab→BalGalv→ProgGalv→FG→ProgInsp→ProgDesp) with confidence tiers; OR consistency panel checks 5 cascade identities; inspectionMt added to OrderStatusRow API.
 - [FG representations agree](tracker-fg-representations.md) — record_pool (import-scoped join) and imports.summary fgWipByStructure (jsonb, kg not MT) are byte-identical; jsonb stores raw kg, pool divides by 1000.
+- [NTLT stage model](ntlt-stage-model.md) — 5-stage chain (Not Started/TS/Galvanising/Y/FG); single classifyNtltStage() in domain; Type guard mandatory (~717 MT misclassified without it).

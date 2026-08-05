@@ -6,9 +6,12 @@ import {
   sortActivities,
   processPhase,
   classifyWipCase,
+  classifyNtltStage,
   PROCESS_PHASES,
+  NTLT_STAGES,
   processPhasesForMode,
   type ProcessPhaseKey,
+  type NtltStage,
 } from "@workspace/domain";
 import { useTracker, useContractorCategoryMap, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE, dateRangeWindow, type MfcViewMode } from "@/lib/store";
 import {
@@ -83,10 +86,10 @@ function JobDashboardContent() {
   // Type shows BOTH — every row is resolved by its own category below.
   const isAll = filters.category === "ALL";
   const isNtlt = filters.category === "NTLT";
-  // Phase column headers list mode-specific activity codes (TLT vs NTLT vs both).
-  const headerPhases = processPhasesForMode(
-    isAll ? "ALL" : isNtlt ? "NTLT" : "TLT",
-  );
+  // Phase column headers: NTLT uses its own 5-stage model; TLT/ALL use PROCESS_PHASES.
+  const headerPhases = isNtlt
+    ? (NTLT_STAGES as typeof PROCESS_PHASES)
+    : processPhasesForMode(isAll ? "ALL" : "TLT");
   const { data: rawRecords = [] } = useGetImportRecords(selectedImportId as number, {
     query: {
       enabled: !!selectedImportId,
@@ -272,17 +275,20 @@ function JobDashboardContent() {
           PROCESS_PHASES.map((p) => [p.key, { marks: 0, weight: 0 }]),
         ) as Record<ProcessPhaseKey, { marks: number; weight: number }>;
 
+      const emptyNtltStages = () =>
+        Object.fromEntries(
+          NTLT_STAGES.map((s) => [s.key, { marks: 0, weight: 0 }]),
+        ) as Record<NtltStage, { marks: number; weight: number }>;
+
       const byProject = Array.from(projGroups.entries()).map(([job, recs]) => {
         const phases = emptyPhases();
+        const ntltStages = emptyNtltStages();
         for (const r of recs) {
-          // Use classifyWipCase to apply the Type guard:
+          // TLT phase classification — Use classifyWipCase to apply the Type guard:
           //   CUTTING / AWAITING_ASSIGNMENT → Cutting bucket (pre-production, JCNS+Authorized)
           //   IN_PRODUCTION  → quality/galvanising by activity (Type="Job Card WIP")
           //   FINISHED_GOODS → dispatch bucket (regardless of activity code)
           //   NOT_RELEASED   → skip (counted as Release Balance, not here)
-          // AWAITING_ASSIGNMENT → separate peer bucket (no contractor yet).
-          // CUTTING            → contractor-assigned JCNS+Authorized work.
-          // Each gets its own phase so Project Wise shows them as distinct columns.
           const wipCase = classifyWipCase(r);
           if (wipCase === "AWAITING_ASSIGNMENT") {
             phases.awaitingAssignment.marks += 1;
@@ -300,11 +306,15 @@ function JobDashboardContent() {
           } else if (wipCase === "FINISHED_GOODS") {
             // FG Pending For Dispatch — covers TLT + NTLT regardless of
             // whether r.activity is blank or holds a scheduled activity code.
-            // Populates phases.dispatch so allPhasesWt reconciliation matches
-            // totalWt; the UI FG column still reads fgWipForJob() from
-            // parseSummary.
             phases.dispatch.marks += 1;
             phases.dispatch.weight += r.balanceWt;
+          }
+          // NTLT stage classification — applies the Type guard via classifyNtltStage
+          // (built on classifyWipCase). Only populated for NTLT records.
+          if ((r.category || "TLT") === "NTLT") {
+            const stg = classifyNtltStage(r);
+            ntltStages[stg].marks += 1;
+            ntltStages[stg].weight += r.balanceWt;
           }
         }
         return {
@@ -314,6 +324,7 @@ function JobDashboardContent() {
         qty: recs.reduce((s, r) => s + r.balanceQty, 0),
         weight: recs.reduce((s, r) => s + r.balanceWt, 0),
         phases,
+        ntltStages,
         avgAge: avg(recs),
         firstAssign: recs.reduce<string | null>((min, r) => {
           const d = isoDate(r.assignDate);
@@ -423,6 +434,24 @@ function JobDashboardContent() {
     setExporting(true);
     try {
       const groupLabel = isAll ? "Group" : isNtlt ? "Section" : "Project";
+      // Stage columns vary by mode: NTLT uses its own 5-stage model; TLT/ALL use PROCESS_PHASES.
+      const stageExportColumns = isNtlt
+        ? NTLT_STAGES.flatMap((s) => [
+            { label: `${s.label} Wt (MT)`,    field: `ntlt_${s.key}_wt`,    numeric: true, decimals: 3, total: true },
+            { label: `${s.label} Marks`,       field: `ntlt_${s.key}_marks`, numeric: true, decimals: 0, total: true },
+          ])
+        : [
+            { label: "Awaiting Assignment Wt (MT)", field: "awaitingAssignmentWt",    numeric: true, decimals: 3, total: true },
+            { label: "Awaiting Assignment Marks",    field: "awaitingAssignmentMarks", numeric: true, decimals: 0, total: true },
+            { label: "Cutting Wt (MT)",              field: "cuttingWt",              numeric: true, decimals: 3, total: true },
+            { label: "Cutting Marks",                field: "cuttingMarks",           numeric: true, decimals: 0, total: true },
+            { label: "Quality Check Wt (MT)",        field: "qualityWt",              numeric: true, decimals: 3, total: true },
+            { label: "Quality Check Marks",          field: "qualityMarks",           numeric: true, decimals: 0, total: true },
+            { label: "Galvanising Wt (MT)",          field: "galvanisingWt",          numeric: true, decimals: 3, total: true },
+            { label: "Galvanising Marks",            field: "galvanisingMarks",       numeric: true, decimals: 0, total: true },
+            { label: "FG (WIP file) (MT)",           field: "fgWipWt",                numeric: true, decimals: 3, total: true },
+          ] as Array<{ label: string; field: string; numeric: boolean; decimals: number; total: boolean }>;
+
       const sheets: XlsxSheet[] = [
         {
           name: `By ${groupLabel}`,
@@ -433,15 +462,7 @@ function JobDashboardContent() {
             { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
             { label: "FG (Order Review) (MT)", field: "fgOverviewComputedMt", numeric: true, decimals: 3, total: true },
             { label: "Release Balance Computed (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
-            { label: "Awaiting Assignment Wt (MT)", field: "awaitingAssignmentWt", numeric: true, decimals: 3, total: true },
-            { label: "Awaiting Assignment Marks", field: "awaitingAssignmentMarks", numeric: true, decimals: 0, total: true },
-            { label: "Cutting Wt (MT)", field: "cuttingWt", numeric: true, decimals: 3, total: true },
-            { label: "Cutting Marks", field: "cuttingMarks", numeric: true, decimals: 0, total: true },
-            { label: "Quality Check Wt (MT)", field: "qualityWt", numeric: true, decimals: 3, total: true },
-            { label: "Quality Check Marks", field: "qualityMarks", numeric: true, decimals: 0, total: true },
-            { label: "Galvanising Wt (MT)", field: "galvanisingWt", numeric: true, decimals: 3, total: true },
-            { label: "Galvanising Marks", field: "galvanisingMarks", numeric: true, decimals: 0, total: true },
-            { label: "FG (WIP file) (MT)", field: "fgWipWt", numeric: true, decimals: 3, total: true },
+            ...stageExportColumns,
             { label: "Total Wt (MT)", field: "totalWt", numeric: true, decimals: 3, total: true },
             { label: "Total Marks", field: "marks", numeric: true, decimals: 0, total: true },
             { label: "Avg Ageing (d)", field: "avgAge", numeric: true, decimals: 0 },
@@ -452,32 +473,44 @@ function JobDashboardContent() {
             { label: "31-60d", field: "c31to60", numeric: true, decimals: 0 },
             { label: "60d+", field: "c60Plus", numeric: true, decimals: 0 },
           ],
-          rows: sortedProjects.map((p) => ({
-            job: p.job,
-            workOrderMt: orderByJob.get(p.job)?.wo ?? 0,
-            dispatchMt: orderByJob.get(p.job)?.disp ?? 0,
-            dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
-            fgOverviewComputedMt: orderByJob.get(p.job)?.computedFg ?? 0,
-            releaseBalanceComputedMt: relBalComputedByJob.get(p.job) ?? 0,
-            awaitingAssignmentWt: p.phases.awaitingAssignment.weight / 1000,
-            awaitingAssignmentMarks: p.phases.awaitingAssignment.marks,
-            cuttingWt: p.phases.cutting.weight / 1000,
-            cuttingMarks: p.phases.cutting.marks,
-            qualityWt: p.phases.quality.weight / 1000,
-            qualityMarks: p.phases.quality.marks,
-            galvanisingWt: p.phases.galvanising.weight / 1000,
-            galvanisingMarks: p.phases.galvanising.marks,
-            fgWipWt: fgWipForJob(p.job) / 1000,
-            totalWt: p.weight / 1000,
-            marks: p.marks,
-            qty: p.qty,
-            avgAge: p.avgAge,
-            firstAssign: p.firstAssign ?? "",
-            structures: p.structures,
-            c0to30: p.c0to30,
-            c31to60: p.c31to60,
-            c60Plus: p.c60Plus,
-          })),
+          rows: sortedProjects.map((p) => {
+            const ntltStageCols = isNtlt
+              ? Object.fromEntries(
+                  NTLT_STAGES.flatMap((s) => [
+                    [`ntlt_${s.key}_wt`,    p.ntltStages[s.key].weight / 1000],
+                    [`ntlt_${s.key}_marks`, p.ntltStages[s.key].marks],
+                  ]),
+                )
+              : {
+                  awaitingAssignmentWt:    p.phases.awaitingAssignment.weight / 1000,
+                  awaitingAssignmentMarks: p.phases.awaitingAssignment.marks,
+                  cuttingWt:               p.phases.cutting.weight / 1000,
+                  cuttingMarks:            p.phases.cutting.marks,
+                  qualityWt:               p.phases.quality.weight / 1000,
+                  qualityMarks:            p.phases.quality.marks,
+                  galvanisingWt:           p.phases.galvanising.weight / 1000,
+                  galvanisingMarks:        p.phases.galvanising.marks,
+                  fgWipWt:                 fgWipForJob(p.job) / 1000,
+                };
+            return {
+              job: p.job,
+              workOrderMt: orderByJob.get(p.job)?.wo ?? 0,
+              dispatchMt: orderByJob.get(p.job)?.disp ?? 0,
+              dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
+              fgOverviewComputedMt: orderByJob.get(p.job)?.computedFg ?? 0,
+              releaseBalanceComputedMt: relBalComputedByJob.get(p.job) ?? 0,
+              ...ntltStageCols,
+              totalWt: p.weight / 1000,
+              marks: p.marks,
+              qty: p.qty,
+              avgAge: p.avgAge,
+              firstAssign: p.firstAssign ?? "",
+              structures: p.structures,
+              c0to30: p.c0to30,
+              c31to60: p.c31to60,
+              c60Plus: p.c60Plus,
+            };
+          }),
         },
         {
           name: "By Activity",
@@ -521,6 +554,8 @@ function JobDashboardContent() {
   // IMPORTANT: this hook must stay BEFORE the selectedJob early-return below to
   // satisfy React's Rules of Hooks (hooks must run on every render unconditionally).
   const reconciliationWarning = useMemo(() => {
+    // NTLT uses its own 5-stage model; TLT-phase reconciliation does not apply.
+    if (isNtlt) return null;
     if (byProject.length === 0 || !relBalData?.rows) return null;
     const allPhasesWt = byProject.reduce(
       (s, p) =>
@@ -680,35 +715,51 @@ function JobDashboardContent() {
                     <TableCell className="text-right tabular-nums">
                       {(() => { const v = relBalComputedByJob.get(p.job); return v ? formatWeight(v * 1000) : <span className="text-muted-foreground">-</span>; })()}
                     </TableCell>
-                    {PROCESS_PHASES.map((ph) => {
-                      if (ph.key === "dispatch") {
-                        const wt = fgWipForJob(p.job);
-                        return (
-                          <TableCell key={ph.key} className="text-right tabular-nums">
-                            {wt > 0 ? (
-                              <span className="font-bold">{formatWeight(wt)}</span>
-                            ) : (
-                              <span className="text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                        );
-                      }
-                      const cell = p.phases[ph.key];
-                      return (
-                        <TableCell key={ph.key} className="text-right tabular-nums">
-                          {cell.marks > 0 ? (
-                            <>
-                              <span className="font-bold">{formatWeight(cell.weight)}</span>
-                              <span className="block text-xs text-muted-foreground">
-                                {cell.marks} marks
-                              </span>
-                            </>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                      );
-                    })}
+                    {isNtlt
+                      ? NTLT_STAGES.map((stg) => {
+                          const cell = p.ntltStages[stg.key];
+                          return (
+                            <TableCell key={stg.key} className="text-right tabular-nums">
+                              {cell.marks > 0 ? (
+                                <>
+                                  <span className="font-bold">{formatWeight(cell.weight)}</span>
+                                  <span className="block text-xs text-muted-foreground">{cell.marks} marks</span>
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                          );
+                        })
+                      : PROCESS_PHASES.map((ph) => {
+                          if (ph.key === "dispatch") {
+                            const wt = fgWipForJob(p.job);
+                            return (
+                              <TableCell key={ph.key} className="text-right tabular-nums">
+                                {wt > 0 ? (
+                                  <span className="font-bold">{formatWeight(wt)}</span>
+                                ) : (
+                                  <span className="text-muted-foreground">-</span>
+                                )}
+                              </TableCell>
+                            );
+                          }
+                          const cell = p.phases[ph.key];
+                          return (
+                            <TableCell key={ph.key} className="text-right tabular-nums">
+                              {cell.marks > 0 ? (
+                                <>
+                                  <span className="font-bold">{formatWeight(cell.weight)}</span>
+                                  <span className="block text-xs text-muted-foreground">
+                                    {cell.marks} marks
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                          );
+                        })}
                     <TableCell className="text-right tabular-nums bg-muted/30">
                       <span className="font-bold">{formatWeight(p.weight)}</span>
                       <span className="block text-xs text-muted-foreground">
@@ -725,7 +776,7 @@ function JobDashboardContent() {
                 })}
                 {byProject.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={PROCESS_PHASES.length + 6} className="text-center py-4 text-muted-foreground">
+                    <TableCell colSpan={(isNtlt ? NTLT_STAGES.length : PROCESS_PHASES.length) + 6} className="text-center py-4 text-muted-foreground">
                       No data for the selected filters.
                     </TableCell>
                   </TableRow>
@@ -740,36 +791,53 @@ function JobDashboardContent() {
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.disp) * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.computedFg * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(byProject.reduce((s, p) => s + (relBalComputedByJob.get(p.job) ?? 0), 0) * 1000)}</TableCell>
-                    {PROCESS_PHASES.map((ph) => {
-                      if (ph.key === "dispatch") {
-                        const totalFgWt = byProject.reduce((s, p) => s + fgWipForJob(p.job), 0);
-                        return (
-                          <TableCell key={ph.key} className="text-right tabular-nums">
-                            {totalFgWt > 0 ? (
-                              <span className="font-bold">{formatWeight(totalFgWt)}</span>
-                            ) : (
-                              <span className="text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                        );
-                      }
-                      const marks = byProject.reduce((s, p) => s + p.phases[ph.key].marks, 0);
-                      const weight = byProject.reduce((s, p) => s + p.phases[ph.key].weight, 0);
-                      return (
-                        <TableCell key={ph.key} className="text-right tabular-nums">
-                          {marks > 0 ? (
-                            <>
-                              <span className="font-bold">{formatWeight(weight)}</span>
-                              <span className="block text-xs text-muted-foreground">
-                                {marks} marks
-                              </span>
-                            </>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                      );
-                    })}
+                    {isNtlt
+                      ? NTLT_STAGES.map((stg) => {
+                          const marks = byProject.reduce((s, p) => s + p.ntltStages[stg.key].marks, 0);
+                          const weight = byProject.reduce((s, p) => s + p.ntltStages[stg.key].weight, 0);
+                          return (
+                            <TableCell key={stg.key} className="text-right tabular-nums">
+                              {marks > 0 ? (
+                                <>
+                                  <span className="font-bold">{formatWeight(weight)}</span>
+                                  <span className="block text-xs text-muted-foreground">{marks} marks</span>
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                          );
+                        })
+                      : PROCESS_PHASES.map((ph) => {
+                          if (ph.key === "dispatch") {
+                            const totalFgWt = byProject.reduce((s, p) => s + fgWipForJob(p.job), 0);
+                            return (
+                              <TableCell key={ph.key} className="text-right tabular-nums">
+                                {totalFgWt > 0 ? (
+                                  <span className="font-bold">{formatWeight(totalFgWt)}</span>
+                                ) : (
+                                  <span className="text-muted-foreground">-</span>
+                                )}
+                              </TableCell>
+                            );
+                          }
+                          const marks = byProject.reduce((s, p) => s + p.phases[ph.key].marks, 0);
+                          const weight = byProject.reduce((s, p) => s + p.phases[ph.key].weight, 0);
+                          return (
+                            <TableCell key={ph.key} className="text-right tabular-nums">
+                              {marks > 0 ? (
+                                <>
+                                  <span className="font-bold">{formatWeight(weight)}</span>
+                                  <span className="block text-xs text-muted-foreground">
+                                    {marks} marks
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                          );
+                        })}
                     <TableCell className="text-right tabular-nums bg-muted/50">
                       <span className="font-bold">{formatWeight(totalWt)}</span>
                       <span className="block text-xs text-muted-foreground">

@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { formatWeight, formatDate } from "@/lib/utils";
 import { exportToXlsx, type XlsxColumn } from "@/lib/export";
 import { ChevronDown, FileSpreadsheet } from "lucide-react";
-import { bundleActivitySet, compareActivity, getActivityBundle, TLT_OPERATION_BUNDLE_IDS, activityRank, routeIncludesOp } from "@workspace/domain";
+import { bundleActivitySet, compareActivity, getActivityBundle, TLT_OPERATION_BUNDLE_IDS, activityRank, routeIncludesOp, classifyNtltStage, NTLT_STAGES, type NtltStage } from "@workspace/domain";
 
 // Activity scopes for each plant operation, sliced from the canonical bundles in
 // @workspace/domain (single source of truth). Display/aggregation only — this is
@@ -186,6 +186,12 @@ function PlantOperationContent() {
   const [tab, setTab] = useState("fabrication");
   const [group, setGroup] = useState<string>("ALL");
 
+  // NTLT has its own stage model — show the dedicated overview instead of the
+  // TLT fabrication/galvanization tabs.
+  if (!isTlt) {
+    return <NtltStageOverview records={records} />;
+  }
+
   return (
     <Tabs value={tab} onValueChange={setTab} className="space-y-4">
       <div className="flex items-center justify-between gap-x-6 gap-y-3 flex-wrap">
@@ -193,31 +199,165 @@ function PlantOperationContent() {
           <TabsTrigger value="fabrication" className="px-6">Fabrication</TabsTrigger>
           <TabsTrigger value="galvanization" className="px-6">Galvanization</TabsTrigger>
         </TabsList>
-        {tab === "fabrication" && isTlt && (
+        {tab === "fabrication" && (
           <Segmented value={group} onChange={(v) => setGroup(v ?? "ALL")} options={OP_GROUP_OPTIONS} />
         )}
       </div>
       <TabsContent value="fabrication">
-        {isTlt ? <FabricationTab records={records} group={group} /> : <ComingSoon />}
+        <FabricationTab records={records} group={group} />
       </TabsContent>
       <TabsContent value="galvanization">
-        {isTlt ? <GalvanizationTab records={records} /> : <ComingSoon />}
+        <GalvanizationTab records={records} />
       </TabsContent>
     </Tabs>
   );
 }
 
-function ComingSoon() {
+// ---------------------------------------------------------------------------
+// NTLT stage overview (replaces "Coming soon" when Order Type = NTLT)
+// ---------------------------------------------------------------------------
+function NtltStageOverview({ records }: { records: any[] }) {
+  type StageCount = { marks: number; weight: number; qty: number };
+  const emptyCount = (): StageCount => ({ marks: 0, weight: 0, qty: 0 });
+
+  const { stageTotals, bySection } = useMemo(() => {
+    const stageTotals = Object.fromEntries(
+      NTLT_STAGES.map((s) => [s.key, emptyCount()]),
+    ) as Record<NtltStage, StageCount>;
+
+    const sectionMap = new Map<string, Record<NtltStage, StageCount> & { totalMarks: number; totalWeight: number }>();
+
+    for (const r of records) {
+      const stg = classifyNtltStage(r);
+      stageTotals[stg].marks  += 1;
+      stageTotals[stg].weight += r.balanceWt;
+      stageTotals[stg].qty    += r.balanceQty;
+
+      const sec = r.groupKey || r.section || "(Unassigned)";
+      if (!sectionMap.has(sec)) {
+        sectionMap.set(sec, {
+          ...(Object.fromEntries(NTLT_STAGES.map((s) => [s.key, emptyCount()])) as Record<NtltStage, StageCount>),
+          totalMarks: 0, totalWeight: 0,
+        });
+      }
+      const sg = sectionMap.get(sec)!;
+      sg[stg].marks  += 1;
+      sg[stg].weight += r.balanceWt;
+      sg[stg].qty    += r.balanceQty;
+      sg.totalMarks  += 1;
+      sg.totalWeight += r.balanceWt;
+    }
+
+    const bySection = Array.from(sectionMap.entries())
+      .map(([section, sg]) => ({ section, stages: sg as Record<NtltStage, StageCount>, totalMarks: sg.totalMarks, totalWeight: sg.totalWeight }))
+      .sort((a, b) => a.section.localeCompare(b.section));
+
+    return { stageTotals, bySection };
+  }, [records]);
+
+  const totalMarks  = records.length;
+  const totalWeight = records.reduce((s, r) => s + r.balanceWt, 0);
+
+  const stageCell = (c: StageCount) =>
+    c.marks > 0 ? (
+      <>
+        <span className="font-bold">{formatWeight(c.weight)}</span>
+        <span className="block text-xs text-muted-foreground">{c.marks.toLocaleString()}</span>
+      </>
+    ) : (
+      <span className="text-muted-foreground">-</span>
+    );
+
   return (
-    <Card>
-      <CardContent className="p-10 text-center space-y-2">
-        <p className="text-lg font-semibold">Coming soon</p>
-        <p className="text-sm text-muted-foreground">
-          Plant Operation views are currently built for TLT only. Switch Order Type to TLT
-          to see fabrication and galvanizing grouped by project and contractor.
-        </p>
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      {/* Stage summary tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {NTLT_STAGES.map((stg) => {
+          const t = stageTotals[stg.key];
+          return (
+            <SummaryTile
+              key={stg.key}
+              title={stg.label}
+              value={formatWeight(t.weight)}
+              sub={`${t.marks.toLocaleString()} marks`}
+            />
+          );
+        })}
+      </div>
+
+      {/* Section breakdown table */}
+      <Card>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Section</TableHead>
+                  {NTLT_STAGES.map((stg) => (
+                    <TableHead key={stg.key} className="text-right align-bottom">
+                      <span className="block whitespace-nowrap leading-tight">{stg.label}</span>
+                      <span className="block text-[10px] font-normal text-muted-foreground normal-case">
+                        {stg.activities.length
+                          ? `(${stg.activities.join(", ")})`
+                          : stg.subLabel
+                            ? `(${stg.subLabel})`
+                            : ""}
+                      </span>
+                      <span className="block text-[10px] font-normal text-muted-foreground normal-case">
+                        wt / marks
+                      </span>
+                    </TableHead>
+                  ))}
+                  <TableHead className="text-right align-bottom">
+                    <span className="block">Total</span>
+                    <span className="block text-[10px] font-normal text-muted-foreground normal-case">wt / marks</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bySection.map((sec) => (
+                  <TableRow key={sec.section}>
+                    <TableCell className="font-medium">{sec.section}</TableCell>
+                    {NTLT_STAGES.map((stg) => (
+                      <TableCell key={stg.key} className="text-right tabular-nums">
+                        {stageCell(sec.stages[stg.key])}
+                      </TableCell>
+                    ))}
+                    <TableCell className="text-right tabular-nums bg-muted/30">
+                      <span className="font-bold">{formatWeight(sec.totalWeight)}</span>
+                      <span className="block text-xs text-muted-foreground">{sec.totalMarks.toLocaleString()}</span>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {bySection.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={NTLT_STAGES.length + 2} className="text-center py-6 text-muted-foreground">
+                      No NTLT marks in the current import.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+              {bySection.length > 0 && (
+                <TableFooter>
+                  <TableRow className="border-t-2">
+                    <TableCell className="font-bold uppercase tracking-wider text-xs">Total</TableCell>
+                    {NTLT_STAGES.map((stg) => (
+                      <TableCell key={stg.key} className="text-right tabular-nums">
+                        {stageCell(stageTotals[stg.key])}
+                      </TableCell>
+                    ))}
+                    <TableCell className="text-right tabular-nums bg-muted/50">
+                      <span className="font-bold">{formatWeight(totalWeight)}</span>
+                      <span className="block text-xs text-muted-foreground">{totalMarks.toLocaleString()}</span>
+                    </TableCell>
+                  </TableRow>
+                </TableFooter>
+              )}
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

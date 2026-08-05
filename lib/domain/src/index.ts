@@ -2298,4 +2298,77 @@ export function classifyWipCase(r: {
   return "IN_PRODUCTION";
 }
 
+// ---------------------------------------------------------------------------
+// NTLT stage model (five-stage chain, separate from TLT PROCESS_PHASES)
+// ---------------------------------------------------------------------------
+// NTLT has a different process chain and activity vocabulary from TLT.
+// These definitions are the SINGLE source of truth — import from here, never
+// inline per-page copies.
+//
+//   Not Started  →  TS  →  Galvanising (G, GB)  →  Y  →  Finished Goods
+//
+// THE TYPE GUARD IS NOT OPTIONAL.
+// G and TS appear under BOTH "Job Card Not Started" AND "Job Card WIP".
+// On the 05-Aug import there are 695 MT of not-started G and 21 MT of
+// not-started TS. Keying on activity alone would silently misclassify ~717 MT.
+// classifyNtltStage is built on classifyWipCase so the guard is always applied.
+// ---------------------------------------------------------------------------
+
+export type NtltStage = "notStarted" | "ts" | "galvanising" | "y" | "fg";
+
+export interface NtltStageInfo {
+  key: NtltStage;
+  label: string;
+  /** Activity codes that define this stage. Empty for Type-driven stages. */
+  activities: readonly string[];
+  /** Short sub-label (e.g. "JCNS") shown under the column heading. */
+  subLabel?: string;
+}
+
+/**
+ * Five-stage NTLT production chain in display order.
+ * Defined separately from TLT PROCESS_PHASES — the two natures have different
+ * process chains and activity vocabularies. Never merge or share these arrays.
+ */
+export const NTLT_STAGES: readonly NtltStageInfo[] = [
+  { key: "notStarted", label: "Not Started",    activities: [],         subLabel: "JCNS" },
+  { key: "ts",         label: "TS",             activities: ["TS"] },
+  { key: "galvanising",label: "Galvanising",    activities: ["G", "GB"] },
+  { key: "y",          label: "Y",              activities: ["Y"] },
+  { key: "fg",         label: "Finished Goods", activities: [],         subLabel: "FG" },
+];
+
+/**
+ * Classify an NTLT mark into one of the five NTLT stages.
+ *
+ * Built on classifyWipCase so the Type guard (Col A) is always applied.
+ *
+ *   "Job Card Not Started" (any activity)     → notStarted
+ *   "Job Card WIP" + activity = TS            → ts
+ *   "Job Card WIP" + activity ∈ {G, GB}       → galvanising
+ *   "Job Card WIP" + activity = Y             → y
+ *   "FG Pending For Dispatch"                  → fg
+ *   Any unexpected IN_PRODUCTION activity      → notStarted (safe fallback,
+ *                                                never drops a mark)
+ */
+export function classifyNtltStage(r: {
+  activity?: string | null;
+  isInitialCutting?: boolean | null;
+  jobCardType?: string | null;
+  jobCardStatus?: string | null;
+  contractor?: string | null;
+}): NtltStage {
+  const wipCase = classifyWipCase(r);
+  if (wipCase === "FINISHED_GOODS") return "fg";
+  if (wipCase !== "IN_PRODUCTION")  return "notStarted";
+  // IN_PRODUCTION: discriminate by activity (Type guard already passed above).
+  const act = (r.activity ?? "").trim().toUpperCase();
+  if (act === "TS")                return "ts";
+  if (act === "G" || act === "GB") return "galvanising";
+  if (act === "Y")                 return "y";
+  // Unexpected IN_PRODUCTION activity (e.g. NTF/NTFSW under WIP type) —
+  // collapse to notStarted rather than silently dropping the mark.
+  return "notStarted";
+}
+
 export * from "./aggregate";
