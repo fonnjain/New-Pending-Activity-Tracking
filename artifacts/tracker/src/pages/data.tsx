@@ -29,44 +29,52 @@ import { ContractorSetupContent } from "@/pages/contractor-setup";
 import { WarningParametersContent } from "@/pages/warning-parameters";
 import { ThicknessContent } from "@/pages/thickness";
 
-// All tabs are admin-only. The /bucket-list-dates route is served by a
-// dedicated standalone page (BucketListDatesPage) so non-admin users can view
-// MFC dates without accessing the admin surface here.
-const ALL_TABS: Array<{ path: string; label: string; disabled?: boolean }> = [
-  { path: "/data", label: "Data" },
+// Most tabs are admin-only. Job Templates is visible to all roles so normal
+// users can manage their own named job sets for the global filter.
+// The /bucket-list-dates route is served by a dedicated standalone page
+// (BucketListDatesPage) so non-admin users can view MFC dates separately.
+const ALL_TABS: Array<{ path: string; label: string; disabled?: boolean; adminOnly?: boolean }> = [
+  { path: "/data", label: "Data", adminOnly: true },
   { path: "/job-templates", label: "Job Templates" },
-  { path: "/computed-fg", label: "Computed FG" },
-  { path: "/order-reconciliation", label: "Order Reconciliation" },
-  { path: "/release-balance", label: "Release Balance" },
-  { path: "/order-review-generated", label: "Order Review (Gen.)" },
-  { path: "/contractor-setup", label: "Contractor Setup" },
-  { path: "/warning-parameters", label: "Warning Parameters" },
-  { path: "/thickness", label: "Thickness" },
-  { path: "/erp-rules", label: "ERP Rules" },
-  { path: "/bucket-list-dates", label: "Bucket List Dates" },
-  { path: "/users", label: "Users" },
+  { path: "/computed-fg", label: "Computed FG", adminOnly: true },
+  { path: "/order-reconciliation", label: "Order Reconciliation", adminOnly: true },
+  { path: "/release-balance", label: "Release Balance", adminOnly: true },
+  { path: "/order-review-generated", label: "Order Review (Gen.)", adminOnly: true },
+  { path: "/contractor-setup", label: "Contractor Setup", adminOnly: true },
+  { path: "/warning-parameters", label: "Warning Parameters", adminOnly: true },
+  { path: "/thickness", label: "Thickness", adminOnly: true },
+  { path: "/erp-rules", label: "ERP Rules", adminOnly: true },
+  { path: "/bucket-list-dates", label: "Bucket List Dates", adminOnly: true },
+  { path: "/users", label: "Users", adminOnly: true },
 ];
 
 export default function DataView() {
   const { data: authStatus } = useGetAuthStatus({
     query: { queryKey: getGetAuthStatusQueryKey() },
   });
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
 
-  // Redirect non-admins away from the admin Data area entirely.
+  const isAdmin = authStatus?.role === "admin";
+  const activeTab = ALL_TABS.find((t) => t.path === location);
+
+  // Redirect non-admins away from admin-only tabs; allow /job-templates through.
   useEffect(() => {
-    if (authStatus && authStatus.role !== "admin") {
-      setLocation("~/production");
+    if (!authStatus) return;
+    if (!isAdmin && (!activeTab || activeTab.adminOnly)) {
+      setLocation("/job-templates");
     }
-  }, [authStatus, setLocation]);
+  }, [authStatus, isAdmin, activeTab, setLocation]);
 
-  if (!authStatus || authStatus.role !== "admin") return null;
-  return <TabbedPage />;
+  if (!authStatus) return null;
+  // Block render until redirect resolves for admin-only tabs
+  if (!isAdmin && activeTab?.adminOnly) return null;
+  return <TabbedPage isAdmin={isAdmin} />;
 }
 
-function TabbedPage() {
+function TabbedPage({ isAdmin }: { isAdmin: boolean }) {
   const [location, setLocation] = useLocation();
-  const active = ALL_TABS.find((t) => t.path === location)?.path ?? "/data";
+  const visibleTabs = ALL_TABS.filter((t) => isAdmin || !t.adminOnly);
+  const active = visibleTabs.find((t) => t.path === location)?.path ?? visibleTabs[0]?.path ?? "/job-templates";
 
   return (
     <div className="space-y-4">
@@ -74,7 +82,7 @@ function TabbedPage() {
         <Segmented
           value={active}
           onChange={(v) => v && setLocation(v)}
-          options={ALL_TABS.map((t) => ({ value: t.path, label: t.label, disabled: t.disabled }))}
+          options={visibleTabs.map((t) => ({ value: t.path, label: t.label, disabled: t.disabled }))}
         />
       </div>
 
