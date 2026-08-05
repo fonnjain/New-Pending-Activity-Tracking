@@ -18,6 +18,7 @@ import productionMovementRouter from "./productionMovement";
 import erpRulesRouter from "./erpRules";
 import jobTemplatesRouter from "./jobTemplates";
 import itemMasterRouter from "./itemMaster";
+import contractorDedupRouter from "./contractorDedup";
 
 const router: IRouter = Router();
 
@@ -40,5 +41,6 @@ router.use(productionMovementRouter);
 router.use(erpRulesRouter);
 router.use(jobTemplatesRouter);
 router.use(itemMasterRouter);
+router.use(contractorDedupRouter);
 
 export default router;

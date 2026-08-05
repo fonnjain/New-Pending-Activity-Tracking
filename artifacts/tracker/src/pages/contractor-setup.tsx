@@ -4,8 +4,19 @@ import {
   useUpsertContractorCategory,
   useDeleteContractorCategory,
   useGetImportRecords,
+  useListContractorAliases,
+  useListContractorDedupProposals,
+  useAnalyzeContractorDedup,
+  useApproveContractorDedupProposal,
+  useRejectContractorDedupProposal,
+  useDeleteContractorAlias,
   getListContractorCategoriesQueryKey,
   getGetImportRecordsQueryKey,
+  getListContractorAliasesQueryKey,
+  getListContractorDedupProposalsQueryKey,
+  getGetContractorDedupPendingCountQueryKey,
+  type ContractorDedupProposal,
+  type ContractorAlias,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTracker } from "@/lib/store";
@@ -42,7 +53,8 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Users, Trash2, Search, FileSpreadsheet, Plus } from "lucide-react";
+import { Segmented } from "@/components/ui/segmented";
+import { Users, Trash2, Search, FileSpreadsheet, Plus, Sparkles, CheckCircle2, XCircle, ChevronDown, ChevronRight, Link2Off } from "lucide-react";
 
 interface RowState {
   displayName: string;
@@ -61,6 +73,390 @@ export default function ContractorSetupView() {
 }
 
 export function ContractorSetupContent() {
+  const [activeTab, setActiveTab] = useState<"contractors" | "dedup">("contractors");
+  const { data: pendingProposals } = useListContractorDedupProposals({ status: "pending" });
+  const pendingCount = pendingProposals?.length ?? 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Users className="w-5 h-5 text-muted-foreground" />
+          <h1 className="text-xl font-bold tracking-tight">Contractor Setup</h1>
+          {pendingCount > 0 && (
+            <span className="inline-flex items-center justify-center rounded-full bg-amber-500 text-white text-xs font-bold px-2 py-0.5 min-w-[22px]">
+              {pendingCount}
+            </span>
+          )}
+        </div>
+        <LogoutButton />
+      </div>
+
+      <Segmented
+        value={activeTab}
+        onChange={(v) => setActiveTab(v as "contractors" | "dedup")}
+        options={[
+          { value: "contractors", label: "Contractors" },
+          {
+            value: "dedup",
+            label: pendingCount > 0 ? `Dedup (${pendingCount} pending)` : "Dedup",
+          },
+        ]}
+      />
+
+      {activeTab === "contractors" ? (
+        <ContractorSetupInner />
+      ) : (
+        <ContractorDedupTab />
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Dedup Tab
+// ============================================================================
+
+function ConfidenceBadge({ confidence }: { confidence: number | null | undefined }) {
+  if (confidence == null) return null;
+  const pct = Math.round(confidence * 100);
+  const color =
+    pct >= 90 ? "bg-green-100 text-green-800" :
+    pct >= 70 ? "bg-yellow-100 text-yellow-800" :
+    "bg-red-100 text-red-800";
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>
+      {pct}% confidence
+    </span>
+  );
+}
+
+function ProposalCard({
+  proposal,
+  onApprove,
+  onReject,
+  isApproving,
+  isRejecting,
+  approveError,
+}: {
+  proposal: ContractorDedupProposal;
+  onApprove: () => void;
+  onReject: () => void;
+  isApproving: boolean;
+  isRejecting: boolean;
+  approveError?: string | null;
+}) {
+  const [showEntries, setShowEntries] = useState(true);
+  const entries = (proposal.aliasEntries ?? []) as { rawName: string; normalizedKey: string }[];
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-sm">{proposal.canonicalDisplay}</span>
+              <span className="text-xs text-muted-foreground font-mono">{proposal.canonicalKey}</span>
+              <ConfidenceBadge confidence={proposal.confidence} />
+              {proposal.confidence == null && (
+                <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-800 px-2 py-0.5 text-xs font-medium">
+                  New contractor
+                </span>
+              )}
+            </div>
+            {proposal.reason && (
+              <p className="text-xs text-muted-foreground italic">{proposal.reason}</p>
+            )}
+          </div>
+          {proposal.status === "pending" && (
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-green-700 border-green-300 hover:bg-green-50"
+                onClick={onApprove}
+                disabled={isApproving || isRejecting}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                Approve
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-red-700 border-red-300 hover:bg-red-50"
+                onClick={onReject}
+                disabled={isApproving || isRejecting}
+              >
+                <XCircle className="w-3.5 h-3.5 mr-1" />
+                Reject
+              </Button>
+            </div>
+          )}
+          {proposal.status === "approved" && (
+            <span className="text-xs font-medium text-green-700 bg-green-100 rounded-full px-2 py-0.5 shrink-0">Approved</span>
+          )}
+          {proposal.status === "rejected" && (
+            <span className="text-xs font-medium text-red-700 bg-red-100 rounded-full px-2 py-0.5 shrink-0">Rejected</span>
+          )}
+        </div>
+
+        {entries.length > 0 && (
+          <div>
+            <button
+              type="button"
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-1"
+              onClick={() => setShowEntries((s) => !s)}
+            >
+              {showEntries ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+              {entries.length} alias{entries.length !== 1 ? "es" : ""} will be merged under canonical
+            </button>
+            {showEntries && (
+              <ul className="ml-4 space-y-0.5">
+                {entries.map((e, i) => (
+                  <li key={i} className="text-xs text-muted-foreground flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 shrink-0" />
+                    <span>{e.rawName}</span>
+                    <span className="font-mono opacity-60">{e.normalizedKey}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {approveError && (
+          <p className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1">
+            {approveError}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ContractorDedupTab() {
+  const queryClient = useQueryClient();
+
+  const { data: allProposals, isLoading: proposalsLoading } = useListContractorDedupProposals();
+  const { data: aliases, isLoading: aliasesLoading } = useListContractorAliases();
+
+  const analyze = useAnalyzeContractorDedup();
+  const approve = useApproveContractorDedupProposal();
+  const reject = useRejectContractorDedupProposal();
+  const deleteAlias = useDeleteContractorAlias();
+
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [analyzeMessage, setAnalyzeMessage] = useState<string | null>(null);
+  const [showReviewed, setShowReviewed] = useState(false);
+  const [approveErrors, setApproveErrors] = useState<Record<number, string>>({});
+
+  const invalidateAll = () => {
+    queryClient.invalidateQueries({ queryKey: getListContractorDedupProposalsQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getGetContractorDedupPendingCountQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getListContractorAliasesQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getListContractorCategoriesQueryKey() });
+  };
+
+  const handleAnalyze = () => {
+    setAnalyzeError(null);
+    setAnalyzeMessage(null);
+    analyze.mutate(undefined, {
+      onSuccess: (data) => {
+        setAnalyzeMessage(
+          data.proposals.length === 0
+            ? (data.message ?? "No new merge groups found.")
+            : `${data.proposals.length} new proposal${data.proposals.length !== 1 ? "s" : ""} created.`,
+        );
+        invalidateAll();
+      },
+      onError: (e) => {
+        setAnalyzeError(`Analysis failed: ${e.message ?? String(e)}`);
+      },
+    });
+  };
+
+  const handleApprove = (id: number) => {
+    setApproveErrors((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    approve.mutate({ id }, {
+      onSuccess: invalidateAll,
+      onError: (e) => {
+        const msg = (e as { response?: { data?: { error?: string } }; message?: string })
+          ?.response?.data?.error ?? e.message ?? String(e);
+        setApproveErrors((prev) => ({ ...prev, [id]: msg }));
+      },
+    });
+  };
+
+  const handleReject = (id: number) => {
+    reject.mutate({ id }, {
+      onSuccess: invalidateAll,
+    });
+  };
+
+  const handleDeleteAlias = (aliasKey: string) => {
+    deleteAlias.mutate(
+      { params: { aliasKey } },
+      { onSuccess: invalidateAll },
+    );
+  };
+
+  const pending = allProposals?.filter((p) => p.status === "pending") ?? [];
+  const reviewed = allProposals?.filter((p) => p.status !== "pending") ?? [];
+
+  return (
+    <div className="space-y-6">
+      {/* Analyze Section */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base uppercase tracking-wider text-muted-foreground">
+            AI Analysis
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Run an AI pass over all contractor names in the system to find likely duplicates
+            (punctuation variants, spacing differences). The AI proposes merge groups; you
+            approve or reject each one. No changes are made without your approval.
+          </p>
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={handleAnalyze}
+              disabled={analyze.isPending}
+              className="gap-2"
+            >
+              <Sparkles className="w-4 h-4" />
+              {analyze.isPending ? "Analyzing…" : "Analyze Contractors"}
+            </Button>
+          </div>
+          {analyzeError && (
+            <p className="text-sm text-destructive">{analyzeError}</p>
+          )}
+          {analyzeMessage && (
+            <p className="text-sm text-green-700 dark:text-green-400">{analyzeMessage}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Pending Proposals */}
+      <div className="space-y-3">
+        <h2 className="text-base font-semibold">
+          Pending Review
+          {pending.length > 0 && (
+            <span className="ml-2 inline-flex items-center justify-center rounded-full bg-amber-500 text-white text-xs font-bold px-2 py-0.5 min-w-[22px]">
+              {pending.length}
+            </span>
+          )}
+        </h2>
+        {proposalsLoading ? (
+          <div className="text-sm text-muted-foreground">Loading…</div>
+        ) : pending.length === 0 ? (
+          <div className="text-sm text-muted-foreground border rounded-lg p-6 text-center">
+            No pending proposals. Run AI Analysis above, or upload a WIP file to flag new contractors.
+          </div>
+        ) : (
+          pending.map((p) => (
+            <ProposalCard
+              key={p.id}
+              proposal={p}
+              onApprove={() => handleApprove(p.id)}
+              onReject={() => handleReject(p.id)}
+              isApproving={approve.isPending}
+              isRejecting={reject.isPending}
+              approveError={approveErrors[p.id]}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Reviewed Proposals (collapsible) */}
+      {reviewed.length > 0 && (
+        <div className="space-y-3">
+          <button
+            type="button"
+            className="flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground"
+            onClick={() => setShowReviewed((s) => !s)}
+          >
+            {showReviewed ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            Reviewed ({reviewed.length})
+          </button>
+          {showReviewed &&
+            reviewed.map((p) => (
+              <ProposalCard
+                key={p.id}
+                proposal={p}
+                onApprove={() => {}}
+                onReject={() => {}}
+                isApproving={false}
+                isRejecting={false}
+              />
+            ))}
+        </div>
+      )}
+
+      {/* Active Alias Mappings */}
+      <div className="space-y-3">
+        <h2 className="text-base font-semibold">Active Alias Mappings</h2>
+        <p className="text-xs text-muted-foreground">
+          These aliases were created when a proposal was approved. Alias contractor names
+          are silently resolved to their canonical on every page. Removing an alias does
+          not restore the original contractor_categories row.
+        </p>
+        {aliasesLoading ? (
+          <div className="text-sm text-muted-foreground">Loading…</div>
+        ) : !aliases || aliases.length === 0 ? (
+          <div className="text-sm text-muted-foreground border rounded-lg p-6 text-center">
+            No active aliases. Approve a merge proposal to create aliases.
+          </div>
+        ) : (
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Alias (raw name)</TableHead>
+                    <TableHead>Alias Key (normalized)</TableHead>
+                    <TableHead>Canonical Key</TableHead>
+                    <TableHead className="w-[60px]" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {aliases.map((a) => (
+                    <TableRow key={a.aliasKey}>
+                      <TableCell className="font-medium text-sm">{a.rawName}</TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">{a.aliasKey}</TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">{a.canonicalKey}</TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleDeleteAlias(a.aliasKey)}
+                          disabled={deleteAlias.isPending}
+                          title="Remove alias"
+                        >
+                          <Link2Off className="w-4 h-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Original contractors tab (moved into its own component)
+// ============================================================================
+
+function ContractorSetupInner() {
   const { selectedImportId } = useTracker();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
@@ -208,23 +604,16 @@ export function ContractorSetupContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Users className="w-5 h-5 text-muted-foreground" />
-          <h1 className="text-xl font-bold tracking-tight">Contractor Setup</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExport}
-            disabled={filtered.length === 0}
-          >
-            <FileSpreadsheet className="w-4 h-4 mr-1.5" />
-            Export Excel
-          </Button>
-          <LogoutButton />
-        </div>
+      <div className="flex items-center justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleExport}
+          disabled={filtered.length === 0}
+        >
+          <FileSpreadsheet className="w-4 h-4 mr-1.5" />
+          Export Excel
+        </Button>
       </div>
 
       <p className="text-sm text-muted-foreground">

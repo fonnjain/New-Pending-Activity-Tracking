@@ -21,3 +21,5 @@ export * from "./userSessionLog";
 export * from "./importDeletionLog";
 export * from "./jobTemplates";
 export * from "./itemMaster";
+export * from "./contractorAliases";
+export * from "./contractorDedupProposals";

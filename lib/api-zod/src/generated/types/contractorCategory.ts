@@ -19,7 +19,7 @@ export interface ContractorCategory {
   /** FAB/GALVA tags (only meaningful when category=OUT_VENDOR). */
   outVendorType: ContractorCategoryOutVendorTypeItem[];
   /**
-     * Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, null=Unassigned). Display metadata only.
+     * Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, out_production=Out Production, job_work=Job Work, null=Unassigned). Display metadata only.
      * @nullable
      */
   plantLocation?: ContractorCategoryPlantLocation;

@@ -581,6 +581,28 @@ export function normalizeContractorName(
   return (name ?? "").trim().replace(/\s+/g, " ").toUpperCase();
 }
 
+/**
+ * Resolve a raw contractor string to its canonical join key, consulting an
+ * alias map built from approved dedup proposals.
+ *
+ * Flow:
+ *   normalizeContractorName(raw) → look up in aliasMap → return canonical key
+ *   If no alias exists for the normalized string, returns the normalized string
+ *   itself (same as the legacy behaviour with no alias table).
+ *
+ * @param raw       - The raw contractor string from a WIP row or filter.
+ * @param aliasMap  - Map of normalizedAliasKey → canonicalKey, built from the
+ *                    contractor_aliases table. Pass an empty Map to get the
+ *                    legacy (no-alias) behaviour.
+ */
+export function resolveContractorKey(
+  raw: string | null | undefined,
+  aliasMap: ReadonlyMap<string, string>,
+): string {
+  const normalized = normalizeContractorName(raw);
+  return aliasMap.get(normalized) ?? normalized;
+}
+
 export interface ContractorCategorySeed {
   name: string;
   category: ContractorCategory;

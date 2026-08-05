@@ -7,7 +7,7 @@
  */
 
 /**
- * Plant location metadata (null = Unassigned).
+ * Plant location metadata (null = Unassigned). All four location values are valid for input; the UI restricts which options are shown per contractor type.
  * @nullable
  */
 export type ContractorCategoryInputPlantLocation = typeof ContractorCategoryInputPlantLocation[keyof typeof ContractorCategoryInputPlantLocation] | null;

@@ -1139,7 +1139,7 @@ export const ContractorCategoryOutVendorTypeItem = {
 } as const;
 
 /**
- * Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, null=Unassigned). Display metadata only.
+ * Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, out_production=Out Production, job_work=Job Work, null=Unassigned). Display metadata only.
  * @nullable
  */
 export type ContractorCategoryPlantLocation = typeof ContractorCategoryPlantLocation[keyof typeof ContractorCategoryPlantLocation] | null;
@@ -1162,7 +1162,7 @@ export interface ContractorCategory {
   /** FAB/GALVA tags (only meaningful when category=OUT_VENDOR). */
   outVendorType: ContractorCategoryOutVendorTypeItem[];
   /**
-     * Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, null=Unassigned). Display metadata only.
+     * Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, out_production=Out Production, job_work=Job Work, null=Unassigned). Display metadata only.
      * @nullable
      */
   plantLocation?: ContractorCategoryPlantLocation;
@@ -1188,7 +1188,7 @@ export const ContractorCategoryInputOutVendorTypeItem = {
 } as const;
 
 /**
- * Plant location metadata (null = Unassigned).
+ * Plant location metadata (null = Unassigned). All four location values are valid for input; the UI restricts which options are shown per contractor type.
  * @nullable
  */
 export type ContractorCategoryInputPlantLocation = typeof ContractorCategoryInputPlantLocation[keyof typeof ContractorCategoryInputPlantLocation] | null;
@@ -1206,7 +1206,7 @@ export interface ContractorCategoryInput {
   category: ContractorCategoryInputCategory;
   outVendorType?: ContractorCategoryInputOutVendorTypeItem[];
   /**
-     * Plant location metadata (null = Unassigned).
+     * Plant location metadata (null = Unassigned). All four location values are valid for input; the UI restricts which options are shown per contractor type.
      * @nullable
      */
   plantLocation?: ContractorCategoryInputPlantLocation;
@@ -2486,6 +2486,69 @@ export interface ImportDeletionLogEntry {
   deletedBy: string;
 }
 
+/**
+ * A single approved alias mapping. The normalized aliasKey resolves to the canonical contractor_categories nameKey via this table.
+
+ */
+export interface ContractorAlias {
+  /** normalizeContractorName(rawName) — the join key used in WIP rows. */
+  aliasKey: string;
+  /** The nameKey of the canonical contractor_categories entry. */
+  canonicalKey: string;
+  /** Original raw string as it appeared in the WIP file (for display). */
+  rawName: string;
+  createdAt?: string;
+}
+
+/**
+ * One alias within a dedup proposal.
+ */
+export interface ContractorAliasEntry {
+  rawName: string;
+  normalizedKey: string;
+}
+
+export type ContractorDedupProposalStatus = typeof ContractorDedupProposalStatus[keyof typeof ContractorDedupProposalStatus];
+
+
+export const ContractorDedupProposalStatus = {
+  pending: 'pending',
+  approved: 'approved',
+  rejected: 'rejected',
+} as const;
+
+/**
+ * One AI-generated or upload-triggered merge proposal awaiting human review. status: pending | approved | rejected. confidence: 0–1 from the AI (null for upload-triggered proposals).
+
+ */
+export interface ContractorDedupProposal {
+  id: number;
+  canonicalKey: string;
+  canonicalDisplay: string;
+  aliasEntries: ContractorAliasEntry[];
+  /**
+     * @minimum 0
+     * @maximum 1
+     * @nullable
+     */
+  confidence?: number | null;
+  /** @nullable */
+  reason?: string | null;
+  status: ContractorDedupProposalStatus;
+  createdAt: string;
+  /** @nullable */
+  reviewedAt?: string | null;
+}
+
+export interface ContractorDedupPendingCount {
+  count: number;
+}
+
+export interface ContractorDedupAnalyzeResult {
+  proposals: ContractorDedupProposal[];
+  message?: string;
+}
+
 export type DeleteRsjThicknessParams = {
 groupKey: string;
 };
@@ -2512,6 +2575,33 @@ export type DeleteFabricationPriorityParams = {
 section: string;
 column: string;
 project: string;
+};
+
+export type DeleteContractorAliasParams = {
+aliasKey: string;
+};
+
+export type ListContractorDedupProposalsParams = {
+status?: ListContractorDedupProposalsStatus;
+};
+
+export type ListContractorDedupProposalsStatus = typeof ListContractorDedupProposalsStatus[keyof typeof ListContractorDedupProposalsStatus];
+
+
+export const ListContractorDedupProposalsStatus = {
+  pending: 'pending',
+  approved: 'approved',
+  rejected: 'rejected',
+} as const;
+
+export type ApproveContractorDedupProposal200 = {
+  ok: boolean;
+  id: number;
+};
+
+export type RejectContractorDedupProposal200 = {
+  ok: boolean;
+  id: number;
 };
 
 export type DeleteContractorCategoryParams = {

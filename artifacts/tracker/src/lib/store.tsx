@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useMemo, ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useListImports, useListContractorCategories, useGetCurrentJobs, type Record } from "@workspace/api-client-react";
-import { getActivityBundle, normalizeContractorName, filterRecords, parseAssignDateMs, dateToDayKey, type RecordFilters } from "@workspace/domain";
+import { useListImports, useListContractorCategories, useListContractorAliases, useGetCurrentJobs, type Record } from "@workspace/api-client-react";
+import { getActivityBundle, normalizeContractorName, resolveContractorKey, filterRecords, parseAssignDateMs, dateToDayKey, type RecordFilters } from "@workspace/domain";
 
 // Sentinel prefix that marks an activity-bundle selection inside the single
 // `filters.activity` slot. A plain activity code (e.g. "Y") is matched exactly;
@@ -356,11 +356,30 @@ export interface ContractorCategoryInfo {
   plantLocation: string | null; // unit_1 | unit_2 | null
 }
 
+// Raw alias map: normalizedAliasKey → canonicalKey. Used by useContractorCategoryMap
+// to fold aliases into the category lookup, and exported for components that need
+// to know the alias-→-canonical key mapping directly (e.g. the Dedup UI).
+export function useContractorAliasMap(): Map<string, string> {
+  const { data } = useListContractorAliases();
+  return useMemo(() => {
+    const m = new Map<string, string>();
+    for (const row of data ?? []) {
+      m.set(row.aliasKey, row.canonicalKey);
+    }
+    return m;
+  }, [data]);
+}
+
+// Re-export resolveContractorKey so consumers can import from store without
+// depending on @workspace/domain directly.
+export { resolveContractorKey };
+
 export function useContractorCategoryMap(): Map<string, ContractorCategoryInfo> {
-  const { data } = useListContractorCategories();
+  const { data: categories } = useListContractorCategories();
+  const aliasMap = useContractorAliasMap();
   return useMemo(() => {
     const m = new Map<string, ContractorCategoryInfo>();
-    for (const row of data ?? []) {
+    for (const row of categories ?? []) {
       m.set(row.nameKey, {
         category: row.category,
         outVendorType: row.outVendorType ?? [],
@@ -368,8 +387,22 @@ export function useContractorCategoryMap(): Map<string, ContractorCategoryInfo> 
         plantLocation: row.plantLocation ?? null,
       });
     }
+    // Pre-populate alias keys → canonical ContractorCategoryInfo so that
+    // contractorCategoryFor(aliasContractor, categoryMap) transparently returns
+    // the canonical entry without any call-site changes.
+    //
+    // IMPORTANT: alias mappings are applied UNCONDITIONALLY, overwriting any
+    // contractor_categories row that might exist for the alias key. A row in
+    // contractor_categories for an alias key is a stale artefact (e.g. created
+    // before the merge was approved, or by an erroneous empty-alias approval).
+    // The alias table is always the higher-authority source of truth — letting
+    // a stale categories row shadow an alias would silently break dedup.
+    for (const [aliasKey, canonicalKey] of aliasMap) {
+      const canonical = m.get(canonicalKey);
+      if (canonical) m.set(aliasKey, canonical); // alias always wins
+    }
     return m;
-  }, [data]);
+  }, [categories, aliasMap]);
 }
 
 // Resolve a contractor's category info from the overlay map, defaulting to

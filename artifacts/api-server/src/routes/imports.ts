@@ -13,6 +13,8 @@ import {
   importDeletionLogTable,
   settingsTable,
   contractorCategoriesTable,
+  contractorAliasesTable,
+  contractorDedupProposalsTable,
   rsjThicknessTable,
   manualThicknessTable,
   inventoryMfcBatchColorTable,
@@ -21,6 +23,7 @@ import {
   type InsertRecordPool,
   type ChangeSummary,
   type RecordPoolRow,
+  type AliasEntry,
 } from "@workspace/db";
 import {
   GetImportParams,
@@ -47,6 +50,7 @@ import {
   summarizeOverview,
   lifecycleCounts,
   identityKey,
+  normalizeContractorName,
   type RecordFilters,
   type VelocitySnapshot,
   type TurnaroundSettings,
@@ -823,6 +827,14 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
     await recomputeAssignmentBalance(file.buffer);
   } catch (err) {
     req.log.warn({ err }, "Assignment balance recompute failed after import");
+  }
+  // Flag any contractor strings from the new import that are not yet classified
+  // in contractor_categories or covered by an alias/proposal. Each new string
+  // becomes a pending contractor_dedup_proposals row for admin review.
+  try {
+    await flagNewContractors(result.import.id, req.log);
+  } catch (err) {
+    req.log.warn({ err }, "Contractor flagging failed after import (non-fatal)");
   }
   res.status(201).json(result);
 });
@@ -2464,6 +2476,105 @@ router.get("/contractor-movement", async (_req, res): Promise<void> => {
   const entries = await recomputeContractorMovement();
   res.json({ entries, generatedAt: new Date().toISOString() });
 });
+
+// ---------------------------------------------------------------------------
+// flagNewContractors — called after every WIP merge
+// ---------------------------------------------------------------------------
+// Inspects the newly committed import's contractor strings and inserts a
+// pending contractor_dedup_proposals row for any string whose normalized form
+// is not yet covered by:
+//   (a) a contractor_categories entry
+//   (b) a contractor_aliases alias key
+//   (c) an existing pending or approved proposal (either as canonical or alias)
+//
+// A "new contractor" proposal has empty aliasEntries, confidence=null, and
+// reason="New contractor name — not yet classified." Approving it will create
+// a contractor_categories entry (UNCLASSIFIED) which the admin can then
+// configure via the Contractors tab.
+async function flagNewContractors(
+  importId: number,
+  log: { warn: (...a: unknown[]) => void },
+): Promise<void> {
+  // 1. Distinct contractor strings from the new import rows.
+  // record_pool has no importId column — rows are joined via import_rows.
+  const poolContractors = await db
+    .selectDistinct({ contractor: recordPoolTable.contractor })
+    .from(importRowsTable)
+    .innerJoin(
+      recordPoolTable,
+      eq(importRowsTable.poolId, recordPoolTable.id),
+    )
+    .where(
+      and(
+        eq(importRowsTable.importId, importId),
+        sql`${recordPoolTable.contractor} is not null and ${recordPoolTable.contractor} <> ''`,
+      ),
+    );
+
+  if (poolContractors.length === 0) return;
+
+  // 2. Build the set of already-covered normalized keys.
+  const [catRows, aliasRows, proposalRows] = await Promise.all([
+    db
+      .select({ nameKey: contractorCategoriesTable.nameKey })
+      .from(contractorCategoriesTable),
+    db
+      .select({ aliasKey: contractorAliasesTable.aliasKey })
+      .from(contractorAliasesTable),
+    db
+      .select({
+        canonicalKey: contractorDedupProposalsTable.canonicalKey,
+        aliasEntries: contractorDedupProposalsTable.aliasEntries,
+        status: contractorDedupProposalsTable.status,
+      })
+      .from(contractorDedupProposalsTable),
+  ]);
+
+  const covered = new Set<string>();
+  for (const r of catRows) covered.add(r.nameKey);
+  for (const r of aliasRows) covered.add(r.aliasKey);
+  for (const p of proposalRows) {
+    if (p.status !== "rejected") {
+      covered.add(p.canonicalKey);
+      for (const e of (p.aliasEntries as AliasEntry[]) ?? []) {
+        covered.add(e.normalizedKey);
+      }
+    }
+  }
+
+  // 3. Collect new strings not yet covered.
+  const newEntries: Array<{ raw: string; key: string }> = [];
+  for (const { contractor } of poolContractors) {
+    const raw = contractor?.trim();
+    if (!raw) continue;
+    const key = normalizeContractorName(raw);
+    if (!covered.has(key)) {
+      newEntries.push({ raw, key });
+      covered.add(key); // prevent duplicates within the same batch
+    }
+  }
+
+  if (newEntries.length === 0) return;
+
+  // 4. Insert a pending proposal for each new string.
+  for (const { raw, key } of newEntries) {
+    try {
+      await db
+        .insert(contractorDedupProposalsTable)
+        .values({
+          canonicalKey: key,
+          canonicalDisplay: raw,
+          aliasEntries: [],
+          confidence: null,
+          reason: "New contractor name — not yet classified.",
+          status: "pending",
+        })
+        .onConflictDoNothing(); // safe: no unique key clash expected, but guard anyway
+    } catch (err) {
+      log.warn({ err, raw, key }, "Failed to insert contractor dedup proposal");
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Startup cache warm-up

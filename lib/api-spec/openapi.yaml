@@ -22,6 +22,8 @@ tags:
     description: App-level turnaround-warning configuration (ideal days, grace bands)
   - name: admin
     description: Manual maintenance triggers for otherwise-automatic recompute/backfill passes
+  - name: contractorDedup
+    description: Contractor name deduplication — AI-assisted merge proposals with human review gate
 paths:
   /settings:
     get:
@@ -406,6 +408,185 @@ paths:
       responses:
         "204":
           description: Deleted
+  /contractor-aliases:
+    get:
+      operationId: listContractorAliases
+      tags: [contractorDedup]
+      summary: List all approved contractor alias mappings
+      description: >
+        Returns every approved alias row (normalizedAliasKey → canonicalKey + rawName).
+        The frontend builds a resolution map from this response so all surfaces
+        transparently resolve alias contractor names to their canonical entry.
+        Public (read-only).
+      responses:
+        "200":
+          description: Approved alias rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContractorAlias"
+    delete:
+      operationId: deleteContractorAlias
+      tags: [contractorDedup]
+      summary: Remove a single alias mapping
+      description: >
+        Removes one alias mapping (undo an approved merge for a single alias).
+        The aliasKey is passed as a query param. Requires authentication.
+      parameters:
+        - name: aliasKey
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+  /contractor-dedup/pending-count:
+    get:
+      operationId: getContractorDedupPendingCount
+      tags: [contractorDedup]
+      summary: Count of proposals awaiting review
+      description: >
+        Returns the number of contractor dedup proposals still in 'pending' status.
+        Used by the nav badge to show the reviewer there is work to do.
+        Public (read-only).
+      responses:
+        "200":
+          description: Pending count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorDedupPendingCount"
+  /contractor-dedup/proposals:
+    get:
+      operationId: listContractorDedupProposals
+      tags: [contractorDedup]
+      summary: List dedup proposals
+      description: >
+        Returns all contractor dedup proposals, newest first. Optional ?status=
+        query param to filter by status (pending, approved, rejected).
+        Public (read-only).
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, approved, rejected]
+      responses:
+        "200":
+          description: Proposal list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContractorDedupProposal"
+  /contractor-dedup/analyze:
+    post:
+      operationId: analyzeContractorDedup
+      tags: [contractorDedup]
+      summary: Run AI deduplication analysis
+      description: >
+        Reads all distinct contractor strings from record_pool and
+        contractor_categories, calls the AI to propose merge groups, and stores
+        the results as pending proposals. Only strings not already covered by
+        an alias or an active proposal are sent to the AI. Requires authentication.
+      responses:
+        "200":
+          description: Newly created proposals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorDedupAnalyzeResult"
+        "503":
+          description: AI unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /contractor-dedup/proposals/{id}/approve:
+    post:
+      operationId: approveContractorDedupProposal
+      tags: [contractorDedup]
+      summary: Approve a merge proposal
+      description: >
+        Approves a pending proposal: writes alias rows to contractor_aliases,
+        consolidates contractor_categories onto the canonical key, and marks
+        the proposal approved. Requires authentication.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  id:
+                    type: integer
+                required: [ok, id]
+        "404":
+          description: Proposal not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Proposal already reviewed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /contractor-dedup/proposals/{id}/reject:
+    post:
+      operationId: rejectContractorDedupProposal
+      tags: [contractorDedup]
+      summary: Reject a merge proposal
+      description: >
+        Marks a pending proposal as rejected. No alias rows are written.
+        The AI will not re-propose the same group unless the covered-keys
+        check is reset. Requires authentication.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  id:
+                    type: integer
+                required: [ok, id]
+        "404":
+          description: Proposal not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Proposal already reviewed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /contractor-categories:
     get:
       operationId: listContractorCategories
@@ -3472,8 +3653,8 @@ components:
           description: FAB/GALVA tags (only meaningful when category=OUT_VENDOR).
         plantLocation:
           type: ["string", "null"]
-          enum: [unit_1, unit_2, null]
-          description: Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, null=Unassigned). Display metadata only.
+          enum: [unit_1, unit_2, out_production, job_work, null]
+          description: Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, out_production=Out Production, job_work=Job Work, null=Unassigned). Display metadata only.
         updatedAt:
           type: string
       required:
@@ -3496,8 +3677,8 @@ components:
             enum: [FAB, GALVA]
         plantLocation:
           type: ["string", "null"]
-          enum: [unit_1, unit_2, null]
-          description: Plant location metadata (null = Unassigned).
+          enum: [unit_1, unit_2, out_production, job_work, null]
+          description: Plant location metadata (null = Unassigned). All four location values are valid for input; the UI restricts which options are shown per contractor type.
       required:
         - displayName
         - category
@@ -5292,6 +5473,93 @@ components:
         - sourceFilename
         - deletedAt
         - deletedBy
+    ContractorAlias:
+      type: object
+      description: >
+        A single approved alias mapping. The normalized aliasKey resolves to
+        the canonical contractor_categories nameKey via this table.
+      properties:
+        aliasKey:
+          type: string
+          description: normalizeContractorName(rawName) — the join key used in WIP rows.
+        canonicalKey:
+          type: string
+          description: The nameKey of the canonical contractor_categories entry.
+        rawName:
+          type: string
+          description: Original raw string as it appeared in the WIP file (for display).
+        createdAt:
+          type: string
+      required:
+        - aliasKey
+        - canonicalKey
+        - rawName
+    ContractorAliasEntry:
+      type: object
+      description: One alias within a dedup proposal.
+      properties:
+        rawName:
+          type: string
+        normalizedKey:
+          type: string
+      required:
+        - rawName
+        - normalizedKey
+    ContractorDedupProposal:
+      type: object
+      description: >
+        One AI-generated or upload-triggered merge proposal awaiting human review.
+        status: pending | approved | rejected.
+        confidence: 0–1 from the AI (null for upload-triggered proposals).
+      properties:
+        id:
+          type: integer
+        canonicalKey:
+          type: string
+        canonicalDisplay:
+          type: string
+        aliasEntries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContractorAliasEntry"
+        confidence:
+          type: ["number", "null"]
+          minimum: 0
+          maximum: 1
+        reason:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        createdAt:
+          type: string
+        reviewedAt:
+          type: ["string", "null"]
+      required:
+        - id
+        - canonicalKey
+        - canonicalDisplay
+        - aliasEntries
+        - status
+        - createdAt
+    ContractorDedupPendingCount:
+      type: object
+      properties:
+        count:
+          type: integer
+      required:
+        - count
+    ContractorDedupAnalyzeResult:
+      type: object
+      properties:
+        proposals:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContractorDedupProposal"
+        message:
+          type: string
+      required:
+        - proposals
     ContractorBalanceMovementDay:
       type: object
       description: One consecutive import pair's per-contractor movement measures.

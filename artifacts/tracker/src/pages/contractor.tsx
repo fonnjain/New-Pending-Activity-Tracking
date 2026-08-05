@@ -96,7 +96,12 @@ function ContractorContent() {
   const { conMap, sortedStats, unassignedCount, busiest, mostAged } = useMemo(() => {
     const conMap = new Map<string, any[]>();
     records.forEach(r => {
-      const c = r.contractor || "Unassigned";
+      // Resolve alias → canonical display name so all Phoenix variants collapse
+      // into one row after an alias mapping is approved.
+      const rawC = r.contractor || "Unassigned";
+      const c = rawC === "Unassigned"
+        ? rawC
+        : (contractorCategoryFor(rawC, categoryMap).displayName || rawC);
       if (!conMap.has(c)) conMap.set(c, []);
       conMap.get(c)!.push(r);
     });
@@ -137,7 +142,7 @@ function ContractorContent() {
       busiest: sortedStats[0]?.name || "-",
       mostAged: [...stats].sort((a, b) => (b.avgAge || 0) - (a.avgAge || 0))[0]?.name || "-",
     };
-  }, [records]);
+  }, [records, categoryMap]);
 
   const handleExport = () => {
     const cols: XlsxColumn[] = [

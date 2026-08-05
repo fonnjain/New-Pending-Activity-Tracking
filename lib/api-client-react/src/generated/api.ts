@@ -24,6 +24,7 @@ import type {
   AiStatus,
   ApplyItemMasterResult,
   ApplyItemMasterThicknessBody,
+  ApproveContractorDedupProposal200,
   AuthCredentials,
   AuthHeartbeat200,
   AuthStatus,
@@ -33,9 +34,13 @@ import type {
   CommitRequest,
   CommitResult,
   CompareImportsParams,
+  ContractorAlias,
   ContractorBalanceMovementResponse,
   ContractorCategory,
   ContractorCategoryInput,
+  ContractorDedupAnalyzeResult,
+  ContractorDedupPendingCount,
+  ContractorDedupProposal,
   ContractorMovementResponse,
   CreateUser201,
   CreateUserRequest,
@@ -43,6 +48,7 @@ import type {
   CurrentJobsUpload,
   CurrentJobsUploadResponse,
   DeleteAllResult,
+  DeleteContractorAliasParams,
   DeleteContractorCategoryParams,
   DeleteFabricationPriorityParams,
   DeleteInventoryManualEParams,
@@ -73,6 +79,7 @@ import type {
   ItemMasterStats,
   ItemMasterThicknessGroup,
   ItemMasterUploadResult,
+  ListContractorDedupProposalsParams,
   ListImportsParams,
   ListUsers200,
   ManualThickness,
@@ -82,6 +89,7 @@ import type {
   OrderStatusResponse,
   ProductionMovementResponse,
   Record,
+  RejectContractorDedupProposal200,
   ReleaseBalanceResponse,
   ReportRequest,
   ReportResult,
@@ -1344,6 +1352,545 @@ export const useDeleteFabricationPriority = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteFabricationPriorityMutationOptions(options));
+    }
+
+export const getListContractorAliasesUrl = () => {
+
+
+
+
+  return `/api/contractor-aliases`
+}
+
+/**
+ * Returns every approved alias row (normalizedAliasKey → canonicalKey + rawName). The frontend builds a resolution map from this response so all surfaces transparently resolve alias contractor names to their canonical entry. Public (read-only).
+
+ * @summary List all approved contractor alias mappings
+ */
+export const listContractorAliases = async ( options?: RequestInit): Promise<ContractorAlias[]> => {
+
+  return customFetch<ContractorAlias[]>(getListContractorAliasesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListContractorAliasesQueryKey = () => {
+    return [
+    `/api/contractor-aliases`
+    ] as const;
+    }
+
+
+export const getListContractorAliasesQueryOptions = <TData = Awaited<ReturnType<typeof listContractorAliases>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContractorAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListContractorAliasesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listContractorAliases>>> = ({ signal }) => listContractorAliases({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listContractorAliases>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListContractorAliasesQueryResult = NonNullable<Awaited<ReturnType<typeof listContractorAliases>>>
+export type ListContractorAliasesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List all approved contractor alias mappings
+ */
+
+export function useListContractorAliases<TData = Awaited<ReturnType<typeof listContractorAliases>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContractorAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListContractorAliasesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getDeleteContractorAliasUrl = (params: DeleteContractorAliasParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/contractor-aliases?${stringifiedParams}` : `/api/contractor-aliases`
+}
+
+/**
+ * Removes one alias mapping (undo an approved merge for a single alias). The aliasKey is passed as a query param. Requires authentication.
+
+ * @summary Remove a single alias mapping
+ */
+export const deleteContractorAlias = async (params: DeleteContractorAliasParams, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteContractorAliasUrl(params),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteContractorAliasMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteContractorAlias>>, TError,{params: DeleteContractorAliasParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteContractorAlias>>, TError,{params: DeleteContractorAliasParams}, TContext> => {
+
+const mutationKey = ['deleteContractorAlias'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteContractorAlias>>, {params: DeleteContractorAliasParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  deleteContractorAlias(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteContractorAliasMutationResult = NonNullable<Awaited<ReturnType<typeof deleteContractorAlias>>>
+
+    export type DeleteContractorAliasMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove a single alias mapping
+ */
+export const useDeleteContractorAlias = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteContractorAlias>>, TError,{params: DeleteContractorAliasParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteContractorAlias>>,
+        TError,
+        {params: DeleteContractorAliasParams},
+        TContext
+      > => {
+      return useMutation(getDeleteContractorAliasMutationOptions(options));
+    }
+
+export const getGetContractorDedupPendingCountUrl = () => {
+
+
+
+
+  return `/api/contractor-dedup/pending-count`
+}
+
+/**
+ * Returns the number of contractor dedup proposals still in 'pending' status. Used by the nav badge to show the reviewer there is work to do. Public (read-only).
+
+ * @summary Count of proposals awaiting review
+ */
+export const getContractorDedupPendingCount = async ( options?: RequestInit): Promise<ContractorDedupPendingCount> => {
+
+  return customFetch<ContractorDedupPendingCount>(getGetContractorDedupPendingCountUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetContractorDedupPendingCountQueryKey = () => {
+    return [
+    `/api/contractor-dedup/pending-count`
+    ] as const;
+    }
+
+
+export const getGetContractorDedupPendingCountQueryOptions = <TData = Awaited<ReturnType<typeof getContractorDedupPendingCount>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getContractorDedupPendingCount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetContractorDedupPendingCountQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getContractorDedupPendingCount>>> = ({ signal }) => getContractorDedupPendingCount({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getContractorDedupPendingCount>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetContractorDedupPendingCountQueryResult = NonNullable<Awaited<ReturnType<typeof getContractorDedupPendingCount>>>
+export type GetContractorDedupPendingCountQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Count of proposals awaiting review
+ */
+
+export function useGetContractorDedupPendingCount<TData = Awaited<ReturnType<typeof getContractorDedupPendingCount>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getContractorDedupPendingCount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetContractorDedupPendingCountQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListContractorDedupProposalsUrl = (params?: ListContractorDedupProposalsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/contractor-dedup/proposals?${stringifiedParams}` : `/api/contractor-dedup/proposals`
+}
+
+/**
+ * Returns all contractor dedup proposals, newest first. Optional ?status= query param to filter by status (pending, approved, rejected). Public (read-only).
+
+ * @summary List dedup proposals
+ */
+export const listContractorDedupProposals = async (params?: ListContractorDedupProposalsParams, options?: RequestInit): Promise<ContractorDedupProposal[]> => {
+
+  return customFetch<ContractorDedupProposal[]>(getListContractorDedupProposalsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListContractorDedupProposalsQueryKey = (params?: ListContractorDedupProposalsParams,) => {
+    return [
+    `/api/contractor-dedup/proposals`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListContractorDedupProposalsQueryOptions = <TData = Awaited<ReturnType<typeof listContractorDedupProposals>>, TError = ErrorType<unknown>>(params?: ListContractorDedupProposalsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContractorDedupProposals>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListContractorDedupProposalsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listContractorDedupProposals>>> = ({ signal }) => listContractorDedupProposals(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listContractorDedupProposals>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListContractorDedupProposalsQueryResult = NonNullable<Awaited<ReturnType<typeof listContractorDedupProposals>>>
+export type ListContractorDedupProposalsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List dedup proposals
+ */
+
+export function useListContractorDedupProposals<TData = Awaited<ReturnType<typeof listContractorDedupProposals>>, TError = ErrorType<unknown>>(
+ params?: ListContractorDedupProposalsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContractorDedupProposals>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListContractorDedupProposalsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getAnalyzeContractorDedupUrl = () => {
+
+
+
+
+  return `/api/contractor-dedup/analyze`
+}
+
+/**
+ * Reads all distinct contractor strings from record_pool and contractor_categories, calls the AI to propose merge groups, and stores the results as pending proposals. Only strings not already covered by an alias or an active proposal are sent to the AI. Requires authentication.
+
+ * @summary Run AI deduplication analysis
+ */
+export const analyzeContractorDedup = async ( options?: RequestInit): Promise<ContractorDedupAnalyzeResult> => {
+
+  return customFetch<ContractorDedupAnalyzeResult>(getAnalyzeContractorDedupUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getAnalyzeContractorDedupMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyzeContractorDedup>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof analyzeContractorDedup>>, TError,void, TContext> => {
+
+const mutationKey = ['analyzeContractorDedup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof analyzeContractorDedup>>, void> = () => {
+
+
+          return  analyzeContractorDedup(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AnalyzeContractorDedupMutationResult = NonNullable<Awaited<ReturnType<typeof analyzeContractorDedup>>>
+
+    export type AnalyzeContractorDedupMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Run AI deduplication analysis
+ */
+export const useAnalyzeContractorDedup = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyzeContractorDedup>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof analyzeContractorDedup>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getAnalyzeContractorDedupMutationOptions(options));
+    }
+
+export const getApproveContractorDedupProposalUrl = (id: number,) => {
+
+
+
+
+  return `/api/contractor-dedup/proposals/${id}/approve`
+}
+
+/**
+ * Approves a pending proposal: writes alias rows to contractor_aliases, consolidates contractor_categories onto the canonical key, and marks the proposal approved. Requires authentication.
+
+ * @summary Approve a merge proposal
+ */
+export const approveContractorDedupProposal = async (id: number, options?: RequestInit): Promise<ApproveContractorDedupProposal200> => {
+
+  return customFetch<ApproveContractorDedupProposal200>(getApproveContractorDedupProposalUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getApproveContractorDedupProposalMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveContractorDedupProposal>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof approveContractorDedupProposal>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['approveContractorDedupProposal'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveContractorDedupProposal>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  approveContractorDedupProposal(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveContractorDedupProposalMutationResult = NonNullable<Awaited<ReturnType<typeof approveContractorDedupProposal>>>
+
+    export type ApproveContractorDedupProposalMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Approve a merge proposal
+ */
+export const useApproveContractorDedupProposal = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveContractorDedupProposal>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof approveContractorDedupProposal>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getApproveContractorDedupProposalMutationOptions(options));
+    }
+
+export const getRejectContractorDedupProposalUrl = (id: number,) => {
+
+
+
+
+  return `/api/contractor-dedup/proposals/${id}/reject`
+}
+
+/**
+ * Marks a pending proposal as rejected. No alias rows are written. The AI will not re-propose the same group unless the covered-keys check is reset. Requires authentication.
+
+ * @summary Reject a merge proposal
+ */
+export const rejectContractorDedupProposal = async (id: number, options?: RequestInit): Promise<RejectContractorDedupProposal200> => {
+
+  return customFetch<RejectContractorDedupProposal200>(getRejectContractorDedupProposalUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRejectContractorDedupProposalMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectContractorDedupProposal>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rejectContractorDedupProposal>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['rejectContractorDedupProposal'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rejectContractorDedupProposal>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  rejectContractorDedupProposal(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RejectContractorDedupProposalMutationResult = NonNullable<Awaited<ReturnType<typeof rejectContractorDedupProposal>>>
+
+    export type RejectContractorDedupProposalMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Reject a merge proposal
+ */
+export const useRejectContractorDedupProposal = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectContractorDedupProposal>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof rejectContractorDedupProposal>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getRejectContractorDedupProposalMutationOptions(options));
     }
 
 export const getListContractorCategoriesUrl = () => {

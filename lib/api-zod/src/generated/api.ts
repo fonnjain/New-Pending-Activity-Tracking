@@ -826,6 +826,130 @@ export const DeleteFabricationPriorityQueryParams = zod.object({
 
 
 /**
+ * Returns every approved alias row (normalizedAliasKey → canonicalKey + rawName). The frontend builds a resolution map from this response so all surfaces transparently resolve alias contractor names to their canonical entry. Public (read-only).
+
+ * @summary List all approved contractor alias mappings
+ */
+export const ListContractorAliasesResponseItem = zod.object({
+  "aliasKey": zod.string().describe('normalizeContractorName(rawName) — the join key used in WIP rows.'),
+  "canonicalKey": zod.string().describe('The nameKey of the canonical contractor_categories entry.'),
+  "rawName": zod.string().describe('Original raw string as it appeared in the WIP file (for display).'),
+  "createdAt": zod.string().optional()
+}).describe('A single approved alias mapping. The normalized aliasKey resolves to the canonical contractor_categories nameKey via this table.\n')
+export const ListContractorAliasesResponse = zod.array(ListContractorAliasesResponseItem)
+
+
+/**
+ * Removes one alias mapping (undo an approved merge for a single alias). The aliasKey is passed as a query param. Requires authentication.
+
+ * @summary Remove a single alias mapping
+ */
+export const DeleteContractorAliasQueryParams = zod.object({
+  "aliasKey": zod.coerce.string()
+})
+
+
+/**
+ * Returns the number of contractor dedup proposals still in 'pending' status. Used by the nav badge to show the reviewer there is work to do. Public (read-only).
+
+ * @summary Count of proposals awaiting review
+ */
+export const GetContractorDedupPendingCountResponse = zod.object({
+  "count": zod.number()
+})
+
+
+/**
+ * Returns all contractor dedup proposals, newest first. Optional ?status= query param to filter by status (pending, approved, rejected). Public (read-only).
+
+ * @summary List dedup proposals
+ */
+export const ListContractorDedupProposalsQueryParams = zod.object({
+  "status": zod.enum(['pending', 'approved', 'rejected']).optional()
+})
+
+export const listContractorDedupProposalsResponseConfidenceMin = 0;
+export const listContractorDedupProposalsResponseConfidenceMax = 1;
+
+
+
+export const ListContractorDedupProposalsResponseItem = zod.object({
+  "id": zod.number(),
+  "canonicalKey": zod.string(),
+  "canonicalDisplay": zod.string(),
+  "aliasEntries": zod.array(zod.object({
+  "rawName": zod.string(),
+  "normalizedKey": zod.string()
+}).describe('One alias within a dedup proposal.')),
+  "confidence": zod.number().min(listContractorDedupProposalsResponseConfidenceMin).max(listContractorDedupProposalsResponseConfidenceMax).nullish(),
+  "reason": zod.string().nullish(),
+  "status": zod.enum(['pending', 'approved', 'rejected']),
+  "createdAt": zod.string(),
+  "reviewedAt": zod.string().nullish()
+}).describe('One AI-generated or upload-triggered merge proposal awaiting human review. status: pending | approved | rejected. confidence: 0–1 from the AI (null for upload-triggered proposals).\n')
+export const ListContractorDedupProposalsResponse = zod.array(ListContractorDedupProposalsResponseItem)
+
+
+/**
+ * Reads all distinct contractor strings from record_pool and contractor_categories, calls the AI to propose merge groups, and stores the results as pending proposals. Only strings not already covered by an alias or an active proposal are sent to the AI. Requires authentication.
+
+ * @summary Run AI deduplication analysis
+ */
+export const analyzeContractorDedupResponseProposalsItemConfidenceMin = 0;
+export const analyzeContractorDedupResponseProposalsItemConfidenceMax = 1;
+
+
+
+export const AnalyzeContractorDedupResponse = zod.object({
+  "proposals": zod.array(zod.object({
+  "id": zod.number(),
+  "canonicalKey": zod.string(),
+  "canonicalDisplay": zod.string(),
+  "aliasEntries": zod.array(zod.object({
+  "rawName": zod.string(),
+  "normalizedKey": zod.string()
+}).describe('One alias within a dedup proposal.')),
+  "confidence": zod.number().min(analyzeContractorDedupResponseProposalsItemConfidenceMin).max(analyzeContractorDedupResponseProposalsItemConfidenceMax).nullish(),
+  "reason": zod.string().nullish(),
+  "status": zod.enum(['pending', 'approved', 'rejected']),
+  "createdAt": zod.string(),
+  "reviewedAt": zod.string().nullish()
+}).describe('One AI-generated or upload-triggered merge proposal awaiting human review. status: pending | approved | rejected. confidence: 0–1 from the AI (null for upload-triggered proposals).\n')),
+  "message": zod.string().optional()
+})
+
+
+/**
+ * Approves a pending proposal: writes alias rows to contractor_aliases, consolidates contractor_categories onto the canonical key, and marks the proposal approved. Requires authentication.
+
+ * @summary Approve a merge proposal
+ */
+export const ApproveContractorDedupProposalParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ApproveContractorDedupProposalResponse = zod.object({
+  "ok": zod.boolean(),
+  "id": zod.number()
+})
+
+
+/**
+ * Marks a pending proposal as rejected. No alias rows are written. The AI will not re-propose the same group unless the covered-keys check is reset. Requires authentication.
+
+ * @summary Reject a merge proposal
+ */
+export const RejectContractorDedupProposalParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RejectContractorDedupProposalResponse = zod.object({
+  "ok": zod.boolean(),
+  "id": zod.number()
+})
+
+
+/**
  * Returns the contractor sub-category overlay (normalized name key -> category + FAB/GALVA tags). Joined to records at read time; never changes parsing, ageing, dedup, qty, or the contractor string. Public (read-only).
 
  * @summary List contractor sub-category mappings
@@ -835,7 +959,7 @@ export const ListContractorCategoriesResponseItem = zod.object({
   "displayName": zod.string().describe('Contractor name as last seen\/entered (for display).'),
   "category": zod.enum(['CNC', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']).describe('Contractor sub-category.'),
   "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).describe('FAB\/GALVA tags (only meaningful when category=OUT_VENDOR).'),
-  "plantLocation": zod.union([zod.literal('unit_1'),zod.literal('unit_2'),zod.literal('out_production'),zod.literal('job_work'),zod.literal(null)]).nullish().describe('Plant location. Display metadata only.'),
+  "plantLocation": zod.union([zod.literal('unit_1'),zod.literal('unit_2'),zod.literal('out_production'),zod.literal('job_work'),zod.literal(null)]).nullish().describe('Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, out_production=Out Production, job_work=Job Work, null=Unassigned). Display metadata only.'),
   "updatedAt": zod.string().optional()
 })
 export const ListContractorCategoriesResponse = zod.array(ListContractorCategoriesResponseItem)
@@ -850,7 +974,7 @@ export const UpsertContractorCategoryBody = zod.object({
   "displayName": zod.string(),
   "category": zod.enum(['CNC', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']),
   "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).optional(),
-  "plantLocation": zod.union([zod.literal('unit_1'),zod.literal('unit_2'),zod.literal('out_production'),zod.literal('job_work'),zod.literal(null)]).nullish().describe('Plant location metadata (null = Unassigned).')
+  "plantLocation": zod.union([zod.literal('unit_1'),zod.literal('unit_2'),zod.literal('out_production'),zod.literal('job_work'),zod.literal(null)]).nullish().describe('Plant location metadata (null = Unassigned). All four location values are valid for input; the UI restricts which options are shown per contractor type.')
 })
 
 export const UpsertContractorCategoryResponse = zod.object({
@@ -858,7 +982,7 @@ export const UpsertContractorCategoryResponse = zod.object({
   "displayName": zod.string().describe('Contractor name as last seen\/entered (for display).'),
   "category": zod.enum(['CNC', 'SUB_CONTRACTOR', 'OUT_VENDOR', 'UNCLASSIFIED']).describe('Contractor sub-category.'),
   "outVendorType": zod.array(zod.enum(['FAB', 'GALVA'])).describe('FAB\/GALVA tags (only meaningful when category=OUT_VENDOR).'),
-  "plantLocation": zod.union([zod.literal('unit_1'),zod.literal('unit_2'),zod.literal('out_production'),zod.literal('job_work'),zod.literal(null)]).nullish().describe('Plant location. Display metadata only.'),
+  "plantLocation": zod.union([zod.literal('unit_1'),zod.literal('unit_2'),zod.literal('out_production'),zod.literal('job_work'),zod.literal(null)]).nullish().describe('Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, out_production=Out Production, job_work=Job Work, null=Unassigned). Display metadata only.'),
   "updatedAt": zod.string().optional()
 })
 
