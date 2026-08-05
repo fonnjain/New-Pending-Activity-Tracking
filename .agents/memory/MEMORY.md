@@ -46,3 +46,4 @@
 - [Generated OR chain + OR consistency panel](tracker-generated-or-v2.md) — 5-stage chain (BalRelease→ProgRelease→BalFab→ProgFab→BalGalv→ProgGalv→FG→ProgInsp→ProgDesp) with confidence tiers; OR consistency panel checks 5 cascade identities; inspectionMt added to OrderStatusRow API.
 - [FG representations agree](tracker-fg-representations.md) — record_pool (import-scoped join) and imports.summary fgWipByStructure (jsonb, kg not MT) are byte-identical; jsonb stores raw kg, pool divides by 1000.
 - [NTLT stage model](ntlt-stage-model.md) — 5-stage chain (Not Started/TS/Galvanising/Y/FG); single classifyNtltStage() in domain; Type guard mandatory (~717 MT misclassified without it).
+- [Generated OR two-banner layout](tracker-generated-or-v2.md) — Gen OR table restructured: 10 fixed cols + PROGRESS (4) + BALANCE (5); exportGenOrXlsx writes real merged-cell banners (K1:R1, S1:Z1) verified cell-by-cell.

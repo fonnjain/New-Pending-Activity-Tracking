@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, PlusCircle, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History, CircleCheck, CircleX, Info, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { exportToXlsx, exportToJson, type XlsxColumn } from "@/lib/export";
+import { exportToXlsx, exportToJson, exportGenOrXlsx, type XlsxColumn } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
 import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { AiReviewPanel } from "@/components/ai-review-panel";
@@ -1044,6 +1044,22 @@ const GEN_STAGES: GenStageSpec[] = [
   // Expect a large gap (~47%) — they measure different things (snapshot vs cumulative book figure).
   { key:"fg",   label:"Finished Goods (FG)",  shortLabel:"FG",   genField:"genProgFg",      orField:null,         structOrField:"orProgFg"      },
 ];
+
+// Balance stage specs (separate from Progress). Balance = what remains in-progress at each stage.
+// Gen values are derived from WIP. OR values come from the Balance columns in the uploaded OR file.
+// orField is null when the OR file has no corresponding Balance column in our schema.
+interface GenBalStageSpec {
+  key: string; label: string; shortLabel: string;
+  genField: keyof GenStructRowData;
+  orField: keyof GenStructRowData | null;
+}
+const GEN_BAL_STAGES: GenBalStageSpec[] = [
+  { key:"balRel",  label:"Balance Release",     shortLabel:"Rel",  genField:"genBalRelease", orField:"orBalRelease" },
+  { key:"balFab",  label:"Balance Fabrication", shortLabel:"Fab",  genField:"genBalFab",     orField:"orBalFab"    },
+  { key:"balGalv", label:"Balance Galvanising", shortLabel:"Galv", genField:"genBalGalv",    orField:"orBalGalv"   },
+  // No OR file Balance FG column in our schema — show gen only; leave OR blank, never zero.
+  { key:"balFg",   label:"Balance Fin. Goods",  shortLabel:"FG",   genField:"fgWt",          orField:null          },
+];
 const TIER_CLS: Record<ConfTier,{badge:string;flag:string}> = {
   high:   { badge:"bg-emerald-500/15 text-emerald-700 dark:text-emerald-400", flag:"text-red-600 dark:text-red-400 font-semibold" },
   medium: { badge:"bg-amber-500/15 text-amber-700 dark:text-amber-400",       flag:"text-orange-600 dark:text-orange-400 font-semibold" },
@@ -1063,12 +1079,20 @@ interface GenStructRowData {
   fgWt: number;              // blank-activity (FG Pending) marks weight (MT)
   genProgFg: number;         // = fgWt — WIP "FG Pending For Dispatch" weight
   totalWt: number;           // all marks weight (MT)
-  // OR file comparison values
+  // OR file Progress comparison values
   orProgRelease: number | null; orProgFab: number | null;
   orProgGalv: number | null;
   /** fileGalvMt − fileDespatchMt; null when OR row absent or galvMt null;
    *  may be negative (despatch exceeds galv in OR file — source-data issue). */
   orProgFg: number | null;
+  // OR file Balance comparison values (from Balance columns in OR file)
+  orBalRelease: number | null; // fileBalReleaseMt
+  orBalFab: number | null;     // balFabMt
+  orBalGalv: number | null;    // balGalvMt
+  // OR leading-column values
+  orSets: number | null;       // Order Qty sets
+  orWeightMt: number | null;   // Order Qty weight (MT)
+  weightPerSet: number | null; // orWeightMt / orSets — null when either unavailable
   // BOM label
   bomDerived: "Proto" | "Mass" | "Mixed";
   bomLowConf: boolean;         // markCount < 8 — accessory-item noise likely
@@ -1213,6 +1237,11 @@ function GeneratedOrderReviewContent() {
         const orBomTypeVal    = orRow?.bomType ?? null;
         const orBomInconsistent = (orBomData.bomTypes.get(structKey)?.size ?? 0) > 1;
 
+        const orSets       = orRow?.sets ?? null;
+        const orWeightMt   = orRow?.weightMt ?? null;
+        const weightPerSet = (orWeightMt != null && orSets != null && orSets > 0)
+          ? orWeightMt / orSets : null;
+
         structures.push({
           structure: struct,
           subType: marks[0]?.towerSubType ?? null,
@@ -1229,6 +1258,10 @@ function GeneratedOrderReviewContent() {
           orProgFab:     orRow?.fileFabMt ?? null,
           orProgGalv:    orRow?.fileGalvMt ?? null,
           orProgFg,
+          orBalRelease:  orRow?.fileBalReleaseMt ?? null,
+          orBalFab:      orRow?.balFabMt ?? null,
+          orBalGalv:     orRow?.balGalvMt ?? null,
+          orSets, orWeightMt, weightPerSet,
           bomDerived, bomLowConf,
           orBomType: orBomTypeVal,
           orBomInconsistent,
@@ -1243,6 +1276,8 @@ function GeneratedOrderReviewContent() {
         totals: {
           genProgRelease: sf("genProgRelease"), genProgFab: sf("genProgFab"),
           genProgGalv: sf("genProgGalv"),       genProgFg: sf("genProgFg"),
+          genBalRelease:  sf("genBalRelease"),  genBalFab: sf("genBalFab"),
+          genBalGalv:     sf("genBalGalv"),     fgWt:      sf("fgWt"),
         },
       });
     }
@@ -1277,43 +1312,35 @@ function GeneratedOrderReviewContent() {
   );
 
   const handleExport = () => {
-    const rows = projectGroups.flatMap((pg) =>
+    const exportRows = projectGroups.flatMap((pg) =>
       pg.structures.map((s) => ({
-        project: pg.project, structure: s.structure,
-        subType: s.subType ?? "", mfcBatch: s.mfcBatch, marks: s.markCount,
-        bomDerived:    s.bomDerived + (s.bomLowConf ? " (low conf.)" : ""),
-        orBomType:     s.orBomType ?? "",
-        orBomNote:     s.orBomInconsistent ? "OR inconsistency" : (s.orBomType && s.orBomType !== s.bomDerived ? "Disagree" : ""),
-        genProgRelease: s.genProgRelease, genProgFab: s.genProgFab,
-        genProgGalv: s.genProgGalv, genProgFg: s.genProgFg,
-        orProgRelease: s.orProgRelease, orProgFab: s.orProgFab,
-        // null → blank in export (no OR row for this structure); never zero-fill.
-        orProgGalv: s.orProgGalv,
-        orProgFg:   s.orProgFg,         // may be negative (OR data inconsistency)
-      })),
-    );
-    exportToXlsx(
+        project:      pg.project,
+        structure:    s.structure,
+        subType:      s.subType,
+        mfcBatch:     s.mfcBatch,
+        marks:        s.markCount,
+        weightPerSet: s.weightPerSet,
+        orSets:       s.orSets,
+        orWeightMt:   s.orWeightMt,
+        woOrderQtyMt: s.woOrderQtyMt,
+        bomLabel:     s.bomDerived + (s.bomLowConf ? " (LOW CONF)" : ""),
+        orBomType:    s.orBomType,
+        orBomNote:    s.orBomInconsistent
+          ? "OR inconsistency"
+          : (s.orBomType && s.orBomType !== s.bomDerived ? "Disagree" : ""),
+        genProgRelease: s.genProgRelease, orProgRelease: s.orProgRelease,
+        genProgFab:     s.genProgFab,     orProgFab:     s.orProgFab,
+        genProgGalv:    s.genProgGalv,    orProgGalv:    s.orProgGalv,
+        genProgFg:      s.genProgFg,      orProgFg:      s.orProgFg,
+        genBalRelease:  s.genBalRelease,  orBalRelease:  s.orBalRelease,
+        genBalFab:      s.genBalFab,      orBalFab:      s.orBalFab,
+        genBalGalv:     s.genBalGalv,     orBalGalv:     s.orBalGalv,
+        fgWt:           s.fgWt,
+      } satisfies import("@/lib/export").GenOrExportRow),
+    ));
+    void exportGenOrXlsx(
       `generated_order_review_${new Date().toISOString().slice(0, 10)}.xlsx`,
-      [
-        { label: "Project",                                    field: "project"  },
-        { label: "Structure",                                  field: "structure" },
-        { label: "Sub Type",                                   field: "subType"  },
-        { label: "MFC Batch",                                  field: "mfcBatch" },
-        { label: "Marks",                                      field: "marks",   numeric: true },
-        { label: "BOM Label (Derived from job card)",          field: "bomDerived" },
-        { label: "BOM Label (OR Col K)",                       field: "orBomType" },
-        { label: "BOM Note",                                   field: "orBomNote" },
-        { label: "Gen Progress Release (MT)",                  field: "genProgRelease", numeric: true, decimals: 3, total: true },
-        { label: "Gen Progress Fabrication (MT)",              field: "genProgFab",     numeric: true, decimals: 3, total: true },
-        { label: "Gen Progress Galvanising (MT)",              field: "genProgGalv",    numeric: true, decimals: 3, total: true },
-        { label: "Gen Finished Goods (MT)",                    field: "genProgFg",      numeric: true, decimals: 3, total: true },
-        { label: "OR Progress Release (MT)",                   field: "orProgRelease",  numeric: true, decimals: 3 },
-        { label: "OR Progress Fabrication (MT)",               field: "orProgFab",      numeric: true, decimals: 3 },
-        { label: "OR Progress Galvanising (MT)",               field: "orProgGalv",     numeric: true, decimals: 3 },
-        { label: "OR Finished Goods (MT)",                     field: "orProgFg",       numeric: true, decimals: 3 },
-      ] as XlsxColumn[],
-      rows,
-      { sheetName: "Generated OR" },
+      exportRows,
     );
   };
 
@@ -1440,31 +1467,75 @@ function GeneratedOrderReviewContent() {
             <CardContent className="p-0">
               <div className="overflow-x-auto">
                 <table className="w-full text-xs border-collapse">
+                  {/* ─── Two-row banner header ─────────────────────────────────────────
+                      Row 1: fixed cols (rowSpan=2) · PROGRESS (colSpan=4) · BALANCE (colSpan=5)
+                      Row 2: stage sub-headers (fixed cols spanned from row 1)
+                      Row 3: "gen / OR" sub-label per stage column */}
                   <thead>
-                    <tr className="bg-muted/60 border-b">
-                      <th className="px-3 py-2 text-left font-semibold min-w-[80px]" rowSpan={2}>Project</th>
-                      <th className="px-3 py-2 text-left font-semibold min-w-[90px]" rowSpan={2}>Structure</th>
-                      <th className="px-3 py-2 text-left font-semibold min-w-[50px]" rowSpan={2}>MFC</th>
-                      <th className="px-3 py-2 text-right font-semibold min-w-[45px]" rowSpan={2}>Marks</th>
-                      <th className="px-3 py-2 text-left font-semibold min-w-[80px] border-l" rowSpan={2}>BOM Label</th>
-                      {GEN_STAGES.map((stage) => {
+                    {/* Row 1: banners */}
+                    <tr className="bg-slate-800 dark:bg-slate-900 text-white border-b-2">
+                      <th className="px-2 py-2 text-left font-semibold min-w-[80px]" rowSpan={3}>Project</th>
+                      <th className="px-2 py-2 text-left font-semibold min-w-[90px]" rowSpan={3}>Structure</th>
+                      <th className="px-2 py-2 text-left font-semibold min-w-[50px]" rowSpan={3}>Sub Type</th>
+                      <th className="px-2 py-2 text-left font-semibold min-w-[40px]" rowSpan={3}>MFC</th>
+                      <th className="px-2 py-2 text-right font-semibold min-w-[40px]" rowSpan={3}>Marks</th>
+                      <th className="px-2 py-2 text-right font-semibold min-w-[68px] border-l border-slate-600"
+                          rowSpan={3} title="Order Qty weight ÷ sets (from OR file)">Wt/Set<br/>(MT)</th>
+                      <th className="px-2 py-2 text-right font-semibold min-w-[52px] border-l border-slate-600"
+                          rowSpan={3} title="Order Qty sets (OR file)">Ord Qty<br/>Sets</th>
+                      <th className="px-2 py-2 text-right font-semibold min-w-[68px]"
+                          rowSpan={3} title="Order Qty weight MT (OR file)">Ord Qty<br/>Wt (MT)</th>
+                      <th className="px-2 py-2 text-right font-semibold min-w-[68px]"
+                          rowSpan={3} title="WO Order Qty weight MT (OR file Col J)">WO Qty<br/>(MT)</th>
+                      <th className="px-2 py-2 text-left font-semibold min-w-[74px] border-l border-slate-600"
+                          rowSpan={3}>BOM Label</th>
+                      <th className="px-3 py-2 text-center font-bold tracking-wide border-l-2 border-blue-400"
+                          colSpan={4} style={{ background: "rgba(30,58,95,0.95)" }}>
+                        PROGRESS
+                      </th>
+                      <th className="px-3 py-2 text-center font-bold tracking-wide border-l-2 border-emerald-400"
+                          colSpan={5} style={{ background: "rgba(26,58,42,0.95)" }}>
+                        BALANCE
+                      </th>
+                    </tr>
+                    {/* Row 2: stage sub-headers */}
+                    <tr className="text-[10px] text-white/80">
+                      {GEN_STAGES.map((stage, i) => {
                         const st = stageStatsByKey.get(stage.key)!;
                         return (
-                          <th key={stage.key} className="px-3 py-1.5 text-center font-semibold border-l min-w-[90px]">
+                          <th key={stage.key}
+                              className={`px-2 py-1.5 text-center font-semibold min-w-[90px] ${i === 0 ? "border-l-2 border-blue-400" : "border-l border-slate-600"}`}
+                              style={{ background: "rgba(30,58,95,0.85)" }}>
                             <div>{stage.shortLabel}</div>
-                            <div className={`text-[10px] font-normal px-1 py-0.5 rounded mt-0.5 inline-block ${TIER_CLS[st.tier].badge}`}>
+                            <div className={`text-[9px] font-normal px-1 py-0 rounded mt-0.5 inline-block ${TIER_CLS[st.tier].badge}`}>
                               {st.tier}
                             </div>
                           </th>
                         );
                       })}
+                      <th className="px-2 py-1.5 text-center font-semibold min-w-[68px] border-l-2 border-emerald-400"
+                          style={{ background: "rgba(26,58,42,0.85)" }}
+                          title="WO Order Qty (MT) — reference for balance">WO (MT)</th>
+                      {GEN_BAL_STAGES.map((stage) => (
+                        <th key={stage.key}
+                            className="px-2 py-1.5 text-center font-semibold min-w-[90px] border-l border-slate-600"
+                            style={{ background: "rgba(26,58,42,0.85)" }}>
+                          {stage.shortLabel}
+                        </th>
+                      ))}
                     </tr>
+                    {/* Row 3: gen / OR sub-label */}
                     <tr className="bg-muted/40 border-b text-[10px] text-muted-foreground">
-                      {/* spacer cells for fixed cols: Project + Structure + MFC + Marks + BOM */}
-                      <td colSpan={5} />
-                      {GEN_STAGES.map((stage) => (
-                        <td key={stage.key} className="px-3 py-1 border-l">
-                          <span className="text-foreground/60">gen / OR (MT)</span>
+                      {GEN_STAGES.map((stage, i) => (
+                        <td key={stage.key}
+                            className={`px-2 py-0.5 text-center ${i === 0 ? "border-l-2 border-blue-300/50" : "border-l border-slate-200 dark:border-slate-700"}`}>
+                          gen / OR
+                        </td>
+                      ))}
+                      <td className="px-2 py-0.5 text-center border-l-2 border-emerald-300/60">OR only</td>
+                      {GEN_BAL_STAGES.map((stage) => (
+                        <td key={stage.key} className="px-2 py-0.5 text-center border-l border-slate-200 dark:border-slate-700">
+                          {stage.orField ? "gen / OR" : "gen only"}
                         </td>
                       ))}
                     </tr>
@@ -1473,13 +1544,21 @@ function GeneratedOrderReviewContent() {
                     {projectGroups.map((pg) => (
                       <Fragment key={pg.project}>
                         {pg.structures.map((s, si) => {
-                          const anyDiff = GEN_STAGES.some((stage) => {
-                            const gen = s[stage.genField]     as number | null;
+                          const anyProgDiff = GEN_STAGES.some((stage) => {
+                            const gen = s[stage.genField]      as number | null;
                             const or  = s[stage.structOrField] as number | null;
                             return gen != null && or != null && Math.abs(gen - or) > 0.5;
                           });
+                          const anyBalDiff = GEN_BAL_STAGES.some((stage) => {
+                            if (!stage.orField) return false;
+                            const gen = s[stage.genField] as number | null;
+                            const or  = s[stage.orField]  as number | null;
+                            return gen != null && or != null && Math.abs(gen - or) > 0.5;
+                          });
+                          const anyDiff = anyProgDiff || anyBalDiff;
                           return (
                             <tr key={s.structure} className={`hover:bg-muted/20 ${anyDiff ? "bg-amber-50/40 dark:bg-amber-950/15" : ""}`}>
+                              {/* Project cell — spans all structure rows + subtotal */}
                               {si === 0 && (
                                 <td
                                   className="px-3 py-2 font-bold align-top border-r bg-muted/10"
@@ -1498,11 +1577,29 @@ function GeneratedOrderReviewContent() {
                                   )}
                                 </td>
                               )}
-                              <td className="px-3 py-1.5 font-mono text-[11px]">{s.structure}</td>
-                              <td className="px-3 py-1.5 text-muted-foreground text-[10px]">{s.mfcBatch}</td>
-                              <td className="px-3 py-1.5 text-right tabular-nums">{s.markCount}</td>
-                              {/* BOM label cell */}
-                              <td className="px-3 py-1.5 border-l">
+                              {/* Fixed cols */}
+                              <td className="px-2 py-1.5 font-mono text-[11px]">{s.structure}</td>
+                              <td className="px-2 py-1.5 text-muted-foreground text-[10px]">{s.subType ?? "—"}</td>
+                              <td className="px-2 py-1.5 text-muted-foreground text-[10px]">{s.mfcBatch}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">{s.markCount}</td>
+                              {/* Wt/Set (MT) */}
+                              <td className="px-2 py-1.5 text-right tabular-nums border-l text-[11px]">
+                                {s.weightPerSet != null ? mt3(s.weightPerSet) : <span className="text-muted-foreground/40">—</span>}
+                              </td>
+                              {/* OR Qty Sets */}
+                              <td className="px-2 py-1.5 text-right tabular-nums border-l text-[11px]">
+                                {s.orSets != null ? s.orSets : <span className="text-muted-foreground/40">—</span>}
+                              </td>
+                              {/* OR Qty Wt (MT) */}
+                              <td className="px-2 py-1.5 text-right tabular-nums text-[11px]">
+                                {s.orWeightMt != null ? mt3(s.orWeightMt) : <span className="text-muted-foreground/40">—</span>}
+                              </td>
+                              {/* WO Qty (MT) */}
+                              <td className="px-2 py-1.5 text-right tabular-nums text-[11px]">
+                                {s.woOrderQtyMt != null ? mt3(s.woOrderQtyMt) : <span className="text-muted-foreground/40">—</span>}
+                              </td>
+                              {/* BOM label */}
+                              <td className="px-2 py-1.5 border-l">
                                 <span className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded font-medium
                                   ${s.bomDerived === "Proto" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" :
                                     s.bomDerived === "Mass"  ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300" :
@@ -1528,18 +1625,18 @@ function GeneratedOrderReviewContent() {
                                   </span>
                                 )}
                               </td>
-                              {GEN_STAGES.map((stage) => {
-                                const gen = s[stage.genField]     as number | null;
+                              {/* ── PROGRESS stage cells ───────────────────────────────── */}
+                              {GEN_STAGES.map((stage, i) => {
+                                const gen = s[stage.genField]      as number | null;
                                 const or  = s[stage.structOrField] as number | null;
                                 const diff = gen != null && or != null ? Math.abs(gen - or) : null;
                                 const flagged = diff != null && diff > 0.5;
                                 const negativeOr = or != null && or < 0;
                                 const flagCls = TIER_CLS[stageStatsByKey.get(stage.key)!.tier].flag;
                                 return (
-                                  <td key={stage.key} className="px-3 py-1.5 text-right tabular-nums border-l">
-                                    <span className={flagged ? flagCls : ""}>
-                                      {mt3(gen)}
-                                    </span>
+                                  <td key={stage.key}
+                                      className={`px-2 py-1.5 text-right tabular-nums ${i === 0 ? "border-l-2 border-blue-300/50" : "border-l border-slate-200 dark:border-slate-700"}`}>
+                                    <span className={flagged ? flagCls : ""}>{mt3(gen)}</span>
                                     {or != null && (
                                       <span className={`block text-[10px] leading-tight ${negativeOr ? "text-red-600 dark:text-red-400 font-semibold" : "text-muted-foreground"}`}>
                                         OR: {mt3(or)}
@@ -1556,17 +1653,52 @@ function GeneratedOrderReviewContent() {
                                   </td>
                                 );
                               })}
+                              {/* ── BALANCE section ─────────────────────────────────────── */}
+                              {/* WO (MT) — OR reference only, blank when no OR row */}
+                              <td className="px-2 py-1.5 text-right tabular-nums border-l-2 border-emerald-300/50 text-[11px]">
+                                {s.woOrderQtyMt != null
+                                  ? <span className="text-muted-foreground">{mt3(s.woOrderQtyMt)}</span>
+                                  : <span className="text-muted-foreground/30">—</span>}
+                              </td>
+                              {/* Balance stage cells */}
+                              {GEN_BAL_STAGES.map((stage) => {
+                                const gen = s[stage.genField] as number;
+                                const or  = stage.orField ? (s[stage.orField] as number | null) : null;
+                                const diff = or != null ? Math.abs(gen - or) : null;
+                                const flagged = diff != null && diff > 0.5;
+                                return (
+                                  <td key={stage.key} className="px-2 py-1.5 text-right tabular-nums border-l border-slate-200 dark:border-slate-700">
+                                    <span className={flagged ? "text-amber-600 dark:text-amber-400 font-semibold" : ""}>{mt3(gen)}</span>
+                                    {or != null && (
+                                      <span className="block text-[10px] leading-tight text-muted-foreground">
+                                        OR: {mt3(or)}
+                                        {flagged && (
+                                          <AlertTriangle className="inline h-2.5 w-2.5 ml-0.5 text-amber-500" />
+                                        )}
+                                      </span>
+                                    )}
+                                  </td>
+                                );
+                              })}
                             </tr>
                           );
                         })}
                         {/* Per-project subtotal */}
+                        {/* colSpan=9: Structure·SubType·MFC·Marks·WtPerSet·OR Sets·OR Wt·WO Wt·BOM */}
                         <tr className="bg-muted/40 font-semibold border-t border-b-2 text-[11px]">
-                          <td className="px-3 py-1.5 text-muted-foreground uppercase tracking-wide" colSpan={4}>
+                          <td className="px-3 py-1.5 text-muted-foreground uppercase tracking-wide" colSpan={9}>
                             Subtotal
                           </td>
-                          {GEN_STAGES.map((stage) => (
-                            <td key={stage.key} className="px-3 py-1.5 text-right tabular-nums border-l">
-                              {mt3(pg.totals[stage.genField as string])}
+                          {GEN_STAGES.map((stage, i) => (
+                            <td key={stage.key}
+                                className={`px-2 py-1.5 text-right tabular-nums ${i === 0 ? "border-l-2 border-blue-300/50" : "border-l border-slate-200 dark:border-slate-700"}`}>
+                              {mt3(pg.totals[stage.genField as keyof typeof pg.totals] as number)}
+                            </td>
+                          ))}
+                          <td className="border-l-2 border-emerald-300/50" />
+                          {GEN_BAL_STAGES.map((stage) => (
+                            <td key={stage.key} className="px-2 py-1.5 text-right tabular-nums border-l border-slate-200 dark:border-slate-700">
+                              {mt3(pg.totals[stage.genField as keyof typeof pg.totals] as number)}
                             </td>
                           ))}
                         </tr>
@@ -1576,12 +1708,22 @@ function GeneratedOrderReviewContent() {
                   <tfoot>
                     <tr className="bg-muted/60 font-bold border-t-2 text-[11px]">
                       <td className="px-3 py-2 uppercase tracking-wide">Grand Total</td>
-                      <td colSpan={4} className="px-3 py-2 text-muted-foreground">
+                      {/* colSpan=9: Structure·SubType·MFC·Marks·WtPerSet·OR Sets·OR Wt·WO Wt·BOM */}
+                      <td colSpan={9} className="px-3 py-2 text-muted-foreground">
                         {projectGroups.length} projects · {structCount} structures · {markCount.toLocaleString()} marks
                       </td>
-                      {GEN_STAGES.map((stage) => (
-                        <td key={stage.key} className="px-3 py-2 text-right tabular-nums border-l">
-                          {mt3(projectGroups.reduce((s, g) => s + (g.totals[stage.genField as string] ?? 0), 0))}
+                      {GEN_STAGES.map((stage, i) => (
+                        <td key={stage.key}
+                            className={`px-2 py-2 text-right tabular-nums ${i === 0 ? "border-l-2 border-blue-300/50" : "border-l border-slate-200 dark:border-slate-700"}`}>
+                          {mt3(projectGroups.reduce((s, g) => s + ((g.totals[stage.genField as keyof typeof g.totals] as number) ?? 0), 0))}
+                        </td>
+                      ))}
+                      <td className="px-2 py-2 text-right tabular-nums border-l-2 border-emerald-300/50 text-muted-foreground">
+                        {mt3(projectGroups.flatMap((g) => g.structures).reduce((s, r) => s + (r.woOrderQtyMt ?? 0), 0))}
+                      </td>
+                      {GEN_BAL_STAGES.map((stage) => (
+                        <td key={stage.key} className="px-2 py-2 text-right tabular-nums border-l border-slate-200 dark:border-slate-700">
+                          {mt3(projectGroups.reduce((s, g) => s + ((g.totals[stage.genField as keyof typeof g.totals] as number) ?? 0), 0))}
                         </td>
                       ))}
                     </tr>

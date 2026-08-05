@@ -1,0 +1,86 @@
+# Replit Prompt — Generated Order Review: match the Order Review's Progress + Balance layout
+
+## What the Order Review file actually looks like
+
+Two banner sections across the top, each with stage columns beneath:
+
+```
+Tower │ Tower Sub │ Weight  │  Order Qty   │  WO Order Qty  │ BOM   │        Progress          │            Balance
+Type  │ Type      │ / Set   │ Sets │Weight │ Sets │Weight(MT)│ Label │ Rel │ Fab │ Galv │ Insp │ Desp │ WorkOrder │ Rel │ Fab │ Galv │ Insp │ Desp
+```
+
+The generated view currently shows only **gen / OR pairs under a single set of stage
+headers** — no Progress/Balance split, and none of the leading Order Qty / WO Order Qty
+columns.
+
+---
+
+## The prompt
+
+```
+The scope is now correct — 18 projects / 167 structures / 9,553 marks. Thank you.
+
+The remaining issue is the column layout. It still does not match the Order Review format. The
+Order Review file has TWO banner sections, and the generated view only reproduces one.
+
+THE ORDER REVIEW STRUCTURE
+
+    Tower Type | Tower Sub Type | Weight / Set (MT) |
+    Order Qty [Sets | Weight] | WO Order Qty [Sets | Weight (MT)] | BOM Label |
+    Progress [Release | Fabrication | Galvanising | Inspection | Despatch] |
+    Balance  [Work Order (MT) | Release | Fabrication | Galvanising | Inspection | Despatch]
+
+Two grouped banner headers — "Progress" and "Balance" — each spanning its stage columns
+beneath.
+
+WHAT THE GENERATED VIEW NEEDS
+
+Mirror that structure for the four stages we keep (Release, Fabrication, Galvanising,
+Finished Goods — no Inspection, no Despatch):
+
+    Tower Type | Tower Sub Type | Weight / Set (MT) |
+    Order Qty [Sets | Weight] | WO Order Qty [Sets | Weight (MT)] | BOM Label |
+    Progress [Release | Fabrication | Galvanising | Finished Goods] |
+    Balance  [Work Order (MT) | Release | Fabrication | Galvanising | Finished Goods]
+
+Points to get right:
+
+1. Add the PROGRESS and BALANCE banner headers as grouped column spans, exactly as the Order
+   Review has them. Right now there is a single flat set of stage columns.
+
+2. Add the leading columns the Order Review has and the generated view does not: Tower Sub
+   Type, Weight / Set (MT), Order Qty (Sets and Weight), WO Order Qty (Sets and Weight). These
+   come from the Order Review where a row exists.
+
+3. Keep the gen / OR comparison. Show the generated figure and the OR figure for each stage as
+   you do now — the pairing is good, it just needs to sit inside the Progress and Balance
+   grouping rather than replacing it.
+
+4. BALANCE stages are computable from WIP the same way Progress is:
+       Balance Release      = WIP Not Started + Initial
+       Balance Fabrication  = released WIP marks at fabrication activities
+       Balance Galvanising  = released WIP marks at G, GB, Y
+       Balance Finished Goods = WIP marks with Type = FG Pending For Dispatch
+   Where a Balance figure cannot be derived from WIP, leave it blank rather than showing zero
+   — a zero is indistinguishable from a real zero.
+
+5. The Excel export must carry exactly the same column structure as the UI, including the
+   grouped banner headers. The export and the UI have diverged several times in this project,
+   so please confirm both after the change.
+
+Please keep everything else as it is — the scope, the BOM Label column with its OR comparison
+and LOW CONF flagging, and the match-rate panel are all working correctly now.
+
+When done, paste the new column definition and confirm the export header structure matches.
+```
+
+---
+
+## What to check in the reply
+
+- **Grouped banner headers, not a flat column list.** This is the specific thing that makes it
+  look like the Order Review.
+- **Blank, not zero**, where a Balance figure cannot be derived. The Fabrication Report had
+  exactly this problem earlier — zeros that were really absences.
+- **The export header structure matches the UI**, confirmed by generating a file rather than
+  by reading code. That divergence has recurred three times in this project.

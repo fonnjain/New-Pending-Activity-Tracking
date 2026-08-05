@@ -857,6 +857,226 @@ export async function exportAiReportPdf(filename: string, result: any) {
   doc.save(filename);
 }
 
+// ─── Generated Order Review xlsx ──────────────────────────────────────────────
+// Writes a 2-row banner header matching the OR file's Progress / Balance layout.
+// Row 1: fixed-col banners (merged into row 2) + "PROGRESS" + "BALANCE" spans.
+// Row 2: stage-level sub-headers.
+// Data rows 3+: one row per structure; OR figures in adjacent columns (not
+// sub-lines) so every cell is individually addressable in Excel.
+//
+// Column layout (26 cols, A–Z):
+//   Fixed (A-J, rows 1-2 merged): Project | Structure | Sub Type | MFC Batch |
+//     Marks | Wt/Set (MT) | Order Qty Sets | Order Qty Wt (MT) |
+//     WO Order Qty (MT) | BOM Label
+//   PROGRESS (K-R, row-2 sub-header): 4 stages × (Gen | OR) = 8 cols
+//   BALANCE  (S-Z, row-2 sub-header): WO (MT) + 3 stages × (Gen | OR) + FG Gen = 8 cols
+
+export type GenOrExportRow = {
+  project: string; structure: string; subType: string | null;
+  mfcBatch: string; marks: number;
+  weightPerSet: number | null; orSets: number | null; orWeightMt: number | null;
+  woOrderQtyMt: number | null; bomLabel: string; orBomType: string | null; orBomNote: string;
+  // Progress
+  genProgRelease: number; orProgRelease: number | null;
+  genProgFab:     number; orProgFab:     number | null;
+  genProgGalv:    number; orProgGalv:    number | null;
+  genProgFg:      number; orProgFg:      number | null;
+  // Balance
+  genBalRelease: number; orBalRelease: number | null;
+  genBalFab:     number; orBalFab:     number | null;
+  genBalGalv:    number; orBalGalv:    number | null;
+  fgWt:          number;
+};
+
+export async function exportGenOrXlsx(filename: string, rows: GenOrExportRow[]) {
+  const wb = new ExcelJS.Workbook();
+  wb.created = new Date();
+  const ws = wb.addWorksheet("Generated OR", { views: [{ state: "frozen", ySplit: 2 }] });
+
+  // ── Column widths (26 cols) ────────────────────────────────────────────────
+  const COL_WIDTHS = [
+    10, 14, 10, 7, 7,     // A-E: Project, Structure, Sub Type, MFC, Marks
+    9,  8,  12, 12, 12,   // F-J: Wt/Set, OR Qty Sets, OR Qty Wt, WO Qty, BOM Label
+    // Progress: 4 stages × 2 (Gen, OR)
+    11, 11, 11, 11, 11, 11, 11, 11,
+    // Balance: WO + 4 stages (3 × 2 + 1)
+    12, 11, 11, 11, 11, 11, 11, 11,
+  ];
+  ws.columns = COL_WIDTHS.map((w, i) => ({ width: w, key: String.fromCharCode(65 + i) }));
+
+  // ── Style helpers ──────────────────────────────────────────────────────────
+  const darkBg  = { type: "pattern" as const, pattern: "solid" as const, fgColor: { argb: "FF1F2937" } };
+  const progBg  = { type: "pattern" as const, pattern: "solid" as const, fgColor: { argb: "FF1E3A5F" } };  // deep blue
+  const balBg   = { type: "pattern" as const, pattern: "solid" as const, fgColor: { argb: "FF1A3A2A" } };  // deep green
+  const subHdrBg = { type: "pattern" as const, pattern: "solid" as const, fgColor: { argb: "FFF3F4F6" } };
+  const white   = { argb: "FFFFFFFF" };
+  const thin    = { style: "thin"   as const, color: { argb: "FFD1D5DB" } };
+  const medium  = { style: "medium" as const, color: { argb: "FF374151" } };
+  const heavy   = { style: "medium" as const, color: { argb: "FF111827" } };
+
+  const styleCell = (cell: any, opts: {
+    fill?: any; font?: any; align?: "left" | "right" | "center";
+    border?: "thin" | "medium" | "heavy";
+  }) => {
+    if (opts.fill)  cell.fill  = opts.fill;
+    if (opts.font)  cell.font  = opts.font;
+    if (opts.align) cell.alignment = { horizontal: opts.align, vertical: "middle", wrapText: false };
+    if (opts.border) {
+      const b = opts.border === "thin" ? thin : opts.border === "medium" ? medium : heavy;
+      cell.border = { top: b, bottom: b, left: b, right: b };
+    }
+  };
+
+  const n3 = (v: number | null | undefined): number | null =>
+    v == null ? null : Math.round(v * 1000) / 1000;
+
+  // ── Row 1: banner headers ─────────────────────────────────────────────────
+  const r1 = ws.getRow(1);
+  r1.height = 22;
+
+  // Fixed-column labels (will be merged into row 2)
+  const fixedLabels = [
+    "Project", "Structure", "Sub Type", "MFC Batch", "Marks",
+    "Wt/Set (MT)", "Order Qty\nSets", "Order Qty\nWt (MT)", "WO Order Qty\n(MT)", "BOM Label",
+  ];
+  fixedLabels.forEach((label, i) => {
+    const col = i + 1;
+    ws.mergeCells(1, col, 2, col);
+    const cell = ws.getCell(1, col);
+    cell.value = label;
+    styleCell(cell, { fill: darkBg, font: { bold: true, color: white, size: 9 }, align: "center", border: "heavy" });
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  });
+
+  // PROGRESS banner K1:R1 (columns 11–18)
+  ws.mergeCells(1, 11, 1, 18);
+  const progCell = ws.getCell(1, 11);
+  progCell.value = "PROGRESS";
+  styleCell(progCell, { fill: progBg, font: { bold: true, color: white, size: 11 }, align: "center", border: "heavy" });
+
+  // BALANCE banner S1:Z1 (columns 19–26)
+  ws.mergeCells(1, 19, 1, 26);
+  const balCell = ws.getCell(1, 19);
+  balCell.value = "BALANCE";
+  styleCell(balCell, { fill: balBg, font: { bold: true, color: white, size: 11 }, align: "center", border: "heavy" });
+
+  // ── Row 2: stage sub-headers ───────────────────────────────────────────────
+  const r2 = ws.getRow(2);
+  r2.height = 28;
+  const stageSubHdrs: [number, string][] = [
+    // Progress (cols 11-18): 4 stages × Gen + OR
+    [11, "Release\nGen (MT)"],  [12, "Release\nOR (MT)"],
+    [13, "Fabrication\nGen (MT)"], [14, "Fabrication\nOR (MT)"],
+    [15, "Galvanising\nGen (MT)"], [16, "Galvanising\nOR (MT)"],
+    [17, "Fin. Goods\nGen (MT)"], [18, "Fin. Goods\nOR (MT)"],
+    // Balance (cols 19-26): WO + 3 stages × Gen+OR + FG Gen
+    [19, "Work Order\n(MT)"],
+    [20, "Release\nGen (MT)"], [21, "Release\nOR (MT)"],
+    [22, "Fabrication\nGen (MT)"], [23, "Fabrication\nOR (MT)"],
+    [24, "Galvanising\nGen (MT)"], [25, "Galvanising\nOR (MT)"],
+    [26, "Fin. Goods\nGen (MT)"],
+  ];
+  stageSubHdrs.forEach(([col, label]) => {
+    const cell = ws.getCell(2, col);
+    cell.value = label;
+    styleCell(cell, { fill: subHdrBg, font: { bold: true, size: 8 }, align: "center" });
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = { top: medium, bottom: medium, left: thin, right: thin };
+  });
+
+  // ── Data rows (starting at row 3) ─────────────────────────────────────────
+  const numFmt3 = "#,##0.000";
+  const numFmt0 = "#,##0";
+
+  for (const r of rows) {
+    const exRow = ws.addRow([]);
+    const rn = exRow.number;
+
+    const setCell = (col: number, val: any, fmt?: string, align: "left"|"right" = "right") => {
+      const cell = ws.getCell(rn, col);
+      cell.value = val;
+      if (fmt) cell.numFmt = fmt;
+      cell.alignment = { horizontal: align, vertical: "middle" };
+      cell.border = { top: thin, bottom: thin, left: thin, right: thin };
+    };
+
+    // Fixed cols
+    setCell(1,  r.project,                    undefined, "left");
+    setCell(2,  r.structure,                  undefined, "left");
+    setCell(3,  r.subType ?? "",              undefined, "left");
+    setCell(4,  r.mfcBatch,                  undefined, "left");
+    setCell(5,  r.marks,                      numFmt0);
+    setCell(6,  n3(r.weightPerSet),           numFmt3);
+    setCell(7,  r.orSets,                     numFmt0);
+    setCell(8,  n3(r.orWeightMt),             numFmt3);
+    setCell(9,  n3(r.woOrderQtyMt),           numFmt3);
+    setCell(10, r.bomLabel + (r.orBomNote ? `\n${r.orBomNote}` : ""), undefined, "left");
+
+    // Progress cols (11-18)
+    setCell(11, n3(r.genProgRelease),  numFmt3);
+    setCell(12, n3(r.orProgRelease),   numFmt3);
+    setCell(13, n3(r.genProgFab),      numFmt3);
+    setCell(14, n3(r.orProgFab),       numFmt3);
+    setCell(15, n3(r.genProgGalv),     numFmt3);
+    setCell(16, n3(r.orProgGalv),      numFmt3);
+    setCell(17, n3(r.genProgFg),       numFmt3);
+    setCell(18, n3(r.orProgFg),        numFmt3);
+
+    // Balance cols (19-26)
+    setCell(19, n3(r.woOrderQtyMt),    numFmt3);
+    setCell(20, n3(r.genBalRelease),   numFmt3);
+    setCell(21, n3(r.orBalRelease),    numFmt3);
+    setCell(22, n3(r.genBalFab),       numFmt3);
+    setCell(23, n3(r.orBalFab),        numFmt3);
+    setCell(24, n3(r.genBalGalv),      numFmt3);
+    setCell(25, n3(r.orBalGalv),       numFmt3);
+    setCell(26, n3(r.fgWt),            numFmt3);
+  }
+
+  // ── TOTAL row ──────────────────────────────────────────────────────────────
+  if (rows.length > 0) {
+    const tot = ws.addRow([]);
+    const tn = tot.number;
+    const tCell = (col: number, val: any, fmt?: string) => {
+      const cell = ws.getCell(tn, col);
+      cell.value = val;
+      if (fmt) cell.numFmt = fmt;
+      cell.font = { bold: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
+      cell.border = { top: medium, bottom: medium, left: thin, right: thin };
+      cell.alignment = { horizontal: col <= 5 ? "left" as const : "right" as const, vertical: "middle" };
+    };
+    const sum = (f: keyof GenOrExportRow) =>
+      rows.reduce((s, r) => s + ((r[f] as number) ?? 0), 0);
+    const sumNull = (f: keyof GenOrExportRow) => {
+      const vals = rows.filter((r) => r[f] != null);
+      return vals.length ? vals.reduce((s, r) => s + ((r[f] as number) ?? 0), 0) : null;
+    };
+
+    tCell(1, "TOTAL");
+    [2,3,4,5,6,7,8,9,10].forEach((c) => ws.getCell(tn, c).border = { top: medium, bottom: medium, left: thin, right: thin });
+    tCell(11, n3(sum("genProgRelease")), numFmt3);
+    tCell(12, n3(sumNull("orProgRelease")), numFmt3);
+    tCell(13, n3(sum("genProgFab")), numFmt3);
+    tCell(14, n3(sumNull("orProgFab")), numFmt3);
+    tCell(15, n3(sum("genProgGalv")), numFmt3);
+    tCell(16, n3(sumNull("orProgGalv")), numFmt3);
+    tCell(17, n3(sum("genProgFg")), numFmt3);
+    tCell(18, n3(sumNull("orProgFg")), numFmt3);
+    tCell(19, n3(sumNull("woOrderQtyMt")), numFmt3);
+    tCell(20, n3(sum("genBalRelease")), numFmt3);
+    tCell(21, n3(sumNull("orBalRelease")), numFmt3);
+    tCell(22, n3(sum("genBalFab")), numFmt3);
+    tCell(23, n3(sumNull("orBalFab")), numFmt3);
+    tCell(24, n3(sum("genBalGalv")), numFmt3);
+    tCell(25, n3(sumNull("orBalGalv")), numFmt3);
+    tCell(26, n3(sum("fgWt")), numFmt3);
+  }
+
+  ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: 26 } };
+  await downloadWorkbook(wb, filename);
+}
+
 export function exportToJson(filename: string, data: any) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
