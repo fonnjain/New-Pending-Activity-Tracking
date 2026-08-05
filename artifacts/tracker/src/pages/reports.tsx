@@ -1329,7 +1329,16 @@ export function ContractorPerformanceReport() {
   // other global filter (MFC, Structure, Mark, Section, NTLT sub-type, Hole
   // Operation) has no equivalent field on a movement entry and is left alone.
   const entries = useMemo(() => {
-    const all = data?.entries ?? [];
+    // Resolve alias → canonical display name FIRST, so all grouping, the
+    // drill-down contractor names, the detail log and the Excel export use
+    // the canonical contractor (historical moves recorded under an alias
+    // variant collapse into the canonical row after a dedup merge). The
+    // category map already folds approved aliases onto the canonical entry.
+    const all = (data?.entries ?? []).map((e) => {
+      if (!e.contractor || !e.contractor.trim()) return e;
+      const resolved = contractorCategoryFor(e.contractor, categoryMap).displayName || e.contractor;
+      return resolved === e.contractor ? e : { ...e, contractor: resolved };
+    });
     const activityFilter = filters.activity;
     const bundleSet =
       activityFilter && activityFilter.startsWith(BUNDLE_PREFIX)
@@ -1402,7 +1411,12 @@ export function ContractorPerformanceReport() {
     const galvMap = new Map<string, number>();
     for (const r of filteredLiveRecords) {
       const activity = (r.activity ?? "").toUpperCase();
-      const c = contractorLabel(r.contractor);
+      // Resolve alias → canonical so live-balance keys line up with the
+      // (already-resolved) ledger contractor names above.
+      const rawC = contractorLabel(r.contractor);
+      const c = rawC === UNASSIGNED_CONTRACTOR
+        ? rawC
+        : (contractorCategoryFor(rawC, categoryMap).displayName || rawC);
       if (FAB_COMPLETION_SET.has(activity)) {
         fabMap.set(c, (fabMap.get(c) ?? 0) + r.balanceWt);
       } else if (activity === GALV_COMPLETION_ACTIVITY) {
@@ -1410,7 +1424,7 @@ export function ContractorPerformanceReport() {
       }
     }
     return { fabRemainingByContractor: fabMap, galvRemainingByContractor: galvMap };
-  }, [filteredLiveRecords]);
+  }, [filteredLiveRecords, categoryMap]);
 
   const toggleContractor = (c: string) =>
     setContractorFilter((cur) => (cur === c ? null : c));
