@@ -19,6 +19,8 @@ export async function seedContractorCategories(): Promise<number> {
     displayName: s.name,
     category: s.category,
     outVendorType: s.outVendorType as string[],
+    // plantLocation is optional in seed; undefined → column default (null)
+    ...(s.plantLocation != null ? { plantLocation: s.plantLocation } : {}),
   }));
 
   if (values.length === 0) return 0;

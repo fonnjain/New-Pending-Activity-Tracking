@@ -463,20 +463,51 @@ export function isOutVendorType(v: unknown): v is OutVendorType {
 
 // --- Plant Location (per-contractor metadata, display-only) -------------------
 // Purely descriptive; NEVER affects classification, buckets, or ageing.
-export type PlantLocation = "unit_1" | "unit_2";
+// Two mutually-exclusive sets:
+//   In-house (CNC / Sub-contractor): Unassigned | VTPL Unit-1 | VTPL Unit-2
+//   Out-vendor:                       Unassigned | Out Production | Job Work
+export type PlantLocation = "unit_1" | "unit_2" | "out_production" | "job_work";
 
+/** In-house options — shown for CNC, Sub-contractor, Unclassified. */
 export const PLANT_LOCATION_OPTIONS: { value: PlantLocation | null; label: string }[] = [
-  { value: null, label: "Unassigned" },
-  { value: "unit_1", label: "VTPL Unit-1" },
-  { value: "unit_2", label: "VTPL Unit-2" },
+  { value: null,        label: "Unassigned"  },
+  { value: "unit_1",   label: "VTPL Unit-1" },
+  { value: "unit_2",   label: "VTPL Unit-2" },
 ];
 
-export function isPlantLocation(v: unknown): v is PlantLocation {
-  return v === "unit_1" || v === "unit_2";
+/** Out-vendor options — shown only when Type = Out-vendor. */
+export const OUT_VENDOR_PLANT_LOCATION_OPTIONS: { value: PlantLocation | null; label: string }[] = [
+  { value: null,            label: "Unassigned"     },
+  { value: "out_production", label: "Out Production" },
+  { value: "job_work",       label: "Job Work"       },
+];
+
+/** Return the correct options list for a given contractor category. */
+export function plantLocationOptionsFor(
+  category: ContractorCategory,
+): { value: PlantLocation | null; label: string }[] {
+  return category === "OUT_VENDOR"
+    ? OUT_VENDOR_PLANT_LOCATION_OPTIONS
+    : PLANT_LOCATION_OPTIONS;
 }
 
+/** True if the location value is only valid for Out-vendor contractors. */
+export function isOutVendorOnlyLocation(v: PlantLocation | null | undefined): boolean {
+  return v === "out_production" || v === "job_work";
+}
+
+export function isPlantLocation(v: unknown): v is PlantLocation {
+  return v === "unit_1" || v === "unit_2" || v === "out_production" || v === "job_work";
+}
+
+const ALL_PLANT_LOCATION_LABELS: { value: PlantLocation | null; label: string }[] = [
+  ...PLANT_LOCATION_OPTIONS,
+  { value: "out_production", label: "Out Production" },
+  { value: "job_work",       label: "Job Work"       },
+];
+
 export function plantLocationLabel(v: string | null | undefined): string {
-  return PLANT_LOCATION_OPTIONS.find((o) => o.value === v)?.label ?? "Unassigned";
+  return ALL_PLANT_LOCATION_LABELS.find((o) => o.value === v)?.label ?? "Unassigned";
 }
 
 // --- "Fabrication Load for TLT" report (display/planning overlay only) ---------
@@ -554,6 +585,7 @@ export interface ContractorCategorySeed {
   name: string;
   category: ContractorCategory;
   outVendorType: OutVendorType[];
+  plantLocation?: PlantLocation;
 }
 
 // Seed list of known out-vendors with their FAB/GALVA tags (full names exactly
@@ -561,34 +593,40 @@ export interface ContractorCategorySeed {
 // onConflictDoNothing on the normalized key, so user edits always win and
 // re-seeding is idempotent. CNC / Sub-contractor are intentionally NOT
 // seeded — they start Unclassified and are set in-app.
+// JW-pattern Out-vendors default to plantLocation:"job_work" on first seed.
+// Non-JW Out-vendors get no plantLocation (null = Unassigned) — "Out Production"
+// has no data marker so it must be set deliberately by a user.
+// Seed is one-time (onConflictDoNothing); user edits always win.
 export const CONTRACTOR_CATEGORY_SEED: ContractorCategorySeed[] = [
-  { name: "BAJRANG STEEL INDUSTRIES & MINERALS PVT.LTD.JW", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "DASHMESH ENGINEERING WORKS  (JW)", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "MAHIMA MERCHANDIZING P.V.T LTD. -JW", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "MARUTINANDAN STRUCTURES PVT LTD.", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "RR ISPAT LIMITED", category: "OUT_VENDOR", outVendorType: ["FAB", "GALVA"] },
-  { name: "RUKMANI ELECTRICAL & COMPONENTS PVT LTD - C", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "SANGAM ISPAT (INDIA) PVT LIMITED", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "SATYA STRUCTURES AND COMPONENTS PRIVATE LTD.", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "SAVITEK INFRA PRIVATE LIMITED", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "SDM AGRO ENGINEERING", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "SHREE SHYAM FABROTECH INDUSTRIES(c)", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "SHRINANDA ENGINEERING (JW)", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "SOLAR AQUA SOLUTIONS", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "SREE SATYA FASTNERS PVT LTD", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "SURYA STRUCTURE", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "TRANSRAIL STRUCTURES AND TOWRS", category: "OUT_VENDOR", outVendorType: ["FAB"] },
-  { name: "DHARAM INDUSTRIES", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
-  { name: "HELLO STEEL PVT LTD (JW)", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
-  { name: "KHYATI ISPAT PRIVATE LIMITED  - JW", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
-  { name: "NANDAN STEELS AND POWER LTD", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
-  { name: "PAVAN SAI WORKS - JW", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
-  { name: "PHOENIX STRUCTURAL & ENGINEERING PVT.LTD.", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "BAJRANG STEEL INDUSTRIES & MINERALS PVT.LTD.JW", category: "OUT_VENDOR", outVendorType: ["FAB"],  plantLocation: "job_work" },
+  { name: "DASHMESH ENGINEERING WORKS  (JW)",                category: "OUT_VENDOR", outVendorType: ["FAB"],  plantLocation: "job_work" },
+  { name: "MAHIMA MERCHANDIZING P.V.T LTD. -JW",            category: "OUT_VENDOR", outVendorType: ["FAB"],  plantLocation: "job_work" },
+  { name: "MARUTINANDAN STRUCTURES PVT LTD.",               category: "OUT_VENDOR", outVendorType: ["FAB"]  },
+  { name: "RR ISPAT LIMITED",                               category: "OUT_VENDOR", outVendorType: ["FAB", "GALVA"] },
+  { name: "RUKMANI ELECTRICAL & COMPONENTS PVT LTD - C",   category: "OUT_VENDOR", outVendorType: ["FAB"]  },
+  { name: "SANGAM ISPAT (INDIA) PVT LIMITED",               category: "OUT_VENDOR", outVendorType: ["FAB"]  },
+  { name: "SATYA STRUCTURES AND COMPONENTS PRIVATE LTD.",   category: "OUT_VENDOR", outVendorType: ["FAB"]  },
+  { name: "SAVITEK INFRA PRIVATE LIMITED",                  category: "OUT_VENDOR", outVendorType: ["FAB"]  },
+  { name: "SDM AGRO ENGINEERING",                           category: "OUT_VENDOR", outVendorType: ["FAB"]  },
+  { name: "SHREE SHYAM FABROTECH INDUSTRIES(c)",            category: "OUT_VENDOR", outVendorType: ["FAB"]  },
+  { name: "SHRINANDA ENGINEERING (JW)",                     category: "OUT_VENDOR", outVendorType: ["FAB"],  plantLocation: "job_work" },
+  { name: "SOLAR AQUA SOLUTIONS",                           category: "OUT_VENDOR", outVendorType: ["FAB"]  },
+  { name: "SREE SATYA FASTNERS PVT LTD",                   category: "OUT_VENDOR", outVendorType: ["FAB"]  },
+  { name: "SURYA STRUCTURE",                                category: "OUT_VENDOR", outVendorType: ["FAB"]  },
+  { name: "TRANSRAIL STRUCTURES AND TOWRS",                 category: "OUT_VENDOR", outVendorType: ["FAB"]  },
+  { name: "DHARAM INDUSTRIES",                              category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "HELLO STEEL PVT LTD (JW)",                      category: "OUT_VENDOR", outVendorType: ["GALVA"], plantLocation: "job_work" },
+  { name: "KHYATI ISPAT PRIVATE LIMITED  - JW",            category: "OUT_VENDOR", outVendorType: ["GALVA"], plantLocation: "job_work" },
+  { name: "NANDAN STEELS AND POWER LTD",                   category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "PAVAN SAI WORKS - JW",                          category: "OUT_VENDOR", outVendorType: ["GALVA"], plantLocation: "job_work" },
+  { name: "PHOENIX STRUCTURAL & ENGINEERING PVT.LTD.",     category: "OUT_VENDOR", outVendorType: ["GALVA"] },
   { name: "PHOENIX STRUCTURAL & ENGINEERING PVT.LTD. (NGP)", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
-  { name: "POWER LINE ACCESSORIES - JW", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
-  { name: "PREMIER ROLLING & FORGING WORKS", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
-  { name: "SHRI ASHUTOSH ENGINEERING INDUSTRIES UNIT II", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
-  { name: "SRISINGHANIYA STRUCTURES PRIVATE LIMITED", category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "POWER LINE ACCESSORIES - JW",                   category: "OUT_VENDOR", outVendorType: ["GALVA"], plantLocation: "job_work" },
+  { name: "PREMIER ROLLING & FORGING WORKS",               category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "SHRI ASHUTOSH ENGINEERING INDUSTRIES UNIT II",  category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  { name: "SRISINGHANIYA STRUCTURES PRIVATE LIMITED",      category: "OUT_VENDOR", outVendorType: ["GALVA"] },
+  // PLA ENSOL PRIVATE LIMITED-JW appears in 05-Aug import but not yet in seed list
+  { name: "PLA ENSOL PRIVATE LIMITED-JW",                  category: "OUT_VENDOR", outVendorType: ["FAB"],  plantLocation: "job_work" },
 ];
 
 // Map an activity code to its coarse process phase (case-insensitive). Known TLT

@@ -1,0 +1,95 @@
+# Replit Prompt — Contractor Setup: add "Out Production" and "Job Work" plant locations
+
+## Context found in the data
+
+The WIP file already distinguishes job-work contractors by name. **8 of 46 distinct
+contractors** carry a `JW` marker, in four different formats:
+
+| Contractor | Marks | MT |
+|---|---|---|
+| BAJRANG STEEL INDUSTRIES & MINERALS PVT.LTD**.JW** | 1,096 | 106.787 |
+| SHRINANDA ENGINEERING **(JW)** | 1,188 | 102.552 |
+| DASHMESH ENGINEERING WORKS **(JW)** | 702 | 81.857 |
+| HELLO STEEL PVT LTD **(JW)** | 3 | 26.747 |
+| PLA ENSOL PRIVATE LIMITED**-JW** | 320 | 16.524 |
+| PAVAN SAI WORKS **- JW** | 120 | 4.059 |
+| KHYATI ISPAT PRIVATE LIMITED **- JW** | 3 | 3.409 |
+| POWER LINE ACCESSORIES **- JW** | 26 | 0.808 |
+| **Total** | **3,458** | **342.743** |
+
+Four naming variants: `.JW`, `(JW)`, `-JW`, `- JW`. Useful as a seeding default, but it is a
+naming convention rather than a guarantee — the setting must remain manually editable.
+
+---
+
+## The prompt
+
+```
+On the Contractor Setup page, the Plant Location dropdown currently offers Unassigned, VTPL
+Unit-1 and VTPL Unit-2. Please add two more options:
+
+    Out Production
+    Job Work
+
+These two apply only to contractors whose Type is "Out-vendor". So Out-vendor contractors get
+further classified by Plant Location into Out Production or Job Work.
+
+Requirements:
+
+1. Show "Out Production" and "Job Work" in the Plant Location dropdown ONLY when Type =
+   Out-vendor. For CNC, Sub-contractor and any other type, keep the existing options
+   (Unassigned, VTPL Unit-1, VTPL Unit-2) and do not offer the two new ones.
+
+2. Conversely, VTPL Unit-1 and VTPL Unit-2 are in-house locations — please tell me whether
+   they should still be selectable for an Out-vendor contractor, or whether Out-vendor should
+   be restricted to Unassigned / Out Production / Job Work only. I would expect the latter but
+   want you to confirm rather than assume.
+
+3. Handle the type-change case: if a contractor is currently set to Out Production or Job Work
+   and its Type is changed away from Out-vendor, the Plant Location becomes invalid. Reset it
+   to Unassigned rather than leaving an orphaned value, and make that visible to the user.
+
+4. SEEDING SUGGESTION — the WIP file already marks job-work contractors by name. 8 of the 46
+   distinct contractors carry a JW marker in their name, in four formats: ".JW", "(JW)",
+   "-JW" and "- JW":
+
+       BAJRANG STEEL INDUSTRIES & MINERALS PVT.LTD.JW
+       SHRINANDA ENGINEERING (JW)
+       DASHMESH ENGINEERING WORKS  (JW)
+       HELLO STEEL PVT LTD (JW)
+       PLA ENSOL PRIVATE LIMITED-JW
+       PAVAN SAI WORKS - JW
+       KHYATI ISPAT PRIVATE LIMITED  - JW
+       POWER LINE ACCESSORIES - JW
+
+   These carry 3,458 marks / 342.743 MT on the 05-Aug import.
+
+   Please use this as a one-time DEFAULT when the two new options are introduced: any
+   Out-vendor contractor whose name matches a JW pattern defaults to "Job Work", every other
+   Out-vendor defaults to "Unassigned". Do NOT auto-assign "Out Production" — there is no
+   marker in the data for it, so it must be set deliberately by a user.
+
+   This is a seeding default only. It must be manually overridable, and it must NOT re-apply
+   on later uploads — once a user sets a value it stays set. The JW suffix is a naming
+   convention, not a guarantee, so treat it as a starting point rather than a rule.
+
+5. Confirm the Plant Location value persists independently of WIP imports, like the other
+   contractor setup fields. It must never be reset or rebuilt when a WIP file is uploaded.
+
+Tell me how many contractors end up in each Plant Location after the change, broken down by
+Type.
+```
+
+---
+
+## What to check in the reply
+
+- **An answer on point 2**, not silence. If VTPL Unit-1/2 stay selectable for Out-vendor, an
+  external vendor can be assigned an in-house plant, which is probably not intended.
+- **That the JW seeding is one-time and overridable.** If it re-applies on every upload it
+  will silently revert manual corrections — the same failure pattern as the balance tables
+  that were being rebuilt on each WIP import earlier in this project.
+- **That Plant Location survives a WIP upload.** Contractor setup is reference data, not
+  import-derived.
+- **The per-type breakdown**, which will confirm the two new options are correctly restricted
+  to Out-vendor.

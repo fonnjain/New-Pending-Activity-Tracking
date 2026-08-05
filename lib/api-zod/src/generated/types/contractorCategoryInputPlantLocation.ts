@@ -16,4 +16,6 @@ export type ContractorCategoryInputPlantLocation = typeof ContractorCategoryInpu
 export const ContractorCategoryInputPlantLocation = {
   unit_1: 'unit_1',
   unit_2: 'unit_2',
+  out_production: 'out_production',
+  job_work: 'job_work',
 } as const;

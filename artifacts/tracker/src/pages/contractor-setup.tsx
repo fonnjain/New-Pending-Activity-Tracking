@@ -13,6 +13,8 @@ import {
   CONTRACTOR_CATEGORIES,
   OUT_VENDOR_TYPES,
   PLANT_LOCATION_OPTIONS,
+  plantLocationOptionsFor,
+  isOutVendorOnlyLocation,
   normalizeContractorName,
   plantLocationLabel,
   type ContractorCategory,
@@ -290,7 +292,15 @@ export function ContractorSetupContent() {
                 </label>
                 <Select
                   value={addCategory}
-                  onValueChange={(v) => setAddCategory(v as ContractorCategory)}
+                  onValueChange={(v) => {
+                    const next = v as ContractorCategory;
+                    setAddCategory(next);
+                    // If current plant location is Out-vendor-only but type is changing
+                    // away from Out-vendor, reset to Unassigned.
+                    if (next !== "OUT_VENDOR" && isOutVendorOnlyLocation(addPlantLocation)) {
+                      setAddPlantLocation(null);
+                    }
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -307,6 +317,11 @@ export function ContractorSetupContent() {
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase mb-1 block">
                   Plant Location
+                  {addCategory === "OUT_VENDOR" && (
+                    <span className="ml-1 font-normal normal-case text-muted-foreground/70">
+                      (Out-vendor options)
+                    </span>
+                  )}
                 </label>
                 <Select
                   value={addPlantLocation ?? "__unassigned__"}
@@ -318,7 +333,7 @@ export function ContractorSetupContent() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {PLANT_LOCATION_OPTIONS.map((o) => (
+                    {plantLocationOptionsFor(addCategory).map((o) => (
                       <SelectItem
                         key={o.value ?? "__unassigned__"}
                         value={o.value ?? "__unassigned__"}
@@ -385,9 +400,17 @@ export function ContractorSetupContent() {
                       <TableCell>
                         <Select
                           value={r.category}
-                          onValueChange={(v) =>
-                            save(r.displayName, v as ContractorCategory, r.outVendorType, r.plantLocation)
-                          }
+                          onValueChange={(v) => {
+                            const newCat = v as ContractorCategory;
+                            // If the current plant location is Out-vendor-only and the type
+                            // is changing away from Out-vendor, reset to Unassigned so we
+                            // never leave an orphaned value.
+                            const plantLoc =
+                              newCat !== "OUT_VENDOR" && isOutVendorOnlyLocation(r.plantLocation)
+                                ? null
+                                : r.plantLocation;
+                            save(r.displayName, newCat, r.outVendorType, plantLoc);
+                          }}
                         >
                           <SelectTrigger className="h-8">
                             <SelectValue />
@@ -441,7 +464,7 @@ export function ContractorSetupContent() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {PLANT_LOCATION_OPTIONS.map((o) => (
+                            {plantLocationOptionsFor(r.category).map((o) => (
                               <SelectItem
                                 key={o.value ?? "__unassigned__"}
                                 value={o.value ?? "__unassigned__"}

@@ -7,7 +7,7 @@
  */
 
 /**
- * Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, null=Unassigned). Display metadata only.
+ * Plant location (unit_1=VTPL Unit-1, unit_2=VTPL Unit-2, out_production=Out Production, job_work=Job Work, null=Unassigned). Display metadata only.
  * @nullable
  */
 export type ContractorCategoryPlantLocation = typeof ContractorCategoryPlantLocation[keyof typeof ContractorCategoryPlantLocation] | null;
@@ -16,4 +16,6 @@ export type ContractorCategoryPlantLocation = typeof ContractorCategoryPlantLoca
 export const ContractorCategoryPlantLocation = {
   unit_1: 'unit_1',
   unit_2: 'unit_2',
+  out_production: 'out_production',
+  job_work: 'job_work',
 } as const;
