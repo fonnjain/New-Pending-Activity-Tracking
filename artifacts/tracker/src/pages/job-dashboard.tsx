@@ -431,7 +431,7 @@ function JobDashboardContent() {
             { label: "Work Order (MT)", field: "workOrderMt", numeric: true, decimals: 3, total: true },
             { label: "Dispatch (MT)", field: "dispatchMt", numeric: true, decimals: 3, total: true },
             { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
-            { label: "FG Overview Computed (MT)", field: "fgOverviewComputedMt", numeric: true, decimals: 3, total: true },
+            { label: "FG (Order Review) (MT)", field: "fgOverviewComputedMt", numeric: true, decimals: 3, total: true },
             { label: "Release Balance Computed (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
             { label: "Awaiting Assignment Wt (MT)", field: "awaitingAssignmentWt", numeric: true, decimals: 3, total: true },
             { label: "Awaiting Assignment Marks", field: "awaitingAssignmentMarks", numeric: true, decimals: 0, total: true },
@@ -441,7 +441,7 @@ function JobDashboardContent() {
             { label: "Quality Check Marks", field: "qualityMarks", numeric: true, decimals: 0, total: true },
             { label: "Galvanising Wt (MT)", field: "galvanisingWt", numeric: true, decimals: 3, total: true },
             { label: "Galvanising Marks", field: "galvanisingMarks", numeric: true, decimals: 0, total: true },
-            { label: "FG WIP Wt (MT)", field: "fgWipWt", numeric: true, decimals: 3, total: true },
+            { label: "FG (WIP file) (MT)", field: "fgWipWt", numeric: true, decimals: 3, total: true },
             { label: "Total Wt (MT)", field: "totalWt", numeric: true, decimals: 3, total: true },
             { label: "Total Marks", field: "marks", numeric: true, decimals: 0, total: true },
             { label: "Avg Ageing (d)", field: "avgAge", numeric: true, decimals: 0 },
@@ -629,7 +629,7 @@ function JobDashboardContent() {
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Work Order Qty</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Qty</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Balance</TableHead>
-                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">FG Overview Computed</TableHead>
+                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">FG (Order Review)</TableHead>
                   <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Balance Computed</TableHead>
                   {headerPhases.map((ph) => (
                     <TableHead key={ph.key} className="text-right align-bottom">

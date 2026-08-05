@@ -1037,11 +1037,12 @@ interface GenStageSpec {
   structOrField: keyof GenStructRowData;
 }
 const GEN_STAGES: GenStageSpec[] = [
-  { key:"rel",  label:"Progress Release",     shortLabel:"Rel",  genField:"genProgRelease", orField:"releaseMt",      structOrField:"orProgRelease" },
-  { key:"fab",  label:"Progress Fabrication", shortLabel:"Fab",  genField:"genProgFab",     orField:"fileFabMt",      structOrField:"orProgFab"     },
-  { key:"galv", label:"Progress Galvanising", shortLabel:"Galv", genField:"genProgGalv",    orField:"fileGalvMt",     structOrField:"orProgGalv"    },
-  { key:"insp", label:"Progress Inspection",  shortLabel:"Insp", genField:"genProgInsp",    orField:"inspectionMt",   structOrField:"orProgInsp"    },
-  { key:"desp", label:"Progress Despatch",    shortLabel:"Desp", genField:"genProgDesp",    orField:"fileDespatchMt", structOrField:"orProgDesp"    },
+  { key:"rel",  label:"Progress Release",     shortLabel:"Rel",  genField:"genProgRelease", orField:"releaseMt",  structOrField:"orProgRelease" },
+  { key:"fab",  label:"Progress Fabrication", shortLabel:"Fab",  genField:"genProgFab",     orField:"fileFabMt",  structOrField:"orProgFab"     },
+  { key:"galv", label:"Progress Galvanising", shortLabel:"Galv", genField:"genProgGalv",    orField:"fileGalvMt", structOrField:"orProgGalv"    },
+  // FG: Gen = WIP "FG Pending For Dispatch" rows; OR = Galvanising − Despatch from OR file.
+  // Expect a large gap (~47%) — they measure different things (snapshot vs cumulative book figure).
+  { key:"fg",   label:"Finished Goods (FG)",  shortLabel:"FG",   genField:"genProgFg",      orField:null,         structOrField:"orProgFg"      },
 ];
 const TIER_CLS: Record<ConfTier,{badge:string;flag:string}> = {
   high:   { badge:"bg-emerald-500/15 text-emerald-700 dark:text-emerald-400", flag:"text-red-600 dark:text-red-400 font-semibold" },
@@ -1060,13 +1061,14 @@ interface GenStructRowData {
   genBalGalv: number;        // released marks in galv activities (MT)
   genProgGalv: number;       // genProgFab - genBalGalv
   fgWt: number;              // blank-activity (FG Pending) marks weight (MT)
-  genProgInsp: number;       // genProgGalv - fgWt
+  genProgFg: number;         // = fgWt — WIP "FG Pending For Dispatch" weight
   totalWt: number;           // all marks weight (MT)
-  genProgDesp: number | null;// woQty - totalWt (null if no woQty)
   // OR file comparison values
   orProgRelease: number | null; orProgFab: number | null;
-  orProgGalv: number | null;    orProgInsp: number | null;
-  orProgDesp: number | null;
+  orProgGalv: number | null;
+  /** fileGalvMt − fileDespatchMt; null when OR row absent or galvMt null;
+   *  may be negative (despatch exceeds galv in OR file — source-data issue). */
+  orProgFg: number | null;
 }
 type GenProjGroup = {
   project: string; releasePct: number; structures: GenStructRowData[];
@@ -1154,9 +1156,16 @@ function GeneratedOrderReviewContent() {
         const genBalGalv     = toMt(sum(released.filter((r) => GEN_GALV_ACTS.has(actOf(r)))));
         const genProgGalv    = genProgFab - genBalGalv;
         const fgWt           = toMt(sum(fg));
-        const genProgInsp    = genProgGalv - fgWt;
+        const genProgFg      = fgWt; // WIP "FG Pending For Dispatch" weight
         const totalWt        = toMt(sum(marks));
-        const genProgDesp    = woQty != null ? woQty - totalWt : null;
+        // OR FG = Galvanising − Despatch from OR file.
+        // Kept as-is even when negative (Despatch > Galvanising is a source-data
+        // inconsistency in the OR file; we surface it rather than clamping to zero).
+        const orProgFg: number | null = orRow
+          ? (orRow.fileGalvMt != null
+              ? orRow.fileGalvMt - (orRow.fileDespatchMt ?? 0)
+              : null)
+          : null;
 
         structures.push({
           structure: struct,
@@ -1168,13 +1177,12 @@ function GeneratedOrderReviewContent() {
           genBalRelease, genProgRelease,
           genBalFab, genProgFab,
           genBalGalv, genProgGalv,
-          fgWt, genProgInsp,
-          totalWt, genProgDesp,
-          orProgRelease: orRow?.releaseMt      ?? null,
-          orProgFab:     orRow?.fileFabMt      ?? null,
-          orProgGalv:    orRow?.fileGalvMt     ?? null,
-          orProgInsp:    orRow?.inspectionMt   ?? null,
-          orProgDesp:    orRow?.fileDespatchMt ?? null,
+          fgWt, genProgFg,
+          totalWt,
+          orProgRelease: orRow?.releaseMt ?? null,
+          orProgFab:     orRow?.fileFabMt ?? null,
+          orProgGalv:    orRow?.fileGalvMt ?? null,
+          orProgFg,
         });
       }
       structures.sort((a, b) => a.structure.localeCompare(b.structure));
@@ -1185,8 +1193,7 @@ function GeneratedOrderReviewContent() {
         project: proj, releasePct, structures,
         totals: {
           genProgRelease: sf("genProgRelease"), genProgFab: sf("genProgFab"),
-          genProgGalv: sf("genProgGalv"), genProgInsp: sf("genProgInsp"),
-          genProgDesp: structures.reduce((s, r) => s + (r.genProgDesp ?? 0), 0),
+          genProgGalv: sf("genProgGalv"),       genProgFg: sf("genProgFg"),
         },
       });
     }
@@ -1226,11 +1233,11 @@ function GeneratedOrderReviewContent() {
         project: pg.project, structure: s.structure,
         subType: s.subType ?? "", mfcBatch: s.mfcBatch, marks: s.markCount,
         genProgRelease: s.genProgRelease, genProgFab: s.genProgFab,
-        genProgGalv: s.genProgGalv, genProgInsp: s.genProgInsp,
-        genProgDesp: s.genProgDesp,
+        genProgGalv: s.genProgGalv, genProgFg: s.genProgFg,
         orProgRelease: s.orProgRelease, orProgFab: s.orProgFab,
-        orProgGalv: s.orProgGalv, orProgInsp: s.orProgInsp,
-        orProgDesp: s.orProgDesp,
+        // null → blank in export (no OR row for this structure); never zero-fill.
+        orProgGalv: s.orProgGalv,
+        orProgFg:   s.orProgFg,         // may be negative (OR data inconsistency)
       })),
     );
     exportToXlsx(
@@ -1242,15 +1249,13 @@ function GeneratedOrderReviewContent() {
         { label: "MFC Batch",                                  field: "mfcBatch" },
         { label: "Marks",                                      field: "marks",   numeric: true },
         { label: "Gen Progress Release (MT)",                  field: "genProgRelease", numeric: true, decimals: 3, total: true },
-        { label: "Gen Progress Fabrication (MT)",              field: "genProgFab",    numeric: true, decimals: 3, total: true },
-        { label: "Gen Progress Galvanising (MT)",              field: "genProgGalv",   numeric: true, decimals: 3, total: true },
-        { label: "Gen Progress Inspection (MT)",               field: "genProgInsp",   numeric: true, decimals: 3, total: true },
-        { label: "Gen Progress Despatch (MT)",                 field: "genProgDesp",   numeric: true, decimals: 3, total: true },
-        { label: "OR Progress Release (MT)",                   field: "orProgRelease", numeric: true, decimals: 3 },
-        { label: "OR Progress Fabrication (MT)",               field: "orProgFab",     numeric: true, decimals: 3 },
-        { label: "OR Progress Galvanising (MT)",               field: "orProgGalv",    numeric: true, decimals: 3 },
-        { label: "OR Progress Inspection (MT)",                field: "orProgInsp",    numeric: true, decimals: 3 },
-        { label: "OR Progress Despatch (MT)",                  field: "orProgDesp",    numeric: true, decimals: 3 },
+        { label: "Gen Progress Fabrication (MT)",              field: "genProgFab",     numeric: true, decimals: 3, total: true },
+        { label: "Gen Progress Galvanising (MT)",              field: "genProgGalv",    numeric: true, decimals: 3, total: true },
+        { label: "Gen Finished Goods (MT)",                    field: "genProgFg",      numeric: true, decimals: 3, total: true },
+        { label: "OR Progress Release (MT)",                   field: "orProgRelease",  numeric: true, decimals: 3 },
+        { label: "OR Progress Fabrication (MT)",               field: "orProgFab",      numeric: true, decimals: 3 },
+        { label: "OR Progress Galvanising (MT)",               field: "orProgGalv",     numeric: true, decimals: 3 },
+        { label: "OR Finished Goods (MT)",                     field: "orProgFg",       numeric: true, decimals: 3 },
       ] as XlsxColumn[],
       rows,
       { sheetName: "Generated OR" },
@@ -1288,9 +1293,11 @@ function GeneratedOrderReviewContent() {
             <span className="font-semibold uppercase tracking-wide text-xs text-amber-600">
               Generated — not imported data.
             </span>{" "}
-            Chain reconstructed from WIP for every structure present in both WIP and the Order Review.
-            Confidence varies by stage: Release and Fabrication reconstruct well across all projects;
-            Inspection and Despatch are indicative only (low confidence — completed marks have left WIP).
+            Chain: Release → Fabrication → Galvanising → Finished Goods, reconstructed from WIP
+            alongside the matching OR file figure at each stage. Confidence varies: Release and
+            Fabrication agree well; Finished Goods typically shows a large gap (~47%) because
+            Gen FG is the physical yard count (WIP file) while OR FG is a cumulative book figure
+            (Galvanising minus Despatch). A gap is expected, not a bug.
             This view is strictly read-only and never affects imported data.
           </p>
         </div>
@@ -1308,7 +1315,7 @@ function GeneratedOrderReviewContent() {
           <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">
             Match rate vs OR file (±0.5 MT tolerance, structures with OR data)
           </div>
-          <div className="grid grid-cols-5 gap-3">
+          <div className="grid grid-cols-4 gap-3">
             {GEN_STAGES.map((stage) => {
               const stat = stageStatsByKey.get(stage.key)!;
               const pct  = stat.total > 0 ? (stat.matching / stat.total) * 100 : null;
@@ -1439,6 +1446,7 @@ function GeneratedOrderReviewContent() {
                                 const or  = s[stage.structOrField] as number | null;
                                 const diff = gen != null && or != null ? Math.abs(gen - or) : null;
                                 const flagged = diff != null && diff > 0.5;
+                                const negativeOr = or != null && or < 0;
                                 const flagCls = TIER_CLS[stageStatsByKey.get(stage.key)!.tier].flag;
                                 return (
                                   <td key={stage.key} className="px-3 py-1.5 text-right tabular-nums border-l">
@@ -1446,9 +1454,14 @@ function GeneratedOrderReviewContent() {
                                       {mt3(gen)}
                                     </span>
                                     {or != null && (
-                                      <span className="block text-[10px] text-muted-foreground leading-tight">
+                                      <span className={`block text-[10px] leading-tight ${negativeOr ? "text-red-600 dark:text-red-400 font-semibold" : "text-muted-foreground"}`}>
                                         OR: {mt3(or)}
-                                        {flagged && (
+                                        {negativeOr && (
+                                          <span title="Negative OR FG: Despatch exceeds Galvanising in the OR file — source-data inconsistency">
+                                            <AlertTriangle className="inline h-2.5 w-2.5 ml-0.5" />
+                                          </span>
+                                        )}
+                                        {!negativeOr && flagged && (
                                           <AlertTriangle className="inline h-2.5 w-2.5 ml-0.5 text-amber-500" />
                                         )}
                                       </span>
@@ -1787,8 +1800,8 @@ function ComputedFgContent() {
         { label: "Structure", field: "structure" },
         { label: "Release (MT)", field: "releaseMt", numeric: true, decimals: 3, total: true },
         { label: "File Despatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
-        { label: "FG Overview Computed (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
-        { label: "FG WIP (MT)", field: "fgWipMt", numeric: true, decimals: 3, total: true },
+        { label: "FG (Order Review) (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
+        { label: "FG (WIP file) (MT)",     field: "fgWipMt",      numeric: true, decimals: 3, total: true },
       ],
       rows,
       { sheetName: "Computed FG" },
@@ -1801,8 +1814,10 @@ function ComputedFgContent() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Computed FG</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Finished-goods figures per structure from the Order Review file.
-            FG Overview Computed = Galvanising minus Despatch.
+            Finished-goods figures per structure, two sources side by side.{" "}
+            <span className="font-medium">FG (Order Review)</span> = OR file Galvanising minus Despatch (cumulative book figure).{" "}
+            <span className="font-medium">FG (WIP file)</span> = WIP rows with Type "FG Pending For Dispatch" (physical yard stock now).
+            A gap between them is normal — they measure different things.
           </p>
         </div>
         {rows.length > 0 && (
@@ -1855,10 +1870,10 @@ function ComputedFgContent() {
                       File Despatch (MT){sortArrow("fileDespatchMt")}
                     </th>
                     <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("computedFgMt")}>
-                      FG Overview Computed (MT){sortArrow("computedFgMt")}
+                      FG (Order Review) (MT){sortArrow("computedFgMt")}
                     </th>
                     <th className="px-3 py-2 font-semibold text-right cursor-pointer select-none" onClick={() => toggleSort("fgWipMt")}>
-                      FG WIP (MT){sortArrow("fgWipMt")}
+                      FG (WIP file) (MT){sortArrow("fgWipMt")}
                     </th>
                   </tr>
                 </thead>

@@ -1,0 +1,128 @@
+# Replit Prompt — Generated Order Review: replace Inspection/Despatch with Finished Goods
+### Plus the match-rate panel fix and FG naming/integrity checks
+
+**Everything below is measured from the 04-Aug files** (`WIP-AS_ON_DATE-04-08-2026.xls`,
+`Order_Review-04-08-2026.xlsx`) and the app's own export
+(`generated_order_review_2026-08-04.xlsx`).
+
+**Confirmed good, no action needed:** the export's OR columns are faithful to the source
+file — Release 748/748 exact, Fabrication 604/604, Galvanising 583/583, Inspection 327/327,
+Despatch 262/262, all within 0.001 MT with zero total difference. Ingestion and export are
+correct.
+
+---
+
+## The prompt
+
+```
+Four changes to the Generated Order Review, plus two checks. All figures below are measured
+from the 04-Aug import and the app's own export.
+
+First, confirmed working so you don't need to look at it: the export's OR columns match
+Order_Review-04-08-2026.xlsx exactly — 748 Release, 604 Fabrication, 583 Galvanising, 327
+Inspection, 262 Despatch, every one within 0.001 MT, zero total difference. Ingestion and
+export are faithful.
+
+CHANGE 1 — Drop Inspection and Despatch, add Finished Goods
+
+WIP does not capture Inspection or Despatch at all. Those two stages are being reconstructed
+by subtraction and there is nothing real behind them — which is why they match at only 50.6%
+and 71.9%. What WIP DOES capture is Finished Goods, and the Order Review has a comparable
+figure, so that is the honest final comparison.
+
+Remove entirely, from both the UI and the Excel export:
+    Gen Progress Inspection (MT) / OR Progress Inspection (MT)
+    Gen Progress Despatch (MT)   / OR Progress Despatch (MT)
+
+Add as the final pair:
+    Gen Finished Goods (MT)  = WIP rows with Type = "FG Pending For Dispatch", summed per
+                               structure
+    OR Finished Goods (MT)   = Order Review Progress Galvanising (Col N)
+                               minus Progress Despatch (Col Q)
+
+The chain becomes: Release -> Fabrication -> Galvanising -> Finished Goods, gen and OR side
+by side at each stage.
+
+EXPECT A LARGE GAP ON THE FG PAIR. THIS IS CORRECT, NOT A BUG.
+
+    Gen FG (WIP)   2,439.518 MT across 397 structures
+    OR FG          4,302.903 MT across the same 397
+    agreement      187/397 = 47.1% within 0.5 MT
+
+The two answer different questions. OR Galvanising-minus-Despatch is cumulative over the
+project's life, so material that was dispatched but never marked despatched in the order book
+stays in that figure permanently. Gen FG is only what is physically in the yard now. Label
+the FG confidence from the measured rate — do not assume high.
+
+CHANGE 2 — Keep the format identical
+
+Same column grouping, same gen/OR pairing, same per-project subtotal structure as the current
+view. Only the stage set changes. The Excel export must match the UI layout.
+
+CHANGE 3 — The match-rate panel shows 0/0 for every stage
+
+The data is present and the rates are computable from your own export. At the +/-0.5 MT
+tolerance the panel already states, on 04-Aug:
+
+    Release      755/768 = 98.3%
+    Fabrication  499/608 = 82.1%
+    Galvanising  414/585 = 70.8%
+    (Inspection and Despatch are being removed)
+    Finished Goods 187/397 = 47.1%
+
+Show matched/total as the label implies, not a bare percentage. The denominators shrink down
+the chain (768 -> 397) because a structure only appears if the OR carries a value for that
+stage, and that shrinkage should be visible rather than hidden.
+
+CHANGE 4 — 47 exported rows have no Order Review row at all
+
+The export has 882 rows but only 835 match a (project, structure) in the OR file. Tell me
+what the other 47 are. If the OR value is genuinely absent, those columns must be BLANK, not
+zero — a zero is indistinguishable from a real zero and drags the match rate down
+artificially.
+
+CHECK 1 — FG naming
+
+There are three FG definitions in this app: WIP-file rows, OR Galvanising-minus-Despatch, and
+the period-over-period delta in Production Movement. The third is clearly named. The first
+two are not — "FG WIP" and "FG Overview Computed" both read as "the FG figure" to anyone who
+has not been briefed, and a difference between them looks like an error.
+
+Please rename so the source is visible in the label: "FG (WIP file)" and "FG (Order Review)"
+or similar, wherever each appears.
+
+CHECK 2 — confirm the two are never combined
+
+Confirm that nothing sums the WIP-derived FG and the OR-derived FG into a single total, and
+that neither is used as a silent fallback when the other is missing. They measure overlapping
+stock from different sources, so summing double counts, and a silent fallback would change a
+page's meaning with no visible signal.
+
+I am asking because FG previously had two representations in this codebase (record_pool rows
+and the imports.summary.fgWipByStructure jsonb) with nothing verifying they agreed, and that
+only surfaced because it produced a permanent false reconciliation warning.
+
+ALSO — negative OR FG on 6 structures
+
+Six structures compute a negative OR Finished Goods on 04-Aug (Despatch Progress exceeds
+Galvanising Progress). That is impossible for stock on hand and is a source-data
+inconsistency in the Order Review, not ordinary divergence. Surface these rather than
+displaying negative stock or clamping to zero. Related: that file's Balance Inspection column
+sums to about -1,434 MT, so it has a known pattern of internally inconsistent stage figures.
+
+When done, paste the new column set, and tell me the four match-rate figures the panel
+displays for the 04-Aug import.
+```
+
+---
+
+## What to check in the reply
+
+- **The four match-rate figures**, not 0/0. Release ~98.3%, Fabrication ~82.1%,
+  Galvanising ~70.8%, Finished Goods ~47.1%.
+- **That FG confidence is labelled from the measured rate.** At 47.1% it is the weakest
+  comparison on the page and should say so.
+- **A real answer on the 47 unmatched rows**, and blanks rather than zeros where the OR has
+  no value.
+- **An explicit "no" on Check 2.** If either figure is used as a fallback for the other
+  anywhere, that needs to surface now rather than as a wrong total later.
