@@ -44,7 +44,7 @@ const ALL_TABS: Array<{ path: string; label: string; disabled?: boolean; adminOn
   { path: "/warning-parameters", label: "Warning Parameters", adminOnly: true },
   { path: "/thickness", label: "Thickness", adminOnly: true },
   { path: "/erp-rules", label: "ERP Rules", adminOnly: true },
-  { path: "/bucket-list-dates", label: "Bucket List Dates", adminOnly: true },
+  { path: "/bucket-list-dates", label: "Bucket List Dates" },
   { path: "/users", label: "Users", adminOnly: true },
 ];
 
