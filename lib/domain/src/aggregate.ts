@@ -9,6 +9,7 @@ import {
   bundleActivitySet,
   matchesContractorCategoryFilter,
   normalizeContractorName,
+  resolveContractorKey,
   lifecycleStatus,
   scopeFor,
   sequenceFor,
@@ -146,6 +147,11 @@ export interface FilterOptions {
   // callers can pass a richer map (extra fields) without value-type invariance
   // errors.
   categoryMap?: ReadonlyMap<string, ContractorCatInfo>;
+  // Contractor alias map (normalizedAliasKey -> canonicalKey) from approved
+  // dedup merges. When provided, the `contractor` filter matches via
+  // resolveContractorKey so selecting the canonical name matches every alias
+  // variant. Omitted/undefined = legacy exact string match.
+  aliasMap?: ReadonlyMap<string, string>;
 }
 
 // Apply the full filter set to a record list, preserving input order. This is a
@@ -158,6 +164,13 @@ export function filterRecords<T extends AggRecord>(
 ): T[] {
   const win = opts.dateWindow ?? null;
   const categoryMap = opts.categoryMap;
+  const aliasMap = opts.aliasMap;
+  // Pre-resolve the contractor filter value once (alias-aware when a map is
+  // supplied; otherwise null and the legacy exact match below applies).
+  const contractorFilterKey =
+    aliasMap && filters.contractor
+      ? resolveContractorKey(filters.contractor, aliasMap)
+      : null;
   const q = filters.search.trim().toLowerCase();
 
   const activityFilter = filters.activity;
@@ -202,7 +215,14 @@ export function filterRecords<T extends AggRecord>(
     if (filters.structure && r.structure !== filters.structure) return false;
     if (filters.mark && r.markId !== filters.mark && r.markTail !== filters.mark)
       return false;
-    if (filters.contractor && r.contractor !== filters.contractor) return false;
+    if (filters.contractor) {
+      if (contractorFilterKey !== null) {
+        if (resolveContractorKey(r.contractor, aliasMap!) !== contractorFilterKey)
+          return false;
+      } else if (r.contractor !== filters.contractor) {
+        return false;
+      }
+    }
     if (filters.contractorCategory || filters.outVendorType) {
       const info = catInfoFor(r.contractor);
       if (

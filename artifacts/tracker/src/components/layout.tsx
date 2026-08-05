@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes, ChevronsUpDown } from "lucide-react";
-import { useTracker, dateRangeWindow, useActiveJobSet, useJobTemplates, MULTI_JOBS_FILTER_VALUE, MULTI_TEMPLATES_FILTER_VALUE, isTemplateFilter, extractTemplateId, templateFilterValue, isNamedJobSetFilter, type JobTemplate, type MfcViewMode } from "@/lib/store";
+import { useTracker, dateRangeWindow, useActiveJobSet, useJobTemplates, useContractorAliasMap, MULTI_JOBS_FILTER_VALUE, MULTI_TEMPLATES_FILTER_VALUE, isTemplateFilter, extractTemplateId, templateFilterValue, isNamedJobSetFilter, type JobTemplate, type MfcViewMode } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useGetImportRecords, useGetAuthStatus, useListContractorCategories, getGetImportRecordsQueryKey, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
 import { LoginForm, ChangePasswordForm, LogoutButton } from "@/components/login-gate";
@@ -13,7 +13,7 @@ import { Segmented } from "@/components/ui/segmented";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { formatDate } from "@/lib/utils";
-import { sortActivities, ACTIVITY_BUNDLES, OUT_VENDOR_TYPES } from "@workspace/domain";
+import { sortActivities, ACTIVITY_BUNDLES, OUT_VENDOR_TYPES, resolveContractorKey, normalizeContractorName } from "@workspace/domain";
 import {
   buildContractorGroups,
   encodeContractorCategory,
@@ -748,9 +748,32 @@ function FilterBar() {
     [scopedRecords]
   );
 
+  // Contractor options, deduped through the alias map: every raw string that
+  // resolves to the same canonical key (approved dedup merge) collapses into a
+  // single option. The representative shown/stored is the raw string whose
+  // normalized form IS the canonical key (i.e. the canonical spelling) when it
+  // appears in the data; otherwise the first variant seen. Matching is
+  // alias-aware downstream (filterRecords / matchesContractorSelection), so
+  // selecting the one option matches every variant.
+  const contractorAliasMap = useContractorAliasMap();
   const contractors = useMemo(
-    () => Array.from(new Set(scopedRecords.map(r => r.contractor).filter((c): c is string => Boolean(c)))).sort(),
-    [scopedRecords]
+    () => {
+      const byKey = new Map<string, string>();
+      for (const r of scopedRecords) {
+        const c = r.contractor;
+        if (!c) continue;
+        const key = resolveContractorKey(c, contractorAliasMap);
+        const existing = byKey.get(key);
+        if (
+          existing === undefined ||
+          (normalizeContractorName(c) === key && normalizeContractorName(existing) !== key)
+        ) {
+          byKey.set(key, c);
+        }
+      }
+      return Array.from(byKey.values()).sort();
+    },
+    [scopedRecords, contractorAliasMap]
   );
 
   const activities = useMemo(

@@ -1948,6 +1948,18 @@ router.post("/imports/:id/summary", async (req, res): Promise<void> => {
     });
   }
 
+  // Contractor alias map (aliasKey -> canonicalKey), matching the client's
+  // useContractorAliasMap so the shared filterRecords contractor match stays
+  // byte-identical on both sides (alias-aware canonical-key comparison).
+  const aliasRows = await db
+    .select({
+      aliasKey: contractorAliasesTable.aliasKey,
+      canonicalKey: contractorAliasesTable.canonicalKey,
+    })
+    .from(contractorAliasesTable);
+  const aliasMap = new Map<string, string>();
+  for (const row of aliasRows) aliasMap.set(row.aliasKey, row.canonicalKey);
+
   const f = body.data.filters;
   const filters: RecordFilters = {
     category: f.category,
@@ -1967,7 +1979,7 @@ router.post("/imports/:id/summary", async (req, res): Promise<void> => {
   };
   const dateWindow = body.data.dateWindow ?? null;
 
-  const filtered = filterRecords(serialized, filters, { dateWindow, categoryMap });
+  const filtered = filterRecords(serialized, filters, { dateWindow, categoryMap, aliasMap });
   const overview = summarizeOverview(filtered);
 
   const [settingsRow] = await db

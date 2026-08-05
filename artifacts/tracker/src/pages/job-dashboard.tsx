@@ -12,8 +12,10 @@ import {
   processPhasesForMode,
   type ProcessPhaseKey,
   type NtltStage,
+  resolveContractorKey,
+  normalizeContractorName,
 } from "@workspace/domain";
-import { useTracker, useContractorCategoryMap, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE, dateRangeWindow, type MfcViewMode } from "@/lib/store";
+import { useTracker, useContractorCategoryMap, useContractorAliasMap, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE, dateRangeWindow, type MfcViewMode } from "@/lib/store";
 import {
   buildContractorGroups,
   matchesContractorSelection,
@@ -239,18 +241,19 @@ function JobDashboardContent() {
   const dateTo = dateWindow?.end ? dateWindow.end.toISOString().slice(0, 10) : "";
 
   const categoryMap = useContractorCategoryMap();
+  const aliasMap = useContractorAliasMap();
 
   // Final filter: apply global activity + contractor + date range.
   const filtered = useMemo(
     () =>
       preFiltered.filter((r) => {
         if (filters.activity && r.activity !== filters.activity) return false;
-        if (!matchesContractorSelection(r.contractor, filters.contractor ?? null, categoryMap)) return false;
+        if (!matchesContractorSelection(r.contractor, filters.contractor ?? null, categoryMap, aliasMap)) return false;
         if (dateFrom && r.assignDate != null && String(r.assignDate) < dateFrom) return false;
         if (dateTo && r.assignDate != null && String(r.assignDate) > dateTo) return false;
         return true;
       }),
-    [preFiltered, filters.activity, filters.contractor, dateFrom, dateTo, categoryMap],
+    [preFiltered, filters.activity, filters.contractor, dateFrom, dateTo, categoryMap, aliasMap],
   );
 
   const { totalProjects, totalMarks, totalQty, totalWt, avgAgeing, byProject, byActivity } =
@@ -1438,21 +1441,31 @@ function StructureDrilldown({
     [records],
   );
   const categoryMap = useContractorCategoryMap();
-  const contractorGroups = useMemo(
-    () =>
-      buildContractorGroups(
-        Array.from(
-          new Set(records.map((r) => r.contractor).filter(Boolean)),
-        ).sort(),
-      ),
-    [records],
-  );
+  const aliasMap = useContractorAliasMap();
+  // Alias-aware dedup: variants that resolve to the same canonical key collapse
+  // into one option (representative = canonical spelling when present in data).
+  const contractorGroups = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const r of records) {
+      const c = r.contractor;
+      if (!c) continue;
+      const key = resolveContractorKey(c, aliasMap);
+      const existing = byKey.get(key);
+      if (
+        existing === undefined ||
+        (normalizeContractorName(c) === key && normalizeContractorName(existing) !== key)
+      ) {
+        byKey.set(key, c);
+      }
+    }
+    return buildContractorGroups(Array.from(byKey.values()).sort());
+  }, [records, aliasMap]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return records.filter((r) => {
       if (activity && r.activity !== activity) return false;
-      if (!matchesContractorSelection(r.contractor, contractor, categoryMap)) return false;
+      if (!matchesContractorSelection(r.contractor, contractor, categoryMap, aliasMap)) return false;
       if (
         q &&
         ![r.structure, r.markId, r.activity, r.section].some((v) =>

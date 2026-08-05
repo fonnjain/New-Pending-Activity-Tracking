@@ -517,12 +517,13 @@ export function resolveActiveFilters(
 export function useFilteredRecords(records: Record[] | undefined) {
   const { filters } = useTracker();
   const categoryMap = useContractorCategoryMap();
+  const aliasMap = useContractorAliasMap();
   const activeJobSet = useActiveJobSet();
 
   return useMemo(() => {
     if (!records) return [];
     const { filters: rf, dateWindow } = resolveActiveFilters(filters, activeJobSet);
-    let result = filterRecords(records, rf, { dateWindow, categoryMap });
+    let result = filterRecords(records, rf, { dateWindow, categoryMap, aliasMap });
     // Plant location post-filter: restrict to contractors whose plantLocation is
     // in the selected set. An unclassified/unmapped contractor (plantLocation null)
     // is excluded when any location is selected.
@@ -534,5 +535,5 @@ export function useFilteredRecords(records: Record[] | undefined) {
       });
     }
     return result;
-  }, [records, filters, categoryMap, activeJobSet]);
+  }, [records, filters, categoryMap, aliasMap, activeJobSet]);
 }

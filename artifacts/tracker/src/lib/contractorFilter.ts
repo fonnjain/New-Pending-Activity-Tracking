@@ -13,6 +13,7 @@
 import {
   IN_HOUSE_GROUP,
   matchesContractorCategoryFilter,
+  resolveContractorKey,
 } from "@workspace/domain";
 import type { SelectGroup } from "@/components/ui/searchable-select";
 import {
@@ -65,11 +66,14 @@ export function buildContractorGroups(contractors: string[]): SelectGroup[] {
 
 // Single-state contractor predicate for page-local filters: a namespaced
 // category value matches via the (virtual-aware) category helper; any other
-// value is an exact contractor-name match; null/empty matches everything.
+// value is a contractor-name match — alias-aware (resolveContractorKey) when
+// an aliasMap is supplied, so selecting a canonical name matches every merged
+// alias variant; exact string match otherwise. null/empty matches everything.
 export function matchesContractorSelection(
   contractor: string | null | undefined,
   selection: string | null,
   map: Map<string, ContractorCategoryInfo>,
+  aliasMap?: ReadonlyMap<string, string>,
 ): boolean {
   if (!selection) return true;
   const category = decodeContractorCategory(selection);
@@ -77,6 +81,12 @@ export function matchesContractorSelection(
     return matchesContractorCategoryFilter(
       contractorCategoryFor(contractor, map).category,
       category,
+    );
+  }
+  if (aliasMap) {
+    return (
+      resolveContractorKey(contractor, aliasMap) ===
+      resolveContractorKey(selection, aliasMap)
     );
   }
   return contractor === selection;
