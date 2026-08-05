@@ -1105,35 +1105,23 @@ function GeneratedOrderReviewContent() {
     return { lastRow, bomTypes };
   }, [orderStatus]);
 
-  // Project-level OR summary for release % and Bucket A classification.
-  // Bucket A per project: ALL OR structures have woOrderQtyMt ≈ 0 AND releaseMt ≈ 0.
-  // Projects with no OR rows are also treated as "new/unregistered" for scoping.
+  // Project-level OR summary for release % display (used in project cell tooltip).
   const orProjSummary = useMemo(() => {
-    const m = new Map<string, { releaseMt: number; woQtyMt: number; anyNonA: boolean }>();
+    const m = new Map<string, { releaseMt: number; woQtyMt: number }>();
     for (const r of orderStatus?.rows ?? []) {
-      const p = m.get(r.project) ?? { releaseMt: 0, woQtyMt: 0, anyNonA: false };
-      const isNonA = Math.abs(r.woOrderQtyMt ?? 0) > 0.001 || Math.abs(r.releaseMt ?? 0) > 0.001;
+      const p = m.get(r.project) ?? { releaseMt: 0, woQtyMt: 0 };
       m.set(r.project, {
         releaseMt: p.releaseMt + (r.releaseMt ?? 0),
         woQtyMt:   p.woQtyMt   + (r.woOrderQtyMt ?? 0),
-        anyNonA:   p.anyNonA || isNonA,
       });
     }
     return m;
   }, [orderStatus]);
 
-  // Projects "in Bucket A" per the OR file: either no OR rows, or ALL structures
-  // have woOrderQtyMt ≈ 0 AND releaseMt ≈ 0 (work not yet assigned in OR).
-  const projectsInBucketA = useMemo(() => {
-    const inBucketA = new Set<string>();
-    // Projects with OR rows where none are non-A:
-    for (const [proj, s] of orProjSummary) {
-      if (!s.anyNonA) inBucketA.add(proj);
-    }
-    return inBucketA;
-  }, [orProjSummary]);
-
-  // First-time projects: appear in this import but never in any earlier import.
+  // Post-first-import projects: present in this import but NOT in the very first
+  // WIP import ever loaded. These are the only projects whose full history the app
+  // has captured, making the reconstructed chain reliable.
+  // The set is stable: it can only grow over time as new projects arrive.
   const { data: newProjectsData, isLoading: newProjLoading } = useQuery({
     queryKey: ["/api/imports", selectedImportId, "new-projects"],
     queryFn: () =>
@@ -1170,11 +1158,10 @@ function GeneratedOrderReviewContent() {
 
     const groups: GenProjGroup[] = [];
     for (const [proj, structMap] of byProj) {
-      // SCOPE FILTER: include only projects that are Bucket A (no OR release yet)
-      // or first-time (never appeared in any earlier import).
-      const inBucketA = projectsInBucketA.has(proj) || !orProjSummary.has(proj);
+      // SCOPE FILTER: TLT projects that were NOT present in the very first WIP
+      // import. Projects in the first import have unobserved history.
       const isFirstTime = firstTimeProjects.has(proj);
-      if (!inBucketA && !isFirstTime) continue;
+      if (!isFirstTime) continue;
 
       const orS = orProjSummary.get(proj);
       const projWoQty   = orS?.woQtyMt  ?? 0;
@@ -1261,7 +1248,7 @@ function GeneratedOrderReviewContent() {
     }
     groups.sort((a, b) => a.project.localeCompare(b.project));
     return groups;
-  }, [allRecordsRaw, orBomData, orProjSummary, projectsInBucketA, firstTimeProjects]);
+  }, [allRecordsRaw, orBomData, orProjSummary, firstTimeProjects]);
 
   // Per-stage match % summary (structures where |gen - or| <= 0.5 MT and OR is present).
   // Tier is derived from the actual measured match rate, not hardcoded:
@@ -1361,9 +1348,10 @@ function GeneratedOrderReviewContent() {
             <span className="font-semibold uppercase tracking-wide text-xs text-amber-600">
               Generated — not imported data.
             </span>{" "}
-            Scope: TLT projects currently in{" "}
-            <span className="font-semibold">Bucket A</span> (OR not yet released) or{" "}
-            <span className="font-semibold">first-time in this WIP file</span> (never in any earlier import).
+            Scope: TLT projects that{" "}
+            <span className="font-semibold">entered WIP after the first file ever loaded</span>.
+            Projects present from day one carry history the app never captured; projects that
+            arrived later are tracked from their first activity, making the reconstructed chain reliable.
             Chain: Release → Fabrication → Galvanising → Finished Goods, reconstructed from WIP
             alongside the matching OR file figure at each stage.{" "}
             BOM label is derived from job card prefix (P→Proto, 0→Mass, 95% dominance) and shown

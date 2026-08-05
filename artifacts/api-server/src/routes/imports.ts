@@ -1696,10 +1696,17 @@ router.get("/imports/:id", async (req, res): Promise<void> => {
   res.json(imp);
 });
 
-// GET /imports/:id/new-projects — project codes that appear in this import for
-// the very first time across all imports (no rows in any earlier import_id).
-// Persistent: once a code has appeared it is never "new" again even if absent
-// from later imports.
+// GET /imports/:id/new-projects — project codes that appear in this import but
+// were NEVER present in the very first (MIN import_id) WIP import.
+//
+// Rule: a project present in the first WIP has history the app never captured,
+// so its reconstructed chain is incomplete. A project that arrived later has been
+// tracked from day one and is eligible for the Generated OR view.
+//
+// "First import" is the global minimum import_id across import_rows — it never
+// changes once established, so the qualifying set is stable: it can only grow
+// (new projects arrive in later WIP files) and never shrinks (a project that
+// qualified once continues to qualify in all subsequent imports).
 router.get("/imports/:id/new-projects", async (req, res): Promise<void> => {
   const params = GetImportParams.safeParse(req.params);
   if (!params.success) {
@@ -1707,6 +1714,18 @@ router.get("/imports/:id/new-projects", async (req, res): Promise<void> => {
     return;
   }
   const rows = await db.execute<{ job: string }>(sql`
+    WITH first_import AS (
+      SELECT MIN(import_id) AS min_id FROM import_rows
+    ),
+    baseline_projects AS (
+      SELECT DISTINCT rp.job
+      FROM import_rows ir
+      JOIN record_pool rp ON rp.id = ir.pool_id
+      WHERE ir.import_id = (SELECT min_id FROM first_import)
+        AND rp.job IS NOT NULL
+        AND rp.job <> ''
+        AND rp.job <> '(Unassigned)'
+    )
     SELECT DISTINCT rp.job
     FROM import_rows ir
     JOIN record_pool rp ON rp.id = ir.pool_id
@@ -1714,14 +1733,7 @@ router.get("/imports/:id/new-projects", async (req, res): Promise<void> => {
       AND rp.job IS NOT NULL
       AND rp.job <> ''
       AND rp.job <> '(Unassigned)'
-      AND rp.job NOT IN (
-        SELECT DISTINCT rp2.job
-        FROM import_rows ir2
-        JOIN record_pool rp2 ON rp2.id = ir2.pool_id
-        WHERE ir2.import_id < ${params.data.id}
-          AND rp2.job IS NOT NULL
-          AND rp2.job <> ''
-      )
+      AND rp.job NOT IN (SELECT job FROM baseline_projects)
   `);
   res.json({ codes: (rows.rows ?? rows as unknown as { job: string }[]).map((r) => r.job) });
 });
