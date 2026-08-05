@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ContractorBalanceMovementDay } from "@workspace/api-client-react";
 import { Card } from "@/components/ui/card";
+import { useContractorCategoryMap, contractorCategoryFor } from "@/lib/store";
 
 type Measure = "produced" | "received" | "released" | "newIntake" | "netChange";
 
@@ -61,8 +62,36 @@ interface Props {
   isLoading?: boolean;
 }
 
-export function ContractorNetMovementPanel({ days, isLoading = false }: Props) {
+export function ContractorNetMovementPanel({ days: rawDays, isLoading = false }: Props) {
   const [measure, setMeasure] = useState<Measure>("produced");
+  const categoryMap = useContractorCategoryMap();
+
+  // Collapse alias contractor names into the canonical display name. The
+  // server computes day.contractors keyed on raw contractor strings, so after
+  // an alias merge Phoenix variants would otherwise appear as separate rows.
+  // When two raw keys resolve to the same canonical name, their per-day
+  // measure objects are summed field-by-field.
+  const days = useMemo<ContractorBalanceMovementDay[]>(() => {
+    return rawDays.map((day) => {
+      const merged: Record<string, ContractorBalanceMovementDay["contractors"][string]> = {};
+      for (const [rawCon, m] of Object.entries(day.contractors)) {
+        const con = contractorCategoryFor(rawCon, categoryMap).displayName || rawCon;
+        const prev = merged[con];
+        if (!prev) {
+          merged[con] = { ...m };
+        } else {
+          merged[con] = {
+            produced: prev.produced + m.produced,
+            received: prev.received + m.received,
+            released: prev.released + m.released,
+            newIntake: prev.newIntake + m.newIntake,
+            netChange: prev.netChange + m.netChange,
+          };
+        }
+      }
+      return { ...day, contractors: merged };
+    });
+  }, [rawDays, categoryMap]);
 
   const sortedContractors = useMemo(() => {
     const totalProduced = new Map<string, number>();
