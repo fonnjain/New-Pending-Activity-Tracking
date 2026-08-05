@@ -2333,7 +2333,15 @@ export interface NtltStageInfo {
 export const NTLT_STAGES: readonly NtltStageInfo[] = [
   { key: "notStarted", label: "Not Started",    activities: [],         subLabel: "JCNS" },
   { key: "ts",         label: "TS",             activities: ["TS"] },
+  // G and GB only — Y is its own separate stage below.
+  // NTLT Yard work (Y) is structurally distinct from NTLT Galvanising and must
+  // remain a separate stage here. Every other view in the app groups G, GB, and Y
+  // together as "Galvanising", but for NTLT that fold is WRONG: Y is ~11% of
+  // NTLT weight (876 MT on the 05-Aug import) and marks a post-galvanising
+  // activity.  Do NOT merge Y into this entry.
   { key: "galvanising",label: "Galvanising",    activities: ["G", "GB"] },
+  // Y is a standalone NTLT stage — do NOT roll it into Galvanising above.
+  // See comment on the galvanising entry for context.
   { key: "y",          label: "Y",              activities: ["Y"] },
   { key: "fg",         label: "Finished Goods", activities: [],         subLabel: "FG" },
 ];
