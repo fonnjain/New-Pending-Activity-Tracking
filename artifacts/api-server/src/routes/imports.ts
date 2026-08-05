@@ -1696,6 +1696,36 @@ router.get("/imports/:id", async (req, res): Promise<void> => {
   res.json(imp);
 });
 
+// GET /imports/:id/new-projects — project codes that appear in this import for
+// the very first time across all imports (no rows in any earlier import_id).
+// Persistent: once a code has appeared it is never "new" again even if absent
+// from later imports.
+router.get("/imports/:id/new-projects", async (req, res): Promise<void> => {
+  const params = GetImportParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const rows = await db.execute<{ job: string }>(sql`
+    SELECT DISTINCT rp.job
+    FROM import_rows ir
+    JOIN record_pool rp ON rp.id = ir.pool_id
+    WHERE ir.import_id = ${params.data.id}
+      AND rp.job IS NOT NULL
+      AND rp.job <> ''
+      AND rp.job <> '(Unassigned)'
+      AND rp.job NOT IN (
+        SELECT DISTINCT rp2.job
+        FROM import_rows ir2
+        JOIN record_pool rp2 ON rp2.id = ir2.pool_id
+        WHERE ir2.import_id < ${params.data.id}
+          AND rp2.job IS NOT NULL
+          AND rp2.job <> ''
+      )
+  `);
+  res.json({ codes: (rows.rows ?? rows as unknown as { job: string }[]).map((r) => r.job) });
+});
+
 router.delete("/imports", requireAuth, async (req, res): Promise<void> => {
   const result = await db.transaction(async (tx) => {
     // Serialize against concurrent uploads (which take the same lock) so a reset

@@ -1,0 +1,117 @@
+# Replit Prompt — Generated Order Review: scope, remove Inspection/Despatch, add BOM Label rule
+
+## Analysis behind the BOM rule (measured, 05-Aug files)
+
+**Prefix structure is clean.** TLT job cards use exactly two prefixes, nothing else:
+`0…` 31,641 marks / 7,557.557 MT, `P…` 28,973 marks / 3,467.451 MT.
+
+**Accuracy against Order Review Col K, 862 structures compared:**
+
+| Rule | Match |
+|---|---|
+| Flat prefix (P→Proto, 0→Mass, both→Mixed) | 790/862 = **91.6%** |
+| + 95% dominance instead of strict unanimity | 798/862 = **92.6%** |
+| + 95% dominance **and** ≥8 marks | 630/656 = **96.0%** |
+
+**51 of 64 projects are 100% clean.** Only 13 projects contain any mismatch.
+
+**The failures have two distinct signatures:**
+
+1. **Tiny accessory structures** — median **3 marks**, **18.255 MT total across all 38**,
+   versus matched Proto structures at median 33 marks / 3,162.828 MT. These are fittings:
+   `2ISO`, `2LA`, `2CT`, `2IVT`, `1CVT`, `4HLA`, `1LA`. Insulator sets, lightning arrestors,
+   CVTs — ordered within a proto lot but fabricated on standard job cards, because there is no
+   prototype to make for a bought-in fitting. **The job card is correct; Col K labels by
+   procurement lot while the job card reflects manufacture.** Both are right about different
+   things.
+
+2. **Order Review self-contradiction** — 11 structures where Col K holds *multiple different
+   BOM labels for the same structure*. Project 912 has 7 of them, and in every case the WIP
+   job cards are unanimous (`NBE603`: 331 P-cards, 0 zeros). **Here the derived rule is more
+   consistent than Col K, not less.**
+
+---
+
+## The prompt
+
+```
+Four changes to the Generated Order Review.
+
+1. SCOPE — restrict to TLT, Bucket A, and newly-arrived projects
+
+The Order Review file contains only TLT projects, so the generated view should not attempt to
+reconstruct anything else. Restrict to:
+
+  a) TLT only (Order Nature = Structure)
+  b) Projects currently in Bucket A
+  c) Projects appearing in the WIP file for the FIRST time — no rows in any earlier import,
+     not merely absent from the previous one — plus any arriving new going forward
+
+Treat first-appearance as persistent: once a project has been seen it is never "new" again,
+even if it disappears and returns.
+
+Tell me how many projects and structures remain after scoping. The current unscoped view
+shows 65 projects / 881 structures.
+
+2. REMOVE Inspection and Despatch from both the UI and the Excel export
+
+WIP does not capture either stage. The chain is Release -> Fabrication -> Galvanising ->
+Finished Goods, gen and OR paired at each stage. The Excel export must carry exactly the same
+columns as the UI.
+
+3. BOM LABEL derived from the job card prefix
+
+Derive per structure from the TLT job card number:
+    prefix "P" -> Proto
+    prefix "0" -> Mass
+
+Verified: these are the only two prefixes across all 60,614 TLT marks on 05-Aug.
+
+Use DOMINANCE, not strict unanimity. If 95% or more of a structure's marks share one prefix,
+take that label. Only below 95% is it genuinely "Mixed". Measured against Order Review Col K
+across 862 structures:
+
+    flat rule (any disagreement -> Mixed)     790/862 = 91.6%
+    95% dominance                             798/862 = 92.6%
+    95% dominance and >= 8 marks              630/656 = 96.0%
+
+Please also flag structures with fewer than 8 marks as LOW CONFIDENCE. That threshold isolates
+the dominant failure mode: 38 mismatches are tiny accessory structures — median 3 marks,
+18.255 MT across all of them, against matched Proto structures at median 33 marks /
+3,162.828 MT. They are fittings (2ISO, 2LA, 2CT, 2IVT, 1CVT, 4HLA, 1LA) ordered inside a proto
+lot but fabricated on standard job cards, because there is no prototype to make for a
+bought-in fitting. The job card is not wrong — Col K labels by procurement lot, the job card
+reflects manufacture. Both are correct about different things, so do not "fix" either.
+
+HOW TO USE IT:
+
+  - Show the derived label as its own column, clearly marked as derived-from-job-card.
+  - Where the Order Review has a Col K value, show that too and flag disagreements. Do NOT
+    overwrite Col K with the derived value.
+  - Where the Order Review has NO row — a genuinely new project — the derived label is the
+    only value available and should be used. That is the case this rule exists for.
+  - Where Col K itself holds multiple different labels for one structure, mark it as an Order
+    Review inconsistency rather than a rule failure. There are 11 such structures, 7 of them
+    on project 912, and in every case the WIP job cards are unanimous — so the derived value
+    is the more reliable one there.
+
+Do not present the derived label as authoritative where Col K exists.
+
+4. Confirm the match-rate panel still populates after scoping, and give me the four figures
+(Rel / Fab / Galv / FG) for the scoped set.
+
+Unscoped reference: Rel 769/782 (98.3%), Fab 497/607 (81.9%), Galv 419/586 (71.5%),
+FG 333/586 (56.8%).
+```
+
+---
+
+## What to check in the reply
+
+- **The scoped project/structure count.** If it comes back near 65 projects, the Bucket A and
+  new-project filters are probably not both applied.
+- **That dominance is implemented at 95%**, not strict unanimity — that alone recovers 8
+  structures, and most "Mixed" cases are lopsided (e.g. `4DD3`: 1,576 P-cards vs 21 zeros).
+- **That low-confidence flagging uses the mark count**, since that is what separates real
+  disagreement from accessory-item noise.
+- **That Col K is never overwritten** where it exists.

@@ -1069,6 +1069,11 @@ interface GenStructRowData {
   /** fileGalvMt − fileDespatchMt; null when OR row absent or galvMt null;
    *  may be negative (despatch exceeds galv in OR file — source-data issue). */
   orProgFg: number | null;
+  // BOM label
+  bomDerived: "Proto" | "Mass" | "Mixed";
+  bomLowConf: boolean;         // markCount < 8 — accessory-item noise likely
+  orBomType: string | null;    // OR Col K value (latest row for this structure)
+  orBomInconsistent: boolean;  // OR has multiple different BOM labels for this structure
 }
 type GenProjGroup = {
   project: string; releasePct: number; structures: GenStructRowData[];
@@ -1084,26 +1089,64 @@ function GeneratedOrderReviewContent() {
   const { data: orderStatus, isLoading: orLoading } = useGetOrderStatus({
     query: { queryKey: getGetOrderStatusQueryKey() },
   });
-  const isLoading = recLoading || orLoading;
-
-  // OR lookup: "project|structure" → order status row
-  const orByKey = useMemo(() => {
-    const rows = orderStatus?.rows ?? [];
-    return new Map(rows.map((r) => [`${r.project}|${r.structure}`, r]));
+  // OR lookup: "project|structure" → order status row (last wins on dup keys)
+  // Also captures all distinct bomType values per key for OR-inconsistency detection.
+  const orBomData = useMemo(() => {
+    const lastRow = new Map<string, OrderStatusRow>();
+    const bomTypes = new Map<string, Set<string>>();
+    for (const r of orderStatus?.rows ?? []) {
+      const key = `${r.project}|${r.structure}`;
+      lastRow.set(key, r);
+      if (r.bomType) {
+        if (!bomTypes.has(key)) bomTypes.set(key, new Set());
+        bomTypes.get(key)!.add(r.bomType);
+      }
+    }
+    return { lastRow, bomTypes };
   }, [orderStatus]);
 
-  // Project-level OR summary for release %
+  // Project-level OR summary for release % and Bucket A classification.
+  // Bucket A per project: ALL OR structures have woOrderQtyMt ≈ 0 AND releaseMt ≈ 0.
+  // Projects with no OR rows are also treated as "new/unregistered" for scoping.
   const orProjSummary = useMemo(() => {
-    const m = new Map<string, { releaseMt: number; woQtyMt: number }>();
+    const m = new Map<string, { releaseMt: number; woQtyMt: number; anyNonA: boolean }>();
     for (const r of orderStatus?.rows ?? []) {
-      const p = m.get(r.project) ?? { releaseMt: 0, woQtyMt: 0 };
+      const p = m.get(r.project) ?? { releaseMt: 0, woQtyMt: 0, anyNonA: false };
+      const isNonA = Math.abs(r.woOrderQtyMt ?? 0) > 0.001 || Math.abs(r.releaseMt ?? 0) > 0.001;
       m.set(r.project, {
         releaseMt: p.releaseMt + (r.releaseMt ?? 0),
         woQtyMt:   p.woQtyMt   + (r.woOrderQtyMt ?? 0),
+        anyNonA:   p.anyNonA || isNonA,
       });
     }
     return m;
   }, [orderStatus]);
+
+  // Projects "in Bucket A" per the OR file: either no OR rows, or ALL structures
+  // have woOrderQtyMt ≈ 0 AND releaseMt ≈ 0 (work not yet assigned in OR).
+  const projectsInBucketA = useMemo(() => {
+    const inBucketA = new Set<string>();
+    // Projects with OR rows where none are non-A:
+    for (const [proj, s] of orProjSummary) {
+      if (!s.anyNonA) inBucketA.add(proj);
+    }
+    return inBucketA;
+  }, [orProjSummary]);
+
+  // First-time projects: appear in this import but never in any earlier import.
+  const { data: newProjectsData, isLoading: newProjLoading } = useQuery({
+    queryKey: ["/api/imports", selectedImportId, "new-projects"],
+    queryFn: () =>
+      fetch(`/api/imports/${selectedImportId}/new-projects`)
+        .then((r) => r.json() as Promise<{ codes: string[] }>),
+    enabled: !!selectedImportId,
+    staleTime: Infinity,
+  });
+  const firstTimeProjects = useMemo(
+    () => new Set(newProjectsData?.codes ?? []),
+    [newProjectsData],
+  );
+  const isLoading = recLoading || orLoading || newProjLoading;
 
   const projectGroups = useMemo((): GenProjGroup[] => {
     const records = allRecordsRaw ?? [];
@@ -1127,12 +1170,16 @@ function GeneratedOrderReviewContent() {
 
     const groups: GenProjGroup[] = [];
     for (const [proj, structMap] of byProj) {
+      // SCOPE FILTER: include only projects that are Bucket A (no OR release yet)
+      // or first-time (never appeared in any earlier import).
+      const inBucketA = projectsInBucketA.has(proj) || !orProjSummary.has(proj);
+      const isFirstTime = firstTimeProjects.has(proj);
+      if (!inBucketA && !isFirstTime) continue;
+
       const orS = orProjSummary.get(proj);
       const projWoQty   = orS?.woQtyMt  ?? 0;
       const projRelease = orS?.releaseMt ?? 0;
       const releasePct  = projWoQty > 0 ? (projRelease / projWoQty) * 100 : 0;
-      // No longer filtering by 5% — include ALL structures present in WIP.
-      // releasePct is preserved as a "New project" badge only.
 
       const structures: GenStructRowData[] = [];
       for (const [struct, marks] of structMap) {
@@ -1146,7 +1193,7 @@ function GeneratedOrderReviewContent() {
         const fg       = released.filter((r) => !actOf(r));
 
         const genBalRelease  = toMt(sum(initCut));
-        const orRow          = orByKey.get(`${proj}|${struct}`);
+        const orRow          = orBomData.lastRow.get(`${proj}|${struct}`);
         const woQty          = orRow?.woOrderQtyMt ?? null;
         // genProgRelease requires woOrderQtyMt from OR file (per spec).
         // Fall back to sum(released) when OR is unavailable.
@@ -1167,12 +1214,24 @@ function GeneratedOrderReviewContent() {
               : null)
           : null;
 
+        // BOM label derived from job card prefix (P→Proto, 0→Mass, 95% dominance).
+        const total    = marks.length;
+        const pCount   = marks.filter((r) => (r.jobCardNo ?? "").startsWith("P")).length;
+        const z0Count  = marks.filter((r) => /^0/.test(r.jobCardNo ?? "")).length;
+        const bomDerived: "Proto" | "Mass" | "Mixed" =
+          pCount / total >= 0.95  ? "Proto" :
+          z0Count / total >= 0.95 ? "Mass"  : "Mixed";
+        const bomLowConf      = total < 8;
+        const structKey       = `${proj}|${struct}`;
+        const orBomTypeVal    = orRow?.bomType ?? null;
+        const orBomInconsistent = (orBomData.bomTypes.get(structKey)?.size ?? 0) > 1;
+
         structures.push({
           structure: struct,
           subType: marks[0]?.towerSubType ?? null,
           mfcBatch: marks[0]?.mfcBatch ?? "Z",
           markCount: marks.length,
-          isNew: projWoQty > 0 && releasePct < 5,
+          isNew: isFirstTime || (projWoQty > 0 && releasePct < 5),
           woOrderQtyMt: woQty,
           genBalRelease, genProgRelease,
           genBalFab, genProgFab,
@@ -1183,6 +1242,9 @@ function GeneratedOrderReviewContent() {
           orProgFab:     orRow?.fileFabMt ?? null,
           orProgGalv:    orRow?.fileGalvMt ?? null,
           orProgFg,
+          bomDerived, bomLowConf,
+          orBomType: orBomTypeVal,
+          orBomInconsistent,
         });
       }
       structures.sort((a, b) => a.structure.localeCompare(b.structure));
@@ -1199,7 +1261,7 @@ function GeneratedOrderReviewContent() {
     }
     groups.sort((a, b) => a.project.localeCompare(b.project));
     return groups;
-  }, [allRecordsRaw, orByKey, orProjSummary]);
+  }, [allRecordsRaw, orBomData, orProjSummary, projectsInBucketA, firstTimeProjects]);
 
   // Per-stage match % summary (structures where |gen - or| <= 0.5 MT and OR is present).
   // Tier is derived from the actual measured match rate, not hardcoded:
@@ -1232,6 +1294,9 @@ function GeneratedOrderReviewContent() {
       pg.structures.map((s) => ({
         project: pg.project, structure: s.structure,
         subType: s.subType ?? "", mfcBatch: s.mfcBatch, marks: s.markCount,
+        bomDerived:    s.bomDerived + (s.bomLowConf ? " (low conf.)" : ""),
+        orBomType:     s.orBomType ?? "",
+        orBomNote:     s.orBomInconsistent ? "OR inconsistency" : (s.orBomType && s.orBomType !== s.bomDerived ? "Disagree" : ""),
         genProgRelease: s.genProgRelease, genProgFab: s.genProgFab,
         genProgGalv: s.genProgGalv, genProgFg: s.genProgFg,
         orProgRelease: s.orProgRelease, orProgFab: s.orProgFab,
@@ -1248,6 +1313,9 @@ function GeneratedOrderReviewContent() {
         { label: "Sub Type",                                   field: "subType"  },
         { label: "MFC Batch",                                  field: "mfcBatch" },
         { label: "Marks",                                      field: "marks",   numeric: true },
+        { label: "BOM Label (Derived from job card)",          field: "bomDerived" },
+        { label: "BOM Label (OR Col K)",                       field: "orBomType" },
+        { label: "BOM Note",                                   field: "orBomNote" },
         { label: "Gen Progress Release (MT)",                  field: "genProgRelease", numeric: true, decimals: 3, total: true },
         { label: "Gen Progress Fabrication (MT)",              field: "genProgFab",     numeric: true, decimals: 3, total: true },
         { label: "Gen Progress Galvanising (MT)",              field: "genProgGalv",    numeric: true, decimals: 3, total: true },
@@ -1293,11 +1361,14 @@ function GeneratedOrderReviewContent() {
             <span className="font-semibold uppercase tracking-wide text-xs text-amber-600">
               Generated — not imported data.
             </span>{" "}
+            Scope: TLT projects currently in{" "}
+            <span className="font-semibold">Bucket A</span> (OR not yet released) or{" "}
+            <span className="font-semibold">first-time in this WIP file</span> (never in any earlier import).
             Chain: Release → Fabrication → Galvanising → Finished Goods, reconstructed from WIP
-            alongside the matching OR file figure at each stage. Confidence varies: Release and
-            Fabrication agree well; Finished Goods typically shows a large gap (~47%) because
-            Gen FG is the physical yard count (WIP file) while OR FG is a cumulative book figure
-            (Galvanising minus Despatch). A gap is expected, not a bug.
+            alongside the matching OR file figure at each stage.{" "}
+            BOM label is derived from job card prefix (P→Proto, 0→Mass, 95% dominance) and shown
+            alongside OR Col K where available. Structures with fewer than 8 marks are flagged
+            LOW CONF — likely accessory items whose job card reflects manufacture, not procurement lot.
             This view is strictly read-only and never affects imported data.
           </p>
         </div>
@@ -1387,6 +1458,7 @@ function GeneratedOrderReviewContent() {
                       <th className="px-3 py-2 text-left font-semibold min-w-[90px]" rowSpan={2}>Structure</th>
                       <th className="px-3 py-2 text-left font-semibold min-w-[50px]" rowSpan={2}>MFC</th>
                       <th className="px-3 py-2 text-right font-semibold min-w-[45px]" rowSpan={2}>Marks</th>
+                      <th className="px-3 py-2 text-left font-semibold min-w-[80px] border-l" rowSpan={2}>BOM Label</th>
                       {GEN_STAGES.map((stage) => {
                         const st = stageStatsByKey.get(stage.key)!;
                         return (
@@ -1400,8 +1472,8 @@ function GeneratedOrderReviewContent() {
                       })}
                     </tr>
                     <tr className="bg-muted/40 border-b text-[10px] text-muted-foreground">
-                      {/* spacer cells for fixed cols */}
-                      <td colSpan={4} />
+                      {/* spacer cells for fixed cols: Project + Structure + MFC + Marks + BOM */}
+                      <td colSpan={5} />
                       {GEN_STAGES.map((stage) => (
                         <td key={stage.key} className="px-3 py-1 border-l">
                           <span className="text-foreground/60">gen / OR (MT)</span>
@@ -1433,7 +1505,7 @@ function GeneratedOrderReviewContent() {
                                   </span>
                                   {s.isNew && (
                                     <span className="block mt-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">
-                                      NEW &lt;5%
+                                      NEW
                                     </span>
                                   )}
                                 </td>
@@ -1441,6 +1513,33 @@ function GeneratedOrderReviewContent() {
                               <td className="px-3 py-1.5 font-mono text-[11px]">{s.structure}</td>
                               <td className="px-3 py-1.5 text-muted-foreground text-[10px]">{s.mfcBatch}</td>
                               <td className="px-3 py-1.5 text-right tabular-nums">{s.markCount}</td>
+                              {/* BOM label cell */}
+                              <td className="px-3 py-1.5 border-l">
+                                <span className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded font-medium
+                                  ${s.bomDerived === "Proto" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" :
+                                    s.bomDerived === "Mass"  ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300" :
+                                                               "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"}
+                                  ${s.bomLowConf ? "opacity-60 ring-1 ring-inset ring-current ring-dashed" : ""}`}>
+                                  {s.bomDerived}
+                                  {s.bomLowConf && (
+                                    <span title="Fewer than 8 marks — likely accessory item; prefix may not reflect procurement lot">⚠</span>
+                                  )}
+                                </span>
+                                {s.orBomType && (
+                                  <span className={`block text-[10px] leading-tight mt-0.5
+                                    ${s.orBomInconsistent ? "text-red-600 dark:text-red-400 font-medium" :
+                                      s.orBomType !== s.bomDerived ? "text-amber-600 dark:text-amber-400" :
+                                      "text-muted-foreground"}`}>
+                                    OR: {s.orBomType}
+                                    {s.orBomInconsistent && (
+                                      <span className="ml-0.5" title="OR Col K has multiple different BOM labels for this structure — derived value is more consistent">⚡</span>
+                                    )}
+                                    {!s.orBomInconsistent && s.orBomType !== s.bomDerived && (
+                                      <span className="ml-0.5" title="Derived label disagrees with OR Col K">≠</span>
+                                    )}
+                                  </span>
+                                )}
+                              </td>
                               {GEN_STAGES.map((stage) => {
                                 const gen = s[stage.genField]     as number | null;
                                 const or  = s[stage.structOrField] as number | null;
@@ -1474,7 +1573,7 @@ function GeneratedOrderReviewContent() {
                         })}
                         {/* Per-project subtotal */}
                         <tr className="bg-muted/40 font-semibold border-t border-b-2 text-[11px]">
-                          <td className="px-3 py-1.5 text-muted-foreground uppercase tracking-wide" colSpan={3}>
+                          <td className="px-3 py-1.5 text-muted-foreground uppercase tracking-wide" colSpan={4}>
                             Subtotal
                           </td>
                           {GEN_STAGES.map((stage) => (
@@ -1489,7 +1588,7 @@ function GeneratedOrderReviewContent() {
                   <tfoot>
                     <tr className="bg-muted/60 font-bold border-t-2 text-[11px]">
                       <td className="px-3 py-2 uppercase tracking-wide">Grand Total</td>
-                      <td colSpan={3} className="px-3 py-2 text-muted-foreground">
+                      <td colSpan={4} className="px-3 py-2 text-muted-foreground">
                         {projectGroups.length} projects · {structCount} structures · {markCount.toLocaleString()} marks
                       </td>
                       {GEN_STAGES.map((stage) => (
