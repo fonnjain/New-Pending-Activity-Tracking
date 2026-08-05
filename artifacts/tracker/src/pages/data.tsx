@@ -1089,6 +1089,7 @@ interface GenStructRowData {
   orBalRelease: number | null; // fileBalReleaseMt
   orBalFab: number | null;     // balFabMt
   orBalGalv: number | null;    // balGalvMt
+  orBalWo: number | null;      // balWoMt — OR file Balance Work Order (col R)
   // OR leading-column values
   orSets: number | null;       // Order Qty sets
   orWeightMt: number | null;   // Order Qty weight (MT)
@@ -1261,6 +1262,7 @@ function GeneratedOrderReviewContent() {
           orBalRelease:  orRow?.fileBalReleaseMt ?? null,
           orBalFab:      orRow?.balFabMt ?? null,
           orBalGalv:     orRow?.balGalvMt ?? null,
+          orBalWo:       orRow?.balWoMt ?? null,
           orSets, orWeightMt, weightPerSet,
           bomDerived, bomLowConf,
           orBomType: orBomTypeVal,
@@ -1332,6 +1334,7 @@ function GeneratedOrderReviewContent() {
         genProgFab:     s.genProgFab,     orProgFab:     s.orProgFab,
         genProgGalv:    s.genProgGalv,    orProgGalv:    s.orProgGalv,
         genProgFg:      s.genProgFg,      orProgFg:      s.orProgFg,
+        orBalWo:        s.orBalWo,
         genBalRelease:  s.genBalRelease,  orBalRelease:  s.orBalRelease,
         genBalFab:      s.genBalFab,      orBalFab:      s.orBalFab,
         genBalGalv:     s.genBalGalv,     orBalGalv:     s.orBalGalv,
@@ -1654,10 +1657,11 @@ function GeneratedOrderReviewContent() {
                                 );
                               })}
                               {/* ── BALANCE section ─────────────────────────────────────── */}
-                              {/* WO (MT) — OR reference only, blank when no OR row */}
+                              {/* Balance Work Order (MT) — OR file col R (remaining WO qty).
+                                  OR reference only; blank when no OR row / pre-upgrade ingest. */}
                               <td className="px-2 py-1.5 text-right tabular-nums border-l-2 border-emerald-300/50 text-[11px]">
-                                {s.woOrderQtyMt != null
-                                  ? <span className="text-muted-foreground">{mt3(s.woOrderQtyMt)}</span>
+                                {s.orBalWo != null
+                                  ? <span className="text-muted-foreground">{mt3(s.orBalWo)}</span>
                                   : <span className="text-muted-foreground/30">—</span>}
                               </td>
                               {/* Balance stage cells */}
@@ -1719,7 +1723,12 @@ function GeneratedOrderReviewContent() {
                         </td>
                       ))}
                       <td className="px-2 py-2 text-right tabular-nums border-l-2 border-emerald-300/50 text-muted-foreground">
-                        {mt3(projectGroups.flatMap((g) => g.structures).reduce((s, r) => s + (r.woOrderQtyMt ?? 0), 0))}
+                        {(() => {
+                          const withVal = projectGroups.flatMap((g) => g.structures).filter((r) => r.orBalWo != null);
+                          return withVal.length
+                            ? mt3(withVal.reduce((s, r) => s + (r.orBalWo ?? 0), 0))
+                            : "—";
+                        })()}
                       </td>
                       {GEN_BAL_STAGES.map((stage) => (
                         <td key={stage.key} className="px-2 py-2 text-right tabular-nums border-l border-slate-200 dark:border-slate-700">

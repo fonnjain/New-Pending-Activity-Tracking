@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { ensureContractorDedupTables } from "./lib/ensureContractorDedupTables";
+import { ensureOrderReviewColumns } from "./lib/ensureOrderReviewColumns";
 import { backfillClassification, backfillHoleOperation, backfillInitialCutting, backfillJobCardType } from "./lib/backfill";
 import { backfillReleaseBalanceFromPool, backfillAssignmentBalanceFromPool } from "./lib/parseWipReleaseBalance";
 import { seedContractorCategories } from "./lib/seedContractorCategories";
@@ -28,6 +29,7 @@ if (Number.isNaN(port) || port <= 0) {
 // on a fresh database (e.g. first production deploy) it creates the tables.
 async function startServer(): Promise<void> {
   await ensureContractorDedupTables();
+  await ensureOrderReviewColumns();
 
   app.listen(port, (err) => {
     if (err) {

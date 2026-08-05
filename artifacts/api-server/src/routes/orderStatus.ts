@@ -96,6 +96,8 @@ router.get("/order-status", async (_req, res): Promise<void> => {
       // Balance Fabrication (col T) and Balance Galvanising (col U) from file.
       balFabMt: r.balFabMt,
       balGalvMt: r.balGalvMt,
+      // Balance Work Order (col R) from file — remaining WO qty after despatch.
+      balWoMt: r.balWoMt,
       // A current order row whose last-seen import is older than the latest
       // ingest was absent from the latest file (kept, never deleted).
       notInLatest: r.importId !== latest.import.id,

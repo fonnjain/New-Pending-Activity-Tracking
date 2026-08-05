@@ -2096,6 +2096,7 @@ export const GetOrderStatusResponse = zod.object({
   "balFabMt": zod.number().nullable().describe('Balance Fabrication MT from the Order Review file (col T).'),
   "balGalvMt": zod.number().nullable().describe('Balance Galvanising MT from the Order Review file (col U).'),
   "inspectionMt": zod.number().nullable().describe('Progress Inspection MT from the Order Review file (col O). Used by the OR consistency panel.'),
+  "balWoMt": zod.number().nullable().describe('Balance Work Order MT from the Order Review file (col R) — remaining work-order qty. Null for rows ingested before this column was parsed.'),
   "notInLatest": zod.boolean().describe('Current order row absent from the latest Order Review file (kept, not deleted).')
 }).describe('One (project, structure) order row joined to computed dispatch.')),
   "reconciliation": zod.object({

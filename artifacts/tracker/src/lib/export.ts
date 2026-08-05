@@ -882,6 +882,9 @@ export type GenOrExportRow = {
   genProgGalv:    number; orProgGalv:    number | null;
   genProgFg:      number; orProgFg:      number | null;
   // Balance
+  // OR file Balance Work Order (col R) — remaining WO qty. No gen-side figure
+  // (Despatch was removed from this view), so null renders blank, never zero.
+  orBalWo: number | null;
   genBalRelease: number; orBalRelease: number | null;
   genBalFab:     number; orBalFab:     number | null;
   genBalGalv:    number; orBalGalv:    number | null;
@@ -1023,7 +1026,9 @@ export async function exportGenOrXlsx(filename: string, rows: GenOrExportRow[]) 
     setCell(18, n3(r.orProgFg),        numFmt3);
 
     // Balance cols (19-26)
-    setCell(19, n3(r.woOrderQtyMt),    numFmt3);
+    // Balance Work Order = OR file col R (remaining WO qty), NOT WO Order Qty.
+    // Null (no OR row / pre-upgrade ingest) renders blank, never zero.
+    setCell(19, n3(r.orBalWo),         numFmt3);
     setCell(20, n3(r.genBalRelease),   numFmt3);
     setCell(21, n3(r.orBalRelease),    numFmt3);
     setCell(22, n3(r.genBalFab),       numFmt3);
@@ -1063,7 +1068,7 @@ export async function exportGenOrXlsx(filename: string, rows: GenOrExportRow[]) 
     tCell(16, n3(sumNull("orProgGalv")), numFmt3);
     tCell(17, n3(sum("genProgFg")), numFmt3);
     tCell(18, n3(sumNull("orProgFg")), numFmt3);
-    tCell(19, n3(sumNull("woOrderQtyMt")), numFmt3);
+    tCell(19, n3(sumNull("orBalWo")), numFmt3);
     tCell(20, n3(sum("genBalRelease")), numFmt3);
     tCell(21, n3(sumNull("orBalRelease")), numFmt3);
     tCell(22, n3(sum("genBalFab")), numFmt3);

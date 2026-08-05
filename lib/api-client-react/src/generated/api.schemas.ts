@@ -1882,6 +1882,11 @@ export interface OrderStatusRow {
      * @nullable
      */
   inspectionMt: number | null;
+  /**
+     * Balance Work Order MT from the Order Review file (col R) — remaining work-order qty. Null for rows ingested before this column was parsed.
+     * @nullable
+     */
+  balWoMt: number | null;
   /** Current order row absent from the latest Order Review file (kept, not deleted). */
   notInLatest: boolean;
 }

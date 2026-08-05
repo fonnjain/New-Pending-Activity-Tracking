@@ -125,6 +125,8 @@ export const orderReviewRowsTable = pgTable(
     //   fileBalReleaseMt  = "Balance Release" (col S)  ~ WO Order Qty - Release
     //   fileBalDespatchMt = "Balance Despatch" (col W) ~ WO Order Qty - Despatch
     // Reconciled against the computed balances at a 1% tolerance + small abs floor.
+    // Balance Work Order (col R) — remaining work-order qty stated by the file.
+    balWoMt: doublePrecision("bal_wo_mt"),
     fileBalReleaseMt: doublePrecision("file_bal_release_mt"),
     fileBalDespatchMt: doublePrecision("file_bal_despatch_mt"),
     // Balance Fabrication (col T) / Balance Galvanising (col U). Additive

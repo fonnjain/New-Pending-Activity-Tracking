@@ -603,6 +603,7 @@ const ORDER_REVIEW_VALUE_FIELDS = [
   "galvMt",
   "inspectionMt",
   "fileDespatchMt",
+  "balWoMt",
   "fileBalReleaseMt",
   "fileBalDespatchMt",
   "balFabMt",
@@ -647,6 +648,7 @@ function collapseOrderRows(
     prev.galvMt = addNum(prev.galvMt, r.galvMt);
     prev.inspectionMt = addNum(prev.inspectionMt, r.inspectionMt);
     prev.fileDespatchMt = addNum(prev.fileDespatchMt, r.fileDespatchMt);
+    prev.balWoMt = addNum(prev.balWoMt, r.balWoMt);
     prev.fileBalReleaseMt = addNum(prev.fileBalReleaseMt, r.fileBalReleaseMt);
     prev.fileBalDespatchMt = addNum(prev.fileBalDespatchMt, r.fileBalDespatchMt);
     prev.balFabMt = addNum(prev.balFabMt, r.balFabMt);
@@ -775,6 +777,7 @@ export async function ingestOrderReview(
       galvMt: r.galvMt,
       inspectionMt: r.inspectionMt,
       fileDespatchMt: r.fileDespatchMt,
+      balWoMt: r.balWoMt,
       fileBalReleaseMt: r.fileBalReleaseMt,
       fileBalDespatchMt: r.fileBalDespatchMt,
       balFabMt: r.balFabMt,

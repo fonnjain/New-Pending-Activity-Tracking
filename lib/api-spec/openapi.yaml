@@ -4643,6 +4643,9 @@ components:
         inspectionMt:
           type: ["number", "null"]
           description: Progress Inspection MT from the Order Review file (col O). Used by the OR consistency panel.
+        balWoMt:
+          type: ["number", "null"]
+          description: Balance Work Order MT from the Order Review file (col R) — remaining work-order qty. Null for rows ingested before this column was parsed.
         notInLatest:
           type: boolean
           description: Current order row absent from the latest Order Review file (kept, not deleted).
@@ -4668,6 +4671,7 @@ components:
         - balFabMt
         - balGalvMt
         - inspectionMt
+        - balWoMt
         - notInLatest
     DispatchReconciliationRow:
       type: object

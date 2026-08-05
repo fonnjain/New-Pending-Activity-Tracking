@@ -43,3 +43,7 @@ Shows satisfied count, total with data, match rate, and top 3 worst offenders pe
 `inspectionMt` (Progress Inspection MT from OR file col O) added to the `orderStatus` route response and both `OrderStatusRow` schema files.
 
 **Why:** BalInsp is not stored in `order_review_rows` — only `inspection_mt` (ProgInsp) is. Identity 4 therefore can only check whether the implied BalInsp is negative, not whether the file value is self-consistent.
+
+## Balance Work Order column (Aug 2026)
+
+Gen OR col 19 ("Work Order (MT)" under BALANCE) is the OR file's **Balance Work Order (col R, `balWoMt`)** — remaining WO qty — NOT `woOrderQtyMt` (col J). No gen-side figure exists (Despatch removed from this view), so null renders blank, never zero, and totals sum only non-null values. `bal_wo_mt` is a nullable column added via startup `ALTER TABLE IF NOT EXISTS` (ensureOrderReviewColumns); rows ingested before the upgrade stay NULL until the OR file is re-uploaded.
