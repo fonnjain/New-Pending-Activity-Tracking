@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes, ChevronsUpDown } from "lucide-react";
 import { useTracker, dateRangeWindow, useActiveJobSet, useJobTemplates, MULTI_JOBS_FILTER_VALUE, MULTI_TEMPLATES_FILTER_VALUE, isTemplateFilter, extractTemplateId, templateFilterValue, isNamedJobSetFilter, type JobTemplate, type MfcViewMode } from "@/lib/store";
@@ -825,8 +825,25 @@ function FilterBar() {
     return true;
   }).length;
 
+  const filterBarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = filterBarRef.current;
+    if (!el) return;
+    const update = () => {
+      // On md+ screens the nav bar itself is sticky at top-0 and is ~44px (min-h-11).
+      // The filter bar sticks at top-11 (44px) on md and top-0 on mobile.
+      // Table thead must pin below both, so we include the nav height here.
+      const navH = window.matchMedia("(min-width: 768px)").matches ? 44 : 0;
+      document.documentElement.style.setProperty("--filter-bar-h", `${navH + el.offsetHeight}px`);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <div className="sticky top-0 md:top-11 z-30 bg-card border-b shadow-sm">
+    <div ref={filterBarRef} className="sticky top-0 md:top-11 z-30 bg-card border-b shadow-sm">
       <Collapsible open={isOpen} onOpenChange={setIsOpen} className="w-full">
         <div className="flex items-center gap-2 p-3 md:px-6 flex-wrap">
           <span className="text-xs font-semibold text-muted-foreground uppercase mr-1">
