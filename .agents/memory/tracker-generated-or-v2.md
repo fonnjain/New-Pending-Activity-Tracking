@@ -47,3 +47,7 @@ Shows satisfied count, total with data, match rate, and top 3 worst offenders pe
 ## Balance Work Order column (Aug 2026)
 
 Gen OR col 19 ("Work Order (MT)" under BALANCE) is the OR file's **Balance Work Order (col R, `balWoMt`)** — remaining WO qty — NOT `woOrderQtyMt` (col J). No gen-side figure exists (Despatch removed from this view), so null renders blank, never zero, and totals sum only non-null values. `bal_wo_mt` is a nullable column added via startup `ALTER TABLE IF NOT EXISTS` (ensureOrderReviewColumns); rows ingested before the upgrade stay NULL until the OR file is re-uploaded.
+
+## "New projects only" scope — baseline window, not just first import
+
+The Gen OR view includes only projects whose FULL WIP history was captured. Baseline = every project seen in ANY import dated (report_date, else UTC upload day) on/before 04-Jul-2026 — not just MIN(import_id). The 27–30 Jun uploads were partial captures; projects first appearing then (848, 893, 932, 936, 947, 952) pre-existed in the ERP and reconstruct incompletely. All genuinely-new projects first appear 05-Jul or later. Implemented in the /imports/:id/new-projects endpoint with a MIN(import_id) fallback for fresh DBs.

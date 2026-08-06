@@ -1709,16 +1709,24 @@ router.get("/imports/:id", async (req, res): Promise<void> => {
 });
 
 // GET /imports/:id/new-projects — project codes that appear in this import but
-// were NEVER present in the very first (MIN import_id) WIP import.
+// were NEVER present in any BASELINE-PERIOD WIP import.
 //
-// Rule: a project present in the first WIP has history the app never captured,
-// so its reconstructed chain is incomplete. A project that arrived later has been
+// Rule: a project present during the baseline period has history the app never
+// captured (it existed in the ERP before capture stabilised), so its
+// reconstructed chain is incomplete. A project that arrived later has been
 // tracked from day one and is eligible for the Generated OR view.
 //
-// "First import" is the global minimum import_id across import_rows — it never
-// changes once established, so the qualifying set is stable: it can only grow
-// (new projects arrive in later WIP files) and never shrinks (a project that
-// qualified once continues to qualify in all subsequent imports).
+// The baseline period covers every import up to and including the 04-Jul-2026
+// baseline WIP file — NOT just the single earliest import. The first uploads
+// (27–30 Jun 2026) were partial captures while intake stabilised; projects that
+// "appeared" during that window (e.g. 848, 893, 932, 936, 947, 952) actually
+// pre-existed in the ERP and reconstruct incompletely. Verified against real
+// data: every genuinely-new project first appears on 05-Jul-2026 or later.
+// Falls back to MIN(import_id) when no import matches the baseline window
+// (e.g. a fresh database seeded only with post-baseline files).
+//
+// The qualifying set is stable: it can only grow (new projects arrive in later
+// WIP files) and never shrinks.
 router.get("/imports/:id/new-projects", async (req, res): Promise<void> => {
   const params = GetImportParams.safeParse(req.params);
   if (!params.success) {
@@ -1726,14 +1734,21 @@ router.get("/imports/:id/new-projects", async (req, res): Promise<void> => {
     return;
   }
   const rows = await db.execute<{ job: string }>(sql`
-    WITH first_import AS (
-      SELECT MIN(import_id) AS min_id FROM import_rows
+    WITH baseline_cutoff AS (
+      -- Latest import in the baseline window (report date, else UTC upload day,
+      -- on/before 04-Jul-2026); fall back to the earliest import ever loaded.
+      SELECT COALESCE(
+        (SELECT MAX(i.id) FROM imports i
+         WHERE COALESCE(i.report_date, (i.created_at AT TIME ZONE 'UTC')::date)
+               <= DATE '2026-07-04'),
+        (SELECT MIN(import_id) FROM import_rows)
+      ) AS max_id
     ),
     baseline_projects AS (
       SELECT DISTINCT rp.job
       FROM import_rows ir
       JOIN record_pool rp ON rp.id = ir.pool_id
-      WHERE ir.import_id = (SELECT min_id FROM first_import)
+      WHERE ir.import_id <= (SELECT max_id FROM baseline_cutoff)
         AND rp.job IS NOT NULL
         AND rp.job <> ''
         AND rp.job <> '(Unassigned)'

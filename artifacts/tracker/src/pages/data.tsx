@@ -1518,7 +1518,7 @@ function GeneratedOrderReviewContent() {
                       })}
                       <th className="px-2 py-1.5 text-center font-semibold min-w-[68px] border-l-2 border-emerald-400"
                           style={{ background: "rgba(26,58,42,0.85)" }}
-                          title="WO Order Qty (MT) — reference for balance">WO (MT)</th>
+                          title="Balance Work Order (MT) — remaining WO qty from OR file col R; blank until the OR file is re-uploaded after the col-R upgrade">WO (MT)</th>
                       {GEN_BAL_STAGES.map((stage) => (
                         <th key={stage.key}
                             className="px-2 py-1.5 text-center font-semibold min-w-[90px] border-l border-slate-600"
