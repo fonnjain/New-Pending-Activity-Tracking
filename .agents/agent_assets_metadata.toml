@@ -78,3 +78,10 @@ id = "m60wDECr9-9fciwEuKCVe"
 uri = "file://Balance_Activity_Tracker_Logic_and_Formulas.md"
 type = "text"
 title = "Logic & Formulas Reference (Markdown)"
+
+[[outputs]]
+id = "pGItNLUEjtPxKrNKfzftu"
+uri = "file://attached_assets/generated/Fabrication_Load_for_TLT__Logic_and_Database.xlsx"
+type = "table"
+title = "Fabrication Load for TLT — Logic & Database"
+description = "Six-sheet Excel document explaining the report's logic, the Operational vs In Hand rules per column, the Col Q route guard, source database tables, filters, and step-by-step working."
