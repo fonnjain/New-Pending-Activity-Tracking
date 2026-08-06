@@ -12,4 +12,5 @@ export type FabricationPrioritySection = typeof FabricationPrioritySection[keyof
 export const FabricationPrioritySection = {
   operational: 'operational',
   inhand: 'inhand',
+  upcoming: 'upcoming',
 } as const;

@@ -3690,7 +3690,7 @@ components:
       properties:
         section:
           type: string
-          enum: [operational, inhand]
+          enum: [operational, inhand, upcoming]
         column:
           type: string
           enum: [welded, bending, anglePunch, drilling, platePunch, plateDrill]
@@ -3711,7 +3711,7 @@ components:
       properties:
         section:
           type: string
-          enum: [operational, inhand]
+          enum: [operational, inhand, upcoming]
         column:
           type: string
           enum: [welded, bending, anglePunch, drilling, platePunch, plateDrill]

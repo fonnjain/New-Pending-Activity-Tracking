@@ -514,7 +514,7 @@ export function plantLocationLabel(v: string | null | undefined): string {
 // Two sections (work AT an operation = operational; work BEFORE it = inhand),
 // five load columns each, and a per-row Priority (P1..P10). These constants are
 // the single source of truth shared by the API validators and the frontend.
-export type FabLoadSection = "operational" | "inhand";
+export type FabLoadSection = "operational" | "inhand" | "upcoming";
 export type FabLoadColumn =
   | "welded"
   | "bending"
@@ -523,9 +523,18 @@ export type FabLoadColumn =
   | "platePunch"
   | "plateDrill";
 
+// Section membership is PER-MARK (never a project-level threshold):
+//   operational — work AT the operation (released, in production at it)
+//   inhand      — released work BEFORE the operation (JCNS+Authorized cutting,
+//                 awaiting assignment, and any earlier in-production activity)
+//   upcoming    — NOT-RELEASED marks (Type "Job Card Not Started" + Status
+//                 "Initial", i.e. classifyWipCase = NOT_RELEASED). These were
+//                 previously excluded from the report entirely; Upcoming ADDS
+//                 them using the same per-operation rules as In Hand.
 export const FAB_LOAD_SECTIONS: { value: FabLoadSection; label: string }[] = [
   { value: "operational", label: "Operation Load" },
   { value: "inhand", label: "In Hand" },
+  { value: "upcoming", label: "Upcoming" },
 ];
 
 // Column order matches the operation sheet: Welded, Angle Punching, Angle
@@ -557,7 +566,7 @@ export const FAB_PRIORITIES: string[] = Array.from(
 );
 
 export function isFabLoadSection(v: unknown): v is FabLoadSection {
-  return v === "operational" || v === "inhand";
+  return v === "operational" || v === "inhand" || v === "upcoming";
 }
 
 export function isFabLoadColumn(v: unknown): v is FabLoadColumn {

@@ -21,6 +21,7 @@ import {
   sortActivities,
   type FabLoadColumn,
   type FabLoadSection,
+  classifyWipCase,
 } from "@workspace/domain";
 import { useSettings } from "@/lib/settings";
 import { LIFECYCLE_LABELS, lifecycleTextColor } from "@/lib/turnaround";
@@ -918,18 +919,35 @@ const B_RANK = activityRank("B");
 
 // Does a record belong in a given (section, column) cell? Welded/Bending use a
 // POSITIONAL rule in the TLT sequence (at the activity = Operational; before it
-// = In Hand). Drilling/Plate Punch/Plate Drill use a SPECIFIC-ACTIVITY rule
-// (RFI = Operational, C = In Hand) combined with sectionType + holeOperation.
+// = In Hand / Upcoming). Angle Punch/Angle Drill/Plate Punch/Plate Drill use a
+// SPECIFIC-ACTIVITY rule (RFI = Operational, C = In Hand / Upcoming) combined
+// with sectionType + holeOperation.
+//
+// Section routing is PER-MARK:
+//   NOT_RELEASED (Type "Job Card Not Started" + Status "Initial") → UPCOMING
+//   everything else → Operational / In Hand as before.
+// Upcoming applies the same per-operation rules as In Hand (positional + Col Q
+// route guard for W/B; sectionType + holeOperation for the hole columns).
 function fabLoadMatch(
   section: FabLoadSection,
   column: FabLoadColumn,
   r: ApiRecord,
 ): boolean {
-  // Initial Cutting marks (NOT_RELEASED, counted as Release Balance) must not
-  // appear in any fabrication load figure — operational or in-hand.
-  // AWAITING_ASSIGNMENT marks (no contractor yet) ARE included — they count
-  // as in-hand load (work queued to be cut).
-  if (isCutting(r.activity) && !isActiveCutting(r) && !isAwaitingAssignment(r)) return false;
+  const notReleased = classifyWipCase(r) === "NOT_RELEASED";
+  if (section === "upcoming") {
+    // Upcoming = exactly the not-released marks (previously excluded from the
+    // report entirely). Everything else stays out of this section.
+    if (!notReleased) return false;
+  } else {
+    // NOT_RELEASED marks (any activity) belong ONLY to Upcoming — never to
+    // Operational or In Hand, keeping the three sections disjoint per mark.
+    if (notReleased) return false;
+    // Legacy guard: activity-C marks that classify as neither CUTTING nor
+    // AWAITING_ASSIGNMENT (e.g. UNCLASSIFIED data-quality rows) also stay out.
+    // AWAITING_ASSIGNMENT marks (no contractor yet) ARE included — they count
+    // as in-hand load (work queued to be cut).
+    if (isCutting(r.activity) && !isActiveCutting(r) && !isAwaitingAssignment(r)) return false;
+  }
   const act = normalizeActivity(r.activity);
   const rank = activityRank(r.activity);
   const sec = r.sectionType;

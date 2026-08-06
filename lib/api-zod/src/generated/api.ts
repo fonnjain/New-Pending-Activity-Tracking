@@ -783,7 +783,7 @@ export const ImportThicknessXlsxResponse = zod.object({
  * @summary List Fabrication-Load priorities
  */
 export const ListFabricationPrioritiesResponseItem = zod.object({
-  "section": zod.enum(['operational', 'inhand']),
+  "section": zod.enum(['operational', 'inhand', 'upcoming']),
   "column": zod.enum(['welded', 'bending', 'anglePunch', 'drilling', 'platePunch', 'plateDrill']),
   "project": zod.string(),
   "priority": zod.enum(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10']),
@@ -798,14 +798,14 @@ export const ListFabricationPrioritiesResponse = zod.array(ListFabricationPriori
  * @summary Set one Fabrication-Load priority
  */
 export const UpsertFabricationPriorityBody = zod.object({
-  "section": zod.enum(['operational', 'inhand']),
+  "section": zod.enum(['operational', 'inhand', 'upcoming']),
   "column": zod.enum(['welded', 'bending', 'anglePunch', 'drilling', 'platePunch', 'plateDrill']),
   "project": zod.string(),
   "priority": zod.enum(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10'])
 })
 
 export const UpsertFabricationPriorityResponse = zod.object({
-  "section": zod.enum(['operational', 'inhand']),
+  "section": zod.enum(['operational', 'inhand', 'upcoming']),
   "column": zod.enum(['welded', 'bending', 'anglePunch', 'drilling', 'platePunch', 'plateDrill']),
   "project": zod.string(),
   "priority": zod.enum(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10']),

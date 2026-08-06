@@ -85,3 +85,10 @@ uri = "file://attached_assets/generated/Fabrication_Load_for_TLT__Logic_and_Data
 type = "table"
 title = "Fabrication Load for TLT — Logic & Database"
 description = "Six-sheet Excel document explaining the report's logic, the Operational vs In Hand rules per column, the Col Q route guard, source database tables, filters, and step-by-step working."
+
+[[outputs]]
+id = "a7MVGx7WCpppga7304kMt"
+uri = "file://attached_assets/generated/fabrication_load_tlt_sample_export.xlsx"
+type = "table"
+title = "Fabrication Load for TLT — sample export (dev data)"
+description = "Three sheets (Operation Load, In Hand, Upcoming) × six columns (Welded, Angle Punching, Angle Drilling, Plate Punch, Plate Drill, Bending), generated from the dev database's latest WIP import (01-08-2026)."

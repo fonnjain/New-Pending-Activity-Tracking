@@ -1218,6 +1218,7 @@ export type FabricationPrioritySection = typeof FabricationPrioritySection[keyof
 export const FabricationPrioritySection = {
   operational: 'operational',
   inhand: 'inhand',
+  upcoming: 'upcoming',
 } as const;
 
 export type FabricationPriorityColumn = typeof FabricationPriorityColumn[keyof typeof FabricationPriorityColumn];
@@ -1266,6 +1267,7 @@ export type FabricationPriorityInputSection = typeof FabricationPriorityInputSec
 export const FabricationPriorityInputSection = {
   operational: 'operational',
   inhand: 'inhand',
+  upcoming: 'upcoming',
 } as const;
 
 export type FabricationPriorityInputColumn = typeof FabricationPriorityInputColumn[keyof typeof FabricationPriorityInputColumn];

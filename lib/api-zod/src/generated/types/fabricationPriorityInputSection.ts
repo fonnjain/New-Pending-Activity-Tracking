@@ -12,4 +12,5 @@ export type FabricationPriorityInputSection = typeof FabricationPriorityInputSec
 export const FabricationPriorityInputSection = {
   operational: 'operational',
   inhand: 'inhand',
+  upcoming: 'upcoming',
 } as const;
