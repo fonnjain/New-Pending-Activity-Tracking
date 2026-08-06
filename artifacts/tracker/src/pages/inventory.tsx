@@ -27,6 +27,7 @@ import {
 } from "@/lib/inventory";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useProjectCompare, type ProjectCompare } from "@/lib/projectSort";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Segmented } from "@/components/ui/segmented";
 import {
@@ -88,7 +89,10 @@ interface ProjectGroup {
   weightMt: number;
 }
 
-function groupByProject(rows: InventoryStructureCard[]): ProjectGroup[] {
+function groupByProject(
+  rows: InventoryStructureCard[],
+  compare?: ProjectCompare,
+): ProjectGroup[] {
   const map = new Map<string, ProjectGroup>();
   for (const r of rows) {
     let g = map.get(r.project);
@@ -100,7 +104,9 @@ function groupByProject(rows: InventoryStructureCard[]): ProjectGroup[] {
     g.count += 1;
     g.weightMt += r.weightMt ?? 0;
   }
-  return Array.from(map.values()).sort((a, b) => a.project.localeCompare(b.project));
+  return Array.from(map.values()).sort((a, b) =>
+    compare ? compare(a.project, b.project) : a.project.localeCompare(b.project),
+  );
 }
 
 function groupByMfcBatch(
@@ -123,6 +129,7 @@ function groupByMfcBatch(
 /** Flat grouping: each unique {project}-{mfcBatch} pair becomes one top-level entry. */
 function groupByProjectMfc(
   rows: InventoryStructureCard[],
+  compare?: ProjectCompare,
 ): { key: string; project: string; mfcBatch: string; rows: InventoryStructureCard[] }[] {
   const map = new Map<string, { project: string; mfcBatch: string; rows: InventoryStructureCard[] }>();
   for (const r of rows) {
@@ -131,7 +138,11 @@ function groupByProjectMfc(
     map.get(key)!.rows.push(r);
   }
   return [...map.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a, va], [b, vb]) =>
+      compare
+        ? compare(va.project, vb.project) || va.mfcBatch.localeCompare(vb.mfcBatch)
+        : a.localeCompare(b),
+    )
     .map(([key, v]) => ({ key, ...v }));
 }
 
@@ -344,7 +355,8 @@ function BucketAPanel({
   rows: InventoryStructureCard[];
   mfcBatchColorMap: Map<string, InventoryMfcBatchColor>;
 }) {
-  const groups = useMemo(() => groupByProject(rows), [rows]);
+  const compareProjects = useProjectCompare();
+  const groups = useMemo(() => groupByProject(rows, compareProjects), [rows, compareProjects]);
   const totalWeight = groups.reduce((s, g) => s + g.weightMt, 0);
   const totalCount = groups.reduce((s, g) => s + g.count, 0);
 
@@ -520,7 +532,8 @@ function MfcTopRow({
   mfcBatchColorMap: Map<string, InventoryMfcBatchColor>;
 }) {
   const [open, setOpen] = useState(false);
-  const projectGroups = useMemo(() => groupByProject(rows), [rows]);
+  const compareProjects = useProjectCompare();
+  const projectGroups = useMemo(() => groupByProject(rows, compareProjects), [rows, compareProjects]);
   return (
     <div>
       <div className="w-full flex items-center justify-between hover:bg-muted/30 text-sm">
@@ -605,9 +618,10 @@ function AutoBucketPanel({
   mfcViewMode: MfcViewMode;
   mfcBatchColorMap: Map<string, InventoryMfcBatchColor>;
 }) {
-  const groups = useMemo(() => groupByProject(rows), [rows]);
+  const compareProjects = useProjectCompare();
+  const groups = useMemo(() => groupByProject(rows, compareProjects), [rows, compareProjects]);
   const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
-  const flatGroups = useMemo(() => groupByProjectMfc(rows), [rows]);
+  const flatGroups = useMemo(() => groupByProjectMfc(rows, compareProjects), [rows, compareProjects]);
   const totalWeight = groups.reduce((s, g) => s + g.weightMt, 0);
   const totalCount = groups.reduce((s, g) => s + g.count, 0);
   const summary = useMemo(() => computeBucketSummary(rows, clampRelease), [rows, clampRelease]);
@@ -756,7 +770,8 @@ function PreBMfcRow({
   canAssign: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const projectGroups = useMemo(() => groupByProject(rows), [rows]);
+  const compareProjects = useProjectCompare();
+  const projectGroups = useMemo(() => groupByProject(rows, compareProjects), [rows, compareProjects]);
   return (
     <div>
       <div className="w-full flex items-center justify-between hover:bg-muted/30 text-sm">
@@ -843,9 +858,10 @@ function PreBucketBPanel({
   onAssignColour: (project: string, mfcBatch: string) => void;
   canAssign: boolean;
 }) {
-  const groups = useMemo(() => groupByProject(rows), [rows]);
+  const compareProjects = useProjectCompare();
+  const groups = useMemo(() => groupByProject(rows, compareProjects), [rows, compareProjects]);
   const mfcGroups = useMemo(() => groupByMfcBatch(rows), [rows]);
-  const flatGroups = useMemo(() => groupByProjectMfc(rows), [rows]);
+  const flatGroups = useMemo(() => groupByProjectMfc(rows, compareProjects), [rows, compareProjects]);
   const pairCount = useMemo(
     () => new Set(rows.map((r) => `${r.project}\u0001${r.mfcBatch}`)).size,
     [rows],
@@ -1532,6 +1548,7 @@ function MfcBatchColorRow({
 }
 
 export default function InventoryView() {
+  const compareProjects = useProjectCompare();
   const [, navigate] = useLocation();
   const { filters, mfcViewMode, setMfcViewMode } = useTracker();
   const queryClient = useQueryClient();
@@ -1904,7 +1921,7 @@ export default function InventoryView() {
 
   const handleExport = () => {
     const filteredManualE = applyJobFilterManual(manualE);
-    const bucketAGroups = groupByProject(bucketA);
+    const bucketAGroups = groupByProject(bucketA, compareProjects);
 
     const sheets: XlsxSheet[] = [
       {

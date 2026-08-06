@@ -135,7 +135,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
   const [selectedImportId, setSelectedImportIdState] = useState<number | null>(null);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [mfcViewMode, setMfcViewMode] = useState<MfcViewMode>("project-with-mfc");
-  const [projectSort, setProjectSort] = useState<ProjectSortKey>("assignDate");
+  const [projectSort, setProjectSort] = useState<ProjectSortKey>("templates");
   const { data: imports } = useListImports();
 
   // When true the selection always tracks imports[0] (the newest upload).

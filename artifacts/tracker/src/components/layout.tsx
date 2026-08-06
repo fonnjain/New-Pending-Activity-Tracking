@@ -1,7 +1,9 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes, ChevronsUpDown } from "lucide-react";
-import { useTracker, dateRangeWindow, useActiveJobSet, useJobTemplates, useContractorAliasMap, MULTI_JOBS_FILTER_VALUE, MULTI_TEMPLATES_FILTER_VALUE, isTemplateFilter, extractTemplateId, templateFilterValue, isNamedJobSetFilter, type JobTemplate, type MfcViewMode } from "@/lib/store";
+import { useTracker, dateRangeWindow, useActiveJobSet, useJobTemplates, useContractorAliasMap, MULTI_JOBS_FILTER_VALUE, MULTI_TEMPLATES_FILTER_VALUE, isTemplateFilter, extractTemplateId, templateFilterValue, isNamedJobSetFilter, type JobTemplate, type MfcViewMode, type ProjectSortKey } from "@/lib/store";
+import { PROJECT_SORT_OPTIONS } from "@/lib/projectSort";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useSettings } from "@/lib/settings";
 import { useGetImportRecords, useGetAuthStatus, useListContractorCategories, getGetImportRecordsQueryKey, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
 import { LoginForm, ChangePasswordForm, LogoutButton } from "@/components/login-gate";
@@ -641,7 +643,7 @@ function PlantLocationPicker({
 
 function FilterBar() {
   const [location] = useLocation();
-  const { filters, setFilter, setSelectedJobs, setSelectedTemplates, setPlantLocations, clearFilters, selectedImportId, mfcViewMode, setMfcViewMode } = useTracker();
+  const { filters, setFilter, setSelectedJobs, setSelectedTemplates, setPlantLocations, clearFilters, selectedImportId, mfcViewMode, setMfcViewMode, projectSort, setProjectSort } = useTracker();
 
   // Rule: navigating from one page to another resets every filter to its
   // default (the Order Type mode is preserved — it is a mode, not a filter).
@@ -998,6 +1000,24 @@ function FilterBar() {
             />
           </div>
           <div className="flex items-center gap-2 ml-auto">
+            <span className="text-xs font-semibold text-muted-foreground uppercase whitespace-nowrap hidden lg:inline">
+              Sort
+            </span>
+            <Select
+              value={projectSort}
+              onValueChange={(v) => setProjectSort(v as ProjectSortKey)}
+            >
+              <SelectTrigger className="h-9 w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROJECT_SORT_OPTIONS.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {activeFilterCount > 0 && (
               <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 px-2 text-muted-foreground">
                 Clear

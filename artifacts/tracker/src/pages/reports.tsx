@@ -24,6 +24,7 @@ import {
   classifyWipCase,
 } from "@workspace/domain";
 import { useSettings } from "@/lib/settings";
+import { useProjectCompare, type ProjectCompare } from "@/lib/projectSort";
 import { LIFECYCLE_LABELS, lifecycleTextColor } from "@/lib/turnaround";
 import { useStalledInfo } from "@/lib/movement";
 import {
@@ -2220,7 +2221,10 @@ type BomGroup = {
   subtotal: FabSums;
 };
 
-function buildBomGroups(rows: FabricationProjectCompletionRow[]): BomGroup[] {
+function buildBomGroups(
+  rows: FabricationProjectCompletionRow[],
+  compareProjects: ProjectCompare,
+): BomGroup[] {
   // Level 1: BOM Label
   const bomMap = new Map<string, FabricationProjectCompletionRow[]>();
   for (const row of rows) {
@@ -2242,7 +2246,7 @@ function buildBomGroups(rows: FabricationProjectCompletionRow[]): BomGroup[] {
         .sort(([a], [b]) => subTypeIndex(a) - subTypeIndex(b))
         .map(([subType, stRows]) => ({
           subType,
-          rows: [...stRows].sort((a, b) => a.project.localeCompare(b.project)),
+          rows: [...stRows].sort((a, b) => compareProjects(a.project, b.project)),
           subtotal: sumRows(stRows),
         }));
       return { label, subGroups, subtotal: sumRows(bomRows) };
@@ -2266,7 +2270,10 @@ type BomGroupByMfc = {
   subtotal: FabSums;
 };
 
-function buildBomGroupsByMfc(rows: FabricationProjectCompletionRow[]): BomGroupByMfc[] {
+function buildBomGroupsByMfc(
+  rows: FabricationProjectCompletionRow[],
+  compareProjects: ProjectCompare,
+): BomGroupByMfc[] {
   const bomMap = new Map<string, FabricationProjectCompletionRow[]>();
   for (const row of rows) {
     const list = bomMap.get(row.bomLabel) ?? [];
@@ -2300,7 +2307,7 @@ function buildBomGroupsByMfc(rows: FabricationProjectCompletionRow[]): BomGroupB
             })
             .map(([mfcBatch, mfcRows]) => ({
               mfcBatch,
-              rows: [...mfcRows].sort((a, b) => a.project.localeCompare(b.project)),
+              rows: [...mfcRows].sort((a, b) => compareProjects(a.project, b.project)),
               subtotal: sumRows(mfcRows),
             }));
           return { subType, mfcGroups, subtotal: sumRows(stRows) };
@@ -2414,6 +2421,7 @@ const FAB_COMP_COLUMNS: XlsxColumn[] = [
 ];
 
 function FabCompletionReport() {
+  const compareProjects = useProjectCompare();
   const { data, isLoading } = useGetFabricationProjectCompletionTlt();
   const { filters, mfcViewMode, setMfcViewMode } = useTracker();
   const activeJobSet = useActiveJobSet();
@@ -2489,9 +2497,9 @@ function FabCompletionReport() {
   }, [rows]);
 
   // 3-level grouping: BOM Label → Sub-Type Group → Project.
-  const bomGroups = useMemo(() => buildBomGroups(visibleRows), [visibleRows]);
+  const bomGroups = useMemo(() => buildBomGroups(visibleRows, compareProjects), [visibleRows, compareProjects]);
   // 4-level grouping for "View by MFC": BOM Label → Sub-Type Group → MFC Batch → Project.
-  const bomGroupsByMfc = useMemo(() => buildBomGroupsByMfc(visibleRows), [visibleRows]);
+  const bomGroupsByMfc = useMemo(() => buildBomGroupsByMfc(visibleRows, compareProjects), [visibleRows, compareProjects]);
 
   const grandTotal = useMemo(() => sumRows(visibleRows), [visibleRows]);
 

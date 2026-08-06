@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { formatDate } from "@/lib/utils";
 import { useTracker, useActiveJobSet, isNamedJobSetFilter } from "@/lib/store";
+import { useProjectCompare } from "@/lib/projectSort";
 import {
   useGetOrderStatus,
   getGetOrderStatusQueryKey,
@@ -81,6 +82,7 @@ interface DisplayRow {
 
 export default function OrderStatusView() {
   const { filters, selectedImportId } = useTracker();
+  const compareProjects = useProjectCompare();
 
   const { data: order, isLoading: orderLoading } = useGetOrderStatus({
     query: { queryKey: getGetOrderStatusQueryKey() },
@@ -244,7 +246,7 @@ export default function OrderStatusView() {
     }
     out.sort(
       (a, b) =>
-        a.project.localeCompare(b.project) ||
+        compareProjects(a.project, b.project) ||
         a.structure.localeCompare(b.structure),
     );
     return out;
@@ -255,6 +257,7 @@ export default function OrderStatusView() {
     wipKeys,
     filters.job,
     filters.structure,
+    compareProjects,
   ]);
 
   // Per-project subtotals for the grouped table.

@@ -15,8 +15,8 @@ import {
   resolveContractorKey,
   normalizeContractorName,
 } from "@workspace/domain";
-import { useTracker, useContractorCategoryMap, useContractorAliasMap, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE, dateRangeWindow, useJobTemplates, type MfcViewMode, type ProjectSortKey } from "@/lib/store";
-import { useInventoryData } from "@/lib/inventory";
+import { useTracker, useContractorCategoryMap, useContractorAliasMap, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE, dateRangeWindow, type MfcViewMode } from "@/lib/store";
+import { useProjectCompare } from "@/lib/projectSort";
 import {
   buildContractorGroups,
   matchesContractorSelection,
@@ -30,7 +30,6 @@ import {
   useListImports,
   useGetReleaseBalance,
   getGetReleaseBalanceQueryKey,
-  useListInventoryMfcBatchColors,
 } from "@workspace/api-client-react";
 import { EmptyState, getAgeingColor } from "./overview";
 import { ageingCell } from "@/lib/ageing";
@@ -45,13 +44,6 @@ import {
   TableFooter,
 } from "@/components/ui/table";
 import { SortControl } from "@/components/sort-control";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { formatWeight, formatDate } from "@/lib/utils";
@@ -61,15 +53,6 @@ import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
 import { useToast } from "@/hooks/use-toast";
 
 const ROW_CAP = 300;
-
-const PROJECT_SORT_OPTIONS: { id: ProjectSortKey; name: string }[] = [
-  { id: "templates", name: "Job Templates List" },
-  { id: "project", name: "Project Wise" },
-  { id: "bucket", name: "Bucket List" },
-  { id: "ageing", name: "Avg Ageing" },
-  { id: "mfcDate", name: "MFC Date" },
-  { id: "assignDate", name: "Assign Date" },
-];
 
 const isoDate = (s: unknown): string | null => {
   const v = String(s ?? "").trim();
@@ -193,59 +176,8 @@ function JobDashboardContent() {
     rowIsNtlt(r) ? r.ntltSubtype : r.structure;
 
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
-  // Global sort — lives in the tracker context so the choice follows the user.
-  const { projectSort, setProjectSort } = useTracker();
-
-  // Rank sources for the ordering options that need external data.
-  const jobTemplates = useJobTemplates();
-  const { buckets: inventoryBuckets, manualE: inventoryManualE } = useInventoryData();
-  const { data: mfcBatchColors = [] } = useListInventoryMfcBatchColors();
-
-  // Job Templates List: P1's members first (in member order), then P2's, etc.
-  // Members may be plain codes or combo keys ("821 - Z") — rank the plain code.
-  const templateRank = useMemo(() => {
-    const rank = new Map<string, number>();
-    let i = 0;
-    for (const t of [...jobTemplates].sort((a, b) => a.sortOrder - b.sortOrder)) {
-      for (const m of t.members) {
-        const code = m.split(" - ")[0].trim();
-        if (!rank.has(code)) rank.set(code, i++);
-      }
-    }
-    return rank;
-  }, [jobTemplates]);
-
-  // Bucket List: projects ordered by their earliest bucket in the Bucket List
-  // progression (A → Pre-B → B → C → D → E); projects in no bucket sort last.
-  const bucketRank = useMemo(() => {
-    const rank = new Map<string, number>();
-    const tiers: { projects: string[]; tier: number }[] = [
-      { projects: inventoryBuckets.a.map((r) => r.project), tier: 0 },
-      { projects: inventoryBuckets.b.map((r) => r.project), tier: 1 },
-      { projects: inventoryBuckets.c.map((r) => r.project), tier: 2 },
-      { projects: inventoryBuckets.d.map((r) => r.project), tier: 3 },
-      { projects: inventoryManualE.map((e) => e.projectCode), tier: 4 },
-    ];
-    for (const { projects, tier } of tiers) {
-      for (const p of projects) {
-        const existing = rank.get(p);
-        if (existing === undefined || tier < existing) rank.set(p, tier);
-      }
-    }
-    return rank;
-  }, [inventoryBuckets, inventoryManualE]);
-
-  // MFC Date: earliest Date of Client MFC across the project's batches.
-  const mfcDateByProject = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const c of mfcBatchColors) {
-      const d = isoDate(c.dateOfClientMfc);
-      if (!d) continue;
-      const existing = map.get(c.project);
-      if (!existing || d < existing) map.set(c.project, d);
-    }
-    return map;
-  }, [mfcBatchColors]);
+  // Global sort — driven by the header "Sort" control (see FilterBar).
+  const compareProjects = useProjectCompare();
 
   const primaryLabel = isAll ? "Group" : isNtlt ? "Section"
     : mfcViewMode === "view-by-mfc" ? "MFC"
@@ -427,68 +359,35 @@ function JobDashboardContent() {
 
   const sortedProjects = useMemo(() => {
     const arr = [...byProject];
-    // In project-then-mfc / view-by-mfc modes the primary key encodes the batch
-    // (e.g. "911 / Batch A"). Alphabetical sort naturally keeps all batches of
-    // the same project consecutive AND sorts batches A→B→C→Z within each project.
-    if (!isAll && !isNtlt && mfcViewMode !== "project-with-mfc") {
+    // View-by-MFC mode: keys are MFC-primary ("Batch A / 911") — keep the
+    // alphabetical batch grouping; the global project sort doesn't apply.
+    if (!isAll && !isNtlt && mfcViewMode === "view-by-mfc") {
       arr.sort((a, b) => a.job.localeCompare(b.job));
       return arr;
     }
-    // In "All" mode the primary key is prefixed ("TLT: 920") — rank lookups
-    // (templates / buckets / MFC dates) are keyed by the plain project code.
-    const plain = (job: string) => job.replace(/^(?:TLT|NTLT): /, "");
-    // Generic "ranked, unranked last, ties alphabetical" comparator.
-    const byRank = (rankOf: (job: string) => number | undefined) =>
-      (a: { job: string }, b: { job: string }) => {
-        const ra = rankOf(plain(a.job));
-        const rb = rankOf(plain(b.job));
-        if (ra !== undefined && rb !== undefined && ra !== rb) return ra - rb;
-        if (ra !== undefined && rb === undefined) return -1;
-        if (ra === undefined && rb !== undefined) return 1;
-        return a.job.localeCompare(b.job);
+    // Project-then-MFC mode: keys encode the batch ("911 / Batch A"). Apply
+    // the global sort to the project part, then batch alphabetical (Z last)
+    // so all batches of a project stay consecutive.
+    if (!isAll && !isNtlt && mfcViewMode === "project-then-mfc") {
+      const parts = (key: string): [string, string] => {
+        const i = key.indexOf(" / ");
+        return i === -1 ? [key, ""] : [key.slice(0, i), key.slice(i + 3)];
       };
-    switch (projectSort) {
-      case "templates":
-        arr.sort(byRank((j) => templateRank.get(j)));
-        break;
-      case "project":
-        arr.sort((a, b) => a.job.localeCompare(b.job));
-        break;
-      case "bucket":
-        arr.sort(byRank((j) => bucketRank.get(j)));
-        break;
-      case "ageing":
-        arr.sort((a, b) => (b.avgAge ?? -1) - (a.avgAge ?? -1));
-        break;
-      case "mfcDate":
-        // Earliest MFC date first; projects with no date sort last.
-        arr.sort((a, b) => {
-          const da = mfcDateByProject.get(plain(a.job));
-          const db = mfcDateByProject.get(plain(b.job));
-          if (da && db && da !== db) return da < db ? -1 : 1;
-          if (da && !db) return -1;
-          if (!da && db) return 1;
-          return a.job.localeCompare(b.job);
-        });
-        break;
-      case "assignDate":
-      default:
-        // Earliest first assign date first; projects with no date sort last.
-        arr.sort((a, b) => {
-          if (a.firstAssign && b.firstAssign)
-            return a.firstAssign < b.firstAssign
-              ? -1
-              : a.firstAssign > b.firstAssign
-                ? 1
-                : a.job.localeCompare(b.job);
-          if (a.firstAssign) return -1;
-          if (b.firstAssign) return 1;
-          return a.job.localeCompare(b.job);
-        });
-        break;
+      arr.sort((a, b) => {
+        const [pa, ba] = parts(a.job);
+        const [pb, bb] = parts(b.job);
+        return compareProjects(pa, pb) || ba.localeCompare(bb);
+      });
+      return arr;
     }
+    const stats = new Map(arr.map((p) => [p.job, p]));
+    const extras = {
+      avgAge: (job: string) => stats.get(job)?.avgAge,
+      firstAssign: (job: string) => stats.get(job)?.firstAssign ?? null,
+    };
+    arr.sort((a, b) => compareProjects(a.job, b.job, extras));
     return arr;
-  }, [byProject, projectSort, isAll, isNtlt, mfcViewMode, templateRank, bucketRank, mfcDateByProject]);
+  }, [byProject, isAll, isNtlt, mfcViewMode, compareProjects]);
 
   const orderTotals = useMemo(() => {
     return byProject.reduce(
@@ -705,27 +604,7 @@ function JobDashboardContent() {
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-semibold text-muted-foreground uppercase whitespace-nowrap">
-              Sort by
-            </label>
-            <Select
-              value={projectSort}
-              onValueChange={(v) => setProjectSort(v as ProjectSortKey)}
-            >
-              <SelectTrigger className="h-9 w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PROJECT_SORT_OPTIONS.map((o) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <CardHeader className="flex flex-row items-center justify-end gap-3 space-y-0">
           <Button
             variant="outline"
             size="sm"
