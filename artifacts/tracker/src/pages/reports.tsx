@@ -1219,13 +1219,20 @@ function FabricationLoadReport() {
         </div>
       </div>
 
+      {/* One tab per section — the export still contains all sections (a
+          combined "All" sheet plus one sheet each). */}
+      <Tabs defaultValue={FAB_LOAD_SECTIONS[0].value}>
+        <TabsList>
+          {FAB_LOAD_SECTIONS.map((s) => (
+            <TabsTrigger key={s.value} value={s.value}>
+              {s.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
       {FAB_LOAD_SECTIONS.map((s) => {
         const columns = fabLoadColumnsForSection(s.value);
         return (
-          <div key={s.value} className="space-y-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              {s.label}
-            </h2>
+          <TabsContent key={s.value} value={s.value} className="space-y-3 mt-4">
             <div className="overflow-x-auto rounded-lg border border-border">
               <div
                 className="grid divide-x divide-border min-w-[560px]"
@@ -1283,9 +1290,10 @@ function FabricationLoadReport() {
                 })}
               </div>
             </div>
-          </div>
+          </TabsContent>
         );
       })}
+      </Tabs>
     </div>
   );
 }
