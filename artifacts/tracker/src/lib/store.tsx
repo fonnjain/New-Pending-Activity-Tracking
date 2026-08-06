@@ -94,7 +94,20 @@ interface TrackerContextType {
   clearFilters: () => void;
   mfcViewMode: MfcViewMode;
   setMfcViewMode: (mode: MfcViewMode) => void;
+  projectSort: ProjectSortKey;
+  setProjectSort: (key: ProjectSortKey) => void;
 }
+
+// Global project sort applied wherever project lists are ordered (currently
+// the Project Wise page). Lives in the tracker context so the choice follows
+// the user across pages.
+export type ProjectSortKey =
+  | "templates" // Job Templates order (P1 members first, then P2, …)
+  | "project" // alphabetical by project code
+  | "bucket" // Bucket List order (Bucket A first, then Pre-B, B, C, D, E)
+  | "ageing" // highest average ageing first
+  | "mfcDate" // earliest Date of Client MFC first
+  | "assignDate"; // earliest first assign date first
 
 const defaultFilters: Filters = {
   category: "TLT",
@@ -122,6 +135,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
   const [selectedImportId, setSelectedImportIdState] = useState<number | null>(null);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [mfcViewMode, setMfcViewMode] = useState<MfcViewMode>("project-with-mfc");
+  const [projectSort, setProjectSort] = useState<ProjectSortKey>("assignDate");
   const { data: imports } = useListImports();
 
   // When true the selection always tracks imports[0] (the newest upload).
@@ -259,7 +273,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
     setFilters((prev) => ({ ...defaultFilters, category: prev.category }));
 
   return (
-    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, setSelectedTemplates, setPlantLocations, clearFilters, mfcViewMode, setMfcViewMode }}>
+    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, setSelectedTemplates, setPlantLocations, clearFilters, mfcViewMode, setMfcViewMode, projectSort, setProjectSort }}>
       {children}
     </TrackerContext.Provider>
   );
