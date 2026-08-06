@@ -940,6 +940,8 @@ function fabLoadMatch(
         return act === "W";
       case "bending":
         return act === "B";
+      case "anglePunch":
+        return sec === "ANGLE" && act === "RFI" && op === "PUNCHING";
       case "drilling":
         return sec === "ANGLE" && act === "RFI" && op === "DRILLING";
       case "platePunch":
@@ -957,6 +959,8 @@ function fabLoadMatch(
     case "bending":
       // before B (C,HG,RFI,NH) AND B must be in the mark's Col Q route.
       return rank < B_RANK && routeIncludesOp(r.operation, "B");
+    case "anglePunch":
+      return sec === "ANGLE" && act === "C" && op === "PUNCHING";
     case "drilling":
       return sec === "ANGLE" && act === "C" && op === "DRILLING";
     case "platePunch":

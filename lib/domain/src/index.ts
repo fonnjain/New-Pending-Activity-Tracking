@@ -518,6 +518,7 @@ export type FabLoadSection = "operational" | "inhand";
 export type FabLoadColumn =
   | "welded"
   | "bending"
+  | "anglePunch"
   | "drilling"
   | "platePunch"
   | "plateDrill";
@@ -527,11 +528,14 @@ export const FAB_LOAD_SECTIONS: { value: FabLoadSection; label: string }[] = [
   { value: "inhand", label: "In Hand" },
 ];
 
-// Column order matches the operation sheet: Welded, Drilling, Plate Punch,
-// Plate Drill, Bending.
+// Column order matches the operation sheet: Welded, Angle Punching, Angle
+// Drilling, Plate Punch, Plate Drill, Bending. The stored key for Angle
+// Drilling remains "drilling" (renamed for display only) so existing saved
+// priorities keep working; "anglePunch" is the new sixth column.
 export const FAB_LOAD_COLUMNS: { value: FabLoadColumn; label: string }[] = [
   { value: "welded", label: "Welded Load" },
-  { value: "drilling", label: "Drilling Load" },
+  { value: "anglePunch", label: "Angle Punching" },
+  { value: "drilling", label: "Angle Drilling" },
   { value: "platePunch", label: "Plate Punch" },
   { value: "plateDrill", label: "Plate Drill" },
   { value: "bending", label: "Bending Load" },
@@ -560,6 +564,7 @@ export function isFabLoadColumn(v: unknown): v is FabLoadColumn {
   return (
     v === "welded" ||
     v === "bending" ||
+    v === "anglePunch" ||
     v === "drilling" ||
     v === "platePunch" ||
     v === "plateDrill"

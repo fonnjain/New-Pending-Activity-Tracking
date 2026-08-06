@@ -1226,6 +1226,7 @@ export type FabricationPriorityColumn = typeof FabricationPriorityColumn[keyof t
 export const FabricationPriorityColumn = {
   welded: 'welded',
   bending: 'bending',
+  anglePunch: 'anglePunch',
   drilling: 'drilling',
   platePunch: 'platePunch',
   plateDrill: 'plateDrill',
@@ -1273,6 +1274,7 @@ export type FabricationPriorityInputColumn = typeof FabricationPriorityInputColu
 export const FabricationPriorityInputColumn = {
   welded: 'welded',
   bending: 'bending',
+  anglePunch: 'anglePunch',
   drilling: 'drilling',
   platePunch: 'platePunch',
   plateDrill: 'plateDrill',

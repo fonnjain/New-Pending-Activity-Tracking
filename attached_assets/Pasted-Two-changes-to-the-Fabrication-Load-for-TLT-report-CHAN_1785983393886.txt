@@ -1,0 +1,47 @@
+Two changes to the Fabrication Load for TLT report.
+
+CHANGE 1 — Add an Angle Punching column, positioned before Angle Drilling
+
+The report currently has five columns: Welded Load, Drilling Load, Plate Punch, Plate Drill,
+Bending Load.
+
+"Drilling Load" is actually ANGLE drilling — per your own logic doc it is
+"Section type = ANGLE, Activity = RFI, Hole operation = DRILL". There is no Angle Punching
+column at all, even though plates have both a Punch and a Drill column.
+
+Please add Angle Punching and rename for clarity, giving six columns in this order:
+
+    Welded Load | Angle Punching | Angle Drilling | Plate Punch | Plate Drill | Bending Load
+
+    Angle Punching  Operational: section_type = ANGLE, activity = RFI, hole_operation = PUNCHING
+                    In Hand:     section_type = ANGLE, activity = C,   hole_operation = PUNCHING
+    Angle Drilling  (the existing "Drilling Load" logic, unchanged — just renamed and moved)
+
+Use the same hole_operation derivation you already use for plates. Thickness decides punch vs
+drill, so the ANGLE punching set should already be derivable — tell me if it is not.
+
+CHANGE 2 — Split IN HAND into IN HAND and UPCOMING
+
+Currently there are two sections: OPERATION LOAD and IN HAND. Please make it three:
+OPERATION LOAD, IN HAND, and UPCOMING.
+
+Projects move from IN HAND to UPCOMING based on Release Balance Computed (the WIP-derived
+figure: Type = "Job Card Not Started" AND Status = "Initial").
+
+BEFORE YOU BUILD THIS, please confirm the direction with me — I want to make sure I have the
+intent right:
+
+    Release Balance Computed  > 0  means the project still has unreleased material
+    Release Balance Computed <= 0  means everything is released
+
+My instruction was that <= 0 moves to UPCOMING. But intuitively a project with nothing left
+unreleased has all its material already available, which sounds like IN HAND, while a project
+with unreleased material still to come sounds like UPCOMING.
+
+Please tell me which way you read it and do NOT implement until I confirm. If it is genuinely
+<= 0 to UPCOMING, say so and I will confirm — I would rather resolve this before the build
+than find the two sections swapped afterwards.
+
+Both changes must apply to the on-screen report AND the Excel export, with the same column
+set and section structure in each. Please confirm both after the change by generating an
+actual export.

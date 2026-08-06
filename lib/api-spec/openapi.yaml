@@ -3693,7 +3693,7 @@ components:
           enum: [operational, inhand]
         column:
           type: string
-          enum: [welded, bending, drilling, platePunch, plateDrill]
+          enum: [welded, bending, anglePunch, drilling, platePunch, plateDrill]
         project:
           type: string
         priority:
@@ -3714,7 +3714,7 @@ components:
           enum: [operational, inhand]
         column:
           type: string
-          enum: [welded, bending, drilling, platePunch, plateDrill]
+          enum: [welded, bending, anglePunch, drilling, platePunch, plateDrill]
         project:
           type: string
         priority:
