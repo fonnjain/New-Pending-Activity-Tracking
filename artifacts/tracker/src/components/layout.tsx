@@ -642,6 +642,19 @@ function PlantLocationPicker({
 function FilterBar() {
   const [location] = useLocation();
   const { filters, setFilter, setSelectedJobs, setSelectedTemplates, setPlantLocations, clearFilters, selectedImportId, mfcViewMode, setMfcViewMode } = useTracker();
+
+  // Rule: navigating from one page to another resets every filter to its
+  // default (the Order Type mode is preserved — it is a mode, not a filter).
+  // Stale filters carried across pages routinely produced confusing empty
+  // views (e.g. a template selection emptying an unrelated page).
+  const prevLocation = useRef(location);
+  useEffect(() => {
+    if (prevLocation.current !== location) {
+      prevLocation.current = location;
+      clearFilters();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location]);
   const { data: contractorCategoriesData = [] } = useListContractorCategories();
   const [isOpen, setIsOpen] = useState(false);
   const { data: records = [] } = useGetImportRecords(selectedImportId as number, {

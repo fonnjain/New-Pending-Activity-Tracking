@@ -589,7 +589,7 @@ function JobDashboardContent() {
       <JobDetail
         job={selectedJob}
         label={primaryLabel}
-        records={records.filter((r) => primaryOf(r) === selectedJob)}
+        records={filtered.filter((r) => primaryOf(r) === selectedJob)}
         onBack={() => setSelectedJob(null)}
         headerPhases={headerPhases}
         orderEntry={orderByJob.get(selectedJob)}

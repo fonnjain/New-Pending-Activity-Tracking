@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { formatDate } from "@/lib/utils";
-import { useTracker } from "@/lib/store";
+import { useTracker, useActiveJobSet, isNamedJobSetFilter } from "@/lib/store";
 import {
   useGetOrderStatus,
   getGetOrderStatusQueryKey,
@@ -103,15 +103,28 @@ export default function OrderStatusView() {
   // / order-type mode). Activity and contractor filters are intentionally NOT
   // applied here — the Fabrication / Galvanizing columns ARE activity
   // partitions, so filtering by a single activity would make them meaningless.
+  const activeJobSet = useActiveJobSet();
   const scopedRecords = useMemo(() => {
     return records.filter((r: WipRecord) => {
       if (r.active === false) return false;
       if (!isAll && (r.category || "TLT") !== filters.category) return false;
-      if (filters.job && r.job !== filters.job) return false;
+      // Jobs filter: named sets (templates) hold combo keys ("821 - Z") or
+      // plain codes; a plain code filter matches the job directly.
+      if (isNamedJobSetFilter(filters.job)) {
+        const comboKey = r.mfcBatch ? `${r.job} - ${r.mfcBatch}` : null;
+        if (!activeJobSet.has(r.job ?? "") && !(comboKey && activeJobSet.has(comboKey))) return false;
+      } else if (filters.job && r.job !== filters.job) {
+        return false;
+      }
+      // Combo picker (Job/Batch) — independent of the plain Jobs filter.
+      if (filters.selectedJobs.length > 0) {
+        const comboKey = r.mfcBatch ? `${r.job} - ${r.mfcBatch}` : null;
+        if (!filters.selectedJobs.includes(r.job ?? "") && !(comboKey && filters.selectedJobs.includes(comboKey))) return false;
+      }
       if (filters.structure && r.structure !== filters.structure) return false;
       return true;
     });
-  }, [records, isAll, filters.category, filters.job, filters.structure]);
+  }, [records, isAll, filters.category, filters.job, filters.selectedJobs, filters.structure, activeJobSet]);
 
   // Roll WIP marks into per (project, structure) Fab / Galv tonnages (balanceWt
   // is kilograms; /1000 -> metric tonnes). Galvanizing spans G,GB,Y. Bundle math

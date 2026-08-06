@@ -994,6 +994,13 @@ function priKey(section: string, column: string, project: string): string {
 }
 
 const toTonnes = (kg: number): number => Math.round((kg / 1000) * 1000) / 1000;
+
+// Shown on-screen and on the export's "All" sheet: the six load columns are
+// per-operation views, NOT mutually exclusive buckets — a mark still to be
+// punched, drilled and bent appears in all three of those columns, so summing
+// columns does not reconcile against any bucket/balance figure.
+const FAB_LOAD_COLUMNS_NOTE =
+  "Note: the six load columns are NOT mutually exclusive — a mark still to be punched, drilled and bent appears in every applicable column, so the column totals cannot be summed to reconcile against a bucket or balance figure.";
 const fmtTonnes = (kg: number): string => toTonnes(kg).toFixed(3);
 
 type FabRow = { project: string; weightKg: number; avgThicknessMm: number | null };
@@ -1139,7 +1146,7 @@ function FabricationLoadReport() {
 
   const exportExcel = () => {
     const date = new Date().toISOString().slice(0, 10);
-    const sheets: XlsxGridSheet[] = FAB_LOAD_SECTIONS.map((s) => {
+    const sectionBlocks = FAB_LOAD_SECTIONS.map((s) => {
       const { blocks } = buildSectionGrid(s.value);
       const gridBlocks: XlsxGridBlock[] = blocks.map(({ c, cell, rows: rs }) => ({
         title: c.label,
@@ -1152,8 +1159,22 @@ function FabricationLoadReport() {
         ]),
         totals: ["G. Total", toTonnes(cell.totalKg)],
       }));
-      return { name: s.label, blocks: gridBlocks };
+      return { label: s.label, blocks: gridBlocks };
     });
+    // "All" sheet first: the three sections stacked vertically — a straight
+    // concatenation of the per-section grids so figures match the individual
+    // sheets exactly (no re-aggregation).
+    const sheets: XlsxGridSheet[] = [
+      {
+        name: "All",
+        note: FAB_LOAD_COLUMNS_NOTE,
+        sections: sectionBlocks.map((s) => ({
+          banner: s.label.toUpperCase(),
+          blocks: s.blocks,
+        })),
+      },
+      ...sectionBlocks.map((s) => ({ name: s.label, blocks: s.blocks })),
+    ];
     exportToXlsxBlockGrid(`fabrication_load_tlt_${date}.xlsx`, sheets);
   };
 
@@ -1182,10 +1203,15 @@ function FabricationLoadReport() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          TLT only. Weight is Balance Wt in tonnes. Respects the header filters
-          (contractor, dates, job).
-        </p>
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">
+            TLT only. Weight is Balance Wt in tonnes. Respects the header filters
+            (contractor, dates, job).
+          </p>
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            {FAB_LOAD_COLUMNS_NOTE}
+          </p>
+        </div>
         <div className="flex items-center gap-2 shrink-0">
           <Button size="sm" className="h-8 gap-2" onClick={exportExcel}>
             <FileSpreadsheet className="w-4 h-4" /> Export Excel
@@ -3312,6 +3338,13 @@ function ContractorNetMovementReport() {
 
 export default function ReportsView() {
   const [reportType, setReportType] = useState<ReportType>("jobwise");
+  const { clearFilters } = useTracker();
+  // Rule: switching from one report to another resets the filters to default,
+  // same as navigating between pages (Order Type mode is preserved).
+  const selectReport = (id: ReportType) => {
+    if (id !== reportType) clearFilters();
+    setReportType(id);
+  };
   return (
     <div className="space-y-6">
       <Card className="border-border">
@@ -3327,7 +3360,7 @@ export default function ReportsView() {
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => setReportType(t.id)}
+                    onClick={() => selectReport(t.id)}
                     className={`text-left rounded-lg border p-3 transition-colors ${
                       active
                         ? "border-primary bg-primary/5 ring-1 ring-primary"

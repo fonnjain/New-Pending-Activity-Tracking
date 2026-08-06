@@ -597,17 +597,21 @@ export type XlsxGridBlock = {
   totals?: (string | number | null)[];
 };
 
-// A worksheet built from block-grids: each block is a bordered set of columns,
-// separated from the next by one blank spacer column.
+// A worksheet built from block-grids. A simple sheet holds one grid (`blocks`);
+// a stacked sheet holds several grids vertically (`sections`), each preceded by
+// a banner row. An optional `note` renders as an italic line at the very top.
 export type XlsxGridSheet = {
   name: string;
-  blocks: XlsxGridBlock[];
+  blocks?: XlsxGridBlock[];
+  sections?: { banner: string; blocks: XlsxGridBlock[] }[];
+  note?: string;
 };
 
-// Export a workbook where each sheet lays blocks side by side: a merged title
+// Export a workbook where each grid lays blocks side by side: a merged title
 // row, a sub-header row, data rows aligned across blocks, and an optional bold
 // totals row. Every block is boxed with a medium outer border and separated by
-// a narrow blank column, with compact auto-sized columns.
+// a narrow blank column, with compact auto-sized columns. Sheets with
+// `sections` stack multiple grids vertically with banner rows between them.
 export async function exportToXlsxBlockGrid(
   filename: string,
   sheets: XlsxGridSheet[],
@@ -619,28 +623,31 @@ export async function exportToXlsxBlockGrid(
   const thin = { style: "thin" as const, color: { argb: "FFB0B7C3" } };
   const medium = { style: "medium" as const, color: { argb: "FF111827" } };
 
-  for (const sheet of sheets) {
-    const ws = wb.addWorksheet(uniqueSheetName(sheet.name, used));
-
+  // Render one block-grid starting at `baseRow`; returns the last row used.
+  const renderGrid = (
+    ws: ExcelJS.Worksheet,
+    blocks: XlsxGridBlock[],
+    baseRow: number,
+  ): number => {
     // Lay blocks left to right, leaving one blank spacer column between them.
     let col = 1;
-    const layout = sheet.blocks.map((b) => {
+    const layout = blocks.map((b) => {
       const start = col;
       const width = b.headers.length;
       col += width + 1; // +1 spacer
       return { b, start, width };
     });
 
-    const maxLen = sheet.blocks.reduce((m, b) => Math.max(m, b.rows.length), 0);
-    const TITLE = 1;
-    const HEADER = 2;
-    const DATA_START = 3;
+    const maxLen = blocks.reduce((m, b) => Math.max(m, b.rows.length), 0);
+    const TITLE = baseRow;
+    const HEADER = baseRow + 1;
+    const DATA_START = baseRow + 2;
     const dataEnd = DATA_START + maxLen - 1; // < DATA_START when there are no rows
-    const hasTotals = sheet.blocks.some((b) => b.totals && b.totals.length);
+    const hasTotals = blocks.some((b) => b.totals && b.totals.length);
     const totalRowNum = hasTotals ? Math.max(dataEnd, HEADER) + 1 : -1;
 
     // Compact per-column widths from header + data text (clamped 8..22); spacer
-    // columns stay narrow.
+    // columns stay narrow. Stacked grids share columns — keep the widest need.
     const spacerCols = new Set<number>();
     for (let i = 0; i < layout.length - 1; i++) {
       spacerCols.add(layout[i].start + layout[i].width);
@@ -666,7 +673,11 @@ export async function exportToXlsxBlockGrid(
             : String(v);
           if (text.length > maxText) maxText = text.length;
         }
-        ws.getColumn(start + j).width = Math.min(22, Math.max(8, maxText + 2));
+        const column = ws.getColumn(start + j);
+        column.width = Math.max(
+          column.width ?? 0,
+          Math.min(22, Math.max(8, maxText + 2)),
+        );
       }
     }
 
@@ -762,6 +773,35 @@ export async function exportToXlsxBlockGrid(
 
     ws.getRow(TITLE).height = 20;
     ws.getRow(HEADER).height = 18;
+    return hasTotals ? totalRowNum : Math.max(dataEnd, HEADER);
+  };
+
+  for (const sheet of sheets) {
+    const ws = wb.addWorksheet(uniqueSheetName(sheet.name, used));
+    let row = 1;
+
+    if (sheet.note) {
+      const cell = ws.getCell(row, 1);
+      cell.value = sheet.note;
+      cell.font = { italic: true, color: { argb: "FF6B7280" } };
+      cell.alignment = { horizontal: "left", vertical: "middle" };
+      row += 2; // note + blank spacer row
+    }
+
+    if (sheet.sections && sheet.sections.length > 0) {
+      for (const section of sheet.sections) {
+        const banner = ws.getCell(row, 1);
+        banner.value = section.banner;
+        banner.font = { bold: true, size: 12 };
+        banner.alignment = { horizontal: "left", vertical: "middle" };
+        ws.getRow(row).height = 18;
+        row += 1;
+        const last = renderGrid(ws, section.blocks, row);
+        row = last + 2; // grid + blank spacer row
+      }
+    } else {
+      renderGrid(ws, sheet.blocks ?? [], row);
+    }
   }
 
   await downloadWorkbook(wb, filename);

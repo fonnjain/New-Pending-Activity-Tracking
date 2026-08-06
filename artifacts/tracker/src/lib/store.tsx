@@ -174,7 +174,11 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
       ...prev,
       selectedJobs: jobs,
       selectedTemplateIds: [],
-      // job (plain code) and mfcBatch are independent — do not change them here.
+      // This setter always clears the template selection, so a template
+      // sentinel (e.g. MULTI_TEMPLATES "0 Templates") must never remain in
+      // `job` — it would match nothing. A plain job code stays untouched
+      // (job and mfcBatch are independent of the combo picker).
+      job: isNamedJobSetFilter(prev.job) ? null : prev.job,
     }));
   };
 

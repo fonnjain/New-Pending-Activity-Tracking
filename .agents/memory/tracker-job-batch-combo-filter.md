@@ -31,3 +31,6 @@ Global filter bar has three independent TLT job filters, ANDed:
 `selectedJobs` is decoupled from `MULTI_JOBS_FILTER_VALUE` — it acts independently regardless of `filters.job`.
 `setSelectedJobs` no longer changes `filters.job`.
 `resolveActiveFilters` sets `jobIn` from `selectedJobs.length > 0` (not gated on `isMultiJobs`).
+
+## Drill-down scoping (Aug 2026)
+Project Wise drill-down (JobDetail) must receive the fully `filtered` set, never raw `records` — passing raw records made drill-downs ignore every global filter (the "920 - C selected but all batches shown" bug). Newly fixed combo/named-set handling: inventory.tsx `applyJobFilter`/`applyJobFilterManual`, order-status.tsx `scopedRecords`. Pages on `useFilteredRecords`/`resolveActiveFilters` are safe automatically.

@@ -1547,8 +1547,24 @@ export default function InventoryView() {
 
   const applyJobFilter = (rows: InventoryStructureCard[]): InventoryStructureCard[] => {
     let out = rows;
-    if (isCurrentJobs) out = out.filter((r) => activeJobSet.has(r.project));
-    else if (jobFilter) out = out.filter((r) => r.project === jobFilter);
+    if (isCurrentJobs) {
+      // activeJobSet may contain combo keys ("821 - Z") or plain codes.
+      out = out.filter((r) => {
+        const comboKey = r.mfcBatch ? `${r.project} - ${r.mfcBatch}` : null;
+        return activeJobSet.has(r.project) || (comboKey != null && activeJobSet.has(comboKey));
+      });
+    } else if (jobFilter) {
+      out = out.filter((r) => r.project === jobFilter);
+    }
+    // Combo picker (Job/Batch) — independent of the plain Jobs filter; keys
+    // are "job - batch" combos, matched per structure card's own batch.
+    if (filters.selectedJobs.length > 0) {
+      const combos = new Set(filters.selectedJobs);
+      out = out.filter((r) => {
+        const comboKey = r.mfcBatch ? `${r.project} - ${r.mfcBatch}` : null;
+        return combos.has(r.project) || (comboKey != null && combos.has(comboKey));
+      });
+    }
     return out;
   };
 
@@ -1736,8 +1752,18 @@ export default function InventoryView() {
 
   const applyJobFilterManual = (entries: InventoryManualEntry[]): InventoryManualEntry[] => {
     let out = entries;
-    if (isCurrentJobs) out = out.filter((e) => activeJobSet.has(e.projectCode));
-    else if (jobFilter) out = out.filter((e) => e.projectCode === jobFilter);
+    if (isCurrentJobs) {
+      // Manual entries have no MFC batch — match the plain project code against
+      // both plain codes and the job half of any combo keys in the set.
+      const plainCodes = new Set(Array.from(activeJobSet, (k) => k.split(" - ")[0]));
+      out = out.filter((e) => plainCodes.has(e.projectCode));
+    } else if (jobFilter) {
+      out = out.filter((e) => e.projectCode === jobFilter);
+    }
+    if (filters.selectedJobs.length > 0) {
+      const plainCodes = new Set(filters.selectedJobs.map((k) => k.split(" - ")[0]));
+      out = out.filter((e) => plainCodes.has(e.projectCode));
+    }
     return out;
   };
 
