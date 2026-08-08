@@ -743,6 +743,33 @@ function JobDashboardContent() {
               </TableBody>
               {byProject.length > 0 && (
                 <TableFooter>
+                  {/* Column labels repeated as footer so they're visible at the bottom of long lists */}
+                  <TableRow className="border-b text-xs text-muted-foreground font-semibold uppercase tracking-wide bg-card">
+                    <TableHead className="py-1">{primaryLabel}</TableHead>
+                    <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight py-1">Work Order Qty</TableHead>
+                    <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight py-1">Dispatch Qty</TableHead>
+                    <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight py-1">Dispatch Balance</TableHead>
+                    <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight py-1">FG (Order Review)</TableHead>
+                    <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight py-1">Release Balance Computed</TableHead>
+                    {headerPhases.map((ph) => (
+                      <TableHead key={ph.key} className="text-right align-bottom py-1">
+                        <span className="block whitespace-normal leading-tight">{ph.label}</span>
+                        <span className="block text-[10px] font-normal normal-case leading-tight max-w-[180px] ml-auto">
+                          {ph.subLabel
+                            ? `(${ph.subLabel})`
+                            : ph.activities.length
+                              ? `(${ph.activities.join(", ")})`
+                              : "-"}
+                        </span>
+                        <span className="block text-[10px] font-normal normal-case">wt / marks</span>
+                      </TableHead>
+                    ))}
+                    <TableHead className="text-right align-bottom py-1">
+                      <span className="block whitespace-nowrap">Total</span>
+                      <span className="block text-[10px] font-normal normal-case">wt / marks</span>
+                    </TableHead>
+                    <TableHead className="text-right py-1">Avg Ageing</TableHead>
+                  </TableRow>
                   <TableRow className="border-t-2">
                     <TableCell className="font-bold uppercase tracking-wider text-xs">Total</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.wo * 1000)}</TableCell>
