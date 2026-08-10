@@ -128,6 +128,34 @@ function JobDashboardContent() {
     return m;
   }, [relBalData, isAll]);
 
+  // Per-(project, mfcBatch) release balance sums — used by the batch-view to
+  // attribute release balance to individual MFC batches without an OR join.
+  // Keyed "rawProject::mfcBatch" (e.g. "911::A").
+  const relBalByProjectBatch = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of relBalData?.batchBreakdown ?? []) {
+      const key = `${r.project}::${r.mfcBatch}`;
+      m.set(key, (m.get(key) ?? 0) + r.releaseBalanceComputedMt);
+    }
+    return m;
+  }, [relBalData]);
+
+  // Lookup helper: returns the correct release balance MT for a project-wise
+  // table row, handling project-then-mfc mode where p.job is "911 / Batch A".
+  const getRelBalForRow = useMemo(
+    () =>
+      (pJob: string): number => {
+        if (!isAll && !isNtlt && mfcViewMode === "project-then-mfc") {
+          const i = pJob.indexOf(" / ");
+          const proj = i === -1 ? pJob : pJob.slice(0, i);
+          const batch = i === -1 ? "Z" : pJob.slice(i + 3);
+          return relBalByProjectBatch.get(`${proj}::${batch}`) ?? 0;
+        }
+        return relBalComputedByJob.get(pJob) ?? 0;
+      },
+    [isAll, isNtlt, mfcViewMode, relBalByProjectBatch, relBalComputedByJob],
+  );
+
   // Finished Goods WIP per project from the WIP file's parseSummary. Keyed by
   // raw project code (no category prefix). React Query cache — no extra request.
   const { data: importList } = useListImports();
@@ -469,15 +497,16 @@ function JobDashboardContent() {
                   qualityMarks:            p.phases.quality.marks,
                   galvanisingWt:           p.phases.galvanising.weight / 1000,
                   galvanisingMarks:        p.phases.galvanising.marks,
-                  fgWipWt:                 fgWipForJob(p.job) / 1000,
+                  fgWipWt:                 (!isAll && !isNtlt && mfcViewMode === "project-then-mfc") ? p.phases.dispatch.weight / 1000 : fgWipForJob(p.job) / 1000,
                 };
+            const isBatchRow = !isAll && !isNtlt && mfcViewMode === "project-then-mfc";
             return {
               job: p.job,
-              workOrderMt: orderByJob.get(p.job)?.wo ?? 0,
-              dispatchMt: orderByJob.get(p.job)?.disp ?? 0,
-              dispatchBalanceMt: (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
-              fgOverviewComputedMt: orderByJob.get(p.job)?.computedFg ?? 0,
-              releaseBalanceComputedMt: relBalComputedByJob.get(p.job) ?? 0,
+              workOrderMt: isBatchRow ? null : orderByJob.get(p.job)?.wo ?? 0,
+              dispatchMt: isBatchRow ? null : orderByJob.get(p.job)?.disp ?? 0,
+              dispatchBalanceMt: isBatchRow ? null : (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
+              fgOverviewComputedMt: isBatchRow ? null : orderByJob.get(p.job)?.computedFg ?? 0,
+              releaseBalanceComputedMt: getRelBalForRow(p.job),
               ...ntltStageCols,
               totalWt: p.weight / 1000,
               marks: p.marks,
@@ -522,7 +551,7 @@ function JobDashboardContent() {
     } finally {
       setExporting(false);
     }
-  }, [exporting, isAll, isNtlt, sortedProjects, orderByJob, relBalComputedByJob, byActivity, toast]);
+  }, [exporting, isAll, isNtlt, mfcViewMode, sortedProjects, orderByJob, relBalComputedByJob, relBalByProjectBatch, getRelBalForRow, byActivity, toast]);
 
   // Reconciliation guard: all marks must be accounted for in exactly one bucket.
   // bucketTotal = sum of all phase weights (including phases.dispatch for FG)
@@ -543,7 +572,7 @@ function JobDashboardContent() {
       0,
     );
     const relBalKg = byProject.reduce(
-      (s, p) => s + (relBalComputedByJob.get(p.job) ?? 0) * 1000,
+      (s, p) => s + getRelBalForRow(p.job) * 1000,
       0,
     );
     const bucketTotal = allPhasesWt + relBalKg;
@@ -571,6 +600,7 @@ function JobDashboardContent() {
         orderEntry={orderByJob.get(selectedJob)}
         orderRows={order?.rows?.filter((r) => r.project === rawJob) ?? []}
         mfcViewMode={mfcViewMode}
+        relBalByProjectBatch={relBalByProjectBatch}
       />
     );
   }
@@ -672,7 +702,7 @@ function JobDashboardContent() {
                       {o ? formatWeight(o.computedFg * 1000) : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {(() => { const v = relBalComputedByJob.get(p.job); return v ? formatWeight(v * 1000) : <span className="text-muted-foreground">-</span>; })()}
+                      {(() => { const v = getRelBalForRow(p.job); return v > 0 ? formatWeight(v * 1000) : <span className="text-muted-foreground">-</span>; })()}
                     </TableCell>
                     {isNtlt
                       ? NTLT_STAGES.map((stg) => {
@@ -692,7 +722,13 @@ function JobDashboardContent() {
                         })
                       : PROCESS_PHASES.map((ph) => {
                           if (ph.key === "dispatch") {
-                            const wt = fgWipForJob(p.job);
+                            // In project-then-mfc mode the key is "911 / Batch A" which has
+                            // no entry in fgWipByJob (JSONB-keyed by raw project). Use the
+                            // pool-derived phases.dispatch.weight instead — it carries the
+                            // correct per-batch FG weight from record_pool for all imports.
+                            const wt = (!isAll && !isNtlt && mfcViewMode === "project-then-mfc")
+                              ? p.phases.dispatch.weight
+                              : fgWipForJob(p.job);
                             return (
                               <TableCell key={ph.key} className="text-right tabular-nums">
                                 {wt > 0 ? (
@@ -776,7 +812,7 @@ function JobDashboardContent() {
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.disp * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.disp) * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.computedFg * 1000)}</TableCell>
-                    <TableCell className="text-right tabular-nums font-bold">{formatWeight(byProject.reduce((s, p) => s + (relBalComputedByJob.get(p.job) ?? 0), 0) * 1000)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-bold">{formatWeight(byProject.reduce((s, p) => s + getRelBalForRow(p.job), 0) * 1000)}</TableCell>
                     {isNtlt
                       ? NTLT_STAGES.map((stg) => {
                           const marks = byProject.reduce((s, p) => s + p.ntltStages[stg.key].marks, 0);
@@ -796,7 +832,9 @@ function JobDashboardContent() {
                         })
                       : PROCESS_PHASES.map((ph) => {
                           if (ph.key === "dispatch") {
-                            const totalFgWt = byProject.reduce((s, p) => s + fgWipForJob(p.job), 0);
+                            const totalFgWt = (!isAll && !isNtlt && mfcViewMode === "project-then-mfc")
+                              ? byProject.reduce((s, p) => s + p.phases.dispatch.weight, 0)
+                              : byProject.reduce((s, p) => s + fgWipForJob(p.job), 0);
                             return (
                               <TableCell key={ph.key} className="text-right tabular-nums">
                                 {totalFgWt > 0 ? (
@@ -910,6 +948,7 @@ function JobDetail({
   orderEntry,
   orderRows = [],
   mfcViewMode = "project-with-mfc",
+  relBalByProjectBatch = new Map(),
 }: {
   job: string;
   label: string;
@@ -919,6 +958,8 @@ function JobDetail({
   orderEntry?: { wo: number; rel: number; disp: number; fileBalRelease: number };
   orderRows?: Array<{ structure: string; weightMt: number | null; woOrderQtyMt: number | null; releaseMt: number | null; fileDespatchMt: number | null; fileBalReleaseMt: number | null }>;
   mfcViewMode?: MfcViewMode;
+  /** Per-(project, mfcBatch) release balance MT map, keyed "rawProject::batch". */
+  relBalByProjectBatch?: Map<string, number>;
 }) {
   const jobIsNtlt = records.some((r) => (r.category || "TLT") === "NTLT");
   const isNtlt = jobIsNtlt;
@@ -992,6 +1033,8 @@ function JobDetail({
             phases.dispatch.weight += r.balanceWt;
           }
         }
+        // Strip category prefix so the batch key matches the relBalByProjectBatch map.
+        const rawJob = job.replace(/^(?:TLT|NTLT): /, "");
         return {
           batch,
           structures: new Set(recs.map((r) => r.structure).filter(Boolean)).size,
@@ -1002,10 +1045,13 @@ function JobDetail({
           avgAge: aged.length
             ? Math.round(aged.reduce((s, r) => s + (r.ageingDays || 0), 0) / aged.length)
             : null,
+          // Release balance for this specific batch — sourced from the DB table
+          // that groups JCNS+Initial records by (import, project, structure, batch).
+          releaseBalanceMt: relBalByProjectBatch.get(`${rawJob}::${batch}`) ?? 0,
         };
       })
       .sort((a, b) => a.batch.localeCompare(b.batch));
-  }, [records, isNtlt]);
+  }, [records, isNtlt, job, relBalByProjectBatch]);
 
   // Footer totals across all MFC rows.
   const mfcTotals = useMemo(() => {
@@ -1203,7 +1249,7 @@ function JobDetail({
   }
 
   if (atMfcListLevel) {
-    const totalCols = 3 + (orderEntry ? 3 : 0) + headerPhases.length + 3;
+    const totalCols = 4 + (orderEntry ? 3 : 0) + headerPhases.length + 3; // +1 for Release Balance column
     return (
       <div className="space-y-4">
         <div className="flex items-start gap-3">
@@ -1230,6 +1276,7 @@ function JobDetail({
                   <TableRow>
                     <TableHead>MFC</TableHead>
                     <TableHead className="text-right">Structures</TableHead>
+                    <TableHead className="text-right align-bottom whitespace-normal max-w-[5rem] leading-tight">Release Balance</TableHead>
                     {orderEntry && (
                       <>
                         <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Work Order Qty</TableHead>
@@ -1273,18 +1320,35 @@ function JobDetail({
                     >
                       <TableCell className="font-mono font-medium">{m.batch}</TableCell>
                       <TableCell className="text-right">{m.structures}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {m.releaseBalanceMt > 0
+                          ? formatWeight(m.releaseBalanceMt * 1000)
+                          : <span className="text-muted-foreground">-</span>}
+                      </TableCell>
                       {orderEntry && (
                         <>
-                          <TableCell className="text-right tabular-nums">{formatWeight((moe?.wo ?? 0) * 1000)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatWeight((moe?.disp ?? 0) * 1000)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatWeight(((moe?.wo ?? 0) - (moe?.disp ?? 0)) * 1000)}</TableCell>
+                          {/* OR file has no batch dimension — blank rather than zero so users
+                              don't mistake missing data for confirmed zero dispatch. */}
+                          <TableCell className="text-right"><span className="text-muted-foreground">—</span></TableCell>
+                          <TableCell className="text-right"><span className="text-muted-foreground">—</span></TableCell>
+                          <TableCell className="text-right"><span className="text-muted-foreground">—</span></TableCell>
                         </>
                       )}
                       {PROCESS_PHASES.map((ph) => {
                         if (ph.key === "dispatch") {
+                          // FG WIP (Finished Goods) is pool-derived per batch —
+                          // phases.dispatch is populated by classifyWipCase = FINISHED_GOODS.
+                          const fgWt = m.phases.dispatch.weight;
                           return (
                             <TableCell key={ph.key} className="text-right tabular-nums">
-                              <span className="text-muted-foreground">-</span>
+                              {fgWt > 0 ? (
+                                <>
+                                  <span className="font-bold">{formatWeight(fgWt)}</span>
+                                  <span className="block text-xs text-muted-foreground">{m.phases.dispatch.marks} marks</span>
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
                             </TableCell>
                           );
                         }
@@ -1331,18 +1395,29 @@ function JobDetail({
                     <TableRow className="border-t-2">
                       <TableCell className="font-bold uppercase tracking-wider text-xs">Total</TableCell>
                       <TableCell />
+                      <TableCell className="text-right tabular-nums font-bold">
+                        {formatWeight(byMfc.reduce((s, m) => s + m.releaseBalanceMt, 0) * 1000)}
+                      </TableCell>
                       {orderEntry && (
                         <>
-                          <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderEntry.wo * 1000)}</TableCell>
-                          <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderEntry.disp * 1000)}</TableCell>
-                          <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderEntry.wo - orderEntry.disp) * 1000)}</TableCell>
+                          <TableCell className="text-right"><span className="text-muted-foreground">—</span></TableCell>
+                          <TableCell className="text-right"><span className="text-muted-foreground">—</span></TableCell>
+                          <TableCell className="text-right"><span className="text-muted-foreground">—</span></TableCell>
                         </>
                       )}
                       {PROCESS_PHASES.map((ph) => {
                         if (ph.key === "dispatch") {
+                          const fgWt = mfcTotals.phases.dispatch.weight;
                           return (
                             <TableCell key={ph.key} className="text-right tabular-nums">
-                              <span className="text-muted-foreground">-</span>
+                              {fgWt > 0 ? (
+                                <>
+                                  <span className="font-bold">{formatWeight(fgWt)}</span>
+                                  <span className="block text-xs text-muted-foreground">{mfcTotals.phases.dispatch.marks} marks</span>
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
                             </TableCell>
                           );
                         }

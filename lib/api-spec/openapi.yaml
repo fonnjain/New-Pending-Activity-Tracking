@@ -5098,12 +5098,33 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReleaseBalanceRow"
+        batchBreakdown:
+          type: array
+          description: >-
+            Per-(project, mfcBatch) release balance sums with no OR join.
+            Used by the batch-view client to attribute release balance to
+            individual MFC batches without inflating the OR comparison table.
+          items:
+            type: object
+            properties:
+              project:
+                type: string
+              mfcBatch:
+                type: string
+                description: MFC batch letter (A, B, C …) or 'Z' for unassigned marks.
+              releaseBalanceComputedMt:
+                type: number
+            required:
+              - project
+              - mfcBatch
+              - releaseBalanceComputedMt
         totals:
           $ref: "#/components/schemas/ReleaseBalanceTotals"
       required:
         - available
         - orderReviewAsOnDate
         - rows
+        - batchBreakdown
         - totals
     FabricationProjectCompletionRow:
       type: object

@@ -20,5 +20,16 @@ export interface ReleaseBalanceResponse {
      */
   orderReviewAsOnDate: string | null;
   rows: ReleaseBalanceRow[];
+  /**
+   * Per-(project, mfcBatch) release balance sums with no OR join.
+   * Used by the batch-view client to attribute release balance to
+   * individual MFC batches without inflating the OR comparison table.
+   */
+  batchBreakdown: Array<{
+    project: string;
+    /** MFC batch letter (A, B, C …) or 'Z' for unassigned marks. */
+    mfcBatch: string;
+    releaseBalanceComputedMt: number;
+  }>;
   totals: ReleaseBalanceTotals;
 }

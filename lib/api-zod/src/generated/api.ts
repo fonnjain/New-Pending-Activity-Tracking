@@ -1954,6 +1954,11 @@ export const GetReleaseBalanceResponse = zod.object({
   "releaseBalanceOrderReviewMt": zod.number().nullable().describe('File-stated Release Balance (MT) from the latest Order Review (fileBalReleaseMt); null when Order Review unavailable for this row.'),
   "diffMt": zod.number().nullable().describe('releaseBalanceComputedMt minus releaseBalanceOrderReviewMt; null when either side is unavailable.')
 }).describe('Per-(project, structure) Release Balance figures from the latest WIP file and Order Review.')),
+  "batchBreakdown": zod.array(zod.object({
+  "project": zod.string(),
+  "mfcBatch": zod.string().describe('MFC batch letter (A, B, C \u2026) or \'Z\' for unassigned marks.'),
+  "releaseBalanceComputedMt": zod.number()
+}).describe('Per-(project, mfcBatch) release balance sum with no OR join. Used by the batch-view client to attribute release balance to individual MFC batches.')),
   "totals": zod.object({
   "releaseBalanceComputedMt": zod.number(),
   "releaseBalanceOrderReviewMt": zod.number(),

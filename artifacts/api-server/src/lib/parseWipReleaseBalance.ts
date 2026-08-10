@@ -1,11 +1,15 @@
 // Lightweight reader that computes the Release Balance Computed aggregate from
-// a WIP workbook buffer. Reads ONLY five columns (Type, Job Card Status, Project
-// Code, Alias, Balance Wt.) — purely for the new additive overlay. Does NOT
-// alter any existing parsing, hashing, dedup, ageing, Activity, or qty logic.
+// a WIP workbook buffer. Reads ONLY six columns (Type, Job Card Status, Project
+// Code, Alias, Balance Wt., Batch No.) — purely for the new additive overlay.
+// Does NOT alter any existing parsing, hashing, dedup, ageing, Activity, or
+// qty logic.
 //
 // Filters: Col A "Type" == "Job Card Not Started" AND Col G "Job Card Status"
 // == "Initial". Sums Col Q "Balance Wt." (kg) ÷ 1000 → MT, grouped by
-// (normalizedProject, structure).
+// (normalizedProject, structure, mfcBatch).
+//
+// mfcBatch is the WIP file "Batch No." / "WO Batch No." (col U/X), upper-cased;
+// blank → 'Z' (the app-wide placeholder for "no batch assigned").
 //
 // Storage is scoped per import_id: recomputeReleaseBalance() deletes only the
 // rows for the given import before reinserting, so historical imports are never
@@ -39,6 +43,7 @@ function cellNum(v: Cell): number | null {
 export interface ReleaseBalanceStructureRow {
   project: string;
   structure: string;
+  mfcBatch: string;
   releaseBalanceComputedMt: number;
 }
 
@@ -66,6 +71,7 @@ export function parseWipReleaseBalance(
     raw: true,
   });
 
+  // Key: project\u0000structure\u0000mfcBatch
   const agg = new Map<string, number>();
 
   for (const row of rawRows) {
@@ -80,18 +86,23 @@ export function parseWipReleaseBalance(
     const structure = cellStr(row["Alias"]);
     if (!structure) continue;
 
+    // "WO Batch No." was renamed to "Batch No." in newer file exports.
+    const rawBatch = cellStr(row["WO Batch No."] ?? row["Batch No."]);
+    const mfcBatch = rawBatch ? rawBatch.toUpperCase() : "Z";
+
     const balWtKg = cellNum(row["Balance Wt."]) ?? 0;
     const balMt = balWtKg / 1000;
 
-    const key = `${project}\u0000${structure}`;
+    const key = `${project}\u0000${structure}\u0000${mfcBatch}`;
     agg.set(key, (agg.get(key) ?? 0) + balMt);
   }
 
   return Array.from(agg.entries()).map(([key, mt]) => {
-    const sep = key.indexOf("\u0000");
+    const parts = key.split("\u0000");
     return {
-      project: key.slice(0, sep),
-      structure: key.slice(sep + 1),
+      project: parts[0],
+      structure: parts[1],
+      mfcBatch: parts[2],
       releaseBalanceComputedMt: mt,
     };
   });
@@ -115,6 +126,7 @@ export async function recomputeReleaseBalance(
           importId,
           project: r.project,
           structure: r.structure,
+          mfcBatch: r.mfcBatch,
           releaseBalanceComputedMt: r.releaseBalanceComputedMt,
         })),
       );
@@ -123,42 +135,49 @@ export async function recomputeReleaseBalance(
 }
 
 // ---------------------------------------------------------------------------
-// Pool-based backfill — computes Release Balance for every import directly from
-// the record_pool using the is_initial_cutting flag (which captures the same
-// "JCNS + Initial" condition as the file-based parser).  Used at boot and via
-// the admin recompute endpoint to populate historical imports whose file bytes
-// are no longer available.
+// Pool-based backfill — computes Release Balance for EVERY import directly from
+// the record_pool, grouped by (import_id, project, structure, mfc_batch).
+//
+// This replaces the entire table on every call (TRUNCATE + re-insert) so that:
+//  (a) the batch dimension is always correct (derived from record_pool.mfc_batch,
+//      never stamped as a blanket 'Z'), and
+//  (b) a schema migration that adds the mfc_batch column (default 'Z') does not
+//      leave all historical rows incorrectly attributed to a single fake batch.
+//
+// Invariant: summing across all batches for a (import_id, project, structure)
+// produces the same total as the old single-row value — the data is split by
+// batch, not changed.
+//
+// Safe to call at boot: the function is idempotent and fast enough for
+// ~20 imports × ~300 structures = ~6,000 rows.
 // ---------------------------------------------------------------------------
 export async function backfillReleaseBalanceFromPool(): Promise<number> {
-  // 1. Find all imports that already have release_balance_wip rows so we can
-  //    skip them (they were populated by the file-based recompute and are already
-  //    correct).
-  const existingImportIds = new Set<number>(
-    (
-      await db
-        .selectDistinct({ importId: releaseBalanceWipTable.importId })
-        .from(releaseBalanceWipTable)
-    ).map((r) => r.importId),
-  );
-
-  // 2. Get all import IDs.
+  // 1. Get all import IDs.
   const allImports = await db
     .select({ id: importsTable.id })
     .from(importsTable)
     .orderBy(importsTable.id);
 
-  const toBackfill = allImports.filter((i) => !existingImportIds.has(i.id));
-  if (toBackfill.length === 0) return 0;
+  if (allImports.length === 0) return 0;
 
-  // 3. For each import without rows, compute from the pool.
-  //    Release Balance = sum of balance_wt / 1000 for rows where
-  //    is_initial_cutting = true AND category = 'TLT', grouped by (job, structure).
+  // 2. TRUNCATE the table so we re-derive everything at batch grain.
+  //    (After a schema migration that added mfc_batch with DEFAULT 'Z', all
+  //    existing rows are incorrectly stamped 'Z'. A full re-derive fixes that.)
+  await db.delete(releaseBalanceWipTable);
+
+  // 3. For each import, compute from the pool grouped by
+  //    (project, structure, mfc_batch).
+  //    Release Balance = JCNS + Initial rows (is_initial_cutting = true for
+  //    legacy imports, or per-import job_card_status = 'INITIAL' for newer ones).
+  const mfcBatchExpr = sql<string>`COALESCE(${recordPoolTable.mfcBatch}, 'Z')`;
+
   let totalInserted = 0;
-  for (const { id: importId } of toBackfill) {
+  for (const { id: importId } of allImports) {
     const computed = await db
       .select({
         project: recordPoolTable.job,
         structure: recordPoolTable.structure,
+        mfcBatch: mfcBatchExpr,
         releaseBalanceComputedMt: sql<number>`coalesce(sum(${recordPoolTable.balanceWt} * ${importRowsTable.copies}) / 1000.0, 0)`,
       })
       .from(importRowsTable)
@@ -175,7 +194,11 @@ export async function backfillReleaseBalanceFromPool(): Promise<number> {
           sql`COALESCE(upper(${importRowsTable.jobCardStatus}) = 'INITIAL', ${recordPoolTable.isInitialCutting}, false)`,
         ),
       )
-      .groupBy(recordPoolTable.job, recordPoolTable.structure);
+      .groupBy(
+        recordPoolTable.job,
+        recordPoolTable.structure,
+        mfcBatchExpr,
+      );
 
     if (computed.length > 0) {
       await db
@@ -185,10 +208,10 @@ export async function backfillReleaseBalanceFromPool(): Promise<number> {
             importId,
             project: r.project,
             structure: r.structure,
+            mfcBatch: r.mfcBatch,
             releaseBalanceComputedMt: r.releaseBalanceComputedMt,
           })),
-        )
-        .onConflictDoNothing();
+        );
       totalInserted += computed.length;
     }
   }

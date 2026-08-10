@@ -48,3 +48,4 @@
 - [NTLT stage model](ntlt-stage-model.md) — 5-stage chain (Not Started/TS/Galvanising/Y/FG); single classifyNtltStage() in domain; Type guard mandatory (~717 MT misclassified without it).
 - [Generated OR two-banner layout](tracker-generated-or-v2.md) — Gen OR table restructured: 10 fixed cols + PROGRESS (4) + BALANCE (5); exportGenOrXlsx writes real merged-cell banners (K1:R1, S1:Z1) verified cell-by-cell.
 - [Fab Load report sections/columns](tracker-fab-load-sections.md) — 3 sections × 6 columns; UPCOMING = per-mark NOT_RELEASED (previously excluded), never a project threshold; "drilling" key = Angle Drilling label.
+- [MFC batch Release Balance + FG fix](tracker-mfc-batch-release-balance.md) — three-part fix: mfc_batch column in release_balance_wip + DELETE-all backfill, FG from phases.dispatch.weight (not JSONB), OR columns null/— in batch rows; batchBreakdown on /release-balance API.

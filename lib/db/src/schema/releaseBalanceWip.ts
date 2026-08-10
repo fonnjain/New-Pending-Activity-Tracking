@@ -10,9 +10,16 @@ import {
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
-// Per-(import_id, project, structure) snapshot of "Job Card Not Started + Initial"
+// Per-(import_id, project, structure, mfc_batch) snapshot of "Job Card Not Started + Initial"
 // balance weight. Scoped per import so that viewing an older import shows that
 // import's own Release Balance, not the latest file's.
+//
+// mfc_batch is the WIP file "Batch No." (col U/X), normalised to uppercase;
+// blank-origin rows use 'Z' (the app-wide placeholder for "no batch").
+//
+// The batch dimension was added after the initial project+structure grain.
+// Backfill re-derives all rows from record_pool grouped by
+// (import_id, project, structure, mfc_batch) — see backfillReleaseBalanceFromPool().
 //
 // Populated by recomputeReleaseBalance(buffer, importId) immediately after each
 // WIP commit. Historical imports are backfilled from the record_pool using the
@@ -35,6 +42,12 @@ export const releaseBalanceWipTable = pgTable(
     importId: integer("import_id").notNull().default(0),
     project: text("project").notNull(),
     structure: text("structure").notNull(),
+    // MFC batch letter (A, B, C …) or 'Z' for marks with no batch assignment.
+    // 'Z' is the canonical placeholder — blank in source → 'Z' on ingest.
+    // NOT NULL DEFAULT 'Z' so the column can be added to an existing table;
+    // all existing rows receive 'Z' from the DB default, but the boot backfill
+    // immediately re-derives every row from record_pool with the correct batch.
+    mfcBatch: text("mfc_batch").notNull().default("Z"),
     releaseBalanceComputedMt: doublePrecision("release_balance_computed_mt")
       .notNull()
       .default(0),
@@ -48,8 +61,8 @@ export const releaseBalanceWipTable = pgTable(
     // ADD COLUMN — which caused the production publish migration to fail (the PK
     // referenced import_id before the column existed). Using uniqueIndex gives
     // the same uniqueness guarantee with a safe migration ordering.
-    uniqueIndex("release_balance_wip_import_id_project_structure_uq").on(
-      t.importId, t.project, t.structure,
+    uniqueIndex("release_balance_wip_import_id_project_structure_batch_uq").on(
+      t.importId, t.project, t.structure, t.mfcBatch,
     ),
     index("release_balance_wip_import_id_idx").on(t.importId),
   ],

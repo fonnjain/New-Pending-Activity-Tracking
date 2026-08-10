@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db, releaseBalanceWipTable, importsTable } from "@workspace/db";
 import { loadLatestOrderReview } from "../lib/dispatch";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { GetReleaseBalanceQueryParams } from "@workspace/api-zod";
 
 const router: IRouter = Router();
@@ -25,6 +25,11 @@ function stripLeadingDash(structure: string): string {
 // cross-checking. Full outer join: OR-only structures appear with null
 // computed; WIP-only structures appear with null OR value.
 // Purely additive read: never mutates any state.
+//
+// Also returns batchBreakdown: per-(project, mfcBatch) sums of the WIP
+// release balance, with no OR join. Used by the project-wise batch view to
+// show the correct per-batch release balance without cross-contaminating the
+// project+structure comparison table.
 router.get("/release-balance", async (req, res): Promise<void> => {
   const parsed = GetReleaseBalanceQueryParams.safeParse(req.query);
   if (!parsed.success) {
@@ -52,6 +57,7 @@ router.get("/release-balance", async (req, res): Promise<void> => {
       orderReviewAsOnDate: null,
       importId: null,
       rows: [],
+      batchBreakdown: [],
       totals: {
         releaseBalanceComputedMt: 0,
         releaseBalanceOrderReviewMt: 0,
@@ -61,15 +67,27 @@ router.get("/release-balance", async (req, res): Promise<void> => {
     return;
   }
 
-  const [wipRows, orderReview] = await Promise.all([
+  const [wipRows, orderReview, batchBreakdown] = await Promise.all([
     db
       .select()
       .from(releaseBalanceWipTable)
       .where(eq(releaseBalanceWipTable.importId, targetImportId)),
     loadLatestOrderReview(),
+    // Per-(project, mfcBatch) sums — no OR join, no structure granularity.
+    // Used by the batch-view client to look up release balance per project+batch.
+    db
+      .select({
+        project: releaseBalanceWipTable.project,
+        mfcBatch: releaseBalanceWipTable.mfcBatch,
+        releaseBalanceComputedMt: sql<number>`sum(${releaseBalanceWipTable.releaseBalanceComputedMt})`,
+      })
+      .from(releaseBalanceWipTable)
+      .where(eq(releaseBalanceWipTable.importId, targetImportId))
+      .groupBy(releaseBalanceWipTable.project, releaseBalanceWipTable.mfcBatch),
   ]);
 
-  // Build WIP lookup keyed by project\u0001structure.
+  // Build WIP lookup keyed by project\u0001structure (aggregated across batches
+  // for the OR comparison table — OR has no batch dimension).
   // Apply the same leading-dash normalization the OR parser uses so that
   // e.g. WIP "-069-2NBD2" and OR "069-2NBD2" resolve to the same key and
   // collapse into a single joined row instead of splitting into two.
@@ -82,7 +100,7 @@ router.get("/release-balance", async (req, res): Promise<void> => {
     const key = `${w.project}\u0001${normalizedStructure}`;
     const existing = wipMap.get(key);
     if (existing) {
-      // Two WIP structures collapsed to the same normalized key — sum them.
+      // Two WIP structures or batches collapsed to the same normalized key — sum them.
       existing.computedMt += w.releaseBalanceComputedMt;
     } else {
       wipMap.set(key, {
@@ -131,6 +149,7 @@ router.get("/release-balance", async (req, res): Promise<void> => {
       orderReviewAsOnDate: null,
       importId: targetImportId,
       rows: [],
+      batchBreakdown,
       totals: {
         releaseBalanceComputedMt: 0,
         releaseBalanceOrderReviewMt: 0,
@@ -205,6 +224,7 @@ router.get("/release-balance", async (req, res): Promise<void> => {
     orderReviewAsOnDate: orderReview?.import.asOnDate ?? null,
     importId: targetImportId,
     rows,
+    batchBreakdown,
     totals,
   });
 });
