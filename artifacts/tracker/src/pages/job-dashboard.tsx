@@ -438,6 +438,44 @@ function JobDashboardContent() {
     );
   }, [byProject, orderByJob]);
 
+  // Global structure→batch OR aggregation for the export in project-then-mfc
+  // mode. Uses the same rule as ProjectDetailPanel.orderByMfc. The __NP__
+  // (No Pending Balance) bucket is folded into 'Z' so export batch rows
+  // sum to the project row total without adding a phantom extra row.
+  // Keyed "rawProject::resolvedBatch" (e.g. "903::A", "903::Z").
+  const orByProjectBatch = useMemo(() => {
+    type OrAgg = { wo: number; disp: number; fg: number };
+    if (!order?.rows?.length) return new Map<string, OrAgg>();
+    // Collect real batches per (project, structure) from all filtered WIP records.
+    const structRealBatches = new Map<string, Set<string>>();
+    const structInWip = new Set<string>();
+    for (const r of filtered) {
+      if (!r.job || !r.structure) continue;
+      const k = `${r.job}\x01${r.structure}`;
+      structInWip.add(k);
+      if (!structRealBatches.has(k)) structRealBatches.set(k, new Set());
+      if (r.mfcBatch && r.mfcBatch !== "Z") structRealBatches.get(k)!.add(r.mfcBatch);
+    }
+    const resolve = (proj: string, struct: string): string => {
+      const k = `${proj}\x01${struct}`;
+      if (!structInWip.has(k)) return "Z"; // no WIP marks → fold into Z for export
+      const real = structRealBatches.get(k) ?? new Set<string>();
+      return real.size === 1 ? [...real][0] : "Z";
+    };
+    const m = new Map<string, OrAgg>();
+    for (const r of order.rows) {
+      if (!r.project) continue;
+      const batchKey = resolve(r.project, r.structure);
+      const mapKey = `${r.project}::${batchKey}`;
+      const agg = m.get(mapKey) ?? { wo: 0, disp: 0, fg: 0 };
+      agg.wo += r.woOrderQtyMt ?? 0;
+      agg.disp += r.fileDespatchMt ?? 0;
+      agg.fg += r.fileGalvMt != null ? r.fileGalvMt - (r.fileDespatchMt ?? 0) : 0;
+      m.set(mapKey, agg);
+    }
+    return m;
+  }, [order?.rows, filtered]);
+
   const [exporting, setExporting] = useState(false);
 
   const handleExport = useCallback(async () => {
@@ -504,12 +542,20 @@ function JobDashboardContent() {
                   fgWipWt:                 (!isAll && !isNtlt && mfcViewMode === "project-then-mfc") ? p.phases.dispatch.weight / 1000 : fgWipForJob(p.job) / 1000,
                 };
             const isBatchRow = !isAll && !isNtlt && mfcViewMode === "project-then-mfc";
+            // For batch rows, look up OR figures from the global structure→batch map.
+            // p.job is "924 / A" format; parse out project and batch.
+            const batchOr = (() => {
+              if (!isBatchRow) return null;
+              const sep = p.job.lastIndexOf(" / ");
+              if (sep === -1) return null;
+              return orByProjectBatch.get(`${p.job.slice(0, sep)}::${p.job.slice(sep + 3)}`);
+            })();
             return {
               job: p.job,
-              workOrderMt: isBatchRow ? null : orderByJob.get(p.job)?.wo ?? 0,
-              dispatchMt: isBatchRow ? null : orderByJob.get(p.job)?.disp ?? 0,
-              dispatchBalanceMt: isBatchRow ? null : (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
-              fgOverviewComputedMt: isBatchRow ? null : orderByJob.get(p.job)?.computedFg ?? 0,
+              workOrderMt: isBatchRow ? (batchOr?.wo ?? 0) : orderByJob.get(p.job)?.wo ?? 0,
+              dispatchMt: isBatchRow ? (batchOr?.disp ?? 0) : orderByJob.get(p.job)?.disp ?? 0,
+              dispatchBalanceMt: isBatchRow ? ((batchOr?.wo ?? 0) - (batchOr?.disp ?? 0)) : (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
+              fgOverviewComputedMt: isBatchRow ? (batchOr?.fg ?? 0) : orderByJob.get(p.job)?.computedFg ?? 0,
               releaseBalanceComputedMt: getRelBalForRow(p.job),
               ...ntltStageCols,
               totalWt: p.weight / 1000,
@@ -555,7 +601,7 @@ function JobDashboardContent() {
     } finally {
       setExporting(false);
     }
-  }, [exporting, isAll, isNtlt, mfcViewMode, sortedProjects, orderByJob, relBalComputedByJob, relBalByProjectBatch, getRelBalForRow, byActivity, toast]);
+  }, [exporting, isAll, isNtlt, mfcViewMode, sortedProjects, orderByJob, orByProjectBatch, relBalComputedByJob, relBalByProjectBatch, getRelBalForRow, byActivity, toast]);
 
   // Reconciliation guard: all marks must be accounted for in exactly one bucket.
   // bucketTotal = sum of all phase weights (including phases.dispatch for FG)
@@ -960,7 +1006,7 @@ function JobDetail({
   onBack: () => void;
   headerPhases?: typeof PROCESS_PHASES;
   orderEntry?: { wo: number; rel: number; disp: number; fileBalRelease: number };
-  orderRows?: Array<{ structure: string; weightMt: number | null; woOrderQtyMt: number | null; releaseMt: number | null; fileDespatchMt: number | null; fileBalReleaseMt: number | null }>;
+  orderRows?: Array<{ structure: string; weightMt: number | null; woOrderQtyMt: number | null; releaseMt: number | null; fileDespatchMt: number | null; fileBalReleaseMt: number | null; fileGalvMt?: number | null }>;
   mfcViewMode?: MfcViewMode;
   /** Per-(project, mfcBatch) release balance MT map, keyed "rawProject::batch". */
   relBalByProjectBatch?: Map<string, number>;
@@ -970,24 +1016,48 @@ function JobDetail({
   const mfcVal = (r: { mfcBatch?: string | null }) => r.mfcBatch || "Z";
 
   // Per-MFC order figures: map structure → mfcBatch using WIP records, then
-  // sum woOrderQtyMt / releaseMt / fileDespatchMt per mfc batch.
+  // aggregate the four OR columns (WO, Dispatch, DispBal, FG) per batch.
+  //
+  // Mapping rule (spec-exact):
+  //   • Structure has exactly 1 distinct real batch letter (not null/'Z') → that batch
+  //   • Structure has 0 or 2+ real batch letters (all-blank or ambiguous) → 'Z'
+  //   • Structure absent from WIP entirely → '__NP__' (No Pending Balance row)
+  //
+  // 'Z' is this app's sentinel for a blank Batch No. in the WIP file; it is
+  // NOT a real batch letter. Only A, B, C, D etc. are real.
   const orderByMfc = useMemo(() => {
-    if (!orderRows.length) return new Map<string, { wo: number; rel: number; disp: number; fileBalRelease: number }>();
-    const structToMfc = new Map<string, string>();
+    type OrAgg = { wo: number; rel: number; disp: number; fileBalRelease: number; fg: number };
+    const empty = (): OrAgg => ({ wo: 0, rel: 0, disp: 0, fileBalRelease: 0, fg: 0 });
+    if (!orderRows.length) return new Map<string, OrAgg>();
+
+    // Step 1: collect all real batch letters per structure from WIP records.
+    const structRealBatches = new Map<string, Set<string>>();
+    const structInWip = new Set<string>();
     for (const r of records) {
-      if (r.structure && !structToMfc.has(r.structure)) {
-        structToMfc.set(r.structure, mfcVal(r));
-      }
+      if (!r.structure) continue;
+      structInWip.add(r.structure);
+      if (!structRealBatches.has(r.structure)) structRealBatches.set(r.structure, new Set());
+      if (r.mfcBatch && r.mfcBatch !== "Z") structRealBatches.get(r.structure)!.add(r.mfcBatch);
     }
-    const m = new Map<string, { wo: number; rel: number; disp: number; fileBalRelease: number }>();
+
+    // Step 2: resolve each structure to a single batch key.
+    const resolve = (struct: string): string => {
+      if (!structInWip.has(struct)) return "__NP__";
+      const real = structRealBatches.get(struct) ?? new Set<string>();
+      return real.size === 1 ? [...real][0] : "Z";
+    };
+
+    // Step 3: aggregate OR figures per resolved batch.
+    const m = new Map<string, OrAgg>();
     for (const r of orderRows) {
-      const mfc = structToMfc.get(r.structure) ?? "Z";
-      const agg = m.get(mfc) ?? { wo: 0, rel: 0, disp: 0, fileBalRelease: 0 };
+      const key = resolve(r.structure);
+      const agg = m.get(key) ?? empty();
       agg.wo += r.woOrderQtyMt ?? 0;
       agg.rel += r.releaseMt ?? 0;
       agg.disp += r.fileDespatchMt ?? 0;
       agg.fileBalRelease += r.fileBalReleaseMt ?? 0;
-      m.set(mfc, agg);
+      agg.fg += r.fileGalvMt != null ? r.fileGalvMt - (r.fileDespatchMt ?? 0) : 0;
+      m.set(key, agg);
     }
     return m;
   }, [orderRows, records]);
@@ -1253,7 +1323,7 @@ function JobDetail({
   }
 
   if (atMfcListLevel) {
-    const totalCols = 4 + (orderEntry ? 3 : 0) + headerPhases.length + 3; // +1 for Release Balance column
+    const totalCols = 4 + (orderEntry ? 4 : 0) + headerPhases.length + 3; // Release Balance + 4 OR cols + phases + Total/Age/Chevron
     return (
       <div className="space-y-4">
         <div className="flex items-start gap-3">
@@ -1329,15 +1399,27 @@ function JobDetail({
                           ? formatWeight(m.releaseBalanceMt * 1000)
                           : <span>{m.releaseBalanceMt.toFixed(3)}</span>}
                       </TableCell>
-                      {orderEntry && (
-                        <>
-                          {/* OR file has no batch dimension — blank rather than zero so users
-                              don't mistake missing data for confirmed zero dispatch. */}
-                          <TableCell className="text-right"><span className="text-muted-foreground">—</span></TableCell>
-                          <TableCell className="text-right"><span className="text-muted-foreground">—</span></TableCell>
-                          <TableCell className="text-right"><span className="text-muted-foreground">—</span></TableCell>
-                        </>
-                      )}
+                      {orderEntry && (() => {
+                        // OR figures split by batch using the structure→batch map.
+                        // Zero shown as "0.0t" to distinguish from "—" (N/A).
+                        const orD = orderByMfc.get(m.batch);
+                        const fmtOr = (v: number | undefined): React.ReactNode =>
+                          v === undefined
+                            ? <span className="text-muted-foreground">—</span>
+                            : v === 0
+                              ? <span>0.0t</span>
+                              : <span>{formatWeight(v * 1000)}</span>;
+                        return (
+                          <>
+                            <TableCell className="text-right tabular-nums">{fmtOr(orD?.wo)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{fmtOr(orD?.disp)}</TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {orD !== undefined ? fmtOr((orD.wo ?? 0) - (orD.disp ?? 0)) : <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{fmtOr(orD?.fg)}</TableCell>
+                          </>
+                        );
+                      })()}
                       {PROCESS_PHASES.map((ph) => {
                         if (ph.key === "dispatch") {
                           // FG WIP (Finished Goods) is pool-derived per batch —
@@ -1386,6 +1468,28 @@ function JobDetail({
                       </TableCell>
                     </TableRow>
                   ); })}
+                  {/* No Pending Balance row — OR structures with no WIP marks in this import.
+                      WIP columns are blank by definition; only the four OR columns are filled. */}
+                  {orderEntry && orderByMfc.has("__NP__") && (() => {
+                    const np = orderByMfc.get("__NP__")!;
+                    const fmtOr = (v: number): React.ReactNode =>
+                      v === 0 ? <span>0.0t</span> : <span>{formatWeight(v * 1000)}</span>;
+                    return (
+                      <TableRow className="text-muted-foreground italic">
+                        <TableCell className="font-mono text-xs">No pending balance</TableCell>
+                        <TableCell />
+                        <TableCell />
+                        <TableCell className="text-right tabular-nums">{fmtOr(np.wo)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtOr(np.disp)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtOr(np.wo - np.disp)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtOr(np.fg)}</TableCell>
+                        {PROCESS_PHASES.map((ph) => <TableCell key={ph.key} />)}
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                      </TableRow>
+                    );
+                  })()}
                   {byMfc.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={totalCols} className="text-center py-4 text-muted-foreground">
@@ -1402,13 +1506,26 @@ function JobDetail({
                       <TableCell className="text-right tabular-nums font-bold">
                         {formatWeight(byMfc.reduce((s, m) => s + m.releaseBalanceMt, 0) * 1000)}
                       </TableCell>
-                      {orderEntry && (
-                        <>
-                          <TableCell className="text-right"><span className="text-muted-foreground">—</span></TableCell>
-                          <TableCell className="text-right"><span className="text-muted-foreground">—</span></TableCell>
-                          <TableCell className="text-right"><span className="text-muted-foreground">—</span></TableCell>
-                        </>
-                      )}
+                      {orderEntry && (() => {
+                        // Footer OR totals: sum all batches including __NP__ so the
+                        // total row equals the project row in the project-level view.
+                        let totalWo = 0, totalDisp = 0, totalFg = 0;
+                        for (const agg of orderByMfc.values()) {
+                          totalWo += agg.wo;
+                          totalDisp += agg.disp;
+                          totalFg += agg.fg;
+                        }
+                        const fmtOr = (v: number): React.ReactNode =>
+                          v === 0 ? <span>0.0t</span> : <span className="font-bold">{formatWeight(v * 1000)}</span>;
+                        return (
+                          <>
+                            <TableCell className="text-right tabular-nums">{fmtOr(totalWo)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{fmtOr(totalDisp)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{fmtOr(totalWo - totalDisp)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{fmtOr(totalFg)}</TableCell>
+                          </>
+                        );
+                      })()}
                       {PROCESS_PHASES.map((ph) => {
                         if (ph.key === "dispatch") {
                           const fgWt = mfcTotals.phases.dispatch.weight;

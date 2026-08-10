@@ -1,0 +1,121 @@
+# Show the four Order Review columns batch-wise in the MFC views
+
+In the MFC-grouped Project Wise views, Work Order Qty, Dispatch Qty, Dispatch Balance and
+FG (Order Review) currently render as `—` on every batch row. This changes them to real
+figures that sum to the project row.
+
+## FIRST — a correction to the earlier analysis
+
+An earlier assessment concluded that ~80 structures span more than one batch and that any
+mapping would therefore be guesswork. That count treated **Z as a batch**. It is not — `Z` is
+this app's own sentinel for a blank `Batch No.`; the WIP file contains only A, B, C, D and
+blank. Every `{A, Z}`, `{B, Z}`, `{C, Z}` pairing is one real batch plus marks that have not
+been stamped yet, not two batches.
+
+Measured on the 10-Aug file, all 882 TLT structures:
+
+```
+465  one real batch, no unbatched marks
+ 82  one real batch + some unbatched marks
+334  every mark unbatched
+  1  two real batches  -> 920 / 3LISO  (C: 11 marks, D: 61 marks, 1.610 MT)
+```
+
+3LISO is the only genuine multi-batch structure, and it is the only one on 11-Jul, 21-Jul,
+24-Jul, 01-Aug, 05-Aug, 08-Aug and 10-Aug alike. The ambiguity the earlier assessment was
+worried about is worth 2.242 MT of Work Order out of 27,131.073.
+
+Note also: `Batch No.` is **column X** of the WIP file, not column U. Column U is
+`Ref. Job Card No.`.
+
+## THE RULE
+
+Build a structure → batch map from the WIP marks **of that import** (from `import_rows`, not
+from `record_pool` — see the guard below). For each Order Review structure:
+
+| Case | Goes to |
+|---|---|
+| Its WIP marks carry exactly one real batch letter (blanks allowed) | that batch row |
+| Every one of its WIP marks is unbatched | the `Z` row |
+| It has no WIP marks at all | a new **No pending balance** row |
+| It has two real batch letters (920 / 3LISO only) | the `Z` row |
+
+Apply this to the four Order Review columns **only**: Work Order Qty, Dispatch Qty, Dispatch
+Balance, FG (Order Review).
+
+## WHAT TO CHANGE
+
+1. Populate those four columns on batch rows using the rule above.
+2. Add one row type per project, labelled **No pending balance**, carrying only the four Order
+   Review columns. Its WIP columns are blank — those structures have no pending marks by
+   definition.
+3. In the MFC export, the TOTAL row must show the true project totals for those four columns.
+   It currently emits `0`, which is a false statement — 27,131.073 / 14,380.689 / 12,750.384 /
+   4,618.594 MT are the correct 10-Aug values.
+4. Render a true zero as `0.0t`, not `—`, so "this batch has none" stops looking identical to
+   "not applicable here".
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change the seven WIP-derived columns. Release Balance Computed, Awaiting Assignment,
+  Cutting, Quality Check, Galvanising, FG (WIP file) and Total stay **per-mark**: a mark
+  stamped A counts in A, a mark left blank counts in Z. They currently reconcile exactly to
+  the source file and must continue to.
+- Do NOT reassign blank-batch marks to their structure's batch in the WIP columns. That would
+  move 1,080 marks / 83.133 MT out of Z and break the reconciliation above.
+- Do NOT pro-rata, apportion or estimate any Order Review figure across batches. Every figure
+  must be a whole structure's value sitting in exactly one row.
+- Do NOT change parsing, hashing, dedup, the bucket definitions, ageing, activity, milestones
+  or dispatch logic.
+- Build the structure → batch map **per import**. A map keyed off `record_pool` would inherit
+  the retroactive-corruption pattern that `job_card_status` had: a mark stamped between
+  uploads would retrospectively move Order Review weight between batch rows on every earlier
+  import. The per-mark `batchKey(project, structure, mfcBatch)` helper in
+  `fabricationProjectCompletion.ts` is the right primitive to reuse.
+
+## ACCEPTANCE CHECK — 10-Aug import, TLT
+
+Project 903:
+
+```
+A                        Work Order 355.615   Dispatch 230.106   Disp Bal 125.509   FG(OR) 117.336
+Z                        Work Order  76.878   Dispatch  49.946   Disp Bal  26.932   FG(OR)  22.423
+No pending balance       Work Order  22.787   Dispatch  14.837   Disp Bal   7.950   FG(OR)   7.953
+PROJECT TOTAL            Work Order 455.280   Dispatch 294.889   Disp Bal 160.391   FG(OR) 147.712
+```
+
+Project 824:
+
+```
+A                        Work Order  77.610   Dispatch  27.352   Disp Bal  50.258   FG(OR)  42.384
+B                        Work Order  18.659   Dispatch   0.000   Disp Bal  18.659   FG(OR)   0.462
+Z                        Work Order 419.842   Dispatch 416.311   Disp Bal   3.531   FG(OR)   0.803
+No pending balance       Work Order  99.343   Dispatch  98.124   Disp Bal   1.219   FG(OR)   0.541
+PROJECT TOTAL            Work Order 615.454   Dispatch 541.787   Disp Bal  73.667   FG(OR)  44.190
+```
+
+Grand totals across all 65 TLT projects must be unchanged:
+
+```
+Work Order 27,131.073   Dispatch 14,380.689   Dispatch Balance 12,750.384   FG (Order Review) 4,618.594
+```
+
+And the seven WIP columns must be untouched:
+
+```
+Release 2,125.871  Awaiting 915.856  Cutting 1,308.031  Quality Check 2,112.110
+Galvanising 1,651.301  FG (WIP file) 2,610.539  TOTAL 10,723.709 MT / 59,171 marks
+Per batch: A 3,330.511 / B 3,727.521 / C 2,074.194 / D 104.543 / Z 1,486.940
+```
+
+**Every project's batch rows must sum to its project row to within 0.001 MT on all four
+columns.** Please export the MFC view and paste the 903 and 824 blocks plus the grand totals.
+
+## ONE THING TO FLAG, NOT FIX
+
+Coverage is uneven and users need to see it. Across all 65 projects, the share landing on a
+real batch letter is 49.0% of Work Order, **19.5% of Dispatch** and 86.3% of FG (Order
+Review). Dispatch is dominated by the Z and No-pending-balance rows, because material that
+has shipped completely leaves the WIP file and takes its batch letter with it. That is a
+source-data limit, not a bug — the only real fix is adding a `Batch No.` column to the Order
+Review export template. Do not attempt to close the gap in code.
