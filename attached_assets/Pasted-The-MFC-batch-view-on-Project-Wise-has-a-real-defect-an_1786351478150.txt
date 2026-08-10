@@ -1,0 +1,66 @@
+The MFC batch view on Project Wise has a real defect, and I want it fixed as a GENERAL
+principle across the app, not patched on this one page.
+
+THE SYMPTOM ON PROJECT WISE
+
+TOTAL row, batch view:
+    Awaiting 915.856 + Cutting 1,308.031 + QC 2,112.110 + Galvanising 1,651.301 = 5,987.298
+    Total Wt shown                                                              = 10,723.709
+    gap                                                                         =  4,736.411
+
+    Release Balance Computed (2,125.871) + FG WIP (2,610.539)                   =  4,736.410
+
+Exact match. Both columns read 0.000 on all 118 rows and in the TOTAL row, yet their weight is
+still counted in Total Wt. The visible buckets are 44% short of their own total.
+
+Individual rows: 926/Z shows Total Wt 11.182 with every bucket at zero; 912/Z shows 44.380 the
+same way; 937/A shows Awaiting 33.733 against Total 74.481.
+
+THE ROOT CAUSE — and why this is not a one-page fix
+
+Release Balance Computed comes from release_balance_wip, keyed (import_id, project,
+structure). FG (WIP file) comes from the parse summary keyed by project/structure. NEITHER
+CARRIES AN MFC BATCH DIMENSION. So any view that groups by batch has nothing to attribute and
+renders zero, while the total still picks the weight up from the pool.
+
+That means this bug exists anywhere in the app that groups by MFC batch — not just Project
+Wise. Please treat it as a general defect.
+
+WHAT I WANT
+
+1. Make EVERY calculation batch-aware, at source. Both figures are derivable per batch straight
+   from the WIP rows:
+
+       Release per batch = Type "Job Card Not Started" AND Status "Initial",
+                           grouped by (project, Batch No.)
+       FG per batch      = Type "FG Pending For Dispatch",
+                           grouped by (project, Batch No.)
+
+   Prefer adding the batch dimension to the underlying computation over special-casing the
+   batch view. If release_balance_wip needs mfc_batch in its key, add it — the per-batch
+   figures must sum back to the per-project figures exactly.
+
+2. AUDIT EVERY VIEW THAT GROUPS BY MFC BATCH and apply the same fix. Please list them before
+   changing anything — I expect this affects the "View by MFC" and "Project Then MFC" toggles
+   wherever they appear, the Bucket List MFC grouping, the Fabrication Report MFC Batch column,
+   the Generated Order Review MFC column, and every Excel export from those. Tell me the full
+   list you find.
+
+3. THE UNIVERSAL TEST, to apply on every one of those views: the bucket columns must sum to
+   Total Wt on every row and in the TOTAL row, and the batch subtotals must roll up to the
+   project figures in the non-batch view. If a figure cannot be attributed to a batch, that is
+   a bug to fix at source — not a zero to render.
+
+4. Separately: Work Order, Dispatch, Dispatch Balance and FG (Order Review) come from the Order
+   Review, which genuinely has no batch dimension. Zero is defensible there, but render them
+   BLANK rather than 0.000 so they read as "not applicable at this grain" rather than
+   "nothing". A user seeing a project with real dispatch showing 0.000 assumes data loss.
+
+ACCEPTANCE for the 10-Aug import, Project Wise batch view:
+    2,125.871 + 915.856 + 1,308.031 + 2,112.110 + 1,651.301 + 2,610.539 = 10,723.709
+
+And the same six-column-sum test passing on every other MFC-grouped view you identify.
+
+This is the "one definition, one place" problem again — a figure computed at project grain and
+displayed at batch grain. Fix the grain at source rather than adding a batch-specific branch,
+or the next view that groups by batch inherits the same bug.
