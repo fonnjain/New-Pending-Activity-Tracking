@@ -1327,7 +1327,7 @@ function JobDetail({
                       <TableCell className="text-right tabular-nums">
                         {m.releaseBalanceMt > 0
                           ? formatWeight(m.releaseBalanceMt * 1000)
-                          : <span className="text-muted-foreground">-</span>}
+                          : <span>{m.releaseBalanceMt.toFixed(3)}</span>}
                       </TableCell>
                       {orderEntry && (
                         <>
@@ -1351,7 +1351,7 @@ function JobDetail({
                                   <span className="block text-xs text-muted-foreground">{m.phases.dispatch.marks} marks</span>
                                 </>
                               ) : (
-                                <span className="text-muted-foreground">-</span>
+                                <span>{(fgWt / 1000).toFixed(3)}</span>
                               )}
                             </TableCell>
                           );
