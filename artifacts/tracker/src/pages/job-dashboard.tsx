@@ -422,6 +422,18 @@ function JobDashboardContent() {
   }, [byProject, isAll, isNtlt, mfcViewMode, compareProjects]);
 
   const orderTotals = useMemo(() => {
+    // In project-then-mfc mode byProject keys are composite ("903 / A"), so
+    // orderByJob.get(p.job) always misses. Sum orByProjectBatch instead — it
+    // holds correct per-batch OR figures (including __NP__) without double-counting.
+    if (mfcViewMode === "project-then-mfc") {
+      let wo = 0, disp = 0, fg = 0;
+      for (const agg of orByProjectBatch.values()) {
+        wo += agg.wo;
+        disp += agg.disp;
+        fg += agg.fg;
+      }
+      return { wo, rel: 0, disp, fileBalRelease: 0, computedFg: fg };
+    }
     return byProject.reduce(
       (acc, p) => {
         const o = orderByJob.get(p.job);
@@ -436,7 +448,7 @@ function JobDashboardContent() {
       },
       { wo: 0, rel: 0, disp: 0, fileBalRelease: 0, computedFg: 0 },
     );
-  }, [byProject, orderByJob]);
+  }, [byProject, orderByJob, mfcViewMode, orByProjectBatch]);
 
   // Global structure→batch OR aggregation used by both the flat table and the
   // export in project-then-mfc mode. Same rule as ProjectDetailPanel.orderByMfc:
