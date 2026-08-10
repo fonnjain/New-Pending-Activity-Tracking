@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useMemo, ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useListImports, useListContractorCategories, useListContractorAliases, useGetCurrentJobs, type Record } from "@workspace/api-client-react";
+import { useListImports, useListContractorCategories, useListContractorAliases, useGetCurrentJobs, useGetInventoryBuckets, getGetInventoryBucketsQueryKey, useListInventoryManualE, useListInventoryMfcBatchColors, type Record } from "@workspace/api-client-react";
+import { computeAutoBuckets } from "@/lib/inventory";
 import { getActivityBundle, normalizeContractorName, resolveContractorKey, filterRecords, parseAssignDateMs, dateToDayKey, type RecordFilters } from "@workspace/domain";
 
 // Sentinel prefix that marks an activity-bundle selection inside the single
@@ -83,6 +84,14 @@ export interface Filters {
   plantLocations: string[];
 }
 
+// Pre-computed rank maps used by the global project sort.
+// Lifted to context so they're built once and shared across all pages.
+export interface ProjectSortRanks {
+  templateRank: Map<string, number>;
+  bucketRank: Map<string, number>;
+  mfcDateByProject: Map<string, string>;
+}
+
 interface TrackerContextType {
   selectedImportId: number | null;
   setSelectedImportId: (id: number | null) => void;
@@ -96,6 +105,7 @@ interface TrackerContextType {
   setMfcViewMode: (mode: MfcViewMode) => void;
   projectSort: ProjectSortKey;
   setProjectSort: (key: ProjectSortKey) => void;
+  sortRanks: ProjectSortRanks;
 }
 
 // Global project sort applied wherever project lists are ordered (currently
@@ -137,6 +147,75 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
   const [mfcViewMode, setMfcViewMode] = useState<MfcViewMode>("project-with-mfc");
   const [projectSort, setProjectSort] = useState<ProjectSortKey>("templates");
   const { data: imports } = useListImports();
+
+  // ── Rank maps for global project sort ───────────────────────────────────
+  // Fetched once at the provider level so every page reads from the same
+  // cache rather than each triggering its own useMemo computation.
+  const jobTemplates = useJobTemplates();
+  const { data: bucketsData } = useGetInventoryBuckets({
+    query: { queryKey: getGetInventoryBucketsQueryKey() },
+  });
+  const { data: manualE = [] } = useListInventoryManualE();
+  const { data: mfcBatchColors = [] } = useListInventoryMfcBatchColors();
+
+  const sortRanks = useMemo((): ProjectSortRanks => {
+    // Job Templates List rank.
+    const templateRank = new Map<string, number>();
+    let i = 0;
+    for (const t of [...jobTemplates].sort((a, b) => a.sortOrder - b.sortOrder)) {
+      for (const m of t.members) {
+        const code = m.split(" - ")[0].trim();
+        if (!templateRank.has(code)) templateRank.set(code, i++);
+      }
+    }
+
+    // Bucket List rank: A → Pre-B → B → C → D → E.
+    // Pre-B = B/C/D rows without a colour assignment (same gate as the page).
+    const bucketRank = new Map<string, number>();
+    const rawRows = bucketsData?.rows ?? [];
+    const eExcludeKeys = new Set<string>();
+    for (const e of manualE) {
+      eExcludeKeys.add(`${e.projectCode}\u0001${e.mfcBatch ?? "Z"}`);
+    }
+    const buckets = computeAutoBuckets(rawRows, eExcludeKeys);
+    const colourKeys = new Set<string>();
+    for (const c of mfcBatchColors) {
+      if (c.color) colourKeys.add(`${c.project}\u0001${c.mfcBatch}`);
+    }
+    const hasColour = (r: { project: string; mfcBatch: string }) =>
+      colourKeys.has(`${r.project}\u0001${r.mfcBatch}`);
+    const bucketTiers: { projects: string[]; tier: number }[] = [
+      { projects: buckets.a.map((r) => r.project), tier: 0 },
+      {
+        projects: [...buckets.b, ...buckets.c, ...buckets.d]
+          .filter((r) => !hasColour(r))
+          .map((r) => r.project),
+        tier: 1,
+      },
+      { projects: buckets.b.filter(hasColour).map((r) => r.project), tier: 2 },
+      { projects: buckets.c.filter(hasColour).map((r) => r.project), tier: 3 },
+      { projects: buckets.d.filter(hasColour).map((r) => r.project), tier: 4 },
+      { projects: manualE.map((e) => e.projectCode), tier: 5 },
+    ];
+    for (const { projects, tier } of bucketTiers) {
+      for (const p of projects) {
+        const existing = bucketRank.get(p);
+        if (existing === undefined || tier < existing) bucketRank.set(p, tier);
+      }
+    }
+
+    // MFC Date rank: earliest Date of Client MFC across a project's batches.
+    const mfcDateByProject = new Map<string, string>();
+    for (const c of mfcBatchColors) {
+      const v = String(c.dateOfClientMfc ?? "").trim();
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+      if (!d) continue;
+      const existing = mfcDateByProject.get(c.project);
+      if (!existing || d < existing) mfcDateByProject.set(c.project, d);
+    }
+
+    return { templateRank, bucketRank, mfcDateByProject };
+  }, [jobTemplates, bucketsData, manualE, mfcBatchColors]);
 
   // When true the selection always tracks imports[0] (the newest upload).
   // Flips to false only when the user explicitly clicks a specific import in
@@ -273,7 +352,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
     setFilters((prev) => ({ ...defaultFilters, category: prev.category }));
 
   return (
-    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, setSelectedTemplates, setPlantLocations, clearFilters, mfcViewMode, setMfcViewMode, projectSort, setProjectSort }}>
+    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, setSelectedTemplates, setPlantLocations, clearFilters, mfcViewMode, setMfcViewMode, projectSort, setProjectSort, sortRanks }}>
       {children}
     </TrackerContext.Provider>
   );
