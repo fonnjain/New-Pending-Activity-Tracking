@@ -231,6 +231,10 @@ function JobDashboardContent() {
           } else if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) {
             if (r.job !== filters.job) return false;
           }
+          // Multi-select job codes filter — independent of combo picker.
+          if (filters.selectedJobCodes.length > 0) {
+            if (!r.job || !filters.selectedJobCodes.includes(r.job)) return false;
+          }
           // Combo filter (Job/Batch picker) — independent of plain job filter.
           // selectedJobs holds "job - batch" combo keys (e.g. "920 - C"); match
           // both the plain job code (for backward compat) and the combo key.
@@ -242,7 +246,7 @@ function JobDashboardContent() {
         if (!isNtlt && filters.mfcBatch && mfcOf(r) !== filters.mfcBatch) return false;
         return true;
       }),
-    [records, isNtlt, filters.job, filters.selectedJobs, filters.section, filters.mfcBatch, activeJobSet, mfcViewMode],
+    [records, isNtlt, filters.job, filters.selectedJobCodes, filters.selectedJobs, filters.section, filters.mfcBatch, activeJobSet, mfcViewMode],
   );
 
   // Date window from the global date-range preset/custom filter.

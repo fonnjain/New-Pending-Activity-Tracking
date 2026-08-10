@@ -187,6 +187,102 @@ function MultiJobPicker({
   );
 }
 
+// Plain job-code multi-select picker. Replaces the single-select SearchableSelect
+// for the "All Jobs" slot. Shows "All Jobs" / "<code>" / "N Jobs" on the trigger.
+function MultiJobSelect({
+  jobs,
+  selectedJobCodes,
+  onSelectionChange,
+}: {
+  jobs: string[];
+  selectedJobCodes: string[];
+  onSelectionChange: (codes: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const selectedSet = useMemo(() => new Set(selectedJobCodes), [selectedJobCodes]);
+
+  const filtered = useMemo(
+    () => (search ? jobs.filter((j) => j.toLowerCase().includes(search.toLowerCase())) : jobs),
+    [jobs, search],
+  );
+
+  const toggle = (code: string) => {
+    const next = new Set(selectedSet);
+    if (next.has(code)) next.delete(code); else next.add(code);
+    onSelectionChange(Array.from(next).sort());
+  };
+
+  const label =
+    selectedJobCodes.length === 0 ? "All Jobs"
+    : selectedJobCodes.length === 1 ? selectedJobCodes[0]
+    : `${selectedJobCodes.length} Jobs`;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className={`h-9 w-full justify-between font-normal text-sm ${selectedJobCodes.length > 0 ? "border-primary text-primary" : ""}`}
+        >
+          <span className="truncate">{label}</span>
+          <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0 ml-1" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[220px] p-2" align="start">
+        <div className="space-y-2">
+          {/* Clear to All Jobs */}
+          <button
+            onClick={() => { onSelectionChange([]); setOpen(false); }}
+            className={`w-full text-left px-2 py-1.5 rounded text-sm hover:bg-accent ${selectedJobCodes.length === 0 ? "bg-accent font-medium" : ""}`}
+          >
+            All Jobs
+          </button>
+          {/* Individual job codes */}
+          <div className="border-t pt-2 space-y-1">
+            <div className="flex items-center justify-between text-xs px-0.5 mb-1">
+              <span className="text-muted-foreground font-medium">Jobs</span>
+              <div className="flex gap-2">
+                <button className="text-primary hover:underline" onClick={() => onSelectionChange([...jobs])}>All</button>
+                <button className="text-muted-foreground hover:underline" onClick={() => onSelectionChange([])}>None</button>
+              </div>
+            </div>
+            <input
+              type="text"
+              placeholder="Search jobs..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full rounded border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring bg-background"
+            />
+            <div className="max-h-56 overflow-y-auto space-y-0.5 pr-0.5 pt-0.5">
+              {filtered.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-2">No jobs found</p>
+              )}
+              {filtered.map((code) => (
+                <div
+                  key={code}
+                  className="flex items-center gap-1.5 px-1 rounded text-sm hover:bg-accent cursor-pointer"
+                  onClick={() => toggle(code)}
+                >
+                  <Checkbox
+                    checked={selectedSet.has(code)}
+                    onCheckedChange={() => toggle(code)}
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    className="shrink-0"
+                  />
+                  <span className="flex-1 py-1.5 truncate select-none">{code}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // Date Range filter: presets encoded as short codes, a custom range as
 // "custom:YYYY-MM-DD:YYYY-MM-DD" (either side may be blank while the user is
 // still picking). Matches the codes understood by `dateRangeWindow` in
@@ -643,7 +739,7 @@ function PlantLocationPicker({
 
 function FilterBar() {
   const [location] = useLocation();
-  const { filters, setFilter, setSelectedJobs, setSelectedTemplates, setPlantLocations, clearFilters, selectedImportId, mfcViewMode, setMfcViewMode, projectSort, setProjectSort } = useTracker();
+  const { filters, setFilter, setSelectedJobs, setSelectedTemplates, setSelectedJobCodes, setPlantLocations, clearFilters, selectedImportId, mfcViewMode, setMfcViewMode, projectSort, setProjectSort } = useTracker();
 
   // Rule: navigating from one page to another resets every filter to its
   // default (the Order Type mode is preserved — it is a mode, not a filter).
@@ -705,18 +801,24 @@ function FilterBar() {
   const templates = useJobTemplates();
 
   // Helper: does a record match all active job-related filters?
-  // Three independent filters ANDed together:
-  //   filters.job        — plain job code (single select)
-  //   filters.mfcBatch   — MFC batch letter (single select)
-  //   filters.selectedJobs — "job - batch" combo multi-select
+  // Four independent filters ANDed together:
+  //   filters.selectedJobCodes — plain job codes (multi-select)
+  //   filters.job              — named set sentinel (templates)
+  //   filters.mfcBatch         — MFC batch letter (single select)
+  //   filters.selectedJobs     — "job - batch" combo multi-select
   const matchesJobFilter = (rJob: string | null | undefined, rMfcBatch?: string | null | undefined) => {
-    // 1. Named set / template filter (uses activeJobSet).
+    // 1. Multi-select job codes (new primary job filter).
+    if (filters.selectedJobCodes.length > 0) {
+      if (!rJob || !filters.selectedJobCodes.includes(rJob)) return false;
+    }
+    // 2. Named set / template filter (uses activeJobSet).
     // activeJobSet may contain combo keys ("821 - Z") or plain codes; check both.
     if (isNamedJobSetFilter(filters.job)) {
       const comboKey = rMfcBatch ? `${rJob} - ${rMfcBatch}` : null;
       if (!activeJobSet.has(rJob ?? "") && !(comboKey && activeJobSet.has(comboKey))) return false;
     } else if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) {
-      // 2. Plain job code filter.
+      // Legacy single-select job code filter (no longer set from the UI but kept
+      // for safety in case anything still calls setFilter("job", code) directly).
       if (rJob !== filters.job) return false;
     }
     // 3. MFC batch filter (single select).
@@ -738,7 +840,7 @@ function FilterBar() {
         (!filters.section || r.groupKey === filters.section)
       : matchesJobFilter(r.job, r.mfcBatch) &&
         (!filters.structure || r.structure === filters.structure)),
-    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.selectedJobs, filters.structure, activeJobSet]
+    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.selectedJobCodes, filters.selectedJobs, filters.structure, activeJobSet]
   );
   // NTLT primary dimension = Section (the cleaned group_key), narrowed to the
   // active sub-category so only relevant sections are offered.
@@ -755,7 +857,7 @@ function FilterBar() {
       .map(r => r.structure)
       .filter(Boolean)
     )).sort(),
-    [modeRecords, filters.job, filters.selectedJobs, activeJobSet]
+    [modeRecords, filters.job, filters.selectedJobCodes, filters.selectedJobs, activeJobSet]
   );
 
   const marks = useMemo(
@@ -852,6 +954,7 @@ function FilterBar() {
 
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => {
     if (k === "category") return false; // Order Type is a mode, not a filter
+    if (k === "selectedJobCodes") return (v as string[]).length > 0; // multi-select job codes
     if (k === "selectedJobs") return (v as string[]).length > 0; // combo picker — independent
     if (k === "selectedTemplateIds") return false; // counted via job
     if (k === "plantLocations") return (v as string[]).length > 0;
@@ -929,12 +1032,10 @@ function FilterBar() {
                 searchPlaceholder="Search sections..."
               />
             ) : (
-              <SearchableSelect
-                value={filters.job === MULTI_JOBS_FILTER_VALUE ? null : filters.job}
-                onChange={(v) => setFilter("job", v)}
-                options={jobs}
-                allLabel="All Jobs"
-                searchPlaceholder="Search jobs..."
+              <MultiJobSelect
+                jobs={jobs}
+                selectedJobCodes={filters.selectedJobCodes}
+                onSelectionChange={setSelectedJobCodes}
               />
             )}
           </div>

@@ -64,6 +64,10 @@ export interface RecordFilters {
   // "Current Jobs" sentinel into `jobIn` and clear `job`, or vice versa).
   // undefined/null behaves exactly as before everywhere.
   jobIn?: ReadonlySet<string> | null;
+  // Multi-select job codes (OR within the set, AND with all other filters).
+  // Undefined/null/empty = no restriction. Checked against r.job only — does
+  // not expand to combo keys like jobIn does.
+  selectedJobCodes?: ReadonlySet<string> | null;
   section: string | null;
   // MFC batch (WO Batch No.) filter. Compared against (r.mfcBatch || "Z").
   mfcBatch: string | null;
@@ -201,6 +205,9 @@ export function filterRecords<T extends AggRecord>(
     if (r.active === false) return false;
     if (filters.ntltSubtype && r.ntltSubtype !== filters.ntltSubtype) return false;
     if (filters.job && r.job !== filters.job) return false;
+    if (filters.selectedJobCodes?.size) {
+      if (!r.job || !filters.selectedJobCodes.has(r.job)) return false;
+    }
     if (filters.jobIn) {
       if (!r.job) return false;
       // Check both the plain job code (used by "Current Jobs" and legacy templates)

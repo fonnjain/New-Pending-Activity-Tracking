@@ -79,6 +79,10 @@ export interface Filters {
   // Active only when job === MULTI_TEMPLATES_FILTER_VALUE. Stores the checked
   // template ids whose members are unioned to form the active job set.
   selectedTemplateIds: number[];
+  // Multi-select job codes for the Jobs picker (replaces single-select filters.job
+  // when non-empty). [] means no restriction. Cleared when filters.job is set to
+  // any non-null value; setting selectedJobCodes clears filters.job.
+  selectedJobCodes: string[];
   // Plant location multi-select: [] means "all locations"; ["unit_1"] filters to
   // only contractors assigned to Unit 1 in the contractor-categories overlay.
   plantLocations: string[];
@@ -99,6 +103,7 @@ interface TrackerContextType {
   setFilter: (key: keyof Filters, value: string | null) => void;
   setSelectedJobs: (jobs: string[]) => void;
   setSelectedTemplates: (ids: number[]) => void;
+  setSelectedJobCodes: (codes: string[]) => void;
   setPlantLocations: (locations: string[]) => void;
   clearFilters: () => void;
   mfcViewMode: MfcViewMode;
@@ -136,6 +141,7 @@ const defaultFilters: Filters = {
   search: "",
   selectedJobs: [],
   selectedTemplateIds: [],
+  selectedJobCodes: [],
   plantLocations: [],
 };
 
@@ -287,6 +293,22 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
     }));
   };
 
+  const setSelectedJobCodes = (codes: string[]) => {
+    setFilters((prev) => ({
+      ...prev,
+      selectedJobCodes: codes,
+      // Job-code multi-select and the single-select job sentinel occupy the same
+      // filter dimension — clear the single-select when codes are set.
+      job: codes.length > 0 ? null : prev.job,
+      // Cascade: narrowing/changing the job dimension drops stale sub-selections.
+      mfcBatch: null,
+      structure: null,
+      mark: null,
+      // Named-set template selection is incompatible with explicit job codes.
+      selectedTemplateIds: [],
+    }));
+  };
+
   const setPlantLocations = (locations: string[]) => {
     setFilters((prev) => ({ ...prev, plantLocations: locations }));
   };
@@ -317,6 +339,9 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
         next.mfcBatch = null;
         next.structure = null;
         next.mark = null;
+        // selectedJobCodes is the multi-select version of the same dimension;
+        // clear it when the single-select is explicitly set.
+        next.selectedJobCodes = [];
         // selectedJobs (combo picker) is independent — do not clear it here.
         // Clear template list when leaving template mode.
         if (value !== MULTI_TEMPLATES_FILTER_VALUE) next.selectedTemplateIds = [];
@@ -352,7 +377,7 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
     setFilters((prev) => ({ ...defaultFilters, category: prev.category }));
 
   return (
-    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, setSelectedTemplates, setPlantLocations, clearFilters, mfcViewMode, setMfcViewMode, projectSort, setProjectSort, sortRanks }}>
+    <TrackerContext.Provider value={{ selectedImportId, setSelectedImportId, filters, setFilter, setSelectedJobs, setSelectedTemplates, setSelectedJobCodes, setPlantLocations, clearFilters, mfcViewMode, setMfcViewMode, projectSort, setProjectSort, sortRanks }}>
       {children}
     </TrackerContext.Provider>
   );
@@ -588,6 +613,12 @@ export function resolveActiveFilters(
       // a plain job code or null (= all). MULTI_JOBS_FILTER_VALUE is a legacy
       // sentinel that is no longer set by setSelectedJobs; guard it for safety.
       job: isNamedSet ? null : (filters.job === MULTI_JOBS_FILTER_VALUE ? null : filters.job),
+      // selectedJobCodes: multi-select job code filter (OR within set, AND with others).
+      // Mutually exclusive with the single-select `job` in the UI, but not at the
+      // resolved level — both are null when neither is active.
+      selectedJobCodes: filters.selectedJobCodes.length > 0
+        ? new Set(filters.selectedJobCodes)
+        : null,
       // jobIn: named-set wins; otherwise combo-picker selections (combo keys like
       // "920 - C") are used — the domain filterRecords checks both the plain job
       // code and the "job - mfcBatch" form so these match correctly.
