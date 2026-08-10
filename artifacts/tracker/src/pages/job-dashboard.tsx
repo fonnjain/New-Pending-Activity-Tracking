@@ -438,11 +438,14 @@ function JobDashboardContent() {
     );
   }, [byProject, orderByJob]);
 
-  // Global structure→batch OR aggregation for the export in project-then-mfc
-  // mode. Uses the same rule as ProjectDetailPanel.orderByMfc. The __NP__
-  // (No Pending Balance) bucket is folded into 'Z' so export batch rows
-  // sum to the project row total without adding a phantom extra row.
-  // Keyed "rawProject::resolvedBatch" (e.g. "903::A", "903::Z").
+  // Global structure→batch OR aggregation used by both the flat table and the
+  // export in project-then-mfc mode. Same rule as ProjectDetailPanel.orderByMfc:
+  //   1 real batch → that batch; 0 or 2+ → Z; no WIP marks → __NP__.
+  // __NP__ is kept as its own key so the flat table can show a "No pending
+  // balance" row and the export can emit it as a separate row. Projects that
+  // have only unbatched marks (no Z row) would silently drop NP structures if
+  // we folded __NP__ into Z — that caused a 142 MT shortfall.
+  // Keyed "rawProject::resolvedBatch" (e.g. "903::A", "903::Z", "903::__NP__").
   const orByProjectBatch = useMemo(() => {
     type OrAgg = { wo: number; disp: number; fg: number };
     if (!order?.rows?.length) return new Map<string, OrAgg>();
@@ -458,7 +461,7 @@ function JobDashboardContent() {
     }
     const resolve = (proj: string, struct: string): string => {
       const k = `${proj}\x01${struct}`;
-      if (!structInWip.has(k)) return "Z"; // no WIP marks → fold into Z for export
+      if (!structInWip.has(k)) return "__NP__"; // no WIP marks → No Pending Balance row
       const real = structRealBatches.get(k) ?? new Set<string>();
       return real.size === 1 ? [...real][0] : "Z";
     };
@@ -522,7 +525,7 @@ function JobDashboardContent() {
             { label: "31-60d", field: "c31to60", numeric: true, decimals: 0 },
             { label: "60d+", field: "c60Plus", numeric: true, decimals: 0 },
           ],
-          rows: sortedProjects.map((p) => {
+          rows: sortedProjects.flatMap((p, idx) => {
             const ntltStageCols = isNtlt
               ? Object.fromEntries(
                   NTLT_STAGES.flatMap((s) => [
@@ -550,7 +553,7 @@ function JobDashboardContent() {
               if (sep === -1) return null;
               return orByProjectBatch.get(`${p.job.slice(0, sep)}::${p.job.slice(sep + 3)}`);
             })();
-            return {
+            const mainExportRow = {
               job: p.job,
               workOrderMt: isBatchRow ? (batchOr?.wo ?? 0) : orderByJob.get(p.job)?.wo ?? 0,
               dispatchMt: isBatchRow ? (batchOr?.disp ?? 0) : orderByJob.get(p.job)?.disp ?? 0,
@@ -568,6 +571,37 @@ function JobDashboardContent() {
               c31to60: p.c31to60,
               c60Plus: p.c60Plus,
             };
+            // Emit a "No pending balance" row after the last batch row for each
+            // project. These are OR structures with no WIP marks — silently dropped
+            // when __NP__ was folded into Z (23 projects have no Z row at all).
+            const npExportRow = (() => {
+              if (!isBatchRow) return null;
+              const sep = p.job.lastIndexOf(" / ");
+              const proj = sep === -1 ? p.job : p.job.slice(0, sep);
+              const nextP = sortedProjects[idx + 1];
+              const nextSep = nextP ? nextP.job.lastIndexOf(" / ") : -1;
+              const nextProj = nextP ? (nextSep === -1 ? nextP.job : nextP.job.slice(0, nextSep)) : null;
+              if (proj === nextProj) return null; // more batch rows follow
+              const np = orByProjectBatch.get(`${proj}::__NP__`);
+              if (!np) return null;
+              return {
+                job: `${proj} / No pending balance`,
+                workOrderMt: np.wo,
+                dispatchMt: np.disp,
+                dispatchBalanceMt: np.wo - np.disp,
+                fgOverviewComputedMt: np.fg,
+                releaseBalanceComputedMt: null,
+                awaitingAssignmentWt: null, awaitingAssignmentMarks: null,
+                cuttingWt: null, cuttingMarks: null,
+                qualityWt: null, qualityMarks: null,
+                galvanisingWt: null, galvanisingMarks: null,
+                fgWipWt: null,
+                totalWt: null, marks: null, qty: null,
+                avgAge: null, firstAssign: "", structures: null,
+                c0to30: null, c31to60: null, c60Plus: null,
+              };
+            })();
+            return npExportRow ? [mainExportRow, npExportRow] : [mainExportRow];
           }),
         },
         {
@@ -730,27 +764,37 @@ function JobDashboardContent() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sortedProjects.map((p) => {
-                  const o = orderByJob.get(p.job);
-                  return (
+                {sortedProjects.flatMap((p, idx) => {
+                  // In project-then-mfc mode, orderByJob is keyed by raw project
+                  // ("924") but p.job is "924 / A" — they never match. Use
+                  // orByProjectBatch (keyed "project::batch") instead.
+                  const isBatchRow2 = !isAll && !isNtlt && mfcViewMode === "project-then-mfc";
+                  const o = (() => {
+                    if (!isBatchRow2) return orderByJob.get(p.job);
+                    const sep = p.job.lastIndexOf(" / ");
+                    if (sep === -1) return orderByJob.get(p.job);
+                    const bOr = orByProjectBatch.get(`${p.job.slice(0, sep)}::${p.job.slice(sep + 3)}`);
+                    return bOr !== undefined ? { wo: bOr.wo, disp: bOr.disp, computedFg: bOr.fg } : undefined;
+                  })();
+                  // Zero shown as "0.0t" to match the drill-down; undefined → "—".
+                  const fmtOr = (v: number | undefined): React.ReactNode =>
+                    v === undefined
+                      ? <span className="text-muted-foreground">-</span>
+                      : v === 0 ? <span>0.0t</span>
+                      : <span>{formatWeight(v * 1000)}</span>;
+                  const mainRow = (
                   <TableRow
                     key={p.job}
                     className="cursor-pointer hover:bg-muted/40"
                     onClick={() => setSelectedJob(p.job)}
                   >
                     <TableCell className="font-bold text-primary">{p.job}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtOr(o?.wo)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtOr(o?.disp)}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {o ? formatWeight(o.wo * 1000) : <span className="text-muted-foreground">-</span>}
+                      {o !== undefined ? fmtOr(o.wo - o.disp) : fmtOr(undefined)}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {o ? formatWeight(o.disp * 1000) : <span className="text-muted-foreground">-</span>}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {o ? formatWeight((o.wo - o.disp) * 1000) : <span className="text-muted-foreground">-</span>}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {o ? formatWeight(o.computedFg * 1000) : <span className="text-muted-foreground">-</span>}
-                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtOr(o?.computedFg)}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       {(() => { const v = getRelBalForRow(p.job); return v > 0 ? formatWeight(v * 1000) : <span className="text-muted-foreground">-</span>; })()}
                     </TableCell>
@@ -818,6 +862,34 @@ function JobDashboardContent() {
                     </TableCell>
                   </TableRow>
                   );
+                  // After the last batch row for each project, inject a "No pending
+                  // balance" row for OR structures that have no WIP marks this import.
+                  const npRow = (() => {
+                    if (!isBatchRow2) return null;
+                    const sep = p.job.lastIndexOf(" / ");
+                    const proj = sep === -1 ? p.job : p.job.slice(0, sep);
+                    const nextP = sortedProjects[idx + 1];
+                    const nextSep = nextP ? nextP.job.lastIndexOf(" / ") : -1;
+                    const nextProj = nextP ? (nextSep === -1 ? nextP.job : nextP.job.slice(0, nextSep)) : null;
+                    if (proj === nextProj) return null; // more batch rows follow
+                    const np = orByProjectBatch.get(`${proj}::__NP__`);
+                    if (!np) return null;
+                    const fmtNp = (v: number) => v === 0 ? "0.0t" : formatWeight(v * 1000);
+                    return (
+                      <TableRow key={`${p.job}::np`} className="italic text-muted-foreground">
+                        <TableCell className="pl-6 text-xs">No pending balance</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtNp(np.wo)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtNp(np.disp)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtNp(np.wo - np.disp)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtNp(np.fg)}</TableCell>
+                        <TableCell />
+                        {PROCESS_PHASES.map((ph) => <TableCell key={ph.key} />)}
+                        <TableCell />
+                        <TableCell />
+                      </TableRow>
+                    );
+                  })();
+                  return npRow ? [mainRow, npRow] : [mainRow];
                 })}
                 {byProject.length === 0 && (
                   <TableRow>
