@@ -576,7 +576,7 @@ function JobDashboardContent() {
               c31to60: p.c31to60,
               c60Plus: p.c60Plus,
             };
-            // Emit a "No pending balance" row after the last batch row for each
+            // Emit a "No marks in WIP" row after the last batch row for each
             // project. These are OR structures with no WIP marks — silently dropped
             // when __NP__ was folded into Z (23 projects have no Z row at all).
             const npExportRow = (() => {
@@ -590,7 +590,7 @@ function JobDashboardContent() {
               const np = orByProjectBatch.get(`${proj}::__NP__`);
               if (!np) return null;
               return {
-                job: `${proj} / No pending balance`,
+                job: `${proj} / No marks in WIP`,
                 workOrderMt: np.wo,
                 dispatchMt: np.disp,
                 dispatchBalanceMt: np.wo - np.disp,
@@ -882,7 +882,7 @@ function JobDashboardContent() {
                     const fmtNp = (v: number) => v === 0 ? "0.0t" : formatWeight(v * 1000);
                     return (
                       <TableRow key={`${p.job}::np`} className="italic text-muted-foreground">
-                        <TableCell className="pl-6 text-xs">No pending balance</TableCell>
+                        <TableCell className="pl-6 text-xs" title="Order Review structures with no marks in this WIP import. MFC batch is recorded only on WIP mark rows, so these structures carry no batch.">No marks in WIP</TableCell>
                         <TableCell className="text-right tabular-nums">{fmtNp(np.wo)}</TableCell>
                         <TableCell className="text-right tabular-nums">{fmtNp(np.disp)}</TableCell>
                         <TableCell className="text-right tabular-nums">{fmtNp(np.wo - np.disp)}</TableCell>
@@ -1545,7 +1545,7 @@ function JobDetail({
                       </TableCell>
                     </TableRow>
                   ); })}
-                  {/* No Pending Balance row — OR structures with no WIP marks in this import.
+                  {/* No marks in WIP row — OR structures with no WIP marks in this import.
                       WIP columns are blank by definition; only the four OR columns are filled. */}
                   {orderEntry && orderByMfc.has("__NP__") && (() => {
                     const np = orderByMfc.get("__NP__")!;
@@ -1553,7 +1553,7 @@ function JobDetail({
                       v === 0 ? <span>0.0t</span> : <span>{formatWeight(v * 1000)}</span>;
                     return (
                       <TableRow className="text-muted-foreground italic">
-                        <TableCell className="font-mono text-xs">No pending balance</TableCell>
+                        <TableCell className="font-mono text-xs" title="Order Review structures with no marks in this WIP import. MFC batch is recorded only on WIP mark rows, so these structures carry no batch.">No marks in WIP</TableCell>
                         <TableCell />
                         <TableCell />
                         <TableCell className="text-right tabular-nums">{fmtOr(np.wo)}</TableCell>
