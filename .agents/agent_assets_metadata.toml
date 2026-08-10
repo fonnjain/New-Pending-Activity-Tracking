@@ -92,3 +92,10 @@ uri = "file://attached_assets/generated/fabrication_load_tlt_sample_export.xlsx"
 type = "table"
 title = "Fabrication Load for TLT — sample export (dev data)"
 description = "Three sheets (Operation Load, In Hand, Upcoming) × six columns (Welded, Angle Punching, Angle Drilling, Plate Punch, Plate Drill, Bending), generated from the dev database's latest WIP import (01-08-2026)."
+
+[[outputs]]
+id = "p05RP5wdhv95Y_C4iAHBi"
+uri = "file://vtpl-tracker.zip"
+type = "unspecified"
+title = "VTPL Tracker — Full Source Code"
+description = "Complete monorepo source (node_modules, dist, and .git excluded). Extract and run `pnpm install` then start the workflows as usual."
