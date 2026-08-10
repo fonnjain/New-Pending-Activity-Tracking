@@ -1433,6 +1433,7 @@ function JobDetail({
                         <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Work Order Qty</TableHead>
                         <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Qty</TableHead>
                         <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Balance</TableHead>
+                        <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">FG (Order Review)</TableHead>
                       </>
                     )}
                     {headerPhases.map((ph) => (
