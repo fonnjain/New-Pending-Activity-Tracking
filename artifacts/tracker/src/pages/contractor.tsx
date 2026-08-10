@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { formatWeight, formatDate } from "@/lib/utils";
 import { ChevronDown, ChevronLeft, Search, Building2, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { exportToXlsx, type XlsxColumn } from "@/lib/export";
+import { exportToXlsx, exportTimestamp, type XlsxColumn } from "@/lib/export";
 import { useMemo, useRef, useState } from "react";
 import { activityDisplayKey, compareActivity, contractorCategoryLabel, outVendorTypeLabel, bundleActivitySet } from "@workspace/domain";
 import { ContractorPerformanceReport } from "./reports";
@@ -156,7 +156,7 @@ function ContractorContent() {
       { label: "Avg Ageing", field: "avgAge", numeric: true, decimals: 0 },
     ];
     void exportToXlsx(
-      `contractor_wise_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      `contractor_wise_${exportTimestamp()}.xlsx`,
       cols,
       sortedStats,
       { sheetName: "Workload" },

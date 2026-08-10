@@ -13,7 +13,7 @@ import {
 import { bundleActivitySet } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { exportToXlsx, type XlsxColumn } from "@/lib/export";
+import { exportToXlsx, exportTimestamp, type XlsxColumn } from "@/lib/export";
 import {
   FileSpreadsheet,
   PackageCheck,
@@ -361,7 +361,7 @@ export default function OrderStatusView() {
       dispatchBalanceMt: r.dispatchBalanceMt ?? "",
     }));
     void exportToXlsx(
-      `order_status_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      `order_status_${exportTimestamp()}.xlsx`,
       cols,
       out,
       { sheetName: "Order Status" },

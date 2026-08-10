@@ -25,7 +25,7 @@ import { AiTurnaroundReport } from "@/components/ai-turnaround-report";
 import { EmptyState } from "./overview";
 import { ProjectCompletionBanner } from "@/components/project-completion-banner";
 import { SlidersHorizontal, Clock, ChevronRight, FileSpreadsheet } from "lucide-react";
-import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
+import { exportToXlsxSheets, exportTimestamp, type XlsxSheet } from "@/lib/export";
 
 export default function TurnaroundView() {
   const { selectedImportId } = useTracker();
@@ -251,7 +251,7 @@ function TurnaroundBreakdown({ records }: { records: ApiRecord[] }) {
       },
     ];
     void exportToXlsxSheets(
-      `turnaround_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      `turnaround_${exportTimestamp()}.xlsx`,
       sheets,
     ).catch((err) => console.error("[Export] turnaround failed", err));
   };

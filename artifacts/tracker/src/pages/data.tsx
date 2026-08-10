@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, PlusCircle, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History, CircleCheck, CircleX, Info, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { exportToXlsx, exportToJson, exportGenOrXlsx, type XlsxColumn } from "@/lib/export";
+import { exportToXlsx, exportToJson, exportGenOrXlsx, exportTimestamp, type XlsxColumn } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
 import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { AiReviewPanel } from "@/components/ai-review-panel";
@@ -311,7 +311,7 @@ function DataViewContent() {
       toast({ variant: "destructive", title: "No data to export" });
       return;
     }
-    const date = new Date().toISOString().slice(0, 10);
+    const date = exportTimestamp();
     exportToJson(`import_${selectedImportId}_${date}.json`, { import: selectedImport, records: allRecords });
   };
 
@@ -1342,7 +1342,7 @@ function GeneratedOrderReviewContent() {
       } satisfies import("@/lib/export").GenOrExportRow),
     ));
     void exportGenOrXlsx(
-      `generated_order_review_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      `generated_order_review_${exportTimestamp()}.xlsx`,
       exportRows,
     );
   };

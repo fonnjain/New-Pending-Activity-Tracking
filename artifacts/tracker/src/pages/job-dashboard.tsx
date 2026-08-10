@@ -49,7 +49,7 @@ import { Button } from "@/components/ui/button";
 import { formatWeight, formatDate } from "@/lib/utils";
 import { sortRecords, type RecordSortKey } from "@/lib/sort";
 import { ChevronLeft, ChevronRight, ChevronDown, Search, FileSpreadsheet } from "lucide-react";
-import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
+import { exportToXlsxSheets, exportTimestamp, type XlsxSheet } from "@/lib/export";
 import { useToast } from "@/hooks/use-toast";
 
 const ROW_CAP = 300;
@@ -539,7 +539,7 @@ function JobDashboardContent() {
         },
       ];
       await exportToXlsxSheets(
-        `project_wise_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        `project_wise_${exportTimestamp()}.xlsx`,
         sheets,
       );
     } catch (err) {

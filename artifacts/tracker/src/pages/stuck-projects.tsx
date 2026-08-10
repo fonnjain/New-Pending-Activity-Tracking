@@ -20,7 +20,7 @@ import { EmptyState } from "./overview";
 import { ProjectCompletionBanner } from "@/components/project-completion-banner";
 import { AlertTriangle, ChevronRight, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
+import { exportToXlsxSheets, exportTimestamp, type XlsxSheet } from "@/lib/export";
 
 type View = "projects" | "contractors" | "stages";
 
@@ -191,7 +191,7 @@ function StuckContent({ importId }: { importId: number }) {
       },
     ];
     void exportToXlsxSheets(
-      `stuck_projects_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      `stuck_projects_${exportTimestamp()}.xlsx`,
       sheets,
     ).catch((err) => console.error("[Export] stuck_projects failed", err));
   };

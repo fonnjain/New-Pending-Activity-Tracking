@@ -10,7 +10,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Segmented } from "@/components/ui/segmented";
 import { Button } from "@/components/ui/button";
 import { formatWeight, formatDate } from "@/lib/utils";
-import { exportToXlsx, type XlsxColumn } from "@/lib/export";
+import { exportToXlsx, exportTimestamp, type XlsxColumn } from "@/lib/export";
 import { ChevronDown, FileSpreadsheet } from "lucide-react";
 import { bundleActivitySet, compareActivity, getActivityBundle, TLT_OPERATION_BUNDLE_IDS, activityRank, routeIncludesOp, classifyNtltStage, NTLT_STAGES, type NtltStage } from "@workspace/domain";
 
@@ -654,7 +654,7 @@ function FabricationTab({ records, group }: { records: any[]; group: string }) {
       { label: "Balance Wt (kg)", field: "weight", numeric: true, decimals: 2, total: true },
       { label: "Ageing (days)", field: "ageingDays", numeric: true, decimals: 0 },
     ];
-    exportToXlsx("plant-operation-fabrication.xlsx", columns, rows, { sheetName: "Fabrication" });
+    exportToXlsx(`plant-operation-fabrication_${exportTimestamp()}.xlsx`, columns, rows, { sheetName: "Fabrication" });
   };
 
   return (
@@ -940,7 +940,7 @@ function GalvanizationTab({ records }: { records: any[] }) {
       { label: "Avg Ageing (days)", field: "avgAge", numeric: true, decimals: 0 },
       { label: "Total Thickness (mm)", field: "totalThicknessMm", numeric: true, decimals: 0, total: true },
     ];
-    exportToXlsx("plant-operation-galvanization.xlsx", columns, rows, { sheetName: "Galvanization" });
+    exportToXlsx(`plant-operation-galvanization_${exportTimestamp()}.xlsx`, columns, rows, { sheetName: "Galvanization" });
   };
 
   return (

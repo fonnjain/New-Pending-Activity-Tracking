@@ -5,6 +5,18 @@
 // the old hash.
 import ExcelJS from "exceljs";
 
+// Returns a compact timestamp string safe for use in filenames: YYYYMMDD_HHmmss
+// e.g. "20260810_143022". Use this for all export filenames so downloads are
+// unique and sort chronologically in the file system.
+export function exportTimestamp(): string {
+  const now = new Date();
+  const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+  return (
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+    `_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  );
+}
+
 // Header names + order EXACTLY as parse.ts expects them on the third row of
 // Sheet1. Each tuple is [header label, record field]. Keeping this in lockstep
 // with the server COL map is what makes a cleaned file round-trip through the

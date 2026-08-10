@@ -85,6 +85,7 @@ import {
 import {
   exportToXlsxSheets,
   exportToXlsxBlockGrid,
+  exportTimestamp,
   type XlsxSheet,
   type XlsxColumn,
   type XlsxSection,
@@ -584,7 +585,7 @@ function ReportBuilder() {
       summaryDataSections.push({ rows: [], summaryRows: [activityTotalRow(`${act} — Total`, actMt)] });
     }
 
-    const date = new Date().toISOString().slice(0, 10);
+    const date = exportTimestamp();
     void exportToXlsxSheets(`report_${tag}_${date}.xlsx`, [
       {
         // Summary sheet:
@@ -1146,7 +1147,7 @@ function FabricationLoadReport() {
   };
 
   const exportExcel = () => {
-    const date = new Date().toISOString().slice(0, 10);
+    const date = exportTimestamp();
     const sectionBlocks = FAB_LOAD_SECTIONS.map((s) => {
       const { blocks } = buildSectionGrid(s.value);
       const gridBlocks: XlsxGridBlock[] = blocks.map(({ c, cell, rows: rs }) => ({
@@ -1646,7 +1647,7 @@ export function ContractorPerformanceReport() {
 
   const handleExcel = () => {
     if (!entries.length) return;
-    const date = new Date().toISOString().slice(0, 10);
+    const date = exportTimestamp();
     const tag = (filters.job ?? "all").replace(/[^\w-]+/g, "-");
 
     // Summary sheet: contractors as rows, dates as columns, weight (MT)
@@ -2534,7 +2535,7 @@ function FabCompletionReport() {
   }, [data?.unknownCauses, visibleUnknownProjects]);
 
   function handleExportExcel() {
-    const date = new Date().toISOString().slice(0, 10);
+    const date = exportTimestamp();
 
     // The API response rows do not include totalFabBalanceMt (it is computed
     // client-side).  Add it to every data row so the export column is populated.
@@ -3209,7 +3210,7 @@ function DailyProductionMovementReport() {
     });
 
     void exportToXlsxSheets(
-      `Daily_Production_Movement_Activity_Wise_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      `Daily_Production_Movement_Activity_Wise_${exportTimestamp()}.xlsx`,
       [summarySheet, ...actSheets],
     ).catch((err) => console.error("[Export] daily_production_movement failed", err));
   };

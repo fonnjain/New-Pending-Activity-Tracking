@@ -16,7 +16,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell, TableFoo
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { ChevronDown, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { exportToXlsxSheets, type XlsxSheet } from "@/lib/export";
+import { exportToXlsxSheets, exportTimestamp, type XlsxSheet } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { activityDisplayKey, compareActivity } from "@workspace/domain";
@@ -924,7 +924,7 @@ function ActivityContent() {
       },
     ];
     void exportToXlsxSheets(
-      `activity_wise_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      `activity_wise_${exportTimestamp()}.xlsx`,
       sheets,
     ).catch((err) => console.error("[Export] activity_wise failed", err));
   };

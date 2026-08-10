@@ -21,7 +21,7 @@ import { LoginGate, LogoutButton } from "@/components/login-gate";
 import { useSettings } from "@/lib/settings";
 import { useTracker } from "@/lib/store";
 import { useToast } from "@/hooks/use-toast";
-import { exportToXlsx, type XlsxColumn } from "@/lib/export";
+import { exportToXlsx, exportTimestamp, type XlsxColumn } from "@/lib/export";
 import {
   useGetImportRecords,
   getGetImportRecordsQueryKey,
@@ -671,7 +671,7 @@ export function WarningParametersContent() {
         redGrace: byBand.red,
       };
     });
-    exportToXlsx(`targets-grace_${scopeSlug}.xlsx`, cols, out, {
+    exportToXlsx(`targets-grace_${scopeSlug}_${exportTimestamp()}.xlsx`, cols, out, {
       sheetName: "Targets & Grace",
     });
   };
@@ -699,7 +699,7 @@ export function WarningParametersContent() {
         pw3: byKey.pw3,
       };
     });
-    exportToXlsx(`pre-warnings_${scopeSlug}.xlsx`, cols, out, {
+    exportToXlsx(`pre-warnings_${scopeSlug}_${exportTimestamp()}.xlsx`, cols, out, {
       sheetName: "Pre-warnings",
     });
   };

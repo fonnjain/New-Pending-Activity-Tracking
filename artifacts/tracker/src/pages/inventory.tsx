@@ -44,7 +44,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { exportToXlsxSheets, type XlsxSheet, type XlsxSummaryRow } from "@/lib/export";
+import { exportToXlsxSheets, exportTimestamp, type XlsxSheet, type XlsxSummaryRow } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
 
 function mt(n: number | null | undefined): string {
@@ -1995,7 +1995,7 @@ export default function InventoryView() {
       },
     ];
 
-    const date = new Date().toISOString().slice(0, 10);
+    const date = exportTimestamp();
     const baseTag = isCurrentJobs
       ? "current-jobs"
       : jobFilter
