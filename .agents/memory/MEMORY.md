@@ -1,3 +1,4 @@
+- [Data Check tab (DC0–DC11)](tracker-data-check.md) — OR arithmetic hard rules + WIP bucket partition check; DC0 parser fix; route + UI pattern.
 - [Balance & Activity Tracker](tracker-app.md) — xlsx-driven append-only import/records app; live ageing, jsonb summary, cross-upload hash dedup, parse rules.
 - [Job/Batch combo filter key space](tracker-job-batch-combo-filter.md) — activeJobSet contains combo keys ("821 - Z"); every component-level has() must check plain code AND combo key; three-filter design (Jobs/Batch/Combo).
 - [Item master thickness source](tracker-item-master-thickness.md) — item_master table is primary thickness source; exact-key-first matching (no bracket strip); FG JOB WORK excluded; 8 stripped-key conflicts all resolve via exact key; upload endpoint + admin card in Data tab.

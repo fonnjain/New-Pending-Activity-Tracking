@@ -82,6 +82,7 @@ function ProductionTracker() {
           <Route path="/warning-parameters" component={DataView} />
           <Route path="/users" component={DataView} />
           <Route path="/order-review-generated" component={DataView} />
+          <Route path="/data-check" component={DataView} />
           <Route path="/erp-rules" component={DataView} />
           <Route path="/job-templates" component={DataView} />
           <Route path="/bucket-list-dates" component={BucketListDatesPage} />
@@ -111,6 +112,7 @@ const LEGACY_TRACKER_PATHS = [
   "/warning-parameters",
   "/release-balance",
   "/order-review-generated",
+  "/data-check",
   "/erp-rules",
   "/users",
   "/job-templates",

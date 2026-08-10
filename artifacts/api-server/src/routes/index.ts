@@ -19,6 +19,7 @@ import erpRulesRouter from "./erpRules";
 import jobTemplatesRouter from "./jobTemplates";
 import itemMasterRouter from "./itemMaster";
 import contractorDedupRouter from "./contractorDedup";
+import dataCheckRouter from "./dataCheck";
 
 const router: IRouter = Router();
 
@@ -42,5 +43,6 @@ router.use(erpRulesRouter);
 router.use(jobTemplatesRouter);
 router.use(itemMasterRouter);
 router.use(contractorDedupRouter);
+router.use(dataCheckRouter);
 
 export default router;

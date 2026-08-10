@@ -522,7 +522,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     }
 
     const firstText = cells.map((c) => cellStr(c as Cell)).find((s) => s !== "") ?? "";
-    if (TOTAL_ROW.test(firstText)) {
+    if (TOTAL_ROW.test(firstText) || TOTAL_ROW.test(rawStructureCell)) {
       skippedTotals++;
       continue;
     }

@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, PlusCircle, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History, CircleCheck, CircleX, Info, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { exportToXlsx, exportToJson, exportGenOrXlsx, exportTimestamp, type XlsxColumn } from "@/lib/export";
+import { exportToXlsx, exportToJson, exportGenOrXlsx, exportTimestamp, exportToXlsxSheets, type XlsxColumn, type XlsxSheet } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
 import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { AiReviewPanel } from "@/components/ai-review-panel";
@@ -43,6 +43,7 @@ const ALL_TABS: Array<{ path: string; label: string; disabled?: boolean; adminOn
   { path: "/contractor-setup", label: "Contractor Setup", adminOnly: true },
   { path: "/warning-parameters", label: "Warning Parameters", adminOnly: true },
   { path: "/thickness", label: "Thickness", adminOnly: true },
+  { path: "/data-check", label: "Data Check", adminOnly: true },
   { path: "/erp-rules", label: "ERP Rules", adminOnly: true },
   { path: "/bucket-list-dates", label: "Bucket List Dates" },
   { path: "/users", label: "Users", adminOnly: true },
@@ -103,6 +104,8 @@ function TabbedPage({ isAdmin }: { isAdmin: boolean }) {
         <WarningParametersContent />
       ) : active === "/thickness" ? (
         <ThicknessContent />
+      ) : active === "/data-check" ? (
+        <DataCheckContent />
       ) : active === "/erp-rules" ? (
         <ErpRulesContent />
       ) : active === "/bucket-list-dates" ? (
@@ -2935,6 +2938,455 @@ function LoginActivitySection() {
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Data Check Content — DC0–DC11 integrity checks
+// ---------------------------------------------------------------------------
+
+type DcViolation = { project: string; structure: string; fields: Record<string, string | null> };
+type DcHardRule  = { id: string; label: string; toleranceMt: number; structuresEvaluated: number; violationCount: number; pass: boolean; violations: DcViolation[] };
+type DcWarning   = { id: string; label: string; structureCount: number; totalMt: number; worstProject: string; worstStructure: string; worstMt: number };
+type DcWipBucket = { name: string; mt: number; marks: number };
+type DataCheckResponse = {
+  available: boolean;
+  orImportId: number | null;
+  orAsOnDate: string | null;
+  wipImportId: number | null;
+  structuresEvaluated: number;
+  hardRuleFailures: number;
+  hardRules: DcHardRule[];
+  warnings: DcWarning[];
+  wipBuckets: DcWipBucket[];
+  wipUnclassifiedMarks: number;
+  wipTotalMt: number;
+  wipTotalMarks: number;
+  dc0StoredTotalRows: number;
+};
+
+const DATA_CHECK_QUERY_KEY = ["data-check"] as const;
+
+async function fetchDataCheck(): Promise<DataCheckResponse> {
+  const r = await fetch("/api/reports/data-check", { credentials: "include" });
+  if (!r.ok) throw new Error(`Data check fetch failed: ${r.status}`);
+  return r.json() as Promise<DataCheckResponse>;
+}
+
+function DataCheckContent() {
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: DATA_CHECK_QUERY_KEY,
+    queryFn: fetchDataCheck,
+    staleTime: 60_000,
+  });
+
+  const handleExport = async () => {
+    if (!data?.available) return;
+
+    // Sheet 1: Hard Rules summary
+    const hardRulesSheet: XlsxSheet = {
+      name: "Hard Rules",
+      columns: [
+        { field: "id",        label: "Rule",       numeric: false },
+        { field: "label",     label: "Description",numeric: false },
+        { field: "tol",       label: "Tolerance (MT)", numeric: true, decimals: 4 },
+        { field: "evaluated", label: "Evaluated",  numeric: true, decimals: 0 },
+        { field: "violations",label: "Violations", numeric: true, decimals: 0 },
+        { field: "pass",      label: "Result",     numeric: false },
+      ],
+      rows: data.hardRules.map((r) => ({
+        id: r.id, label: r.label, tol: r.toleranceMt,
+        evaluated: r.structuresEvaluated, violations: r.violationCount,
+        pass: r.pass ? "PASS" : "FAIL",
+      })),
+    };
+
+    // Sheet 2: Warnings
+    const warningsSheet: XlsxSheet = {
+      name: "Warnings",
+      columns: [
+        { field: "id",       label: "Warning",      numeric: false },
+        { field: "label",    label: "Description",  numeric: false },
+        { field: "count",    label: "Structures",   numeric: true, decimals: 0 },
+        { field: "totalMt",  label: "Total MT (signed)", numeric: true, decimals: 3 },
+        { field: "worstProj",label: "Worst Project",numeric: false },
+        { field: "worstStr", label: "Worst Structure",numeric: false },
+        { field: "worstMt",  label: "Worst MT",     numeric: true, decimals: 3 },
+      ],
+      rows: data.warnings.map((w) => ({
+        id: w.id, label: w.label, count: w.structureCount, totalMt: w.totalMt,
+        worstProj: w.worstProject, worstStr: w.worstStructure, worstMt: w.worstMt,
+      })),
+    };
+
+    // Sheet 3: WIP Buckets (DC6)
+    const wipSheet: XlsxSheet = {
+      name: "DC6 WIP Buckets",
+      columns: [
+        { field: "name",  label: "Bucket",    numeric: false },
+        { field: "mt",    label: "MT",        numeric: true, decimals: 3 },
+        { field: "marks", label: "Marks",     numeric: true, decimals: 0 },
+      ],
+      rows: [
+        ...data.wipBuckets.map((b) => ({ name: b.name, mt: b.mt, marks: b.marks })),
+        { name: "Unclassified", mt: 0, marks: data.wipUnclassifiedMarks },
+        { name: "TOTAL", mt: data.wipTotalMt, marks: data.wipTotalMarks },
+      ],
+    };
+
+    // Sheet 4: All violations (DC1–DC5)
+    const allViolations = data.hardRules
+      .filter((r) => r.id !== "DC6" && r.violations.length > 0)
+      .flatMap((r) => r.violations.map((v) => ({ rule: r.id, project: v.project, structure: v.structure, ...v.fields })));
+
+    const violCols: XlsxColumn[] = allViolations.length > 0
+      ? [
+          { field: "rule",      label: "Rule",      numeric: false },
+          { field: "project",   label: "Project",   numeric: false },
+          { field: "structure", label: "Structure", numeric: false },
+          ...Object.keys(allViolations[0]).filter((k) => !["rule","project","structure"].includes(k)).map((k) => ({
+            field: k, label: k, numeric: false,
+          })),
+        ]
+      : [{ field: "note", label: "Note", numeric: false }];
+
+    const violRows = allViolations.length > 0
+      ? allViolations
+      : [{ note: "No violations found." }];
+
+    const violSheet: XlsxSheet = { name: "All Violations", columns: violCols, rows: violRows };
+
+    await exportToXlsxSheets(
+      `DataCheck_${exportTimestamp()}.xlsx`,
+      [hardRulesSheet, warningsSheet, wipSheet, violSheet],
+    );
+  };
+
+  // Overall banner
+  const allClear = data?.available && data.hardRuleFailures === 0 && data.dc0StoredTotalRows === 0;
+
+  return (
+    <div className="space-y-5">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-base font-semibold">Data Integrity Check</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            DC0–DC5 are hard rules (PASS / FAIL). DC7–DC11 are warnings (non-zero counts are expected).
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
+          </Button>
+          {data?.available && (
+            <Button variant="outline" size="sm" onClick={() => void handleExport()}>
+              <FileDown className="h-3.5 w-3.5 mr-1" /> Export
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {isLoading && (
+        <Card className="border-border">
+          <CardContent className="p-6 text-center text-sm text-muted-foreground">Running checks…</CardContent>
+        </Card>
+      )}
+
+      {error && (
+        <Card className="border-destructive bg-destructive/5">
+          <CardContent className="p-4 flex items-center gap-2 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            Failed to load checks: {String(error)}
+          </CardContent>
+        </Card>
+      )}
+
+      {data && !isLoading && !data.available && (
+        <Card className="border-border">
+          <CardContent className="p-8 text-center text-sm text-muted-foreground">
+            No Order Review import found. Upload an Order Review file to run checks.
+          </CardContent>
+        </Card>
+      )}
+
+      {data?.available && (
+        <>
+          {/* Import info strip */}
+          <div className="rounded-md border border-border bg-muted/30 px-4 py-3 flex flex-wrap gap-x-6 gap-y-1 text-xs">
+            <span>
+              <span className="text-muted-foreground">OR import: </span>
+              <span className="font-mono font-medium">#{data.orImportId}</span>
+              {data.orAsOnDate && (
+                <span className="text-muted-foreground ml-1">({formatDate(data.orAsOnDate)})</span>
+              )}
+            </span>
+            <span>
+              <span className="text-muted-foreground">WIP import: </span>
+              <span className="font-mono font-medium">#{data.wipImportId ?? "—"}</span>
+            </span>
+            <span>
+              <span className="text-muted-foreground">OR structures: </span>
+              <span className="font-medium">{data.structuresEvaluated.toLocaleString()}</span>
+            </span>
+            <span>
+              <span className="text-muted-foreground">WIP marks: </span>
+              <span className="font-medium">{data.wipTotalMarks.toLocaleString()}</span>
+            </span>
+            <span>
+              <span className="text-muted-foreground">WIP total: </span>
+              <span className="font-medium">{data.wipTotalMt.toFixed(3)} MT</span>
+            </span>
+          </div>
+
+          {/* Overall status */}
+          {allClear ? (
+            <div className="flex items-center gap-2 rounded-md px-4 py-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300">
+              <CircleCheck className="h-4 w-4 shrink-0" />
+              <span className="text-sm font-medium">All hard rules passing — data is consistent.</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-md px-4 py-3 bg-destructive/10 border border-destructive/30 text-destructive">
+              <CircleX className="h-4 w-4 shrink-0" />
+              <span className="text-sm font-bold">
+                {data.hardRuleFailures + (data.dc0StoredTotalRows > 0 ? 1 : 0)} hard rule
+                {(data.hardRuleFailures + (data.dc0StoredTotalRows > 0 ? 1 : 0)) !== 1 ? "s" : ""} FAILING — calculations may be unreliable.
+              </span>
+            </div>
+          )}
+
+          {/* ---- DC0 parse hygiene row ---- */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">
+              Parse Hygiene
+            </h3>
+            <Card className={`border ${data.dc0StoredTotalRows === 0 ? "border-border" : "border-destructive/50 bg-destructive/5"}`}>
+              <div className="flex items-start gap-3 px-4 py-3">
+                <div className="mt-0.5 shrink-0">
+                  {data.dc0StoredTotalRows === 0
+                    ? <CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                    : <CircleX className="h-4 w-4 text-destructive" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold font-mono bg-muted px-1.5 py-0.5 rounded">DC0</span>
+                    <span className={`text-xs font-semibold ${data.dc0StoredTotalRows === 0 ? "text-emerald-700 dark:text-emerald-400" : "text-destructive"}`}>
+                      {data.dc0StoredTotalRows === 0 ? "PASS" : "FAIL"}
+                    </span>
+                    {data.dc0StoredTotalRows > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        {data.dc0StoredTotalRows} stored structure{data.dc0StoredTotalRows !== 1 ? "s" : ""} match a total-row name
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    No stored structure name is a Sub Total, Grand Total or Total row. Fix: re-upload the Order Review file after the parser is updated.
+                  </p>
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {/* ---- Hard rules DC1–DC6 ---- */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">
+              Hard Rules (DC1–DC6)
+            </h3>
+            {data.hardRules.map((rule) => (
+              <DcHardRuleRow
+                key={rule.id}
+                rule={rule}
+                wipBuckets={rule.id === "DC6" ? data.wipBuckets : undefined}
+                wipUnclassifiedMarks={rule.id === "DC6" ? data.wipUnclassifiedMarks : undefined}
+                wipTotalMt={rule.id === "DC6" ? data.wipTotalMt : undefined}
+                wipTotalMarks={rule.id === "DC6" ? data.wipTotalMarks : undefined}
+              />
+            ))}
+          </div>
+
+          {/* ---- Warnings DC7–DC11 ---- */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">
+              Warnings (DC7–DC11) — non-zero counts are expected; watch for large changes
+            </h3>
+            {data.warnings.map((w) => (
+              <DcWarningRow key={w.id} warning={w} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DcHardRuleRow({
+  rule,
+  wipBuckets,
+  wipUnclassifiedMarks,
+  wipTotalMt,
+  wipTotalMarks,
+}: {
+  rule: DcHardRule;
+  wipBuckets?: DcWipBucket[];
+  wipUnclassifiedMarks?: number;
+  wipTotalMt?: number;
+  wipTotalMarks?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isDc6 = rule.id === "DC6";
+  const canExpand = isDc6 ? !!wipBuckets : rule.violations.length > 0;
+
+  const fieldKeys = rule.violations[0] ? Object.keys(rule.violations[0].fields) : [];
+
+  return (
+    <Card className={`border ${rule.pass ? "border-border" : "border-destructive/50 bg-destructive/5 dark:bg-destructive/10"}`}>
+      <div
+        className={`flex items-start gap-3 px-4 py-3 ${canExpand ? "cursor-pointer select-none" : ""}`}
+        onClick={() => canExpand && setExpanded((v) => !v)}
+      >
+        <div className="mt-0.5 shrink-0">
+          {rule.pass
+            ? <CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            : <CircleX className="h-4 w-4 text-destructive" />}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold font-mono bg-muted px-1.5 py-0.5 rounded">{rule.id}</span>
+            <span className={`text-xs font-semibold ${rule.pass ? "text-emerald-700 dark:text-emerald-400" : "text-destructive"}`}>
+              {rule.pass ? "PASS" : "FAIL"}
+            </span>
+            {!rule.pass && (
+              <span className="text-xs text-muted-foreground">
+                {rule.violationCount.toLocaleString()} violation{rule.violationCount !== 1 ? "s" : ""}
+                {isDc6 ? " unclassified" : ""}
+                {rule.toleranceMt > 0 && <span> · tol {rule.toleranceMt * 1000} kg</span>}
+              </span>
+            )}
+            {isDc6 && rule.pass && (
+              <span className="text-xs text-muted-foreground">
+                {rule.structuresEvaluated.toLocaleString()} marks · {wipTotalMt?.toFixed(3)} MT
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{rule.label}</p>
+        </div>
+
+        {canExpand && (
+          <div className="shrink-0 text-muted-foreground mt-0.5">
+            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </div>
+        )}
+      </div>
+
+      {/* DC6 expand: WIP bucket breakdown */}
+      {isDc6 && expanded && wipBuckets && (
+        <div className="border-t border-border/40 px-4 py-3">
+          <p className="text-xs font-medium text-muted-foreground mb-2">WIP bucket breakdown:</p>
+          <div className="overflow-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-border/40 bg-muted/40">
+                  <th className="text-left px-2 py-1 font-medium">Bucket</th>
+                  <th className="text-right px-2 py-1 font-medium">MT</th>
+                  <th className="text-right px-2 py-1 font-medium">Marks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {wipBuckets.map((b) => (
+                  <tr key={b.name} className="border-b border-border/20 hover:bg-muted/20">
+                    <td className="px-2 py-1">{b.name}</td>
+                    <td className="px-2 py-1 text-right font-mono">{b.mt.toFixed(3)}</td>
+                    <td className="px-2 py-1 text-right font-mono">{b.marks.toLocaleString()}</td>
+                  </tr>
+                ))}
+                {(wipUnclassifiedMarks ?? 0) > 0 && (
+                  <tr className="border-b border-destructive/30 bg-destructive/5">
+                    <td className="px-2 py-1 text-destructive font-medium">Unclassified</td>
+                    <td className="px-2 py-1 text-right font-mono text-destructive">—</td>
+                    <td className="px-2 py-1 text-right font-mono text-destructive">{wipUnclassifiedMarks?.toLocaleString()}</td>
+                  </tr>
+                )}
+                <tr className="border-t-2 border-border font-semibold bg-muted/30">
+                  <td className="px-2 py-1">TOTAL</td>
+                  <td className="px-2 py-1 text-right font-mono">{(wipTotalMt ?? 0).toFixed(3)}</td>
+                  <td className="px-2 py-1 text-right font-mono">{(wipTotalMarks ?? 0).toLocaleString()}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* DC1–DC5 expand: violations table */}
+      {!isDc6 && !rule.pass && expanded && rule.violations.length > 0 && (
+        <div className="border-t border-border/40 px-4 py-3">
+          <p className="text-xs font-medium text-muted-foreground mb-2">
+            All violations — sorted by |diff| descending ({rule.violationCount.toLocaleString()} total):
+          </p>
+          <div className="overflow-auto max-h-96">
+            <table className="w-full text-xs border-collapse">
+              <thead className="sticky top-0 bg-background">
+                <tr className="border-b border-border/40 bg-muted/40">
+                  <th className="text-left px-2 py-1 font-medium">Project</th>
+                  <th className="text-left px-2 py-1 font-medium">Structure</th>
+                  {fieldKeys.map((k) => (
+                    <th key={k} className="text-right px-2 py-1 font-medium whitespace-nowrap">{k}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rule.violations.map((v, i) => (
+                  <tr key={i} className="border-b border-border/20 hover:bg-muted/20">
+                    <td className="px-2 py-1">{v.project}</td>
+                    <td className="px-2 py-1">{v.structure}</td>
+                    {fieldKeys.map((k) => (
+                      <td key={k} className="px-2 py-1 text-right font-mono">
+                        {v.fields[k] != null ? v.fields[k] : <span className="text-muted-foreground italic">blank</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function DcWarningRow({ warning }: { warning: DcWarning }) {
+  const isSignificant = warning.structureCount > 0;
+  return (
+    <Card className="border-border">
+      <div className="flex items-start gap-3 px-4 py-3">
+        <div className="mt-0.5 shrink-0">
+          {isSignificant
+            ? <AlertTriangle className="h-4 w-4 text-amber-500" />
+            : <CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold font-mono bg-muted px-1.5 py-0.5 rounded">{warning.id}</span>
+            <span className={`text-xs font-semibold ${isSignificant ? "text-amber-600 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>
+              {warning.structureCount.toLocaleString()} structure{warning.structureCount !== 1 ? "s" : ""}
+            </span>
+            {isSignificant && (
+              <>
+                <span className="text-xs text-muted-foreground">
+                  Σ {warning.totalMt.toFixed(3)} MT
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  · worst: {warning.worstProject} / {warning.worstStructure} ({warning.worstMt.toFixed(3)} MT)
+                </span>
+              </>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{warning.label}</p>
+        </div>
+      </div>
+    </Card>
   );
 }
 

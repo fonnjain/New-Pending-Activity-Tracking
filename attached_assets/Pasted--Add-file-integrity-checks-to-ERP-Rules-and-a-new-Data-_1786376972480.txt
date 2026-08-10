@@ -1,0 +1,133 @@
+# Add file-integrity checks to ERP Rules, and a new "Data Check" tab under Data
+
+Two things: a set of new rules that validate the Order Review and WIP files against themselves
+on every import, and a new tab under **Data** called **Data Check** that displays them.
+
+These are all **single-file** checks. They need no WIP↔Order Review join and no project scoping,
+so they run on any import regardless of how much history the database holds.
+
+Every figure below was measured against the 10-Aug-2026 Order Review (2,049 structures across
+156 projects) and the 10-Aug-2026 WIP file. Use them as the acceptance targets.
+
+---
+
+## PART 1 — the rules
+
+Follow the existing ERP Rules tab pattern (U1–U9, T1–T8). Prefix these **DC**. Evaluate at the
+stored Order Review structure grain — one evaluation per `order_review_rows` record, after the
+existing normalisation.
+
+### Hard rules — a violation is a defect
+
+| ID | Rule | Tolerance | Expected on 10-Aug |
+|---|---|---|---|
+| **DC1** | `Balance Fabrication (T) = Progress Release (L) − Progress Fabrication (M)` | 2.5 kg | **0 / 2,049** |
+| **DC2** | `Balance Despatch (W) = Progress Inspection (O) − Progress Despatch (Q)` | 2.5 kg | **0 / 2,049** |
+| **DC3** | `Balance Galvanising (U) = Progress Fabrication (M) − Progress Galvanising (N)` | 10 kg | **2 / 2,049** (worst 893 / 1BPI4, +0.084 MT) |
+| **DC4** | `Balance Release (S) = WO Order Qty (J) − Progress Release (L)` | 50 kg | **1 / 2,049** (see DC0 — it is the parse artefact) |
+| **DC5** | `Progress Release (L) ≥ Progress Fabrication (M)` | 1 kg | **0 / 2,049** |
+| **DC6** | WIP: the six buckets sum to Total, and unclassified = 0 | 1 kg | **0 marks unclassified** |
+
+DC4 needs a 50 kg tolerance rather than 1 kg because `Weight per Set` is published to three
+decimals while the balances are computed from the unrounded value. At 1 kg it reports 952 false
+positives, at 10 kg 24, at 50 kg exactly one. Do not tighten it.
+
+DC3 likewise: 70 violations at 1 kg, 2 at 2.5 kg and above. The two are real.
+
+### Warnings — report, do not fail
+
+These conditions occur legitimately in the source data. They are the signal we actually want to
+watch, so they need counts and weights, not a pass/fail.
+
+| ID | Condition | Expected on 10-Aug |
+|---|---|---|
+| **DC7** | `Progress Release (L) > WO Order Qty (J)` — released beyond the work order | **393 structures**, worst VS-36 / S2 at −20.917 MT |
+| **DC8** | `Progress Inspection (O) > Progress Galvanising (N)` | **228 structures**, worst 935 / 2TA2 at −82.308 MT |
+| **DC9** | `Progress Despatch (Q) > Progress Inspection (O)` | **21 structures**, worst −0.352 MT |
+| **DC10** | `Progress Galvanising (N) > Progress Fabrication (M)` | **2 structures**, worst −0.079 MT |
+| **DC11** | `Balance Inspection (V) ≠ 0` | **284 structures**, ΣV = **−2,464.230 MT** |
+
+DC11 is the important one. The `Balance Inspection` column does not behave like the other balance
+columns: it is empty where it should carry a figure and systematically negative overall. On the
+twelve projects that entered WIP after 04-Jul it reads 0.000 on all 196 structures where
+`N − O` is 18.096 MT. **Nothing in the app should read Col V**, and because it is broken,
+`S + T + U + V + W ≠ J − Q` — do not build that identity anywhere.
+
+### DC0 — parse hygiene
+
+One Order Review structure is currently stored as `VS-94 / GRAND TOTAL`. A grand-total row is
+being ingested as if it were a structure. Add a rule that no stored structure name matches
+`SUB TOTAL`, `GRAND TOTAL` or `TOTAL`, and **fix the parser so that row is skipped**. Expected
+after the fix: 0. This is also what makes DC4 report 1 instead of 0.
+
+---
+
+## PART 2 — the "Data Check" tab
+
+Add a new tab under **Data**, alongside the existing ones, labelled **Data Check**.
+
+Layout:
+
+1. **Header strip** — the import being checked (file name, as-on date, import id), total rules
+   evaluated, hard-rule failures, warning count.
+2. **Hard rules table** — one row per rule: ID, plain-English statement, tolerance, structures
+   evaluated, violations, pass/fail. Green when violations equal zero.
+3. **Warnings table** — one row per warning: ID, statement, structures affected, total MT
+   involved, worst single structure with its project and figure.
+4. **Drill-down** — clicking any rule lists the offending structures with project, structure,
+   each input value used in the comparison, the expected value, the actual value and the
+   difference. Sorted by absolute difference descending.
+5. **Export Excel** — one sheet per table plus one sheet of all violations, following the
+   existing export pattern on other tabs.
+
+Show both the current import and, if it is cheap to do, the previous import's counts beside them
+so a new violation is visible as a change rather than an absolute number.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change any bucket definition, the parser's normalisation (leading-dash strip on the
+  Order Review side, trailing dots preserved on structures, trailing dots stripped on project
+  codes), the hashing, dedup, ageing, activity, milestone or dispatch logic.
+- Do NOT change the existing U1–U9 / T1–T8 rules or their display.
+- Do NOT change the Project Wise MFC work just completed. Its totals must stay at
+  Work Order 27,131.073 / Dispatch 14,380.689 / Dispatch Balance 12,750.384 /
+  FG (Order Review) 4,618.594, and the WIP side at 10,723.709 MT / 59,171 marks.
+- Do NOT "correct" the source data. Every one of these rules reports what the file says; none of
+  them should modify a stored value.
+- The only parser change permitted here is the DC0 fix — skipping total rows. Nothing else.
+
+---
+
+## ACCEPTANCE CHECK
+
+On the 10-Aug-2026 import, the Data Check tab must show:
+
+```
+DC1   0 / 2049      DC2   0 / 2049      DC3   2 / 2049
+DC4   0 / 2048  (after the DC0 parser fix removes the GRAND TOTAL row)
+DC5   0 / 2049      DC6   0 marks unclassified
+DC7   393 structures    DC8  228 structures    DC9  21 structures
+DC10    2 structures    DC11 284 structures, ΣV -2,464.230 MT
+DC0     0 total-rows stored
+```
+
+And the WIP side of DC6 must reconcile to:
+
+```
+Release 2,125.871  Awaiting 915.856  Cutting 1,308.031  Quality Check 2,112.110
+Galvanising 1,651.301  FG (WIP file) 2,610.539   TOTAL 10,723.709 MT / 59,171 marks
+```
+
+Paste the tab's figures and the Excel export, not a description.
+
+---
+
+## NOTE FOR LATER — do not build yet
+
+There is a second family of checks that compares WIP against the Order Review directly. Those
+only hold for projects whose entire history is inside the import range, so they need project
+scoping and are a separate piece of work. The strongest of them, for reference: on the twelve
+post-04-Jul projects, `Release Balance = Balance Release (S)` matches on **106 of 106
+structures with a maximum deviation of 0.000 MT**. Worth building once the Data Check tab exists.
