@@ -449,10 +449,15 @@ function JobDashboardContent() {
   const orByProjectBatch = useMemo(() => {
     type OrAgg = { wo: number; disp: number; fg: number };
     if (!order?.rows?.length) return new Map<string, OrAgg>();
-    // Collect real batches per (project, structure) from all filtered WIP records.
+    // Collect real batches per (project, structure) from all job-scoped WIP
+    // records. Intentionally uses preFiltered (job/section/mfcBatch scope) NOT
+    // filtered (activity/contractor/date narrow view) — NP membership is
+    // determined by absence from the current import, not absence from the
+    // current display filter. A structure with Fabrication marks but no Cutting
+    // marks must NOT appear as NP just because an activity=C filter is active.
     const structRealBatches = new Map<string, Set<string>>();
     const structInWip = new Set<string>();
-    for (const r of filtered) {
+    for (const r of preFiltered) {
       if (!r.job || !r.structure) continue;
       const k = `${r.job}\x01${r.structure}`;
       structInWip.add(k);
