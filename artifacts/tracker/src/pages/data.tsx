@@ -3083,6 +3083,19 @@ function DataCheckContent() {
   // Overall banner
   const allClear = data?.available && data.hardRuleFailures === 0 && data.dc0StoredTotalRows === 0;
 
+  // Violation counts for banner severity scaling.
+  // Total structures that appear in at least one hard-rule violation (DC1–DC6).
+  const totalViolatingStructures = (data?.hardRules ?? [])
+    .filter((r) => !r.pass)
+    .reduce((s, r) => s + r.violationCount, 0);
+  const dc0Fail = (data?.dc0StoredTotalRows ?? 0) > 0;
+  const failingRuleCount = (data?.hardRuleFailures ?? 0) + (dc0Fail ? 1 : 0);
+  // Share of OR structures affected by DC1–DC5 violations (DC0 and DC6 are not structure-count rules)
+  const evalTotal = data?.structuresEvaluated ?? 0;
+  const sharePct = evalTotal > 0 ? (totalViolatingStructures / evalTotal) * 100 : 0;
+  // "Minor" = < 1% of structures and all individual discrepancies are small
+  const isMajorViolation = sharePct >= 1 || totalViolatingStructures >= 10 || dc0Fail;
+
   return (
     <div className="space-y-5">
       {/* Toolbar */}
@@ -3164,12 +3177,28 @@ function DataCheckContent() {
               <span className="text-sm font-medium">All hard rules passing — data is consistent.</span>
             </div>
           ) : (
-            <div className="flex items-center gap-2 rounded-md px-4 py-3 bg-destructive/10 border border-destructive/30 text-destructive">
-              <CircleX className="h-4 w-4 shrink-0" />
-              <span className="text-sm font-bold">
-                {data.hardRuleFailures + (data.dc0StoredTotalRows > 0 ? 1 : 0)} hard rule
-                {(data.hardRuleFailures + (data.dc0StoredTotalRows > 0 ? 1 : 0)) !== 1 ? "s" : ""} FAILING — calculations may be unreliable.
-              </span>
+            <div className={`flex items-start gap-2 rounded-md px-4 py-3 border ${
+              isMajorViolation
+                ? "bg-destructive/10 border-destructive/30 text-destructive"
+                : "bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300"
+            }`}>
+              <CircleX className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>
+                <span className="text-sm font-bold">
+                  {failingRuleCount} hard rule{failingRuleCount !== 1 ? "s" : ""} failing
+                  {totalViolatingStructures > 0 && evalTotal > 0 && (
+                    <> — {totalViolatingStructures.toLocaleString()} structure{totalViolatingStructures !== 1 ? "s" : ""} affected
+                    {" "}({sharePct < 0.1 ? "<0.1" : sharePct.toFixed(1)}% of {evalTotal.toLocaleString()} evaluated)</>
+                  )}
+                  {dc0Fail && totalViolatingStructures === 0 && " — OR parse hygiene"}
+                  .
+                </span>
+                <span className="text-xs block mt-0.5 opacity-80">
+                  {isMajorViolation
+                    ? "Review the violations below — figures for affected structures may be unreliable."
+                    : "Discrepancy is small relative to the dataset. Verify the affected structures in the drill-down below."}
+                </span>
+              </div>
             </div>
           )}
 
@@ -3197,9 +3226,16 @@ function DataCheckContent() {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                    No stored structure name is a Sub Total, Grand Total or Total row. Fix: re-upload the Order Review file after the parser is updated.
-                  </p>
+                  {data.dc0StoredTotalRows === 0 ? (
+                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                      No stored structure name matches a total-row pattern.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                      {data.dc0StoredTotalRows} stored structure{data.dc0StoredTotalRows !== 1 ? "s" : ""} match a Grand Total / Sub Total row name and should not be in the data.
+                      Fix: re-upload the Order Review file after the parser fix is applied.
+                    </p>
+                  )}
                 </div>
               </div>
             </Card>
