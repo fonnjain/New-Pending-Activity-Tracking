@@ -303,6 +303,11 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     : false;
 
   if (latestWip && wipHasTypeData) {
+    // Scoped to TLT only — the six-bucket model is a TLT model; NTLT uses a
+    // separate five-stage model (Y is a distinct stage, not FG). Scoping to TLT
+    // makes the reported total tie to the 10,723.709 MT / 59,171 marks figure
+    // that users see on Overview and Project Wise.
+    //
     // Read raw type/status from import_rows only — no COALESCE fallback to pool.
     // Using import_rows columns directly guarantees we classify only what the
     // file actually stored, so an all-NULL import fails DC6 instead of passing.
@@ -317,39 +322,49 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
       })
       .from(importRowsTable)
       .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
-      .where(eq(importRowsTable.importId, latestWip.id));
+      .where(
+        and(
+          eq(importRowsTable.importId, latestWip.id),
+          eq(recordPoolTable.category, "TLT"),
+        ),
+      );
 
     for (const r of wipRawRows) {
+      const copies = r.copies ?? 1;
       const tp = (r.jobCardType ?? "").trim().toLowerCase();
       const st = (r.jobCardStatus ?? "").trim().toLowerCase();
       const a  = (r.activity ?? "").trim().toUpperCase();
-      const wMt = ((r.balanceWt ?? 0) * (r.copies ?? 1)) / 1000;
+      const wMt = ((r.balanceWt ?? 0) * copies) / 1000;
       wipTotalMt += wMt;
-      wipTotalMarks++;
+      wipTotalMarks += copies;
 
       if (tp === "job card not started" && st === "initial") {
         bucketCounts["Release"].mt += wMt;
-        bucketCounts["Release"].marks++;
+        bucketCounts["Release"].marks += copies;
       } else if (tp === "job card not started" && st === "authorized") {
         const contr = (r.contractor ?? "").trim();
         if (contr === "") {
           bucketCounts["Awaiting Assignment"].mt += wMt;
-          bucketCounts["Awaiting Assignment"].marks++;
+          bucketCounts["Awaiting Assignment"].marks += copies;
         } else {
           bucketCounts["Cutting"].mt += wMt;
-          bucketCounts["Cutting"].marks++;
+          bucketCounts["Cutting"].marks += copies;
         }
       } else if (tp === "job card wip" && QC_ACTIVITY_SET.has(a)) {
         bucketCounts["Quality Check"].mt += wMt;
-        bucketCounts["Quality Check"].marks++;
+        bucketCounts["Quality Check"].marks += copies;
       } else if (tp === "job card wip" && GALV_ACTIVITY_SET.has(a)) {
         bucketCounts["Galvanising"].mt += wMt;
-        bucketCounts["Galvanising"].marks++;
-      } else if (tp === "fg pending for dispatch" && a === "") {
+        bucketCounts["Galvanising"].marks += copies;
+      } else if (tp === "fg pending for dispatch") {
+        // Classify on Type alone — activity is irrelevant for FG.
+        // An FG row with a non-blank activity would land in FG on every other
+        // page; requiring a === "" here would spuriously fail DC6 against a
+        // correct page.
         bucketCounts["FG (WIP file)"].mt += wMt;
-        bucketCounts["FG (WIP file)"].marks++;
+        bucketCounts["FG (WIP file)"].marks += copies;
       } else {
-        wipUnclassifiedMarks++;
+        wipUnclassifiedMarks += copies;
       }
     }
   }
@@ -364,7 +379,7 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     ? {
         id: "DC6",
         label:
-          "WIP: the six buckets (Release, Awaiting Assignment, Cutting, Quality Check, Galvanising, FG WIP) sum to the total balance with zero unclassified marks. Tolerance: 1 kg.",
+          "WIP (TLT only): the six buckets (Release, Awaiting Assignment, Cutting, Quality Check, Galvanising, FG WIP) sum to the total TLT balance with zero unclassified copies. NTLT uses a separate five-stage model and is excluded. Tolerance: 1 kg.",
         toleranceMt: 0.001,
         structuresEvaluated: wipTotalMarks,
         violationCount: wipUnclassifiedMarks,
