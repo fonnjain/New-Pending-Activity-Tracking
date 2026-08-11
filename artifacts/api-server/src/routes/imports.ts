@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Router, type IRouter, type RequestHandler } from "express";
 import multer from "multer";
 import { requireAuth } from "./auth";
-import { desc, eq, lt, inArray, sql, and, isNull } from "drizzle-orm";
+import { desc, eq, lt, inArray, sql, and, isNull, or } from "drizzle-orm";
 import {
   db,
   importsTable,
@@ -2100,7 +2100,13 @@ router.get("/imports/:id/changes", async (req, res): Promise<void> => {
   const [prevImport] = await db
     .select()
     .from(importsTable)
-    .where(and(lt(importsTable.id, toImport.id), cutoffSql(changesCutoff)))
+    .where(and(
+      or(
+        lt(importsTable.reportDate, toImport.reportDate),
+        and(eq(importsTable.reportDate, toImport.reportDate), lt(importsTable.id, toImport.id)),
+      ),
+      cutoffSql(changesCutoff),
+    ))
     .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
     .limit(1);
 
@@ -2151,7 +2157,13 @@ router.get("/imports/:id/movement", async (req, res): Promise<void> => {
   const priorImports = await db
     .select({ id: importsTable.id, createdAt: importsTable.createdAt })
     .from(importsTable)
-    .where(and(lt(importsTable.id, target.id), cutoffSql(movementCutoff)))
+    .where(and(
+      or(
+        lt(importsTable.reportDate, target.reportDate),
+        and(eq(importsTable.reportDate, target.reportDate), lt(importsTable.id, target.id)),
+      ),
+      cutoffSql(movementCutoff),
+    ))
     .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id));
 
   const days = new Map<string, number | null>();
@@ -2312,7 +2324,13 @@ async function computeVelocityItems(
       reportDate: importsTable.reportDate,
     })
     .from(importsTable)
-    .where(and(lt(importsTable.id, target.id), cutoffSql(velocityCutoff)))
+    .where(and(
+      or(
+        lt(importsTable.reportDate, target.reportDate),
+        and(eq(importsTable.reportDate, target.reportDate), lt(importsTable.id, target.id)),
+      ),
+      cutoffSql(velocityCutoff),
+    ))
     .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id));
 
   // Build per-identity snapshot series: seed with the current import, then layer

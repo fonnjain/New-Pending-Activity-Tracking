@@ -140,11 +140,10 @@ function dcWarning(
 // ---------------------------------------------------------------------------
 router.get("/reports/data-check", async (_req, res): Promise<void> => {
   // Latest WIP import + latest OR in parallel
-  const [latestWipArr, orData] = await Promise.all([
+  const [latestWip, orData] = await Promise.all([
     loadLatestWipImport(),
     loadLatestOrderReview(),
   ]);
-  const latestWip = latestWipArr[0] ?? null;
 
   const empty: DataCheckResponse = {
     available: false,
