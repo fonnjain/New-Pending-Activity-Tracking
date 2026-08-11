@@ -2979,12 +2979,43 @@ type DcViolation = { project: string; structure: string; fields: Record<string, 
 type DcHardRule  = { id: string; label: string; toleranceMt: number; structuresEvaluated: number; violationCount: number; pass: boolean; violations: DcViolation[] };
 type DcWarning   = { id: string; label: string; structureCount: number; totalMt: number; worstProject: string; worstStructure: string; worstMt: number };
 type DcWipBucket = { name: string; mt: number; marks: number };
+type DcTransition = { from: string; to: string; count: number; weightMt: number };
+
+type DcMarkMovementAvailable = {
+  available: true;
+  prevImportId: number;
+  currImportId: number;
+  prevDate: string;
+  currDate: string;
+  identityKey: string;
+  trackedMarks: number;
+  forwardMoves: number;
+  backwardMoves: number;
+  backwardWeightMt: number;
+  backwardTransitions: DcTransition[];
+  leavingFgCount: number;
+  leavingFgWeightMt: number;
+  leavingFgTransitions: DcTransition[];
+  vanishedCount: number;
+  vanishedWeightMt: number;
+  vanishedByLastActivity: { activity: string; count: number; weightMt: number }[];
+};
+type DcMarkMovementGated = {
+  available: false;
+  reason: string;
+  prevImportId: number | null;
+  currImportId: number;
+  prevDate: string | null;
+  currDate: string;
+};
+type DcMarkMovementResult = DcMarkMovementAvailable | DcMarkMovementGated;
+
 type DataCheckResponse = {
   available: boolean;
   orImportId: number | null;
   orAsOnDate: string | null;
   wipImportId: number | null;
-  /** False for pre-type-column imports; DC6 is not evaluated for those. */
+  /** False for pre-type-column imports; DC6 and DC16 are not evaluated for those. */
   wipHasTypeData: boolean;
   structuresEvaluated: number;
   hardRuleFailures: number;
@@ -2994,7 +3025,12 @@ type DataCheckResponse = {
   wipUnclassifiedMarks: number;
   wipTotalMt: number;
   wipTotalMarks: number;
+  ntltBuckets: DcWipBucket[];
+  ntltUnclassifiedMarks: number;
+  ntltTotalMt: number;
+  ntltTotalMarks: number;
   dc0StoredTotalRows: number;
+  markMovement: DcMarkMovementResult | null;
 };
 
 const DATA_CHECK_QUERY_KEY = ["data-check"] as const;
@@ -3255,20 +3291,20 @@ function DataCheckContent() {
             </Card>
           </div>
 
-          {/* ---- Hard rules DC1–DC6 ---- */}
+          {/* ---- Hard rules DC1–DC6, DC16 ---- */}
           <div className="space-y-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">
-              Hard Rules (DC1–DC6)
+              Hard Rules (DC1–DC6, DC16)
             </h3>
             {data.hardRules.map((rule) => (
               <DcHardRuleRow
                 key={rule.id}
                 rule={rule}
-                wipBuckets={rule.id === "DC6" ? data.wipBuckets : undefined}
-                wipUnclassifiedMarks={rule.id === "DC6" ? data.wipUnclassifiedMarks : undefined}
-                wipTotalMt={rule.id === "DC6" ? data.wipTotalMt : undefined}
-                wipTotalMarks={rule.id === "DC6" ? data.wipTotalMarks : undefined}
-                wipHasTypeData={rule.id === "DC6" ? data.wipHasTypeData : undefined}
+                wipBuckets={rule.id === "DC6" ? data.wipBuckets : rule.id === "DC16" ? data.ntltBuckets : undefined}
+                wipUnclassifiedMarks={rule.id === "DC6" ? data.wipUnclassifiedMarks : rule.id === "DC16" ? data.ntltUnclassifiedMarks : undefined}
+                wipTotalMt={rule.id === "DC6" ? data.wipTotalMt : rule.id === "DC16" ? data.ntltTotalMt : undefined}
+                wipTotalMarks={rule.id === "DC6" ? data.wipTotalMarks : rule.id === "DC16" ? data.ntltTotalMarks : undefined}
+                wipHasTypeData={rule.id === "DC6" || rule.id === "DC16" ? data.wipHasTypeData : undefined}
               />
             ))}
           </div>
@@ -3282,6 +3318,11 @@ function DataCheckContent() {
               <DcWarningRow key={w.id} warning={w} />
             ))}
           </div>
+
+          {/* ---- Movement checks DC12–DC14 ---- */}
+          {data.markMovement && (
+            <DcMarkMovementSection movement={data.markMovement} />
+          )}
         </>
       )}
     </div>
@@ -3306,9 +3347,11 @@ function DcHardRuleRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const isDc6 = rule.id === "DC6";
-  // DC6 on an old-format import: not evaluated — show as N/A, not FAIL.
-  const dc6NotEvaluated = isDc6 && wipHasTypeData === false;
-  const canExpand = isDc6 ? !!wipBuckets && !dc6NotEvaluated : rule.violations.length > 0;
+  const isDc16 = rule.id === "DC16";
+  const isBucketRule = isDc6 || isDc16;
+  // DC6/DC16 on an old-format import: not evaluated — show as N/A, not FAIL.
+  const dc6NotEvaluated = isBucketRule && wipHasTypeData === false;
+  const canExpand = isBucketRule ? !!wipBuckets && !dc6NotEvaluated : rule.violations.length > 0;
 
   const fieldKeys = rule.violations[0] ? Object.keys(rule.violations[0].fields) : [];
 
@@ -3343,11 +3386,11 @@ function DcHardRuleRow({
             {!dc6NotEvaluated && !rule.pass && (
               <span className="text-xs text-muted-foreground">
                 {rule.violationCount.toLocaleString()} violation{rule.violationCount !== 1 ? "s" : ""}
-                {isDc6 ? " unclassified" : ""}
+                {isBucketRule ? " unclassified" : ""}
                 {rule.toleranceMt > 0 && <span> · tol {rule.toleranceMt * 1000} kg</span>}
               </span>
             )}
-            {isDc6 && rule.pass && (
+            {isBucketRule && rule.pass && (
               <span className="text-xs text-muted-foreground">
                 {rule.structuresEvaluated.toLocaleString()} marks · {wipTotalMt?.toFixed(3)} MT
               </span>
@@ -3363,8 +3406,8 @@ function DcHardRuleRow({
         )}
       </div>
 
-      {/* DC6 expand: WIP bucket breakdown */}
-      {isDc6 && expanded && wipBuckets && (
+      {/* DC6 / DC16 expand: bucket breakdown */}
+      {isBucketRule && expanded && wipBuckets && (
         <div className="border-t border-border/40 px-4 py-3">
           <p className="text-xs font-medium text-muted-foreground mb-2">WIP bucket breakdown:</p>
           <div className="overflow-auto">
@@ -3403,7 +3446,7 @@ function DcHardRuleRow({
       )}
 
       {/* DC1–DC5 expand: violations table */}
-      {!isDc6 && !rule.pass && expanded && rule.violations.length > 0 && (
+      {!isBucketRule && !rule.pass && expanded && rule.violations.length > 0 && (
         <div className="border-t border-border/40 px-4 py-3">
           <p className="text-xs font-medium text-muted-foreground mb-2">
             All violations — sorted by |diff| descending ({rule.violationCount.toLocaleString()} total):
@@ -3437,6 +3480,239 @@ function DcHardRuleRow({
         </div>
       )}
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DC12–DC14 mark movement section
+// ---------------------------------------------------------------------------
+function DcMarkMovementSection({ movement }: { movement: DcMarkMovementResult }) {
+  const [expanded12, setExpanded12] = useState(false);
+  const [expanded13, setExpanded13] = useState(false);
+  const [expanded14, setExpanded14] = useState(false);
+
+  const fmtMt = (v: number) => v.toFixed(3);
+  const fmtDate = (d: string | null) => (d ? formatDate(d) : "—");
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">
+        Movement Checks — DC12–DC14
+      </h3>
+
+      {/* gated banner */}
+      {!movement.available && (
+        <Card className="border-amber-400/60 bg-amber-50/60 dark:bg-amber-950/20 dark:border-amber-600/40">
+          <div className="flex items-start gap-3 px-4 py-3">
+            <Info className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold font-mono bg-muted px-1.5 py-0.5 rounded">DC12–DC14</span>
+                <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">N/A</span>
+                <span className="text-xs text-muted-foreground">
+                  Comparing import #{movement.currImportId} ({fmtDate(movement.currDate)})
+                  {movement.prevImportId && ` vs #${movement.prevImportId} (${fmtDate(movement.prevDate)})`}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">{movement.reason}</p>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {movement.available && (() => {
+        const mv = movement;
+        const importStrip = (
+          <span className="text-xs text-muted-foreground ml-1">
+            #{mv.prevImportId} ({fmtDate(mv.prevDate)}) → #{mv.currImportId} ({fmtDate(mv.currDate)})
+            · {mv.trackedMarks.toLocaleString()} tracked · {mv.forwardMoves.toLocaleString()} forward
+            · identity: {mv.identityKey}
+          </span>
+        );
+
+        return (
+          <>
+            {/* DC12 — backward movement */}
+            <Card className="border-border">
+              <div
+                className={`flex items-start gap-3 px-4 py-3 ${mv.backwardMoves > 0 ? "cursor-pointer select-none" : ""}`}
+                onClick={() => mv.backwardMoves > 0 && setExpanded12((v) => !v)}
+              >
+                <div className="mt-0.5 shrink-0">
+                  {mv.backwardMoves > 0
+                    ? <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    : <CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold font-mono bg-muted px-1.5 py-0.5 rounded">DC12</span>
+                    <span className={`text-xs font-semibold ${mv.backwardMoves > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>
+                      {mv.backwardMoves} mark{mv.backwardMoves !== 1 ? "s" : ""} moved backward
+                    </span>
+                    {mv.backwardMoves > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        {fmtMt(mv.backwardWeightMt)} MT (rework — warning only)
+                      </span>
+                    )}
+                    {importStrip}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    Marks whose activity moved backwards since the previous import. Backward movement is rework — it is
+                    expected and legitimate. Watch for sudden spikes in count or weight.
+                  </p>
+                </div>
+                {mv.backwardMoves > 0 && (
+                  <div className="shrink-0 text-muted-foreground mt-0.5">
+                    {expanded12 ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </div>
+                )}
+              </div>
+              {expanded12 && mv.backwardTransitions.length > 0 && (
+                <div className="border-t border-border/40 px-4 py-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Backward transitions (ordered by weight):</p>
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-border/40 bg-muted/40">
+                        <th className="text-left px-2 py-1 font-medium">From</th>
+                        <th className="text-left px-2 py-1 font-medium">To</th>
+                        <th className="text-right px-2 py-1 font-medium">Marks</th>
+                        <th className="text-right px-2 py-1 font-medium">MT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mv.backwardTransitions.map((t, i) => (
+                        <tr key={i} className="border-b border-border/20 hover:bg-muted/20">
+                          <td className="px-2 py-1 font-mono">{t.from}</td>
+                          <td className="px-2 py-1 font-mono">{t.to}</td>
+                          <td className="px-2 py-1 text-right">{t.count}</td>
+                          <td className="px-2 py-1 text-right font-mono">{fmtMt(t.weightMt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+
+            {/* DC13 — marks leaving FG */}
+            <Card className="border-border">
+              <div
+                className={`flex items-start gap-3 px-4 py-3 ${mv.leavingFgCount > 0 ? "cursor-pointer select-none" : ""}`}
+                onClick={() => mv.leavingFgCount > 0 && setExpanded13((v) => !v)}
+              >
+                <div className="mt-0.5 shrink-0">
+                  {mv.leavingFgCount > 0
+                    ? <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    : <CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold font-mono bg-muted px-1.5 py-0.5 rounded">DC13</span>
+                    <span className={`text-xs font-semibold ${mv.leavingFgCount > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>
+                      {mv.leavingFgCount} mark{mv.leavingFgCount !== 1 ? "s" : ""} left Finished Goods
+                    </span>
+                    {mv.leavingFgCount > 0 && (
+                      <span className="text-xs text-muted-foreground">{fmtMt(mv.leavingFgWeightMt)} MT</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    FG is terminal — material should leave it by being dispatched (disappearing from the file), not
+                    by moving to an earlier activity. A non-zero count may indicate same-day corrections or data
+                    entry errors.
+                  </p>
+                </div>
+                {mv.leavingFgCount > 0 && (
+                  <div className="shrink-0 text-muted-foreground mt-0.5">
+                    {expanded13 ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </div>
+                )}
+              </div>
+              {expanded13 && mv.leavingFgTransitions.length > 0 && (
+                <div className="border-t border-border/40 px-4 py-3">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-border/40 bg-muted/40">
+                        <th className="text-left px-2 py-1 font-medium">From</th>
+                        <th className="text-left px-2 py-1 font-medium">To</th>
+                        <th className="text-right px-2 py-1 font-medium">Marks</th>
+                        <th className="text-right px-2 py-1 font-medium">MT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mv.leavingFgTransitions.map((t, i) => (
+                        <tr key={i} className="border-b border-border/20 hover:bg-muted/20">
+                          <td className="px-2 py-1 font-mono">{t.from}</td>
+                          <td className="px-2 py-1 font-mono">{t.to}</td>
+                          <td className="px-2 py-1 text-right">{t.count}</td>
+                          <td className="px-2 py-1 text-right font-mono">{fmtMt(t.weightMt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+
+            {/* DC14 — marks vanished before FG */}
+            <Card className="border-border">
+              <div
+                className={`flex items-start gap-3 px-4 py-3 ${mv.vanishedCount > 0 ? "cursor-pointer select-none" : ""}`}
+                onClick={() => mv.vanishedCount > 0 && setExpanded14((v) => !v)}
+              >
+                <div className="mt-0.5 shrink-0">
+                  {mv.vanishedCount > 0
+                    ? <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    : <CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold font-mono bg-muted px-1.5 py-0.5 rounded">DC14</span>
+                    <span className={`text-xs font-semibold ${mv.vanishedCount > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>
+                      {mv.vanishedCount} mark{mv.vanishedCount !== 1 ? "s" : ""} vanished before FG
+                    </span>
+                    {mv.vanishedCount > 0 && (
+                      <span className="text-xs text-muted-foreground">{fmtMt(mv.vanishedWeightMt)} MT</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    Marks present in the previous import but absent in the current one without having reached FG.
+                    Possible causes: cancellation, re-numbering, or dispatch without passing through Finished Goods.
+                  </p>
+                </div>
+                {mv.vanishedCount > 0 && (
+                  <div className="shrink-0 text-muted-foreground mt-0.5">
+                    {expanded14 ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </div>
+                )}
+              </div>
+              {expanded14 && mv.vanishedByLastActivity.length > 0 && (
+                <div className="border-t border-border/40 px-4 py-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">By last-known activity:</p>
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-border/40 bg-muted/40">
+                        <th className="text-left px-2 py-1 font-medium">Last Activity</th>
+                        <th className="text-right px-2 py-1 font-medium">Marks</th>
+                        <th className="text-right px-2 py-1 font-medium">MT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mv.vanishedByLastActivity.map((a, i) => (
+                        <tr key={i} className="border-b border-border/20 hover:bg-muted/20">
+                          <td className="px-2 py-1 font-mono">{a.activity}</td>
+                          <td className="px-2 py-1 text-right">{a.count}</td>
+                          <td className="px-2 py-1 text-right font-mono">{fmtMt(a.weightMt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          </>
+        );
+      })()}
+    </div>
   );
 }
 

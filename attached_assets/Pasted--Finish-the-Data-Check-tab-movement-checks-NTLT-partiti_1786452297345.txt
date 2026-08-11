@@ -1,0 +1,169 @@
+# Finish the Data Check tab — movement checks, NTLT partition, and one question
+
+Three parts. Answer part 1 before building parts 2 and 3.
+
+---
+
+## PART 1 — one question, answer first
+
+Your last summary described the gated imports as "19 (ids 5–32, **no report_date**)". But the
+import list from the earlier verification showed `as_on_date` populated for ids 8 through 32 —
+2026-06-30, 2026-07-04, 2026-07-21 and so on. Only ids 5, 6 and 7 were null.
+
+Run and paste:
+
+```sql
+SELECT id, report_date, created_at FROM imports WHERE id <= 32 ORDER BY id;
+```
+
+This matters beyond tidiness. `loadLatestWipImport()` sorts by
+`report_date DESC NULLS LAST, id DESC`. If `report_date` is genuinely null on 19 imports, that
+is a different column from the `as_on_date` shown earlier, and I want to know which one the
+sort actually uses. The gate itself is demonstrably correct — import 30 has a date and is
+correctly gated — so this is about the sort, not the gate.
+
+---
+
+## PART 2 — DC12 to DC14, cross-import movement checks
+
+A second section on the Data Check tab, headed **Movement checks**, comparing an import against
+its predecessor. These are only possible because the activity sequence has now been established
+by tracking individual marks between imports.
+
+### The sequence
+
+```
+C-init -> C-await -> C-cut -> RFI -> Q -> TS -> G / GB -> Y -> FG -> (despatched, leaves the file)
+```
+
+`HG, NH, B, HAB, W` are fabrication and inspection activities sitting between C-cut and Q. They
+have no strict order among themselves — treat them as one rank. Movement measured 01-Aug to
+10-Aug across 39,962 tracked marks, 4,272 forward moves:
+
+```
+C-init -> C-await 223     RFI -> G  299     G  -> GB  60
+C-await -> C-cut  181     TS  -> G   67     G  -> Y   59
+C-cut  -> RFI     228     Q   -> TS  24     Y  -> FG  90
+```
+
+Every mark entering TS came from RFI, Q, C-cut or NH. Every mark leaving TS went to G, GB, Y or
+FG. All 90 marks leaving Y went to FG. Nothing left FG.
+
+### DC12 — backward activity movement (warning)
+
+Marks whose activity moved backwards since the previous import. This is rework and is
+legitimate — report it, never fail on it.
+
+| Window | Tracked | Forward | Backward | Backward weight |
+|---|---|---|---|---|
+| 08-Aug -> 10-Aug | 42,997 | 918 | **16** | 4.122 MT |
+| 05-Aug -> 08-Aug | 42,643 | 2,530 | **10** | 2.772 MT |
+| 01-Aug -> 10-Aug | 39,962 | 4,272 | **17** | 4.346 MT |
+
+The backward moves themselves, 01-Aug to 10-Aug:
+
+```
+RFI -> W    13 marks   3.058 MT     sent back for welding after being offered
+RFI -> NH    2 marks   0.572 MT     sent back for notching
+TS  -> Q     2 marks   0.716 MT     pulled from temp stock for re-check
+```
+
+Report count, weight, and the individual transitions. 15 to 20 marks per upload is normal; the
+number to watch is whether it jumps.
+
+### DC13 — marks leaving Finished Goods (warning)
+
+Zero over the 9-day window. A handful appear over shorter windows (13 marks FG -> Y between
+08-Aug and 10-Aug, 1 mark FG -> G between 05-Aug and 08-Aug) and then disappear, which reads as
+same-day corrections rather than real movement. FG should be terminal — material leaves it by
+being despatched, which removes it from the file entirely.
+
+### DC14 — marks that vanished before reaching FG (warning)
+
+A mark should normally leave the file from FG, having been despatched. One disappearing from an
+earlier activity has been cancelled, re-numbered, or despatched without passing through finished
+goods. Report count and weight by last-known activity.
+
+### Mark identity — the critical constraint
+
+Do **not** match marks across imports on `pool_id`. `balance_qty` and `balance_wt` are inside
+the row hash, so a mark that partially completes between uploads gets a new pool row. On a
+working shop floor that is most marks, most days.
+
+Use the identity the existing movement code already uses: `identityRawKey(markId, jobCardNo)`
+with the bridge in `diff.ts`, the same as `contractorMovement.ts`. If that bridge is not
+reachable here, say so rather than substituting a different key — a different key produces
+different numbers that will not be comparable to anything else in the app.
+
+My figures above used project + mark number with single-activity marks only, so they will not
+match exactly. I want to see what the application's own matching produces; a large divergence is
+itself worth knowing.
+
+### Gating
+
+Use the same `hasTypeData` helper. If **either** side of a pair lacks type data, do not compute
+the movement — name the unusable import and say why, exactly as `productionMovement.ts` now
+does. Name the two imports being compared, by id and date, in every case.
+
+---
+
+## PART 3 — DC16, the NTLT partition
+
+Scoping DC6 to TLT was correct, but it left a blind spot: a malformed NTLT row is now invisible
+where it would previously have surfaced as unclassified. DC16 closes it.
+
+NTLT follows a **separate five-stage model** — note that `Y` is a stage in its own right here,
+where the TLT six-bucket model folds `Y` into Galvanising:
+
+```
+Not Started    Type = Job Card Not Started
+TS             Type = Job Card WIP, Activity = TS
+Galvanising    Type = Job Card WIP, Activity in (G, GB)
+Y              Type = Job Card WIP, Activity = Y
+FG             Type = FG Pending For Dispatch
+```
+
+Scope: `category != 'TLT'` — the inverse of DC6's filter. Weight `balance_wt * copies / 1000`,
+marks counted as `+= copies`, exactly as DC6 now does.
+
+Expected on import 58 (10-Aug):
+
+```
+Not Started   3,610.168 MT      Galvanising   810.168 MT
+TS              102.433 MT      Y           1,000.865 MT
+                                FG            796.517 MT
+TOTAL         6,320.151 MT   ·  314 marks  ·  0 unclassified
+```
+
+DC16 passes when the five stages sum to the total with zero unclassified. Gate it on
+`hasTypeData` like DC6.
+
+Note for the label: NTLT rows all carry a blank project code and a blank alias, so NTLT can
+never be joined to the Order Review. DC16 is a WIP-only check and no order-book comparison is
+possible for it.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change bucket definitions, the activity sets in `lib/domain`, the parser, hashing,
+  dedup, `copies` handling, ageing, or mark-identity logic. This section reads existing data.
+- Do NOT treat backward movement as an error to be corrected in the data. It is rework.
+- Do NOT hard-code the activity sequence as a validation that rejects imports. Warnings only.
+- Do NOT touch DC0 to DC15, the Project Wise MFC work, `loadLatestWipImport()`, the predecessor
+  queries, or the `hasTypeData` gates just built.
+
+## ACCEPTANCE CHECK
+
+DC6 and the Project Wise figures must be untouched:
+
+```
+Release 2,125.871 (10,552)   Awaiting 915.856 (4,577)   Cutting 1,308.031 (8,595)
+Quality Check 2,112.110 (16,152)   Galvanising 1,651.301 (9,774)   FG 2,610.539 (9,521)
+TOTAL 10,723.709 MT / 59,171 marks
+```
+
+DC16 on import 58: five stages summing to 6,320.151 MT / 314 marks, zero unclassified.
+
+DC12 to DC14 on the most recent valid pair: paste the counts, the weights, the transition list,
+which two imports were compared, and **which mark-identity key was used**.

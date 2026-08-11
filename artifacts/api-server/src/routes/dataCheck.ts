@@ -6,9 +6,10 @@ import {
   importsTable,
   orderReviewRowsTable,
 } from "@workspace/db";
-import { and, desc, eq, sql } from "drizzle-orm";
-import { QC_ACTIVITY_SET, GALV_ACTIVITY_SET } from "@workspace/domain";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { PROCESS_SEQUENCE, QC_ACTIVITY_SET, GALV_ACTIVITY_SET, classifyNtltStage } from "@workspace/domain";
 import { hasTypeData, loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
+import { buildIdentityBridge, identityRawKey } from "../lib/identityBridge";
 
 const router: IRouter = Router();
 
@@ -48,6 +49,50 @@ export interface DcWipBucket {
   marks: number;
 }
 
+export interface DcTransition {
+  from: string;
+  to: string;
+  count: number;
+  weightMt: number;
+}
+
+/** Movement computed successfully for a pair of imports with type data. */
+export interface DcMarkMovement {
+  available: true;
+  prevImportId: number;
+  currImportId: number;
+  prevDate: string;
+  currDate: string;
+  /** Always "markId+jobCardNo via identityBridge" — explicit so callers know the key space. */
+  identityKey: string;
+  trackedMarks: number;
+  forwardMoves: number;
+  /** DC12 — rework: marks whose activity moved backwards (warning, not an error). */
+  backwardMoves: number;
+  backwardWeightMt: number;
+  backwardTransitions: DcTransition[];
+  /** DC13 — marks that left Finished Goods (FG is normally terminal). */
+  leavingFgCount: number;
+  leavingFgWeightMt: number;
+  leavingFgTransitions: DcTransition[];
+  /** DC14 — marks present in prev but absent in curr before reaching FG. */
+  vanishedCount: number;
+  vanishedWeightMt: number;
+  vanishedByLastActivity: { activity: string; count: number; weightMt: number }[];
+}
+
+/** Either import in the pair lacks per-row type data — movement cannot be computed. */
+export interface DcMarkMovementGated {
+  available: false;
+  reason: string;
+  prevImportId: number | null;
+  currImportId: number;
+  prevDate: string | null;
+  currDate: string;
+}
+
+export type DcMarkMovementResult = DcMarkMovement | DcMarkMovementGated;
+
 export interface DataCheckResponse {
   available: boolean;
   orImportId: number | null;
@@ -66,7 +111,14 @@ export interface DataCheckResponse {
   wipUnclassifiedMarks: number;
   wipTotalMt: number;
   wipTotalMarks: number;
+  /** DC16 — NTLT five-stage partition buckets. */
+  ntltBuckets: DcWipBucket[];
+  ntltUnclassifiedMarks: number;
+  ntltTotalMt: number;
+  ntltTotalMarks: number;
   dc0StoredTotalRows: number;
+  /** DC12–DC14 cross-import movement results. Null when only one import exists. */
+  markMovement: DcMarkMovementResult | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +132,14 @@ const n = (v: number | null | undefined): number => v ?? 0;
 const fmt3 = (v: number | null | undefined): string => (v ?? 0).toFixed(3);
 
 const TOTAL_ROW_RE = /\b(sub\s*total|grand\s*total|total)\b/i;
+
+/** Returns a YYYY-MM-DD calendar day key for an import, using report_date if set
+ *  and falling back to the UTC date of created_at for old-format imports. */
+function importDayKey(reportDate: string | null, createdAt: Date | string): string {
+  if (reportDate && /^\d{4}-\d{2}-\d{2}$/.test(reportDate)) return reportDate;
+  const d = createdAt instanceof Date ? createdAt : new Date(createdAt as string);
+  return d.toISOString().slice(0, 10);
+}
 
 function dcHardRule(
   id: string,
@@ -163,7 +223,12 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     wipUnclassifiedMarks: 0,
     wipTotalMt: 0,
     wipTotalMarks: 0,
+    ntltBuckets: [],
+    ntltUnclassifiedMarks: 0,
+    ntltTotalMt: 0,
+    ntltTotalMarks: 0,
     dc0StoredTotalRows: 0,
+    markMovement: null,
   };
 
   if (!orData) {
@@ -287,17 +352,30 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
   // DC6 gate: delegate to the shared hasTypeData helper (one definition in dispatch.ts).
   const wipHasTypeData = latestWip ? await hasTypeData(latestWip.id) : false;
 
+  // NTLT accumulator variables (DC16).
+  const NTLT_STAGE_KEYS = ["notStarted", "ts", "galvanising", "y", "fg"] as const;
+  const NTLT_STAGE_LABELS: Record<string, string> = {
+    notStarted: "Not Started",
+    ts: "TS",
+    galvanising: "Galvanising",
+    y: "Y",
+    fg: "Finished Goods",
+  };
+  const ntltBucketCounts: Record<string, { mt: number; marks: number }> = Object.fromEntries(
+    NTLT_STAGE_KEYS.map((k) => [k, { mt: 0, marks: 0 }]),
+  );
+  let ntltTotalMt = 0;
+  let ntltTotalMarks = 0;
+
+  // Predecessor import for DC12–DC14 (fetched in parallel below if applicable).
+  let prevWip: { id: number; reportDate: string | null; createdAt: Date | string } | null = null;
+
   if (latestWip && wipHasTypeData) {
-    // Scoped to TLT only — the six-bucket model is a TLT model; NTLT uses a
-    // separate five-stage model (Y is a distinct stage, not FG). Scoping to TLT
-    // makes the reported total tie to the 10,723.709 MT / 59,171 marks figure
-    // that users see on Overview and Project Wise.
-    //
-    // Read raw type/status from import_rows only — no COALESCE fallback to pool.
-    // Using import_rows columns directly guarantees we classify only what the
-    // file actually stored, so an all-NULL import fails DC6 instead of passing.
-    const wipRawRows = await db
-      .select({
+    // Three parallel queries: TLT rows (DC6), NTLT rows (DC16), predecessor import (DC12–DC14).
+    // Read raw type/status from import_rows only — no COALESCE fallback to pool (we've gated).
+    const [wipTltRows, wipNtltRows, prevWipArr] = await Promise.all([
+      // TLT rows for the six-bucket DC6 partition.
+      db.select({
         jobCardType: importRowsTable.jobCardType,
         jobCardStatus: importRowsTable.jobCardStatus,
         contractor: recordPoolTable.contractor,
@@ -305,16 +383,44 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
         balanceWt: recordPoolTable.balanceWt,
         copies: importRowsTable.copies,
       })
-      .from(importRowsTable)
-      .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
-      .where(
-        and(
-          eq(importRowsTable.importId, latestWip.id),
-          eq(recordPoolTable.category, "TLT"),
-        ),
-      );
+        .from(importRowsTable)
+        .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+        .where(and(eq(importRowsTable.importId, latestWip.id), eq(recordPoolTable.category, "TLT"))),
 
-    for (const r of wipRawRows) {
+      // NTLT rows for the five-stage DC16 partition.
+      db.select({
+        jobCardType: importRowsTable.jobCardType,
+        jobCardStatus: importRowsTable.jobCardStatus,
+        activity: recordPoolTable.activity,
+        contractor: recordPoolTable.contractor,
+        balanceWt: recordPoolTable.balanceWt,
+        copies: importRowsTable.copies,
+      })
+        .from(importRowsTable)
+        .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+        .where(and(eq(importRowsTable.importId, latestWip.id), sql`${recordPoolTable.category} != 'TLT'`)),
+
+      // Most-recent predecessor import (same sort as loadLatestWipImport, shifted by one).
+      db.select({ id: importsTable.id, reportDate: importsTable.reportDate, createdAt: importsTable.createdAt })
+        .from(importsTable)
+        .where(
+          latestWip.reportDate != null
+            ? or(
+                lt(importsTable.reportDate, latestWip.reportDate),
+                and(eq(importsTable.reportDate, latestWip.reportDate), lt(importsTable.id, latestWip.id)),
+              )
+            : lt(importsTable.id, latestWip.id),
+        )
+        .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
+        .limit(1),
+    ]);
+
+    prevWip = prevWipArr[0] ?? null;
+
+    // -----------------------------------------------------------------------
+    // DC6 — TLT six-bucket partition
+    // -----------------------------------------------------------------------
+    for (const r of wipTltRows) {
       const copies = r.copies ?? 1;
       const tp = (r.jobCardType ?? "").trim().toLowerCase();
       const st = (r.jobCardStatus ?? "").trim().toLowerCase();
@@ -343,14 +449,24 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
         bucketCounts["Galvanising"].marks += copies;
       } else if (tp === "fg pending for dispatch") {
         // Classify on Type alone — activity is irrelevant for FG.
-        // An FG row with a non-blank activity would land in FG on every other
-        // page; requiring a === "" here would spuriously fail DC6 against a
-        // correct page.
         bucketCounts["FG (WIP file)"].mt += wMt;
         bucketCounts["FG (WIP file)"].marks += copies;
       } else {
         wipUnclassifiedMarks += copies;
       }
+    }
+
+    // -----------------------------------------------------------------------
+    // DC16 — NTLT five-stage partition
+    // -----------------------------------------------------------------------
+    for (const r of wipNtltRows) {
+      const copies = r.copies ?? 1;
+      const wMt = ((r.balanceWt ?? 0) * copies) / 1000;
+      ntltTotalMt += wMt;
+      ntltTotalMarks += copies;
+      const stage = classifyNtltStage(r);
+      ntltBucketCounts[stage].mt += wMt;
+      ntltBucketCounts[stage].marks += copies;
     }
   }
 
@@ -381,6 +497,233 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
         pass: false,
         violations: [],
       };
+
+  // -------------------------------------------------------------------------
+  // DC16 — NTLT five-stage partition assembly
+  // -------------------------------------------------------------------------
+  const ntltBuckets: DcWipBucket[] = NTLT_STAGE_KEYS.map((key) => ({
+    name: NTLT_STAGE_LABELS[key],
+    mt: ntltBucketCounts[key].mt,
+    marks: ntltBucketCounts[key].marks,
+  }));
+  // classifyNtltStage always returns a valid stage — unclassified is structurally zero.
+  const ntltUnclassifiedMarks = 0;
+
+  const dc16: DcHardRule = wipHasTypeData
+    ? {
+        id: "DC16",
+        label:
+          "WIP (NTLT only): the five stages (Not Started, TS, Galvanising, Y, Finished Goods) sum to " +
+          "the total NTLT balance with zero unclassified copies. NTLT rows carry blank project code and " +
+          "alias and cannot be joined to the Order Review — this is a WIP-only check.",
+        toleranceMt: 0.001,
+        structuresEvaluated: ntltTotalMarks,
+        violationCount: ntltUnclassifiedMarks,
+        pass: ntltUnclassifiedMarks === 0,
+        violations: [],
+      }
+    : {
+        id: "DC16",
+        label:
+          `WIP NTLT partition — NOT EVALUATED. WIP import ` +
+          `${latestWip?.id != null ? `#${latestWip.id}` : ""} pre-dates per-row job_card_type storage. ` +
+          `Re-upload the WIP file to enable this check.`,
+        toleranceMt: 0.001,
+        structuresEvaluated: 0,
+        violationCount: 0,
+        pass: false,
+        violations: [],
+      };
+
+  // -------------------------------------------------------------------------
+  // DC12–DC14 — cross-import mark movement
+  // Uses identityRawKey(markId, jobCardNo) + buildIdentityBridge for continuity.
+  // -------------------------------------------------------------------------
+  let markMovement: DcMarkMovementResult | null = null;
+
+  if (latestWip && !wipHasTypeData) {
+    // Curr import is gated — record why movement cannot be computed.
+    markMovement = {
+      available: false,
+      reason:
+        `WIP import #${latestWip.id} pre-dates per-row Type/Status storage. ` +
+        `Mark movement cannot be computed.`,
+      prevImportId: null,
+      currImportId: latestWip.id,
+      prevDate: null,
+      currDate: importDayKey(latestWip.reportDate, latestWip.createdAt),
+    };
+  } else if (latestWip && prevWip) {
+    const currDayKey = importDayKey(latestWip.reportDate, latestWip.createdAt);
+    const prevDayKey = importDayKey(prevWip.reportDate, prevWip.createdAt);
+
+    const prevHasType = await hasTypeData(prevWip.id);
+    if (!prevHasType) {
+      markMovement = {
+        available: false,
+        reason:
+          `Predecessor import #${prevWip.id} (${prevDayKey}) pre-dates per-row Type/Status storage. ` +
+          `Mark movement cannot be computed for the pair #${prevWip.id} → #${latestWip.id}.`,
+        prevImportId: prevWip.id,
+        currImportId: latestWip.id,
+        prevDate: prevDayKey,
+        currDate: currDayKey,
+      };
+    } else {
+      // Both imports have type data — run full movement analysis.
+      type MvRow = {
+        importId: number;
+        markId: string;
+        jobCardNo: string | null;
+        activity: string | null;
+        jobCardType: string | null;
+        balanceWt: number;
+        copies: number | null;
+      };
+      const mvRawRows: MvRow[] = await db
+        .select({
+          importId: importRowsTable.importId,
+          markId: recordPoolTable.markId,
+          jobCardNo: recordPoolTable.jobCardNo,
+          activity: recordPoolTable.activity,
+          jobCardType: importRowsTable.jobCardType,
+          balanceWt: recordPoolTable.balanceWt,
+          copies: importRowsTable.copies,
+        })
+        .from(importRowsTable)
+        .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+        .where(inArray(importRowsTable.importId, [latestWip.id, prevWip.id]));
+
+      const prevRawRows = mvRawRows.filter((r) => r.importId === prevWip!.id);
+      const currRawRows = mvRawRows.filter((r) => r.importId === latestWip!.id);
+
+      // Build identity bridge: handle job-card reissue on TLT stage advances.
+      const bridges = buildIdentityBridge([prevRawRows, currRawRows]);
+      const prevBridge = bridges[0];
+      const currBridge = bridges[1];
+
+      // Activity rank for direction detection.
+      // FG (Type = "fg pending for dispatch") sits above Y (rank 11) at rank 12.
+      // Unknown activity code → rank -1 (direction undetermined, skipped).
+      const FG_RANK = PROCESS_SEQUENCE.length; // 12
+      function actRank(r: Pick<MvRow, "activity" | "jobCardType">): number {
+        if ((r.jobCardType ?? "").trim().toLowerCase() === "fg pending for dispatch") return FG_RANK;
+        const act = (r.activity ?? "").trim().toUpperCase();
+        const idx = (PROCESS_SEQUENCE as readonly string[]).indexOf(act);
+        return idx >= 0 ? idx : -1;
+      }
+      function actLabel(r: Pick<MvRow, "activity" | "jobCardType">): string {
+        if ((r.jobCardType ?? "").trim().toLowerCase() === "fg pending for dispatch") return "FG";
+        return (r.activity ?? "").trim().toUpperCase() || "?";
+      }
+
+      // Build canonical-key state maps. When a key appears multiple times in one
+      // import (copies at different activities), keep the row with the highest
+      // copies-weighted raw weight — same mark, dominant activity.
+      type MvState = { rank: number; label: string; wt: number; copies: number };
+      const prevMap = new Map<string, MvState>();
+      const currMap = new Map<string, MvState>();
+
+      for (const r of prevRawRows) {
+        const canon = prevBridge.get(identityRawKey(r.markId, r.jobCardNo)) ?? identityRawKey(r.markId, r.jobCardNo);
+        const copies = r.copies ?? 1;
+        const wt = (r.balanceWt ?? 0) * copies;
+        const ex = prevMap.get(canon);
+        if (!ex || wt > ex.wt) {
+          prevMap.set(canon, { rank: actRank(r), label: actLabel(r), wt, copies });
+        }
+      }
+      for (const r of currRawRows) {
+        const canon = currBridge.get(identityRawKey(r.markId, r.jobCardNo)) ?? identityRawKey(r.markId, r.jobCardNo);
+        const copies = r.copies ?? 1;
+        const wt = (r.balanceWt ?? 0) * copies;
+        const ex = currMap.get(canon);
+        if (!ex || wt > ex.wt) {
+          currMap.set(canon, { rank: actRank(r), label: actLabel(r), wt, copies });
+        }
+      }
+
+      // Walk prev marks, classify movement.
+      let trackedMarks = 0;
+      let forwardMoves = 0;
+      let backwardMoves = 0;
+      let backwardWt = 0;
+      const backTransMap = new Map<string, { count: number; wt: number }>();
+      let leavingFgCount = 0;
+      let leavingFgWt = 0;
+      const leavingFgTransMap = new Map<string, { count: number; wt: number }>();
+      let vanishedCount = 0;
+      let vanishedWt = 0;
+      const vanishedActMap = new Map<string, { count: number; wt: number }>();
+
+      for (const [key, prevState] of prevMap) {
+        const currState = currMap.get(key);
+        if (!currState) {
+          // DC14 — mark absent from curr.  If prev was FG, this is a normal dispatch.
+          if (prevState.rank < FG_RANK && prevState.rank !== -1) {
+            vanishedCount++;
+            vanishedWt += prevState.wt;
+            const ex = vanishedActMap.get(prevState.label) ?? { count: 0, wt: 0 };
+            vanishedActMap.set(prevState.label, { count: ex.count + prevState.copies, wt: ex.wt + prevState.wt });
+          }
+          continue;
+        }
+
+        trackedMarks++;
+        if (prevState.rank === -1 || currState.rank === -1) continue; // direction undetermined
+
+        if (currState.rank > prevState.rank) {
+          forwardMoves++;
+        } else if (currState.rank < prevState.rank) {
+          // DC12 — backward move (rework).
+          backwardMoves++;
+          backwardWt += prevState.wt;
+          const tk = `${prevState.label}\u0001${currState.label}`;
+          const ex = backTransMap.get(tk) ?? { count: 0, wt: 0 };
+          backTransMap.set(tk, { count: ex.count + prevState.copies, wt: ex.wt + prevState.wt });
+
+          // DC13 — specifically leaving Finished Goods.
+          if (prevState.rank === FG_RANK) {
+            leavingFgCount++;
+            leavingFgWt += prevState.wt;
+            const exFg = leavingFgTransMap.get(tk) ?? { count: 0, wt: 0 };
+            leavingFgTransMap.set(tk, { count: exFg.count + prevState.copies, wt: exFg.wt + prevState.wt });
+          }
+        }
+        // else: same rank (no activity change)
+      }
+
+      const toTransitions = (m: Map<string, { count: number; wt: number }>): DcTransition[] =>
+        [...m.entries()]
+          .map(([k, v]) => {
+            const sep = k.indexOf("\u0001");
+            return { from: k.slice(0, sep), to: k.slice(sep + 1), count: v.count, weightMt: v.wt / 1000 };
+          })
+          .sort((a, b) => b.weightMt - a.weightMt);
+
+      markMovement = {
+        available: true,
+        prevImportId: prevWip.id,
+        currImportId: latestWip.id,
+        prevDate: prevDayKey,
+        currDate: currDayKey,
+        identityKey: "markId+jobCardNo via identityBridge",
+        trackedMarks,
+        forwardMoves,
+        backwardMoves,
+        backwardWeightMt: backwardWt / 1000,
+        backwardTransitions: toTransitions(backTransMap),
+        leavingFgCount,
+        leavingFgWeightMt: leavingFgWt / 1000,
+        leavingFgTransitions: toTransitions(leavingFgTransMap),
+        vanishedCount,
+        vanishedWeightMt: vanishedWt / 1000,
+        vanishedByLastActivity: [...vanishedActMap.entries()]
+          .map(([activity, v]) => ({ activity, count: v.count, weightMt: v.wt / 1000 }))
+          .sort((a, b) => b.weightMt - a.weightMt),
+      };
+    }
+  }
 
   // -------------------------------------------------------------------------
   // DC7–DC11 — Warnings (conditions that occur legitimately; report counts)
@@ -451,7 +794,7 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
   // -------------------------------------------------------------------------
   // Assemble response
   // -------------------------------------------------------------------------
-  const allHardRules: DcHardRule[] = [r_dc1, r_dc2, r_dc3, r_dc4, r_dc5, dc6];
+  const allHardRules: DcHardRule[] = [r_dc1, r_dc2, r_dc3, r_dc4, r_dc5, dc6, dc16];
   const hardRuleFailures = allHardRules.filter((r) => !r.pass).length;
 
   const response: DataCheckResponse = {
@@ -468,7 +811,12 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     wipUnclassifiedMarks,
     wipTotalMt,
     wipTotalMarks,
+    ntltBuckets,
+    ntltUnclassifiedMarks,
+    ntltTotalMt,
+    ntltTotalMarks,
     dc0StoredTotalRows: dc0Count,
+    markMovement,
   };
 
   res.json(response);
