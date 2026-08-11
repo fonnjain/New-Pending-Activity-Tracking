@@ -459,6 +459,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
   const seenStructures = new Set<string>();
   let rowsRead = 0;
   let skippedTotals = 0;
+  let skippedBanner = 0;
   let missingStructure = 0;
   let missingStructureWtMt = 0;
   let totalWeightMt = 0;
@@ -526,7 +527,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
       skippedTotals++;
       continue;
     }
-    if (bannerHit) continue;
+    if (bannerHit) { skippedBanner++; continue; }
 
     // Forward-fill structure across BOM rows within a project.
     // The first (Proto) row has the Tower Type Code in Col C; Mass/Pre continuation
@@ -614,6 +615,7 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
     totalReleaseMt,
     totalFileDespatchMt,
     skippedTotals,
+    skippedBanner,
     missingStructure,
     ...(missingStructureWtMt > 0 && { missingStructureWtMt }),
     // WIP join coverage needs DB context; enriched by computeWipCoverage at

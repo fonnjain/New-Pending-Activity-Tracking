@@ -580,8 +580,16 @@ function DataViewContent() {
                         </>
                       )}
                       {o.summary.missingStructure > 0
-                        ? <span className="text-destructive font-medium">{o.summary.missingStructure} orphaned row{o.summary.missingStructure === 1 ? "" : "s"}{o.summary.missingStructureWtMt != null ? ` · ${o.summary.missingStructureWtMt.toFixed(3)} MT` : ""} missing structure</span>
-                        : <span>0 missing structure</span>
+                        ? <span className="text-destructive font-medium">{o.summary.missingStructure} orphaned row{o.summary.missingStructure === 1 ? "" : "s"}{o.summary.missingStructureWtMt != null ? ` · ${o.summary.missingStructureWtMt.toFixed(3)} MT` : ""} (no structure — excluded)</span>
+                        : null
+                      }
+                      {(o.summary.skippedBanner ?? 0) > 0
+                        ? <span className="text-amber-600 dark:text-amber-400 font-medium">{o.summary.skippedBanner} banner row{o.summary.skippedBanner === 1 ? "" : "s"} skipped</span>
+                        : null
+                      }
+                      {o.summary.missingStructure === 0 && (o.summary.skippedBanner ?? 0) === 0
+                        ? <span>0 skipped rows</span>
+                        : null
                       }
                     </div>
                   </div>

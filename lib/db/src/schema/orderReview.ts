@@ -25,6 +25,9 @@ export interface OrderReviewSummary {
   // Total Order Qty Weight (MT) of missingStructure rows. Optional — absent
   // for Order Review files parsed before this field was added.
   missingStructureWtMt?: number;
+  // Count of pure project-banner rows that were skipped (bannerHit path).
+  // These have no structure and no numeric data; counted for transparency.
+  skippedBanner?: number;
   // Join coverage of this file's (project, structure) keys against the newest
   // WIP import's structures. Computed where WIP context is available (stage +
   // ingest); 0 from a bare parse with no DB context.

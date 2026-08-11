@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { cutoffSql, loadValidFrom } from "./cutoff";
 import {
   db,
@@ -573,7 +573,13 @@ export async function loadLatestOrderReview(): Promise<{
   const [latest] = await db
     .select()
     .from(orderReviewImportsTable)
-    .orderBy(desc(orderReviewImportsTable.id))
+    // Sort by as_on_date (the date the source file represents) rather than the
+    // database row id or created_at.  The bulk-upload on 10-Aug assigned higher
+    // ids to older-dated files, so id order is not date order.  NULLS LAST
+    // ensures imports without an as_on_date fall below imports that have one;
+    // the secondary id DESC tiebreaker gives a deterministic winner when two
+    // imports share the same as_on_date.
+    .orderBy(sql`${orderReviewImportsTable.asOnDate} DESC NULLS LAST`, desc(orderReviewImportsTable.id))
     .limit(1);
   if (!latest) return null;
   const rows = await db

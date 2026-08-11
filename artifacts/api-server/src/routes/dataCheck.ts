@@ -397,6 +397,27 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     (r) => n(r.galvMt) - n(r.inspectionMt),
   );
 
+  // DC12: any of L/M/N/O/Q below zero — a progress figure should never be negative.
+  // The worst value reported is the most negative figure across all five fields for
+  // the worst-offending structure.
+  const r_dc12 = dcWarning(
+    "DC12",
+    "Negative progress value — Progress Release (L), Fabrication (M), Galvanising (N), Inspection (O) or Despatch (Q) is below zero. A progress figure should never be negative.",
+    currentOrRows,
+    (r) =>
+      [r.releaseMt, r.fabMt, r.galvMt, r.inspectionMt, r.fileDespatchMt].some(
+        (v) => v != null && v < -0.001,
+      ),
+    (r) =>
+      Math.min(
+        n(r.releaseMt),
+        n(r.fabMt),
+        n(r.galvMt),
+        n(r.inspectionMt),
+        n(r.fileDespatchMt),
+      ),
+  );
+
   // -------------------------------------------------------------------------
   // Assemble response
   // -------------------------------------------------------------------------
@@ -411,7 +432,7 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     structuresEvaluated: currentOrRows.length,
     hardRuleFailures,
     hardRules: allHardRules,
-    warnings: [r_dc7, r_dc8, r_dc9, r_dc10, r_dc11],
+    warnings: [r_dc7, r_dc8, r_dc9, r_dc10, r_dc11, r_dc12],
     wipBuckets,
     wipUnclassifiedMarks,
     wipTotalMt,

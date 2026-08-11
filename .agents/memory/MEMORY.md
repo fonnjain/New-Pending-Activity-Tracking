@@ -1,4 +1,5 @@
-- [Data Check tab (DC0–DC11)](tracker-data-check.md) — OR arithmetic hard rules + WIP bucket partition check; DC0 parser fix; route + UI pattern.
+- [Data Check tab (DC0–DC12)](tracker-data-check.md) — OR arithmetic hard rules + WIP bucket partition check; DC0 parser fix; DC12 negative-progress warning; route + UI pattern.
+- [OR selection by as_on_date](tracker-or-selection.md) — loadLatestOrderReview must sort by as_on_date DESC NULLS LAST, id DESC — bulk uploads assign higher ids to older-dated files, so id order ≠ date order.
 - [hasTypeData field on Import](tracker-has-type-data.md) — old-ingest imports (ids 5–32) lack per-row classification; field computed live via import_rows subquery; badge + warning in data.tsx import picker.
 - [Balance & Activity Tracker](tracker-app.md) — xlsx-driven append-only import/records app; live ageing, jsonb summary, cross-upload hash dedup, parse rules.
 - [Job/Batch combo filter key space](tracker-job-batch-combo-filter.md) — activeJobSet contains combo keys ("821 - Z"); every component-level has() must check plain code AND combo key; three-filter design (Jobs/Batch/Combo).
