@@ -2500,6 +2500,14 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ChangeSummary"
             - type: "null"
+        hasTypeData:
+          type: boolean
+          description: >
+            True when this import has per-row job_card_type / job_card_status data
+            stored in import_rows (i.e. it was ingested with the current code that
+            writes those columns). False for imports uploaded before that code
+            existed — their classification is fabricated via COALESCE from the pool
+            and must never be shown as bucket figures.
       required:
         - id
         - label
@@ -2509,6 +2517,7 @@ components:
         - createdAt
         - summary
         - changeSummary
+        - hasTypeData
     ChangeItem:
       type: object
       properties:

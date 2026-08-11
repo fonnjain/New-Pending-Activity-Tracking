@@ -746,7 +746,19 @@ router.get("/imports", async (req, res): Promise<void> => {
     .from(importsTable)
     .where(cutoffSql(cutoff))
     .orderBy(desc(importsTable.createdAt));
-  res.json(rows);
+
+  // Determine which imports have per-row type data stored in import_rows.
+  // Old-format imports (ingested before job_card_type was written) have 100%
+  // NULL job_card_type in import_rows; their bucket figures are fabricated via
+  // COALESCE from the pool and must never be presented as real classification.
+  const withTypeRows = await db
+    .selectDistinct({ importId: importRowsTable.importId })
+    .from(importRowsTable)
+    .where(sql`${importRowsTable.jobCardType} IS NOT NULL`);
+  const hasTypeSet = new Set(withTypeRows.map((r) => r.importId));
+
+  const result = rows.map((r) => ({ ...r, hasTypeData: hasTypeSet.has(r.id) }));
+  res.json(result);
 });
 
 router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<void> => {

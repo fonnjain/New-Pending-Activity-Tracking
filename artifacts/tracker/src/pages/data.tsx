@@ -378,6 +378,18 @@ function DataViewContent() {
         </div>
       )}
 
+      {selectedImport && !selectedImport.hasTypeData && (
+        <div className="rounded-md border border-amber-400/60 bg-amber-50 dark:bg-amber-900/20 p-3 flex gap-2 items-start">
+          <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="text-sm text-amber-800 dark:text-amber-300">
+            <span className="font-semibold">Classification data not available for this import.</span>{" "}
+            This file was uploaded before per-row Type/Status tracking was added.
+            WIP bucket figures (Initial, TS, Galvanising, etc.) cannot be computed for this import.
+            Re-upload the source WIP file to restore full classification.
+          </div>
+        </div>
+      )}
+
       {selectedImport && (
         <Card className="border-border">
           <CardHeader className="pb-2">
@@ -514,9 +526,15 @@ function DataViewContent() {
                     className="flex-1 cursor-pointer flex flex-col gap-1"
                     onClick={() => setSelectedImportId(s.id)}
                   >
-                    <div className="font-bold flex items-center gap-2">
+                    <div className="font-bold flex items-center gap-2 flex-wrap">
                       {s.label || s.sourceFilename}
                       {selectedImportId === s.id && <CheckCircle2 className="w-4 h-4 text-primary" />}
+                      {!s.hasTypeData && (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                          <AlertTriangle className="w-3 h-3" />
+                          No classification data
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
                       <span>{formatDate(s.createdAt)}</span>
