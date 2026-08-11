@@ -387,15 +387,6 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     (r) => n(r.fabMt) - n(r.galvMt), // negative = excess galv
   );
 
-  // DC11: derived Balance Inspection (N − O) ≠ 0
-  // Col V in the source file is systematically wrong/empty; we use N − O.
-  const r_dc11 = dcWarning(
-    "DC11",
-    "Balance Inspection (derived: N − O = Galvanising − Inspection) ≠ 0. Col V in the source file is unreliable; this warning uses the derived value to detect the imbalance. Nothing in the app reads Col V.",
-    currentOrRows,
-    (r) => Math.abs(n(r.galvMt) - n(r.inspectionMt)) > 0.001,
-    (r) => n(r.galvMt) - n(r.inspectionMt),
-  );
 
   // DC15: any of L/M/N/O/Q below zero — a progress figure should never be negative.
   // The worst value reported is the most negative figure across all five fields for
@@ -432,7 +423,7 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     structuresEvaluated: currentOrRows.length,
     hardRuleFailures,
     hardRules: allHardRules,
-    warnings: [r_dc7, r_dc8, r_dc9, r_dc10, r_dc11, r_dc15],
+    warnings: [r_dc7, r_dc8, r_dc9, r_dc10, r_dc15],
     wipBuckets,
     wipUnclassifiedMarks,
     wipTotalMt,
