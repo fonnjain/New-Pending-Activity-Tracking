@@ -1244,11 +1244,17 @@ function GeneratedOrderReviewContent() {
         // Fall back to sum(released) when OR is unavailable.
         const genProgRelease = woQty != null ? woQty - genBalRelease : toMt(sum(released));
         const genBalFab      = toMt(sum(released.filter((r) => GEN_FAB_ACTS.has(actOf(r)))));
-        const genProgFab     = genProgRelease - genBalFab;
         const genBalGalv     = toMt(sum(released.filter((r) => GEN_GALV_ACTS.has(actOf(r)))));
-        const genProgGalv    = genProgFab - genBalGalv;
         const fgWt           = toMt(sum(fg));
         const genProgFg      = fgWt; // WIP "FG Pending For Dispatch" weight
+        // Pure-WIP derivation — never mixes OR and WIP values in the same subtraction.
+        // genProgFab  = weight past fabrication  = in galv activities + FG.
+        // genProgGalv = weight past galvanising   = in FG only.
+        // Replaces the former chain (genProgRelease − genBalFab, genProgFab − genBalGalv)
+        // which produced kg-rounding negatives when OR's MT figures and WIP's kg figures
+        // diverged on nearly-complete structures (35 rows, −0.111 MT total).
+        const genProgFab     = genBalGalv + fgWt;
+        const genProgGalv    = fgWt;
         const totalWt        = toMt(sum(marks));
         // OR FG = Galvanising − Despatch from OR file.
         // Kept as-is even when negative (Despatch > Galvanising is a source-data
@@ -1260,7 +1266,9 @@ function GeneratedOrderReviewContent() {
           : null;
 
         // BOM label derived from job card prefix (P→Proto, 0→Mass, 95% dominance).
-        const total    = marks.length;
+        // Use copies-expanded length for the dominance ratio (higher-copies P-cards
+        // are weighted correctly); markCount uses distinct markId for the Marks column.
+        const total    = marks.length; // copies-expanded count, BOM dominance only
         const pCount   = marks.filter((r) => (r.jobCardNo ?? "").startsWith("P")).length;
         const z0Count  = marks.filter((r) => /^0/.test(r.jobCardNo ?? "")).length;
         const bomDerived: "Proto" | "Mass" | "Mixed" =
@@ -1280,7 +1288,7 @@ function GeneratedOrderReviewContent() {
           structure: struct,
           subType: marks[0]?.towerSubType ?? null,
           mfcBatch: marks[0]?.mfcBatch ?? "Z",
-          markCount: marks.length,
+          markCount: new Set(marks.map((r) => r.markId)).size, // distinct marks, not copies
           isNew: isFirstTime || (projWoQty > 0 && releasePct < 5),
           woOrderQtyMt: woQty,
           genBalRelease, genProgRelease,
