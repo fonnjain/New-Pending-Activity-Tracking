@@ -1,0 +1,147 @@
+# Extend the `has_type_data` gate to the four remaining pages
+
+You already built this for DC6 in `dataCheck.ts` — read `import_rows.job_card_type` and
+`job_card_status` directly, probe whether the import has any non-null type row, and show an
+amber N/A card instead of figures when it does not. That was the right shape. Apply the same
+pattern to the four pages that still fall back to `record_pool`.
+
+**No re-ingest. No file uploads. No stored value changes.** This is a display gate only.
+
+---
+
+## THE PROBLEM
+
+Imports 5 through 32 were written by the pre-01-Aug ingest code, which never stored `Type`
+(Col A) or `Job Card Status` (Col G) in `import_rows`. Every row of those 21 imports has
+`job_card_type = NULL`. The queries then do:
+
+```sql
+COALESCE(import_rows.job_card_type, record_pool.job_card_type)
+```
+
+and fall through to `record_pool` — which the 10-Aug bulk upload has since rewritten. A mark
+that was at Cutting on 21-Jul and is at Galvanising today is classified as Galvanising **in the
+21-Jul view**. The page assembles a snapshot of a date that never existed.
+
+Measured effect on import 30 (21-Jul):
+
+```
+app shows      Release Balance 2,512.230 MT,  369.737 MT unclassified
+source file    Release Balance 2,538.863 MT,        0 MT unclassified
+```
+
+Import 9 (04-Jul) is the worst case: 22,897 of its 39,305 rows inherit a type this way,
+producing 6,087 MT of fabricated classification.
+
+**This is now urgent because DC6 already refuses to evaluate these imports while the pages still
+show figures for them.** On the same import, the Data Check tab says "classification data not
+available" and Release Balance shows a number. The app contradicts itself.
+
+## THE 21 AFFECTED IMPORTS
+
+```
+5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20, 21, 22, 25, 26, 27, 28, 29, 30, 32
+```
+
+## THE 25 UNAFFECTED IMPORTS — these must not change in any way
+
+```
+35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
+53, 54, 55, 56, 57, 58, 59
+```
+
+---
+
+## A. Extract the probe into one shared helper
+
+Put it next to `loadLatestWipImport()` in `dispatch.ts`, or wherever `dataCheck.ts` currently
+holds it — but **one definition, imported everywhere**. We consolidated the activity sets into
+`lib/domain` for exactly this reason; do not let a second copy of this appear.
+
+```
+hasTypeData(importId) =
+  EXISTS (SELECT 1 FROM import_rows
+          WHERE import_id = <importId> AND job_card_type IS NOT NULL)
+```
+
+If `dataCheck.ts` already has this inline, move it to the shared location and have `dataCheck.ts`
+import it too.
+
+## B. Apply it at these four call sites
+
+| File | Sites | Page affected |
+|---|---|---|
+| `lib/parseWipReleaseBalance.ts` | 3 COALESCE expressions | Release Balance |
+| `routes/erpRules.ts` | lines 125, 126, 134 | ERP Rules |
+| `routes/fabricationProjectCompletion.ts` | lines 221, 222, 224, plus 3 more | Fabrication Project Completion |
+| `routes/productionMovement.ts` | line 299 | Production Movement |
+
+For each: when `hasTypeData` is **false**, return no figures and a reason string. When it is
+**true**, leave the query exactly as it is — the COALESCE is correct there, because it handles
+the occasional individually-null row inside an otherwise good import.
+
+## C. Production Movement needs one extra rule
+
+This one is not a historical page — it computes day-over-day change, so a gated import can
+poison a current comparison. If **either** side of a movement pair lacks type data, do not
+compute the movement. Say which import is unusable and why. Do not silently substitute the next
+import along, and do not report zero movement.
+
+## D. Surface it in the import picker
+
+Mark the 21 gated imports visibly wherever an import can be selected, so a user does not choose
+one and land on an empty page with no explanation. Mark-level and weight-level views that do not
+depend on Type or Status may keep working normally for these imports — only the
+classification-dependent figures are withheld.
+
+## E. Delete the four duplicate imports
+
+```
+(11, 12)  same file, 06-Jul        (35, 37)  same file, 31-Jul
+(14, 15)  same file, 07-Jul        (36, 38)  same file, 01-Aug
+```
+
+Keep the lower id of each pair. Note that 35 and 36 are in the unaffected list — deleting 37 and
+38 must not change any figure, since they are byte-identical duplicates.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT re-ingest, re-upload or re-process any source file.
+- Do NOT modify `record_pool`. It is a current-state store; the historical state exists only in
+  the source files and is not being recovered.
+- Do NOT delete the COALESCE where `has_type_data` is true.
+- Do NOT change bucket definitions, the parser, hashing, dedup, `copies` handling, ageing,
+  activity classification, or the activity sets just consolidated into `lib/domain`.
+- Do NOT show a fallback figure behind a toggle or a "best estimate" label. A fabricated figure
+  with a caveat is still a fabricated figure.
+- Do NOT touch the Project Wise MFC work, `loadLatestWipImport()`, the predecessor queries, or
+  DC0 to DC15.
+
+## ACCEPTANCE CHECK
+
+**Import 58 (10-Aug) unchanged on every page:**
+
+```
+Release 2,125.871   Awaiting 915.856   Cutting 1,308.031   Quality Check 2,112.110
+Galvanising 1,651.301   FG (WIP) 2,610.539   TOTAL 10,723.709 MT / 59,171 marks
+Marks per bucket: 10,552 / 4,577 / 8,595 / 16,152 / 9,774 / 9,521
+```
+
+**Import 46 (24-Jul) unchanged** — it is a new-ingest import and must be untouched:
+
+```
+2,495.664 / 877.873 / 1,383.924 / 2,077.853 / 2,213.517 / 1,996.753,  0 unclassified
+```
+
+**Import 30 (21-Jul)** now shows "classification data not available" on Release Balance, ERP
+Rules and Fabrication Project Completion, instead of its current 2,512.230 MT and 369.737 MT
+unclassified.
+
+**Production Movement** refuses any pair involving imports 5 to 32 and names the unusable
+import.
+
+**Import count** goes from 46 to 42 with no duplicate pairs remaining.
+
+Paste the import list showing which are gated, and the two acceptance blocks above.
