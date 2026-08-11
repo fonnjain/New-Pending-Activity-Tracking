@@ -351,12 +351,16 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
   // DC7–DC11 — Warnings (conditions that occur legitimately; report counts)
   // -------------------------------------------------------------------------
 
-  // DC7: L > J (released beyond WO)
+  // DC7: L > J (released beyond WO) — tolerance 10 kg.
+  // 1–5 kg excess is weight-per-set rounding noise at 3 decimal places (173
+  // structures sit at exactly 1.000 kg over).  At 10 kg the rule flags ~51
+  // structures that are genuinely worth investigating; at 1 kg it flags 316
+  // (mostly noise); at 0 kg it flags 463 and means nothing.
   const r_dc7 = dcWarning(
     "DC7",
-    "Progress Release (L) > WO Order Qty (J) — released beyond the work order.",
+    "Progress Release (L) > WO Order Qty (J) by more than 10 kg — released materially beyond the work order (sub-10 kg excess is weight-per-set rounding noise).",
     currentOrRows,
-    (r) => n(r.releaseMt) > n(r.woOrderQtyMt) + 0.001,
+    (r) => n(r.releaseMt) > n(r.woOrderQtyMt) + 0.010,
     (r) => n(r.releaseMt) - n(r.woOrderQtyMt),
   );
 
