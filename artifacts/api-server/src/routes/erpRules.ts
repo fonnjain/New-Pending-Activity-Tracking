@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db, importRowsTable, recordPoolTable, importsTable, orderReviewRowsTable } from "@workspace/db";
 import { desc, eq, sql } from "drizzle-orm";
+import { QC_ACTIVITY_SET, GALV_ACTIVITY_SET } from "@workspace/domain";
 import { loadLatestWipImport } from "../lib/dispatch";
 
 const router: IRouter = Router();
@@ -91,9 +92,7 @@ const TYPE_ALLOWED = new Set([
   "fg pending for dispatch",
 ]);
 const STATUS_ALLOWED = new Set(["initial", "authorized"]);
-const QC_ACTS = new Set(["HG", "RFI", "NH", "B", "HAB", "W", "Q", "TS"]);
-const GALV_ACTS = new Set(["G", "GB", "Y"]);
-const TLT_WIP_ACTS = new Set([...QC_ACTS, ...GALV_ACTS]);
+const TLT_WIP_ACTS = new Set([...QC_ACTIVITY_SET, ...GALV_ACTIVITY_SET]);
 
 // ---------------------------------------------------------------------------
 // GET /reports/erp-rules
@@ -448,8 +447,8 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
       if (contr === "") return false; // Awaiting Assignment
       return false;                   // Cutting
     }
-    if (tp === "job card wip" && QC_ACTS.has(a)) return false;            // QC
-    if (tp === "job card wip" && GALV_ACTS.has(a)) return false;          // Galv
+    if (tp === "job card wip" && QC_ACTIVITY_SET.has(a)) return false;     // QC
+    if (tp === "job card wip" && GALV_ACTIVITY_SET.has(a)) return false;  // Galv
     if (tp === "fg pending for dispatch" && a === "") return false;        // FG
     return true; // unclassified
   });

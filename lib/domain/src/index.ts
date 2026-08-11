@@ -206,6 +206,31 @@ for (const phase of PROCESS_PHASES) {
   for (const code of phase.activities) PHASE_BY_CODE.set(code.toUpperCase(), phase.key);
 }
 
+// ---------------------------------------------------------------------------
+// Canonical WIP bucket activity sets
+// ---------------------------------------------------------------------------
+// Single source of truth for which activity codes belong to the Quality Check
+// and Galvanising WIP buckets. All four call sites (dataCheck, erpRules,
+// fabricationProjectCompletion, data.tsx Generated OR) import from here;
+// never redefine locally.
+//
+// Derived from PROCESS_SEQUENCE so they can never drift from the canonical
+// step ordering:
+//   QC_ACTIVITY_SET  = all steps between C (exclusive) and G (exclusive)
+//                      → HG, RFI, NH, B, HAB, W, Q, TS
+//   GALV_ACTIVITY_SET = all steps from G onward
+//                      → G, GB, Y
+//
+// Usage: job_card_type = "Job Card WIP" AND activity ∈ QC_ACTIVITY_SET  → Quality Check
+//        job_card_type = "Job Card WIP" AND activity ∈ GALV_ACTIVITY_SET → Galvanising
+export const QC_ACTIVITY_SET: ReadonlySet<string> = new Set(
+  PROCESS_SEQUENCE.slice(1, GALV_START_INDEX),
+);
+
+export const GALV_ACTIVITY_SET: ReadonlySet<string> = new Set(
+  PROCESS_SEQUENCE.slice(GALV_START_INDEX),
+);
+
 // Order Type mode for the Project-Wise phase display. "ALL" shows every phase's
 // full activity list (TLT + NTLT); "TLT"/"NTLT" narrow each phase's listed codes
 // to just that category's sequences. Display/roll-up only — the phase KEYS and

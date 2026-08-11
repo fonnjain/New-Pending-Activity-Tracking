@@ -6,13 +6,8 @@ import {
   importsTable,
 } from "@workspace/db";
 import { desc, eq, and, sql, or } from "drizzle-orm";
+import { QC_ACTIVITY_SET } from "@workspace/domain";
 import { loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
-
-// Individual fab activities tracked between Cutting and Quality Check.
-// Order mirrors the TLT process sequence: C → HG → RFI → NH → B → HAB → W → Q → TS
-// Quality Check = Q + TS only (the final quality/test step).
-const FAB_MID_ACTS = ["HG", "RFI", "NH", "B", "HAB", "W", "Q", "TS"] as const;
-type FabMidAct = (typeof FAB_MID_ACTS)[number];
 
 // BOM label canonical display order for sorting.
 const BOM_ORDER = ["Proto", "Mass", "Pre", "Mixed", "No BOM match"];
@@ -143,8 +138,9 @@ router.get(
 
     // 2. Run all data queries in parallel.
     // Per-activity balance for HG, RFI, NH, B, HAB, W, Q, TS (one query, grouped by activity).
+    // Activity membership is authoritative from QC_ACTIVITY_SET (single source in domain).
     const fabMidFilter = or(
-      ...FAB_MID_ACTS.map((a) => eq(sql`upper(${recordPoolTable.activity})`, a)),
+      ...Array.from(QC_ACTIVITY_SET).map((a) => eq(sql`upper(${recordPoolTable.activity})`, a)),
     );
 
     const [
@@ -350,16 +346,17 @@ router.get(
       ]),
     );
     // Per-activity maps for HG, RFI, NH, B, HAB, W, Q, TS.
-    const actMaps = new Map<FabMidAct, Map<string, number>>(
-      FAB_MID_ACTS.map((a) => [a, new Map<string, number>()]),
+    // Keys come from QC_ACTIVITY_SET (single source in domain) — no local re-definition.
+    const actMaps = new Map<string, Map<string, number>>(
+      Array.from(QC_ACTIVITY_SET).map((a) => [a, new Map<string, number>()]),
     );
     for (const r of fabMidAgg) {
-      const act = r.activity as FabMidAct;
+      const act = r.activity as string;
       if (actMaps.has(act)) {
         actMaps.get(act)!.set(batchKey(r.project, r.structure, r.mfcBatch), r.balanceMt);
       }
     }
-    const actMap = (a: FabMidAct, bkey: string) => actMaps.get(a)?.get(bkey) ?? 0;
+    const actMap = (a: string, bkey: string) => actMaps.get(a)?.get(bkey) ?? 0;
 
     // 4. Build BOM label map from Order Review rows.
     // For each (project, structure), collect the set of distinct non-null bomType

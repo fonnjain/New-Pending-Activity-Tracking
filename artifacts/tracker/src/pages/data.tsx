@@ -9,7 +9,7 @@ type ErpRulesResponse = { rules: ErpRuleResult[]; asOnDate?: string | null; type
 import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
-import { contractorCategoryLabel } from "@workspace/domain";
+import { contractorCategoryLabel, QC_ACTIVITY_SET, GALV_ACTIVITY_SET, PROCESS_SEQUENCE } from "@workspace/domain";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1053,9 +1053,12 @@ function ReleaseBalanceContent() {
 }
 
 // ─── Generated Order Review (per-stage validation) ────────────────────────────
-// Activity sets for chain computation (per spec)
-const GEN_FAB_ACTS  = new Set(["C","HG","RFI","NH","B","HAB","W","Q","TS"]);
-const GEN_GALV_ACTS = new Set(["G","GB","Y"]);
+// Activity sets for chain computation (per spec). Single source of truth lives
+// in @workspace/domain; do not redefine locally.
+// GEN_FAB_ACTS = Cutting (C) + all QC activities (HG…TS) = everything pre-galv.
+const GEN_FAB_ACTS  = new Set([PROCESS_SEQUENCE[0], ...QC_ACTIVITY_SET]);
+// GEN_GALV_ACTS = G, GB, Y — identical to GALV_ACTIVITY_SET.
+const GEN_GALV_ACTS = GALV_ACTIVITY_SET;
 
 type ConfTier = "high" | "medium" | "low";
 interface GenStageSpec {
@@ -2980,6 +2983,8 @@ type DataCheckResponse = {
   orImportId: number | null;
   orAsOnDate: string | null;
   wipImportId: number | null;
+  /** False for pre-type-column imports; DC6 is not evaluated for those. */
+  wipHasTypeData: boolean;
   structuresEvaluated: number;
   hardRuleFailures: number;
   hardRules: DcHardRule[];
@@ -3262,6 +3267,7 @@ function DataCheckContent() {
                 wipUnclassifiedMarks={rule.id === "DC6" ? data.wipUnclassifiedMarks : undefined}
                 wipTotalMt={rule.id === "DC6" ? data.wipTotalMt : undefined}
                 wipTotalMarks={rule.id === "DC6" ? data.wipTotalMarks : undefined}
+                wipHasTypeData={rule.id === "DC6" ? data.wipHasTypeData : undefined}
               />
             ))}
           </div>
@@ -3287,38 +3293,53 @@ function DcHardRuleRow({
   wipUnclassifiedMarks,
   wipTotalMt,
   wipTotalMarks,
+  wipHasTypeData,
 }: {
   rule: DcHardRule;
   wipBuckets?: DcWipBucket[];
   wipUnclassifiedMarks?: number;
   wipTotalMt?: number;
   wipTotalMarks?: number;
+  /** Undefined for non-DC6 rules. False = old-format import; DC6 was not evaluated. */
+  wipHasTypeData?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const isDc6 = rule.id === "DC6";
-  const canExpand = isDc6 ? !!wipBuckets : rule.violations.length > 0;
+  // DC6 on an old-format import: not evaluated — show as N/A, not FAIL.
+  const dc6NotEvaluated = isDc6 && wipHasTypeData === false;
+  const canExpand = isDc6 ? !!wipBuckets && !dc6NotEvaluated : rule.violations.length > 0;
 
   const fieldKeys = rule.violations[0] ? Object.keys(rule.violations[0].fields) : [];
 
   return (
-    <Card className={`border ${rule.pass ? "border-border" : "border-destructive/50 bg-destructive/5 dark:bg-destructive/10"}`}>
+    <Card className={`border ${
+      dc6NotEvaluated
+        ? "border-amber-400/60 bg-amber-50/60 dark:bg-amber-950/20 dark:border-amber-600/40"
+        : rule.pass ? "border-border" : "border-destructive/50 bg-destructive/5 dark:bg-destructive/10"
+    }`}>
       <div
         className={`flex items-start gap-3 px-4 py-3 ${canExpand ? "cursor-pointer select-none" : ""}`}
         onClick={() => canExpand && setExpanded((v) => !v)}
       >
         <div className="mt-0.5 shrink-0">
-          {rule.pass
-            ? <CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-            : <CircleX className="h-4 w-4 text-destructive" />}
+          {dc6NotEvaluated
+            ? <Info className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+            : rule.pass
+              ? <CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              : <CircleX className="h-4 w-4 text-destructive" />}
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-bold font-mono bg-muted px-1.5 py-0.5 rounded">{rule.id}</span>
-            <span className={`text-xs font-semibold ${rule.pass ? "text-emerald-700 dark:text-emerald-400" : "text-destructive"}`}>
-              {rule.pass ? "PASS" : "FAIL"}
+            <span className={`text-xs font-semibold ${
+              dc6NotEvaluated
+                ? "text-amber-700 dark:text-amber-400"
+                : rule.pass ? "text-emerald-700 dark:text-emerald-400" : "text-destructive"
+            }`}>
+              {dc6NotEvaluated ? "N/A" : rule.pass ? "PASS" : "FAIL"}
             </span>
-            {!rule.pass && (
+            {!dc6NotEvaluated && !rule.pass && (
               <span className="text-xs text-muted-foreground">
                 {rule.violationCount.toLocaleString()} violation{rule.violationCount !== 1 ? "s" : ""}
                 {isDc6 ? " unclassified" : ""}

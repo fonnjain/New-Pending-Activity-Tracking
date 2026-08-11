@@ -6,7 +6,8 @@ import {
   importsTable,
   orderReviewRowsTable,
 } from "@workspace/db";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { QC_ACTIVITY_SET, GALV_ACTIVITY_SET } from "@workspace/domain";
 import { loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
 
 const router: IRouter = Router();
@@ -52,6 +53,11 @@ export interface DataCheckResponse {
   orImportId: number | null;
   orAsOnDate: string | null;
   wipImportId: number | null;
+  /** True when the WIP import has per-row job_card_type data in import_rows.
+   * False for pre-type-column imports (ids 5–32): DC6 is not evaluated for
+   * those because classifying them would draw from pool COALESCE fallbacks
+   * and report a false PASS. */
+  wipHasTypeData: boolean;
   structuresEvaluated: number;
   hardRuleFailures: number;
   hardRules: DcHardRule[];
@@ -74,8 +80,6 @@ const n = (v: number | null | undefined): number => v ?? 0;
 const fmt3 = (v: number | null | undefined): string => (v ?? 0).toFixed(3);
 
 const TOTAL_ROW_RE = /\b(sub\s*total|grand\s*total|total)\b/i;
-const QC_ACTS = new Set(["HG", "RFI", "NH", "B", "HAB", "W", "Q", "TS"]);
-const GALV_ACTS = new Set(["G", "GB", "Y"]);
 
 function dcHardRule(
   id: string,
@@ -150,6 +154,7 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     orImportId: null,
     orAsOnDate: null,
     wipImportId: latestWip?.id ?? null,
+    wipHasTypeData: false,
     structuresEvaluated: 0,
     hardRuleFailures: 0,
     hardRules: [],
@@ -279,16 +284,36 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
   let wipTotalMt = 0;
   let wipTotalMarks = 0;
 
-  if (latestWip) {
+  // DC6 gate: check whether this WIP import has per-row job_card_type stored in
+  // import_rows. Old-format imports (ids 5–32) have 100% NULL job_card_type there;
+  // classifying them would silently COALESCE from the pool and report a false PASS.
+  const wipHasTypeData = latestWip
+    ? (
+        await db
+          .select({ importId: importRowsTable.importId })
+          .from(importRowsTable)
+          .where(
+            and(
+              eq(importRowsTable.importId, latestWip.id),
+              sql`${importRowsTable.jobCardType} IS NOT NULL`,
+            ),
+          )
+          .limit(1)
+      ).length > 0
+    : false;
+
+  if (latestWip && wipHasTypeData) {
+    // Read raw type/status from import_rows only — no COALESCE fallback to pool.
+    // Using import_rows columns directly guarantees we classify only what the
+    // file actually stored, so an all-NULL import fails DC6 instead of passing.
     const wipRawRows = await db
       .select({
-        jobCardType: sql<string | null>`COALESCE(${importRowsTable.jobCardType}, ${recordPoolTable.jobCardType})`,
-        jobCardStatus: sql<string | null>`COALESCE(${importRowsTable.jobCardStatus}, ${recordPoolTable.jobCardStatus})`,
+        jobCardType: importRowsTable.jobCardType,
+        jobCardStatus: importRowsTable.jobCardStatus,
         contractor: recordPoolTable.contractor,
         activity: recordPoolTable.activity,
         balanceWt: recordPoolTable.balanceWt,
         copies: importRowsTable.copies,
-        isInitialCutting: sql<boolean>`COALESCE(upper(${importRowsTable.jobCardStatus}) = 'INITIAL', ${recordPoolTable.isInitialCutting}, false)`,
       })
       .from(importRowsTable)
       .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
@@ -314,10 +339,10 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
           bucketCounts["Cutting"].mt += wMt;
           bucketCounts["Cutting"].marks++;
         }
-      } else if (tp === "job card wip" && QC_ACTS.has(a)) {
+      } else if (tp === "job card wip" && QC_ACTIVITY_SET.has(a)) {
         bucketCounts["Quality Check"].mt += wMt;
         bucketCounts["Quality Check"].marks++;
-      } else if (tp === "job card wip" && GALV_ACTS.has(a)) {
+      } else if (tp === "job card wip" && GALV_ACTIVITY_SET.has(a)) {
         bucketCounts["Galvanising"].mt += wMt;
         bucketCounts["Galvanising"].marks++;
       } else if (tp === "fg pending for dispatch" && a === "") {
@@ -335,16 +360,27 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     marks: bucketCounts[name].marks,
   }));
 
-  const dc6: DcHardRule = {
-    id: "DC6",
-    label:
-      "WIP: the six buckets (Release, Awaiting Assignment, Cutting, Quality Check, Galvanising, FG WIP) sum to the total balance with zero unclassified marks. Tolerance: 1 kg.",
-    toleranceMt: 0.001,
-    structuresEvaluated: wipTotalMarks,
-    violationCount: wipUnclassifiedMarks,
-    pass: wipUnclassifiedMarks === 0,
-    violations: [], // drill-down via wipBuckets breakdown instead
-  };
+  const dc6: DcHardRule = wipHasTypeData
+    ? {
+        id: "DC6",
+        label:
+          "WIP: the six buckets (Release, Awaiting Assignment, Cutting, Quality Check, Galvanising, FG WIP) sum to the total balance with zero unclassified marks. Tolerance: 1 kg.",
+        toleranceMt: 0.001,
+        structuresEvaluated: wipTotalMarks,
+        violationCount: wipUnclassifiedMarks,
+        pass: wipUnclassifiedMarks === 0,
+        violations: [], // drill-down via wipBuckets breakdown instead
+      }
+    : {
+        id: "DC6",
+        label:
+          `WIP bucket partition — NOT EVALUATED. WIP import ${latestWip?.id != null ? `#${latestWip.id}` : ""} pre-dates per-row job_card_type storage. Classifying it would draw from pool COALESCE fallbacks and report a false PASS. Re-upload the WIP file to enable this check.`,
+        toleranceMt: 0.001,
+        structuresEvaluated: 0,
+        violationCount: 0,
+        pass: false,
+        violations: [],
+      };
 
   // -------------------------------------------------------------------------
   // DC7–DC11 — Warnings (conditions that occur legitimately; report counts)
@@ -423,6 +459,7 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     orImportId: currentOrImportId,
     orAsOnDate: orData.import.asOnDate,
     wipImportId: latestWip?.id ?? null,
+    wipHasTypeData,
     structuresEvaluated: currentOrRows.length,
     hardRuleFailures,
     hardRules: allHardRules,
