@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, lt, desc } from "drizzle-orm";
+import { eq, lt, desc, sql } from "drizzle-orm";
 import { requireAuth } from "./auth";
 import {
   db,
@@ -436,7 +436,7 @@ router.post("/ai/review", requireAuth, async (req, res): Promise<void> => {
       .select()
       .from(importsTable)
       .where(lt(importsTable.id, toImport.id))
-      .orderBy(desc(importsTable.id))
+      .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
       .limit(1);
     fromImport = prev;
   }
@@ -775,7 +775,7 @@ router.post("/ai/report", requireAuth, async (req, res): Promise<void> => {
       .select()
       .from(importsTable)
       .where(lt(importsTable.id, toImport.id))
-      .orderBy(desc(importsTable.id))
+      .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
       .limit(1);
     fromImport = prev;
   }

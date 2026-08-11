@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db, importRowsTable, recordPoolTable, importsTable, orderReviewRowsTable } from "@workspace/db";
 import { desc, eq, sql } from "drizzle-orm";
+import { loadLatestWipImport } from "../lib/dispatch";
 
 const router: IRouter = Router();
 
@@ -99,11 +100,7 @@ const TLT_WIP_ACTS = new Set([...QC_ACTS, ...GALV_ACTS]);
 // ---------------------------------------------------------------------------
 router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
   // Find the latest WIP import.
-  const [latestImport] = await db
-    .select({ id: importsTable.id, asOnDate: importsTable.asOnDate })
-    .from(importsTable)
-    .orderBy(desc(importsTable.id))
-    .limit(1);
+  const latestImport = await loadLatestWipImport();
 
   if (!latestImport) {
     const empty: ErpRulesResponse = {

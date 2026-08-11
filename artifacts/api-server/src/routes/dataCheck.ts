@@ -7,7 +7,7 @@ import {
   orderReviewRowsTable,
 } from "@workspace/db";
 import { desc, eq, sql } from "drizzle-orm";
-import { loadLatestOrderReview } from "../lib/dispatch";
+import { loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
 
 const router: IRouter = Router();
 
@@ -141,7 +141,7 @@ function dcWarning(
 router.get("/reports/data-check", async (_req, res): Promise<void> => {
   // Latest WIP import + latest OR in parallel
   const [latestWipArr, orData] = await Promise.all([
-    db.select({ id: importsTable.id }).from(importsTable).orderBy(desc(importsTable.id)).limit(1),
+    loadLatestWipImport(),
     loadLatestOrderReview(),
   ]);
   const latestWip = latestWipArr[0] ?? null;

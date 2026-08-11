@@ -77,7 +77,7 @@ router.get("/imports/:id/contractor-movement", async (req, res): Promise<void> =
     })
     .from(importsTable)
     .where(lt(importsTable.id, target.id))
-    .orderBy(desc(importsTable.id))
+    .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
     .limit(7);
 
   const allImports = [target, ...predecessors];
@@ -265,7 +265,7 @@ router.get("/imports/:id/production-movement", async (req, res): Promise<void> =
     })
     .from(importsTable)
     .where(lt(importsTable.id, target.id))
-    .orderBy(desc(importsTable.id))
+    .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
     .limit(7);
 
   // allImports = [newest, ..., oldest]

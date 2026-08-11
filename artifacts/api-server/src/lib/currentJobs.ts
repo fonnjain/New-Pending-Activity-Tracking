@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
+import { loadLatestWipImport } from "./dispatch";
 import {
   db,
   currentJobsImportTable,
@@ -90,11 +91,7 @@ export function parseCurrentJobsFile(buffer: Buffer): { codes: string[] } {
 async function loadKnownProjects(): Promise<Set<string>> {
   const known = new Set<string>();
 
-  const [latestWip] = await db
-    .select({ id: importsTable.id })
-    .from(importsTable)
-    .orderBy(desc(importsTable.id))
-    .limit(1);
+  const latestWip = await loadLatestWipImport();
   if (latestWip) {
     const rows = await db
       .select({ job: recordPoolTable.job })

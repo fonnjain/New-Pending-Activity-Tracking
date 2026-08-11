@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, releaseBalanceWipTable, importsTable } from "@workspace/db";
-import { loadLatestOrderReview } from "../lib/dispatch";
+import { loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
 import { desc, eq, sql } from "drizzle-orm";
 import { GetReleaseBalanceQueryParams } from "@workspace/api-zod";
 
@@ -42,11 +42,7 @@ router.get("/release-balance", async (req, res): Promise<void> => {
   // the latest committed WIP import.
   let targetImportId: number | null = requestedImportId ?? null;
   if (targetImportId == null) {
-    const [latest] = await db
-      .select({ id: importsTable.id })
-      .from(importsTable)
-      .orderBy(desc(importsTable.id))
-      .limit(1);
+    const latest = await loadLatestWipImport();
     targetImportId = latest?.id ?? null;
   }
 

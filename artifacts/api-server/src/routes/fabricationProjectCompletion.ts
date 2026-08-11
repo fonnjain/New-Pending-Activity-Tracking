@@ -6,7 +6,7 @@ import {
   importsTable,
 } from "@workspace/db";
 import { desc, eq, and, sql, or } from "drizzle-orm";
-import { loadLatestOrderReview } from "../lib/dispatch";
+import { loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
 
 // Individual fab activities tracked between Cutting and Quality Check.
 // Order mirrors the TLT process sequence: C → HG → RFI → NH → B → HAB → W → Q → TS
@@ -134,11 +134,7 @@ router.get(
     };
 
     // 1. Find the latest WIP import.
-    const [latestImport] = await db
-      .select({ id: importsTable.id })
-      .from(importsTable)
-      .orderBy(desc(importsTable.id))
-      .limit(1);
+    const latestImport = await loadLatestWipImport();
 
     if (!latestImport) {
       res.json({ available: false, rows: [], totals: ZERO_TOTALS, unknownCauses: [] });

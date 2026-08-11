@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db, jobTemplatesTable, jobTemplateMembersTable, importRowsTable, recordPoolTable, importsTable, orderReviewRowsTable } from "@workspace/db";
 import { eq, and, desc, inArray, sql } from "drizzle-orm";
+import { loadLatestWipImport } from "../lib/dispatch";
 
 const router: IRouter = Router();
 
@@ -61,11 +62,7 @@ router.get("/job-templates", async (_req, res): Promise<void> => {
 // Used by the Job Templates UI to populate the available-projects panel.
 // ---------------------------------------------------------------------------
 router.get("/job-templates/projects", async (_req, res): Promise<void> => {
-  const [latestImport] = await db
-    .select({ id: importsTable.id })
-    .from(importsTable)
-    .orderBy(desc(importsTable.id))
-    .limit(1);
+  const latestImport = await loadLatestWipImport();
 
   if (!latestImport) {
     res.json({ tlt: [], ntlt: [] });

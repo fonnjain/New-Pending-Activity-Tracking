@@ -66,11 +66,7 @@ export async function seedDispatchFromOrderReview(
 
   // The newest WIP import at seed time (max id). Yard departures only accrue for
   // WIP import pairs after this id.
-  const [newestWip] = await db
-    .select({ id: importsTable.id })
-    .from(importsTable)
-    .orderBy(desc(importsTable.id))
-    .limit(1);
+  const newestWip = await loadLatestWipImport();
   const seedImportId = newestWip?.id ?? null;
 
   // Collapse the file rows to one seed value per key (sum despatch across any
@@ -523,11 +519,7 @@ export function crossCheckBalance(
 // Distinct (project, structure) keys present in the NEWEST WIP import — the same
 // import the Order Status page joins against. Empty when no WIP import exists.
 async function loadNewestWipStructureKeys(): Promise<Set<string>> {
-  const [newest] = await db
-    .select({ id: importsTable.id })
-    .from(importsTable)
-    .orderBy(desc(importsTable.id))
-    .limit(1);
+  const newest = await loadLatestWipImport();
   const keys = new Set<string>();
   if (!newest) return keys;
   const rows = await db
@@ -557,6 +549,22 @@ export async function computeWipCoverage(
   let matched = 0;
   for (const k of fileKeys) if (wipKeys.has(k)) matched++;
   return { matchedToWip: matched, unmatchedToWip: fileKeys.size - matched };
+}
+
+// The most-recent WIP import by report date (reportDate DESC NULLS LAST, id DESC
+// as tiebreaker). Returns null when no WIP import has been committed yet.
+// Use this everywhere the app needs "the current WIP snapshot" rather than a
+// caller-supplied import id. Never substitute orderBy(id DESC) alone — bulk
+// uploads assign ids in upload order, not date order.
+export async function loadLatestWipImport(): Promise<
+  typeof importsTable.$inferSelect | null
+> {
+  const [latest] = await db
+    .select()
+    .from(importsTable)
+    .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
+    .limit(1);
+  return latest ?? null;
 }
 
 // The latest Order Review ingest (for as-on date / summary / change log) plus the

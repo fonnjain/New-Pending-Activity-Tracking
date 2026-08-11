@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
+import { loadLatestWipImport } from "../lib/dispatch";
 import {
   db,
   importsTable,
@@ -52,11 +53,7 @@ router.get("/inventory/buckets", async (_req, res): Promise<void> => {
     .from(orderReviewRowsTable)
     .where(eq(orderReviewRowsTable.importId, latestImport.id));
 
-  const [newestWip] = await db
-    .select({ id: importsTable.id })
-    .from(importsTable)
-    .orderBy(desc(importsTable.id))
-    .limit(1);
+  const newestWip = await loadLatestWipImport();
 
   // (project, structure) keys that have at least one WIP mark with Order
   // Nature = Structure. Drives completed-structure exclusion: a bucket row

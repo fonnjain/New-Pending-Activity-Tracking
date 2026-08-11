@@ -585,7 +585,7 @@ async function mergeImport(
       .select()
       .from(importsTable)
       .where(cutoffSql(cutoff))
-      .orderBy(desc(importsTable.id))
+      .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
       .limit(1);
 
     const [imp] = await tx
@@ -2101,7 +2101,7 @@ router.get("/imports/:id/changes", async (req, res): Promise<void> => {
     .select()
     .from(importsTable)
     .where(and(lt(importsTable.id, toImport.id), cutoffSql(changesCutoff)))
-    .orderBy(desc(importsTable.id))
+    .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
     .limit(1);
 
   const changeSet = buildChangeSet(
@@ -2152,7 +2152,7 @@ router.get("/imports/:id/movement", async (req, res): Promise<void> => {
     .select({ id: importsTable.id, createdAt: importsTable.createdAt })
     .from(importsTable)
     .where(and(lt(importsTable.id, target.id), cutoffSql(movementCutoff)))
-    .orderBy(desc(importsTable.id));
+    .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id));
 
   const days = new Map<string, number | null>();
   for (const key of current.keys()) days.set(key, null);
@@ -2313,7 +2313,7 @@ async function computeVelocityItems(
     })
     .from(importsTable)
     .where(and(lt(importsTable.id, target.id), cutoffSql(velocityCutoff)))
-    .orderBy(desc(importsTable.id));
+    .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id));
 
   // Build per-identity snapshot series: seed with the current import, then layer
   // prior imports (only while the mark still appears) for the time axis.
@@ -2655,7 +2655,7 @@ export async function warmMembershipCaches(): Promise<void> {
   const allImports = await db
     .select({ id: importsTable.id })
     .from(importsTable)
-    .orderBy(desc(importsTable.id));
+    .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id));
 
   // Warm identity states for EVERY import — these are needed by the movement
   // endpoint which walks the full history chain for each request. Identity
