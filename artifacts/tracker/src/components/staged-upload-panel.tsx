@@ -94,6 +94,12 @@ export function StagedUploadPanel({
   const [formatAcknowledged, setFormatAcknowledged] = useState(false);
   // User-selected date for this upload (YYYY-MM-DD). Defaults to today.
   const [selectedDate, setSelectedDate] = useState<string>(todayYmd);
+  // Set when the server refuses because the file's date is older than the
+  // current Order Review; the user can override and force-upload.
+  const [staleDateConflict, setStaleDateConflict] = useState<{
+    fileAsOnDate: string;
+    existingAsOnDate: string;
+  } | null>(null);
 
   const busy =
     stage.isPending ||
@@ -107,6 +113,7 @@ export function StagedUploadPanel({
     setValidation(null);
     setAccepted(new Set());
     setFormatAcknowledged(false);
+    setStaleDateConflict(null);
     // Keep selectedDate — user likely wants to re-upload for the same date.
   };
 
@@ -187,21 +194,39 @@ export function StagedUploadPanel({
     );
   };
 
-  const doCommit = () => {
+  const doCommit = (forceStaleDate = false) => {
     if (!staged) return;
+    setStaleDateConflict(null);
     const acceptedSuggestions =
       validation?.sanitize
         .filter((_, i) => accepted.has(i))
         .map((s) => ({ field: s.field, from: s.from, to: s.to })) ?? [];
 
     commit.mutate(
-      { data: { stagingId: staged.stagingId, expectedType, acceptedSuggestions } },
+      {
+        data: {
+          stagingId: staged.stagingId,
+          expectedType,
+          acceptedSuggestions,
+          ...(forceStaleDate ? { forceStaleDate: true } : {}),
+        },
+      },
       {
         onSuccess: (res) => {
           onCommitted(res);
           reset();
         },
         onError: (err) => {
+          // Stale-date refusal: server returned 409 with staleDateWarning flag.
+          // Show an inline override prompt instead of a generic error toast.
+          const d = (err as { data?: { staleDateWarning?: boolean; fileAsOnDate?: string; existingAsOnDate?: string } })?.data;
+          if (d?.staleDateWarning && d.fileAsOnDate && d.existingAsOnDate) {
+            setStaleDateConflict({
+              fileAsOnDate: d.fileAsOnDate,
+              existingAsOnDate: d.existingAsOnDate,
+            });
+            return;
+          }
           toast({
             variant: "destructive",
             title: "Import failed",
@@ -395,6 +420,38 @@ export function StagedUploadPanel({
                   />
                 )}
 
+                {/* Stale-date override banner — shown when the server refused because
+                    the file's date is older than the current stored Order Review. */}
+                {staleDateConflict && (
+                  <div className="rounded-md border border-amber-400 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm space-y-2">
+                    <div className="flex items-start gap-2 text-amber-800 dark:text-amber-300 font-medium">
+                      <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                      <span>
+                        This file is dated <strong>{formatDate(staleDateConflict.fileAsOnDate)}</strong>, which is older than the current Order Review (<strong>{formatDate(staleDateConflict.existingAsOnDate)}</strong>). Uploading will revert the order book to the earlier snapshot and may make cross-file figures wrong.
+                      </span>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-amber-500 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                        onClick={() => doCommit(true)}
+                        disabled={busy}
+                      >
+                        Upload anyway
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setStaleDateConflict(null)}
+                        disabled={busy}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 {phase === "staged" && (formatOk || formatAcknowledged) && isOrderReview && (
                   <div className="flex flex-col sm:flex-row gap-2">
                     <Button
@@ -406,7 +463,7 @@ export function StagedUploadPanel({
                       {validate.isPending ? "Checking..." : "Check with AI"}
                     </Button>
                     <Button
-                      onClick={doCommit}
+                      onClick={() => doCommit()}
                       disabled={busy}
                       variant="outline"
                       className="gap-2"

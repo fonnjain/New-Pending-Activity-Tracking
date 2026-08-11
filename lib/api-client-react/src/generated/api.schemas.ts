@@ -542,6 +542,9 @@ export interface CommitRequest {
   expectedType?: CommitRequestExpectedType;
   /** Descriptive cleanups the user accepted; applied before parse+merge. */
   acceptedSuggestions?: AcceptedSuggestion[];
+  /** Order Review only: when true, bypasses the stale-date guard that refuses
+   * uploads whose as-on date is older than the current stored Order Review. */
+  forceStaleDate?: boolean;
 }
 
 export type WipCommitResultKind = typeof WipCommitResultKind[keyof typeof WipCommitResultKind];

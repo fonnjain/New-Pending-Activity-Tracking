@@ -939,13 +939,16 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
       };
       // Query the latest committed Order Review import for prev-date and prev
       // unmatched count — used by the stale-date and unmatched-spike checks.
+      // Sort by as_on_date DESC (not id DESC) so the "current" OR matches what
+      // loadLatestOrderReview uses — a bulk upload can assign higher ids to
+      // older-dated files, making id order ≠ date order.
       const prevOrRows = await db
         .select({
           asOnDate: orderReviewImportsTable.asOnDate,
           summary: orderReviewImportsTable.summary,
         })
         .from(orderReviewImportsTable)
-        .orderBy(desc(orderReviewImportsTable.id))
+        .orderBy(sql`${orderReviewImportsTable.asOnDate} DESC NULLS LAST`, desc(orderReviewImportsTable.id))
         .limit(1);
       const prevOr = prevOrRows[0] ?? null;
       const prevSummary = prevOr?.summary as { unmatchedToWip?: number } | null;
@@ -1409,6 +1412,30 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
       });
       return;
     }
+    // Stale-date guard: refuse if the file's as-on date is older than the newest
+    // already-ingested Order Review, unless the caller explicitly overrides.
+    // The guard protects against a bulk upload silently reverting the order book
+    // to an older snapshot (as happened with the 10-Aug bulk upload that left
+    // the 28-Jul OR as the newest by id even though 10-Aug was already stored).
+    const forceStaleDate = req.body?.forceStaleDate === true;
+    if (!forceStaleDate) {
+      const [newestOr] = await db
+        .select({ asOnDate: orderReviewImportsTable.asOnDate })
+        .from(orderReviewImportsTable)
+        .orderBy(sql`${orderReviewImportsTable.asOnDate} DESC NULLS LAST`, desc(orderReviewImportsTable.id))
+        .limit(1);
+      const newestDate = newestOr?.asOnDate ?? null;
+      if (newestDate && orderAsOnDate < newestDate) {
+        res.status(409).json({
+          error: `This file's date (${orderAsOnDate}) is older than the current Order Review (${newestDate}). Uploading would revert the order book to an earlier snapshot.`,
+          staleDateWarning: true,
+          fileAsOnDate: orderAsOnDate,
+          existingAsOnDate: newestDate,
+        });
+        return;
+      }
+    }
+
     // Serialize the whole Order Review commit under the shared dispatch advisory
     // lock (the same one WIP merges take). The ingest now UPSERTS shared current
     // rows in place, so two concurrent commits of the same staged file must NOT
