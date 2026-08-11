@@ -955,8 +955,9 @@ function ReleaseBalanceContent() {
       ) : !data?.available ? (
         <Card>
           <CardContent className="py-10 text-center text-muted-foreground text-sm">
-            No Release Balance data. Upload a WIP file in the newer format
-            (with "Type" and "Job Card Status" columns) to populate this view.
+            {(data as Record<string, unknown> | undefined)?.hasTypeData === false
+              ? "Classification data not available for the loaded WIP file. It pre-dates per-row Type/Status storage — Release Balance cannot be computed. Re-upload the source WIP file to restore this view."
+              : "No Release Balance data. Upload a WIP file in the newer format (with "Type" and "Job Card Status" columns) to populate this view."}
           </CardContent>
         </Card>
       ) : (

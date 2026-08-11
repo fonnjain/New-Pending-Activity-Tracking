@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { db, importRowsTable, recordPoolTable, importsTable, orderReviewRowsTable } from "@workspace/db";
 import { desc, eq, sql } from "drizzle-orm";
 import { QC_ACTIVITY_SET, GALV_ACTIVITY_SET } from "@workspace/domain";
-import { loadLatestWipImport } from "../lib/dispatch";
+import { hasTypeData, loadLatestWipImport } from "../lib/dispatch";
 
 const router: IRouter = Router();
 
@@ -113,6 +113,55 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
     return;
   }
 
+  // Gate: old-format imports have NULL job_card_type in import_rows everywhere.
+  // The rawRows COALESCE would fall through to pool (current state), making every
+  // row appear typed and producing false PASSes / FAILs against the wrong data.
+  // Use the shared hasTypeData helper (reads import_rows directly, no COALESCE)
+  // and short-circuit before the expensive rawRows query when the import is gated.
+  if (!await hasTypeData(latestImport.id)) {
+    const naRules: ErpRuleResult[] = [
+      ["U1", "Type (Col A) is one of exactly three values: \"Job Card Not Started\", \"Job Card WIP\", \"FG Pending For Dispatch\". Never blank.", "UNIVERSAL"],
+      ["U2", "Job Card Status (Col G) is one of exactly two values: \"Initial\", \"Authorized\". Never blank.", "UNIVERSAL"],
+      ["U3", "Status \"Initial\" occurs ONLY with Type \"Job Card Not Started\".", "UNIVERSAL"],
+      ["U4", "Type \"FG Pending For Dispatch\" always has a BLANK Activity.", "UNIVERSAL"],
+      ["U5", "Type \"FG Pending For Dispatch\" is always \"Authorized\".", "UNIVERSAL"],
+      ["U6", "Type \"Job Card WIP\" is NEVER activity C.", "UNIVERSAL"],
+      ["U7", "Type \"Job Card WIP\" is always \"Authorized\".", "UNIVERSAL"],
+      ["U8", "Balance Wt. is greater than zero on every row.", "UNIVERSAL"],
+      ["U9", "Mark No. is never blank.", "UNIVERSAL"],
+      ["T1", "Type \"Job Card Not Started\" is ALWAYS activity C. (TLT only.)", "TLT"],
+      ["T2", "Project Code (Col B) is never blank.", "TLT"],
+      ["T3", "Alias (Col J) is never blank.", "TLT"],
+      ["T4", "Status \"Initial\" always has a BLANK Contractor.", "TLT"],
+      ["T5", "Marks at activity C never have a Last Production Entry Date.", "TLT"],
+      ["T6", "Marks at any activity other than C or blank ALWAYS have a Last Production Entry Date.", "TLT"],
+      ["T7", "Every \"Job Card WIP\" activity falls in the Quality Check or Galvanising set.", "TLT"],
+      ["T8", "The five buckets partition the TLT file exactly.", "TLT"],
+      ["X1", "Every structure code that ends with one or more dots (e.g. DN30E., 4QMD3.) must have its own Order Review row distinct from the un-dotted variant.", "TLT"],
+      ["X2", "Every TLT WIP structure that carries pool balance must have a corresponding Order Review row.", "TLT"],
+    ].map(([id, label, scope]) => ({
+      id: id as string,
+      label: label as string,
+      scope: scope as "UNIVERSAL" | "TLT",
+      pass: true,
+      notApplicable: true,
+      violatingRowCount: 0,
+      violatingWeightMt: 0,
+      sampleRows: [],
+    }));
+    res.json({
+      available: true,
+      importId: latestImport.id,
+      asOnDate: latestImport.asOnDate,
+      typeColumnMissing: true,
+      totalRules: naRules.length,
+      passingRules: 0,
+      failingRules: 0,
+      rules: naRules,
+    });
+    return;
+  }
+
   // Pull all rows for the latest import.
   const rawRows = await db
     .select({
@@ -138,61 +187,7 @@ router.get("/reports/erp-rules", async (_req, res): Promise<void> => {
 
   const rows = rawRows as PoolRow[];
 
-  // -------------------------------------------------------------------------
-  // Coverage check: if NO row in this import has job_card_type populated, the
-  // file predates Col A (the Type column).  Rules dependent on that column
-  // cannot be evaluated — signal this to the client rather than producing
-  // false FAILs.
-  // -------------------------------------------------------------------------
-  const typedRowCount = rows.filter((r) => r.jobCardType !== null).length;
-  const hasTypeColumn = typedRowCount > 0;
-
-  if (!hasTypeColumn) {
-    // Build all rules as NOT_APPLICABLE
-    const naRules: ErpRuleResult[] = [
-      ["U1", "Type (Col A) is one of exactly three values: \"Job Card Not Started\", \"Job Card WIP\", \"FG Pending For Dispatch\". Never blank.", "UNIVERSAL"],
-      ["U2", "Job Card Status (Col G) is one of exactly two values: \"Initial\", \"Authorized\". Never blank.", "UNIVERSAL"],
-      ["U3", "Status \"Initial\" occurs ONLY with Type \"Job Card Not Started\".", "UNIVERSAL"],
-      ["U4", "Type \"FG Pending For Dispatch\" always has a BLANK Activity.", "UNIVERSAL"],
-      ["U5", "Type \"FG Pending For Dispatch\" is always \"Authorized\".", "UNIVERSAL"],
-      ["U6", "Type \"Job Card WIP\" is NEVER activity C.", "UNIVERSAL"],
-      ["U7", "Type \"Job Card WIP\" is always \"Authorized\".", "UNIVERSAL"],
-      ["U8", "Balance Wt. is greater than zero on every row.", "UNIVERSAL"],
-      ["U9", "Mark No. is never blank.", "UNIVERSAL"],
-      ["T1", "Type \"Job Card Not Started\" is ALWAYS activity C. (TLT only.)", "TLT"],
-      ["T2", "Project Code (Col B) is never blank.", "TLT"],
-      ["T3", "Alias (Col J) is never blank.", "TLT"],
-      ["T4", "Status \"Initial\" always has a BLANK Contractor.", "TLT"],
-      ["T5", "Marks at activity C never have a Last Production Entry Date.", "TLT"],
-      ["T6", "Marks at any activity other than C or blank ALWAYS have a Last Production Entry Date.", "TLT"],
-      ["T7", "Every \"Job Card WIP\" activity falls in the Quality Check or Galvanising set.", "TLT"],
-      ["T8", "The five buckets partition the TLT file exactly.", "TLT"],
-      ["X1", "Every structure code that ends with one or more dots (e.g. DN30E., 4QMD3.) must have its own Order Review row distinct from the un-dotted variant.", "TLT"],
-      ["X2", "Every TLT WIP structure that carries pool balance must have a corresponding Order Review row.", "TLT"],
-    ].map(([id, label, scope]) => ({
-      id: id as string,
-      label: label as string,
-      scope: scope as "UNIVERSAL" | "TLT",
-      pass: true,          // neutral — not a failure
-      notApplicable: true, // frontend uses this to show N/A badge instead of PASS
-      violatingRowCount: 0,
-      violatingWeightMt: 0,
-      sampleRows: [],
-    }));
-
-    const naResponse: ErpRulesResponse & { typeColumnMissing: boolean } = {
-      available: true,
-      importId: latestImport.id,
-      asOnDate: latestImport.asOnDate,
-      typeColumnMissing: true,
-      totalRules: naRules.length,
-      passingRules: 0,
-      failingRules: 0,
-      rules: naRules,
-    };
-    res.json(naResponse);
-    return;
-  }
+  // Coverage check is now handled above via hasTypeData before the rawRows query.
 
   // TLT-scoped rows: Order Nature = "Structure" (case-insensitive) or category = "TLT".
   const tlt = rows.filter(

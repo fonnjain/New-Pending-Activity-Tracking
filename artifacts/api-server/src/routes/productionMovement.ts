@@ -310,6 +310,21 @@ router.get("/imports/:id/production-movement", async (req, res): Promise<void> =
     else byImport.set(r.importId, [r]);
   }
 
+  // Probe which of the loaded imports have per-row type data.
+  // For movement, isInitialCutting uses COALESCE(importRows.jobCardStatus='INITIAL', pool.isInitialCutting).
+  // For old-format imports that side falls through to pool (current state), corrupting
+  // the cutting-output diff.  Any pair where either side is gated is refused entirely.
+  const typeDataProbe = await db
+    .selectDistinct({ importId: importRowsTable.importId })
+    .from(importRowsTable)
+    .where(
+      and(
+        inArray(importRowsTable.importId, allIds),
+        sql`${importRowsTable.jobCardType} IS NOT NULL`,
+      ),
+    );
+  const typeDataSet = new Set(typeDataProbe.map((r) => r.importId));
+
   const days = [];
 
   for (let i = 0; i < allImports.length - 1; i++) {
@@ -324,6 +339,31 @@ router.get("/imports/:id/production-movement", async (req, res): Promise<void> =
         86_400_000,
     );
     const isGap = elapsed > 1;
+
+    // Gate: refuse to compute movement for any pair where either import is gated.
+    // Do not substitute the next import — report the specific unusable import.
+    if (!typeDataSet.has(curr.id) || !typeDataSet.has(prev.id)) {
+      const badImport = !typeDataSet.has(curr.id) ? curr : prev;
+      const badKey = importDayKey(badImport.reportDate, badImport.createdAt);
+      days.push({
+        importId: curr.id,
+        dayKey: currKey,
+        dayLabel: buildDayLabel(currKey, prevKey, elapsed),
+        prevImportId: prev.id,
+        prevDayKey: prevKey,
+        isGap,
+        elapsedDays: elapsed,
+        cuttingOutputMt: 0,
+        cuttingMarksLeft: 0,
+        cuttingMarksReduced: 0,
+        netBalance: {},
+        gated: true,
+        gatedReason:
+          `Import #${badImport.id} (${badKey}) pre-dates per-row Type/Status storage ` +
+          `and cannot be used in movement computation.`,
+      });
+      continue;
+    }
 
     const currRows = byImport.get(curr.id) ?? [];
     const prevRows = byImport.get(prev.id) ?? [];

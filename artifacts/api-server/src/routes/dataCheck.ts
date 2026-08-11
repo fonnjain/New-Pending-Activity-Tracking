@@ -8,7 +8,7 @@ import {
 } from "@workspace/db";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { QC_ACTIVITY_SET, GALV_ACTIVITY_SET } from "@workspace/domain";
-import { loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
+import { hasTypeData, loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
 
 const router: IRouter = Router();
 
@@ -284,23 +284,8 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
   let wipTotalMt = 0;
   let wipTotalMarks = 0;
 
-  // DC6 gate: check whether this WIP import has per-row job_card_type stored in
-  // import_rows. Old-format imports (ids 5–32) have 100% NULL job_card_type there;
-  // classifying them would silently COALESCE from the pool and report a false PASS.
-  const wipHasTypeData = latestWip
-    ? (
-        await db
-          .select({ importId: importRowsTable.importId })
-          .from(importRowsTable)
-          .where(
-            and(
-              eq(importRowsTable.importId, latestWip.id),
-              sql`${importRowsTable.jobCardType} IS NOT NULL`,
-            ),
-          )
-          .limit(1)
-      ).length > 0
-    : false;
+  // DC6 gate: delegate to the shared hasTypeData helper (one definition in dispatch.ts).
+  const wipHasTypeData = latestWip ? await hasTypeData(latestWip.id) : false;
 
   if (latestWip && wipHasTypeData) {
     // Scoped to TLT only — the six-bucket model is a TLT model; NTLT uses a

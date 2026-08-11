@@ -2616,10 +2616,11 @@ function FabCompletionReport() {
   }
 
   if (!data?.available) {
+    const reason = (data as Record<string, unknown> | undefined)?.reason as string | undefined;
     return (
       <Card className="border-border">
         <CardContent className="py-6 text-sm text-muted-foreground">
-          No WIP import available. Upload a WIP file to generate this report.
+          {reason ?? "No WIP import available. Upload a WIP file to generate this report."}
         </CardContent>
       </Card>
     );

@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, releaseBalanceWipTable, importsTable } from "@workspace/db";
-import { loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
+import { hasTypeData, loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
 import { desc, eq, sql } from "drizzle-orm";
 import { GetReleaseBalanceQueryParams } from "@workspace/api-zod";
 
@@ -59,6 +59,26 @@ router.get("/release-balance", async (req, res): Promise<void> => {
         releaseBalanceOrderReviewMt: 0,
         rowCount: 0,
       },
+    });
+    return;
+  }
+
+  // Gate: old-format imports have no per-row job_card_type — their pre-computed
+  // Release Balance drew from COALESCE(pool) and reflects current state, not the
+  // historical snapshot.  Refuse to serve those figures.
+  if (!await hasTypeData(targetImportId)) {
+    res.json({
+      available: false,
+      hasTypeData: false,
+      reason:
+        `WIP import #${targetImportId} pre-dates per-row Type/Status storage. ` +
+        `Release Balance was computed from pool fallback values that reflect current ` +
+        `state, not the historical date. Re-upload the source WIP file to restore this view.`,
+      orderReviewAsOnDate: null,
+      importId: targetImportId,
+      rows: [],
+      batchBreakdown: [],
+      totals: { releaseBalanceComputedMt: 0, releaseBalanceOrderReviewMt: 0, diffMt: 0, rowCount: 0 },
     });
     return;
   }

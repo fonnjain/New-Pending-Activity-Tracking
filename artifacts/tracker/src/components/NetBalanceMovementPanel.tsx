@@ -18,18 +18,24 @@ function fmtNetDelta(v: number): string {
   return sign + num;
 }
 
+// Extended shape: backend adds gated/gatedReason to days that involve a gated import.
+type AnyDay = ProductionMovementDay & { gated?: boolean; gatedReason?: string };
+
 interface Props {
   days: ProductionMovementDay[];
   isLoading?: boolean;
 }
 
-export function NetBalanceMovementPanel({ days, isLoading = false }: Props) {
+export function NetBalanceMovementPanel({ days: daysRaw, isLoading = false }: Props) {
+  const days = daysRaw as AnyDay[];
   if (!isLoading && days.length === 0) return null;
 
   const actSet = new Set<string>();
   for (const day of days) {
-    for (const act of Object.keys(day.netBalance)) {
-      actSet.add(act);
+    if (!day.gated) {
+      for (const act of Object.keys(day.netBalance)) {
+        actSet.add(act);
+      }
     }
   }
   const sortedActs = [...actSet].sort(compareActivity);
@@ -56,10 +62,16 @@ export function NetBalanceMovementPanel({ days, isLoading = false }: Props) {
                   <th
                     key={day.dayKey}
                     className="text-right px-3 py-2 font-semibold whitespace-nowrap min-w-[72px]"
+                    title={day.gated ? day.gatedReason : undefined}
                   >
-                    <span className={day.isGap ? "text-amber-600" : "text-primary/80"}>
+                    <span className={day.gated ? "text-amber-600/70" : day.isGap ? "text-amber-600" : "text-primary/80"}>
                       {day.dayLabel}
                     </span>
+                    {day.gated && (
+                      <span className="block text-[10px] font-normal text-amber-600/70 leading-none mt-0.5">
+                        N/A
+                      </span>
+                    )}
                   </th>
                 ))}
               </tr>
@@ -67,6 +79,7 @@ export function NetBalanceMovementPanel({ days, isLoading = false }: Props) {
             <tbody className="divide-y">
               {sortedActs.map((act) => {
                 const vals = days.map((d) => {
+                  if (d.gated) return null;
                   const v = d.netBalance[act];
                   return v !== undefined ? v : null;
                 });
@@ -77,14 +90,32 @@ export function NetBalanceMovementPanel({ days, isLoading = false }: Props) {
                     {vals.map((v, i) => (
                       <td
                         key={days[i].dayKey}
-                        className={`px-3 py-1.5 text-right tabular-nums whitespace-nowrap ${v !== null ? netBalanceCellClass(v) : "text-muted-foreground"}`}
+                        className={`px-3 py-1.5 text-right tabular-nums whitespace-nowrap ${
+                          days[i].gated
+                            ? "text-muted-foreground/40"
+                            : v !== null
+                            ? netBalanceCellClass(v)
+                            : "text-muted-foreground"
+                        }`}
                       >
-                        {v !== null ? fmtNetDelta(v) : "-"}
+                        {days[i].gated ? "—" : v !== null ? fmtNetDelta(v) : "-"}
                       </td>
                     ))}
                   </tr>
                 );
               })}
+              {/* If all displayed days are gated, show a single explanation row */}
+              {sortedActs.length === 0 && days.every((d) => d.gated) && (
+                <tr>
+                  <td
+                    colSpan={days.length + 1}
+                    className="px-4 py-4 text-center text-xs text-amber-700 dark:text-amber-400"
+                  >
+                    Movement cannot be computed — one or both imports in each pair pre-date
+                    per-row Type/Status storage. Hover a column header for details.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

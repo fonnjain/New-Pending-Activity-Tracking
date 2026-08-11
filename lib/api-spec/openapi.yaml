@@ -5099,7 +5099,16 @@ components:
       properties:
         available:
           type: boolean
-          description: False when no WIP file with Not Started + Initial rows has been uploaded.
+          description: False when no WIP file has been uploaded, or when the import is gated (hasTypeData false).
+        hasTypeData:
+          type: boolean
+          description: >-
+            Present and false when the import pre-dates per-row Type/Status storage.
+            The pre-computed Release Balance for such imports is derived from pool COALESCE
+            (current state) and must not be displayed.
+        reason:
+          type: string
+          description: Human-readable explanation when available is false due to a type-data gate.
         orderReviewAsOnDate:
           type: ["string", "null"]
           description: '"As on" date of the latest Order Review import; null if none.'
@@ -5302,7 +5311,10 @@ components:
       properties:
         available:
           type: boolean
-          description: False when no WIP import exists.
+          description: False when no WIP import exists, or when the import is gated (pre-dates Type/Status storage).
+        reason:
+          type: string
+          description: Human-readable explanation when available is false due to a type-data gate.
         rows:
           type: array
           items:
@@ -5382,7 +5394,9 @@ components:
         import (left C entirely, or still at C with reduced weight). netBalance
         maps activity code to MT delta (curr − prev); negative = clearing,
         positive = accumulating. isGap=true when the two imports are more than
-        one calendar day apart.
+        one calendar day apart. gated=true when either import in the pair
+        pre-dates per-row Type/Status storage; in that case cuttingOutputMt=0
+        and netBalance={} — the pair cannot be computed.
       properties:
         importId:
           type: integer
@@ -5422,9 +5436,17 @@ components:
           description: >
             Net balance delta in MT per activity (curr balance − prev balance).
             Negative = material leaving (good); positive = material accumulating (potential bottleneck).
-            Key "FG" is derived from parseSummary fgWipByJob.
+            Key "FG" is derived from parseSummary fgWipByJob. Empty ({}) when gated=true.
           additionalProperties:
             type: number
+        gated:
+          type: boolean
+          description: >-
+            True when either import in this pair pre-dates per-row Type/Status storage.
+            Movement cannot be computed; cuttingOutputMt and netBalance are zeroed.
+        gatedReason:
+          type: string
+          description: Names the specific unusable import when gated is true.
       required:
         - importId
         - dayKey

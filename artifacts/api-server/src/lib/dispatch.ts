@@ -567,6 +567,25 @@ export async function loadLatestWipImport(): Promise<
   return latest ?? null;
 }
 
+// Probe whether a WIP import has per-row job_card_type stored in import_rows.
+// Old-format imports (ingested before Aug 2026) have NULL job_card_type on every row;
+// their classification queries fall through to COALESCE(pool) and reflect current state,
+// not the historical snapshot. Routes that depend on type/status classification call this
+// helper and gate their response when it returns false. One definition — import everywhere.
+export async function hasTypeData(importId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ importId: importRowsTable.importId })
+    .from(importRowsTable)
+    .where(
+      and(
+        eq(importRowsTable.importId, importId),
+        sql`${importRowsTable.jobCardType} IS NOT NULL`,
+      ),
+    )
+    .limit(1);
+  return row != null;
+}
+
 // The latest Order Review ingest (for as-on date / summary / change log) plus the
 // FULL set of current order rows (one per project+structure, UPSERTed across all
 // uploads). Each row carries importId = the import it was last seen in, so callers

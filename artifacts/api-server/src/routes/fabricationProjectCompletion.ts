@@ -7,7 +7,7 @@ import {
 } from "@workspace/db";
 import { desc, eq, and, sql, or } from "drizzle-orm";
 import { QC_ACTIVITY_SET } from "@workspace/domain";
-import { loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
+import { hasTypeData, loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
 
 // BOM label canonical display order for sorting.
 const BOM_ORDER = ["Proto", "Mass", "Pre", "Mixed", "No BOM match"];
@@ -133,6 +133,23 @@ router.get(
 
     if (!latestImport) {
       res.json({ available: false, rows: [], totals: ZERO_TOTALS, unknownCauses: [] });
+      return;
+    }
+
+    // Gate: old-format imports lack per-row job_card_type — the Cutting balance
+    // query's COALESCE falls through to pool (current state), producing a fabricated
+    // historical snapshot.  Refuse to evaluate gated imports.
+    if (!await hasTypeData(latestImport.id)) {
+      res.json({
+        available: false,
+        reason:
+          `WIP import #${latestImport.id} pre-dates per-row Type/Status storage. ` +
+          `Fabrication completion figures cannot be computed for this import. ` +
+          `Re-upload the source WIP file to restore this view.`,
+        rows: [],
+        totals: ZERO_TOTALS,
+        unknownCauses: [],
+      });
       return;
     }
 
