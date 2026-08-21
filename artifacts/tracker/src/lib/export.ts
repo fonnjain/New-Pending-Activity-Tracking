@@ -84,6 +84,9 @@ export type XlsxColumn = {
   numeric?: boolean;
   decimals?: number;
   total?: boolean;
+  // Optional Excel header-cell comment (hover note), e.g. to declare
+  // export-only columns that have no on-screen equivalent.
+  headerNote?: string;
 };
 
 // A summary/subtotal row inserted between the data and the grand-total row.
@@ -269,6 +272,10 @@ function writeSheet(wb: any, sheet: XlsxSheet, usedNames: Set<string>) {
     cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
     cell.alignment = { horizontal: "center", vertical: "middle" };
+  });
+  // Header comments (e.g. "export-only columns" note).
+  columns.forEach((c, i) => {
+    if (c.headerNote) headerRow.getCell(i + 1).note = c.headerNote;
   });
 
   // Totals row: sums across ALL sections.
@@ -583,14 +590,21 @@ export async function exportToXlsx(
 // (e.g. one sheet per activity). Every sheet gets the same formatting + borders.
 // Pass `combined` to append a block-grid "Combined" sheet with InHouse blocks
 // side-by-side on top and OutVendor blocks side-by-side below.
+// Pass `buildFirst` to write custom-built sheets (e.g. summary sheets) at the
+// FRONT of the workbook, before the styled per-bucket sheets.
 export async function exportToXlsxSheets(
   filename: string,
   sheets: XlsxSheet[],
   combined?: { inHouse: XlsxBlockGroup[]; outVendor: XlsxBlockGroup[] },
+  buildFirst?: (wb: any) => void,
 ) {
   const wb = new ExcelJS.Workbook();
   wb.created = new Date();
   const used = new Set<string>();
+  if (buildFirst) {
+    buildFirst(wb);
+    for (const ws of wb.worksheets) used.add(String(ws.name).toLowerCase());
+  }
   if (combined) writeCombinedBlockSheet(wb, combined.inHouse, combined.outVendor, used);
   for (const sheet of sheets) writeSheet(wb, sheet, used);
   await downloadWorkbook(wb, filename);

@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { isCsvWip } from "./parse";
 import type { OrderReviewSummary } from "@workspace/db";
 import { logger } from "./logger";
 
@@ -168,6 +169,9 @@ function gridText(grid: unknown[][], limit: number): string {
 // review. Order Review is recognised by its own markers and the ABSENCE of the
 // per-mark WIP columns.
 export function detectFileType(buffer: Buffer): OrderReviewFileType {
+  // CSV WIP reports have a direct parser in parse.ts and must never be handed
+  // to SheetJS (which locale-coerces their dd/mm/yyyy date strings).
+  if (isCsvWip(buffer)) return "wip";
   let grid: unknown[][];
   try {
     grid = getGrid(buffer);
@@ -413,6 +417,11 @@ export function detectReportAsOnDate(
   buffer: Buffer,
   filename?: string,
 ): string | null {
+  // WIP CSV has no report banner. Go directly to filename handling so date
+  // detection cannot accidentally run the CSV through SheetJS.
+  if (isCsvWip(buffer)) {
+    return filename ? parseLooseDate(filename) : null;
+  }
   try {
     const grid = getGrid(buffer);
     const limit = Math.min(grid.length, 15);

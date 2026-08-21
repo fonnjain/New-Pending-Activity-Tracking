@@ -4,7 +4,7 @@ import {
   activityDisplayKey,
   compareActivity,
   sortActivities,
-  processPhase,
+  classifyWipPhase,
   classifyWipCase,
   classifyNtltStage,
   PROCESS_PHASES,
@@ -50,6 +50,7 @@ import { formatWeight, formatDate } from "@/lib/utils";
 import { sortRecords, type RecordSortKey } from "@/lib/sort";
 import { ChevronLeft, ChevronRight, ChevronDown, Search, FileSpreadsheet } from "lucide-react";
 import { exportToXlsxSheets, exportTimestamp, type XlsxSheet } from "@/lib/export";
+import { leadingColumns, phaseQualifier, projectWiseExportColumns } from "@/lib/projectWiseColumns";
 import { useToast } from "@/hooks/use-toast";
 
 const ROW_CAP = 300;
@@ -303,6 +304,11 @@ function JobDashboardContent() {
       const byProject = Array.from(projGroups.entries()).map(([job, recs]) => {
         const phases = emptyPhases();
         const ntltStages = emptyNtltStages();
+        // Marks not yet released (classifyWipCase NOT_RELEASED) — the count
+        // behind the Release Balance Computed weight. Counted client-side from
+        // the same record set as Total Marks so the six bucket mark columns
+        // always sum to Total Marks exactly.
+        let releaseBalanceMarks = 0;
         for (const r of recs) {
           // TLT phase classification — Use classifyWipCase to apply the Type guard:
           //   CUTTING / AWAITING_ASSIGNMENT → Cutting bucket (pre-production, JCNS+Authorized)
@@ -317,7 +323,7 @@ function JobDashboardContent() {
             phases.cutting.marks += 1;
             phases.cutting.weight += r.balanceWt;
           } else if (wipCase === "IN_PRODUCTION") {
-            const key = processPhase(r.activity);
+            const key = classifyWipPhase(r);
             if (key === "quality" || key === "galvanising") {
               phases[key].marks += 1;
               phases[key].weight += r.balanceWt;
@@ -328,6 +334,12 @@ function JobDashboardContent() {
             // whether r.activity is blank or holds a scheduled activity code.
             phases.dispatch.marks += 1;
             phases.dispatch.weight += r.balanceWt;
+          } else if (wipCase === "NOT_RELEASED" && !isNtlt) {
+            // TLT/All modes only. In NTLT mode these marks are already counted
+            // in the NTLT stage model ("Not Started"), so counting them here
+            // too would double-count them against Total Marks — and the
+            // Release Balance column renders "-" in NTLT mode anyway.
+            releaseBalanceMarks += 1;
           }
           // NTLT stage classification — applies the Type guard via classifyNtltStage
           // (built on classifyWipCase). Only populated for NTLT records.
@@ -345,6 +357,7 @@ function JobDashboardContent() {
         weight: recs.reduce((s, r) => s + r.balanceWt, 0),
         phases,
         ntltStages,
+        releaseBalanceMarks,
         avgAge: avg(recs),
         firstAssign: recs.reduce<string | null>((min, r) => {
           const d = isoDate(r.assignDate);
@@ -505,46 +518,18 @@ function JobDashboardContent() {
     if (exporting) return;
     setExporting(true);
     try {
-      const groupLabel = isAll ? "Group" : isNtlt ? "Section" : "Project";
-      // Stage columns vary by mode: NTLT uses its own 5-stage model; TLT/ALL use PROCESS_PHASES.
-      const stageExportColumns = isNtlt
-        ? NTLT_STAGES.flatMap((s) => [
-            { label: `${s.label} Wt (MT)`,    field: `ntlt_${s.key}_wt`,    numeric: true, decimals: 3, total: true },
-            { label: `${s.label} Marks`,       field: `ntlt_${s.key}_marks`, numeric: true, decimals: 0, total: true },
-          ])
-        : [
-            { label: "Awaiting Assignment Wt (MT)", field: "awaitingAssignmentWt",    numeric: true, decimals: 3, total: true },
-            { label: "Awaiting Assignment Marks",    field: "awaitingAssignmentMarks", numeric: true, decimals: 0, total: true },
-            { label: "Cutting Wt (MT)",              field: "cuttingWt",              numeric: true, decimals: 3, total: true },
-            { label: "Cutting Marks",                field: "cuttingMarks",           numeric: true, decimals: 0, total: true },
-            { label: "Quality Check Wt (MT)",        field: "qualityWt",              numeric: true, decimals: 3, total: true },
-            { label: "Quality Check Marks",          field: "qualityMarks",           numeric: true, decimals: 0, total: true },
-            { label: "Galvanising Wt (MT)",          field: "galvanisingWt",          numeric: true, decimals: 3, total: true },
-            { label: "Galvanising Marks",            field: "galvanisingMarks",       numeric: true, decimals: 0, total: true },
-            { label: "FG (WIP file) (MT)",           field: "fgWipWt",                numeric: true, decimals: 3, total: true },
-          ] as Array<{ label: string; field: string; numeric: boolean; decimals: number; total: boolean }>;
-
+      // First column header matches the on-screen primary label exactly
+      // ("Project", "MFC", "Project / MFC", "Section", "Group").
+      const groupLabel = primaryLabel;
+      // Column set comes from the shared definition (projectWiseColumns.ts) —
+      // the same source the on-screen header reads — so labels cannot drift.
+      // Stage columns vary by mode: NTLT uses its own 5-stage model; TLT/ALL
+      // use PROCESS_PHASES (headerPhases carries the mode-scoped activities
+      // that the UI shows as qualifiers).
       const sheets: XlsxSheet[] = [
         {
           name: `By ${groupLabel}`,
-          columns: [
-            { label: groupLabel, field: "job" },
-            { label: "Work Order (MT)", field: "workOrderMt", numeric: true, decimals: 3, total: true },
-            { label: "Dispatch (MT)", field: "dispatchMt", numeric: true, decimals: 3, total: true },
-            { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
-            { label: "FG (Order Review) (MT)", field: "fgOverviewComputedMt", numeric: true, decimals: 3, total: true },
-            { label: "Release Balance Computed (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
-            ...stageExportColumns,
-            { label: "Total Wt (MT)", field: "totalWt", numeric: true, decimals: 3, total: true },
-            { label: "Total Marks", field: "marks", numeric: true, decimals: 0, total: true },
-            { label: "Avg Ageing (d)", field: "avgAge", numeric: true, decimals: 0 },
-            { label: "First Assign", field: "firstAssign" },
-            { label: "Structures", field: "structures", numeric: true, decimals: 0 },
-            { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
-            { label: "0-30d", field: "c0to30", numeric: true, decimals: 0 },
-            { label: "31-60d", field: "c31to60", numeric: true, decimals: 0 },
-            { label: "60d+", field: "c60Plus", numeric: true, decimals: 0 },
-          ],
+          columns: projectWiseExportColumns(groupLabel, headerPhases, { isNtlt }),
           rows: sortedProjects.flatMap((p, idx) => {
             const ntltStageCols = isNtlt
               ? Object.fromEntries(
@@ -563,6 +548,7 @@ function JobDashboardContent() {
                   galvanisingWt:           p.phases.galvanising.weight / 1000,
                   galvanisingMarks:        p.phases.galvanising.marks,
                   fgWipWt:                 (!isAll && !isNtlt && mfcViewMode === "project-then-mfc") ? p.phases.dispatch.weight / 1000 : fgWipForJob(p.job) / 1000,
+                  fgWipMarks:              p.phases.dispatch.marks,
                 };
             const isBatchRow = !isAll && !isNtlt && mfcViewMode === "project-then-mfc";
             // For batch rows, look up OR figures from the global structure→batch map.
@@ -580,6 +566,7 @@ function JobDashboardContent() {
               dispatchBalanceMt: isBatchRow ? ((batchOr?.wo ?? 0) - (batchOr?.disp ?? 0)) : (orderByJob.get(p.job)?.wo ?? 0) - (orderByJob.get(p.job)?.disp ?? 0),
               fgOverviewComputedMt: isBatchRow ? (batchOr?.fg ?? 0) : orderByJob.get(p.job)?.computedFg ?? 0,
               releaseBalanceComputedMt: getRelBalForRow(p.job),
+              releaseBalanceComputedMarks: p.releaseBalanceMarks,
               ...ntltStageCols,
               totalWt: p.weight / 1000,
               marks: p.marks,
@@ -610,12 +597,12 @@ function JobDashboardContent() {
                 dispatchMt: np.disp,
                 dispatchBalanceMt: np.wo - np.disp,
                 fgOverviewComputedMt: np.fg,
-                releaseBalanceComputedMt: null,
+                releaseBalanceComputedMt: null, releaseBalanceComputedMarks: null,
                 awaitingAssignmentWt: null, awaitingAssignmentMarks: null,
                 cuttingWt: null, cuttingMarks: null,
                 qualityWt: null, qualityMarks: null,
                 galvanisingWt: null, galvanisingMarks: null,
-                fgWipWt: null,
+                fgWipWt: null, fgWipMarks: null,
                 totalWt: null, marks: null, qty: null,
                 avgAge: null, firstAssign: "", structures: null,
                 c0to30: null, c31to60: null, c60Plus: null,
@@ -655,7 +642,7 @@ function JobDashboardContent() {
     } finally {
       setExporting(false);
     }
-  }, [exporting, isAll, isNtlt, mfcViewMode, sortedProjects, orderByJob, orByProjectBatch, relBalComputedByJob, relBalByProjectBatch, getRelBalForRow, byActivity, toast]);
+  }, [exporting, isAll, isNtlt, mfcViewMode, primaryLabel, headerPhases, sortedProjects, orderByJob, orByProjectBatch, relBalComputedByJob, relBalByProjectBatch, getRelBalForRow, byActivity, toast]);
 
   // Reconciliation guard: all marks must be accounted for in exactly one bucket.
   // bucketTotal = sum of all phase weights (including phases.dispatch for FG)
@@ -754,20 +741,34 @@ function JobDashboardContent() {
             <TableHeader>
                 <TableRow>
                   <TableHead>{primaryLabel}</TableHead>
-                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Work Order Qty</TableHead>
-                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Qty</TableHead>
-                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Dispatch Balance</TableHead>
-                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">FG (Order Review)</TableHead>
-                  <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">Release Balance Computed</TableHead>
+                  {/* Leading column headers come from the shared column definition
+                      (projectWiseColumns.ts) — the same source the export reads.
+                      A label appearing twice (wt + marks pair) renders as a
+                      two-line "wt / marks" header. */}
+                  {(() => {
+                    const lead = leadingColumns();
+                    const seen = new Set<string>();
+                    return lead
+                      .filter((c) => !seen.has(c.uiLabel) && (seen.add(c.uiLabel), true))
+                      .map((c) => {
+                        const hasMarks = lead.filter((x) => x.uiLabel === c.uiLabel).length > 1;
+                        return (
+                          <TableHead key={c.field} className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight">
+                            <span className="block whitespace-normal leading-tight">{c.uiLabel}</span>
+                            {hasMarks && (
+                              <span className="block text-[10px] font-normal text-muted-foreground normal-case">
+                                wt / marks
+                              </span>
+                            )}
+                          </TableHead>
+                        );
+                      });
+                  })()}
                   {headerPhases.map((ph) => (
                     <TableHead key={ph.key} className="text-right align-bottom">
                       <span className="block whitespace-normal leading-tight">{ph.label}</span>
                       <span className="block text-[10px] font-normal text-muted-foreground normal-case leading-tight max-w-[180px] ml-auto">
-                        {ph.subLabel
-                          ? `(${ph.subLabel})`
-                          : ph.activities.length
-                            ? `(${ph.activities.join(", ")})`
-                            : "-"}
+                        {phaseQualifier(ph) || "-"}
                       </span>
                       <span className="block text-[10px] font-normal text-muted-foreground normal-case">
                         wt / marks
@@ -816,7 +817,16 @@ function JobDashboardContent() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{fmtOr(o?.computedFg)}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {(() => { const v = getRelBalForRow(p.job); return v > 0 ? formatWeight(v * 1000) : <span className="text-muted-foreground">-</span>; })()}
+                      {(() => {
+                        const v = getRelBalForRow(p.job);
+                        if (v <= 0 && p.releaseBalanceMarks === 0) return <span className="text-muted-foreground">-</span>;
+                        return (
+                          <>
+                            <span className="font-bold">{formatWeight(v * 1000)}</span>
+                            <span className="block text-xs text-muted-foreground">{p.releaseBalanceMarks} marks</span>
+                          </>
+                        );
+                      })()}
                     </TableCell>
                     {isNtlt
                       ? NTLT_STAGES.map((stg) => {
@@ -845,8 +855,13 @@ function JobDashboardContent() {
                               : fgWipForJob(p.job);
                             return (
                               <TableCell key={ph.key} className="text-right tabular-nums">
-                                {wt > 0 ? (
-                                  <span className="font-bold">{formatWeight(wt)}</span>
+                                {wt > 0 || p.phases.dispatch.marks > 0 ? (
+                                  <>
+                                    <span className="font-bold">{formatWeight(wt)}</span>
+                                    <span className="block text-xs text-muted-foreground">
+                                      {p.phases.dispatch.marks} marks
+                                    </span>
+                                  </>
                                 ) : (
                                   <span className="text-muted-foreground">-</span>
                                 )}
@@ -921,40 +936,18 @@ function JobDashboardContent() {
               </TableBody>
               {byProject.length > 0 && (
                 <TableFooter>
-                  {/* Column labels repeated as footer so they're visible at the bottom of long lists */}
-                  <TableRow className="border-b text-xs text-muted-foreground font-semibold uppercase tracking-wide bg-card">
-                    <TableHead className="py-1">{primaryLabel}</TableHead>
-                    <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight py-1">Work Order Qty</TableHead>
-                    <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight py-1">Dispatch Qty</TableHead>
-                    <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight py-1">Dispatch Balance</TableHead>
-                    <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight py-1">FG (Order Review)</TableHead>
-                    <TableHead className="text-right align-bottom whitespace-normal max-w-[4.5rem] leading-tight py-1">Release Balance Computed</TableHead>
-                    {headerPhases.map((ph) => (
-                      <TableHead key={ph.key} className="text-right align-bottom py-1">
-                        <span className="block whitespace-normal leading-tight">{ph.label}</span>
-                        <span className="block text-[10px] font-normal normal-case leading-tight max-w-[180px] ml-auto">
-                          {ph.subLabel
-                            ? `(${ph.subLabel})`
-                            : ph.activities.length
-                              ? `(${ph.activities.join(", ")})`
-                              : "-"}
-                        </span>
-                        <span className="block text-[10px] font-normal normal-case">wt / marks</span>
-                      </TableHead>
-                    ))}
-                    <TableHead className="text-right align-bottom py-1">
-                      <span className="block whitespace-nowrap">Total</span>
-                      <span className="block text-[10px] font-normal normal-case">wt / marks</span>
-                    </TableHead>
-                    <TableHead className="text-right py-1">Avg Ageing</TableHead>
-                  </TableRow>
                   <TableRow className="border-t-2">
                     <TableCell className="font-bold uppercase tracking-wider text-xs">Total</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.wo * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.disp * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight((orderTotals.wo - orderTotals.disp) * 1000)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">{formatWeight(orderTotals.computedFg * 1000)}</TableCell>
-                    <TableCell className="text-right tabular-nums font-bold">{formatWeight(byProject.reduce((s, p) => s + getRelBalForRow(p.job), 0) * 1000)}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      <span className="font-bold">{formatWeight(byProject.reduce((s, p) => s + getRelBalForRow(p.job), 0) * 1000)}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {byProject.reduce((s, p) => s + p.releaseBalanceMarks, 0)} marks
+                      </span>
+                    </TableCell>
                     {isNtlt
                       ? NTLT_STAGES.map((stg) => {
                           const marks = byProject.reduce((s, p) => s + p.ntltStages[stg.key].marks, 0);
@@ -977,10 +970,16 @@ function JobDashboardContent() {
                             const totalFgWt = (!isAll && !isNtlt && mfcViewMode === "project-then-mfc")
                               ? byProject.reduce((s, p) => s + p.phases.dispatch.weight, 0)
                               : byProject.reduce((s, p) => s + fgWipForJob(p.job), 0);
+                            const totalFgMarks = byProject.reduce((s, p) => s + p.phases.dispatch.marks, 0);
                             return (
                               <TableCell key={ph.key} className="text-right tabular-nums">
-                                {totalFgWt > 0 ? (
-                                  <span className="font-bold">{formatWeight(totalFgWt)}</span>
+                                {totalFgWt > 0 || totalFgMarks > 0 ? (
+                                  <>
+                                    <span className="font-bold">{formatWeight(totalFgWt)}</span>
+                                    <span className="block text-xs text-muted-foreground">
+                                      {totalFgMarks} marks
+                                    </span>
+                                  </>
                                 ) : (
                                   <span className="text-muted-foreground">-</span>
                                 )}
@@ -1189,7 +1188,7 @@ function JobDetail({
             phases.cutting.marks += 1;
             phases.cutting.weight += r.balanceWt;
           } else if (wipCase === "IN_PRODUCTION") {
-            const key = processPhase(r.activity);
+            const key = classifyWipPhase(r);
             if (key === "quality" || key === "galvanising") {
               phases[key].marks += 1;
               phases[key].weight += r.balanceWt;
@@ -1256,7 +1255,7 @@ function JobDetail({
             phases.cutting.marks += 1;
             phases.cutting.weight += r.balanceWt;
           } else if (wipCase === "IN_PRODUCTION") {
-            const key = processPhase(r.activity);
+            const key = classifyWipPhase(r);
             if (key === "quality" || key === "galvanising") {
               phases[key].marks += 1;
               phases[key].weight += r.balanceWt;

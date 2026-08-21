@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ReleaseBalanceResponseBatchBreakdownItem } from './releaseBalanceResponseBatchBreakdownItem';
 import type { ReleaseBalanceRow } from './releaseBalanceRow';
 import type { ReleaseBalanceTotals } from './releaseBalanceTotals';
 
@@ -12,24 +13,19 @@ import type { ReleaseBalanceTotals } from './releaseBalanceTotals';
  * Release Balance Computed from the latest WIP file, joined to Order Review.
  */
 export interface ReleaseBalanceResponse {
-  /** False when no WIP file with Not Started + Initial rows has been uploaded. */
+  /** False when no WIP file has been uploaded, or when the import is gated (hasTypeData false). */
   available: boolean;
+  /** Present and false when the import pre-dates per-row Type/Status storage. The pre-computed Release Balance for such imports is derived from pool COALESCE (current state) and must not be displayed. */
+  hasTypeData?: boolean;
+  /** Human-readable explanation when available is false due to a type-data gate. */
+  reason?: string;
   /**
      * "As on" date of the latest Order Review import; null if none.
      * @nullable
      */
   orderReviewAsOnDate: string | null;
   rows: ReleaseBalanceRow[];
-  /**
-   * Per-(project, mfcBatch) release balance sums with no OR join.
-   * Used by the batch-view client to attribute release balance to
-   * individual MFC batches without inflating the OR comparison table.
-   */
-  batchBreakdown: Array<{
-    project: string;
-    /** MFC batch letter (A, B, C …) or 'Z' for unassigned marks. */
-    mfcBatch: string;
-    releaseBalanceComputedMt: number;
-  }>;
+  /** Per-(project, mfcBatch) release balance sums with no OR join. Used by the batch-view client to attribute release balance to individual MFC batches without inflating the OR comparison table. */
+  batchBreakdown: ReleaseBalanceResponseBatchBreakdownItem[];
   totals: ReleaseBalanceTotals;
 }

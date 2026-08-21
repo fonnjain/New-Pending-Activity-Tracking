@@ -8,7 +8,7 @@
 import type { ProductionMovementDayNetBalance } from './productionMovementDayNetBalance';
 
 /**
- * One consecutive import pair. cuttingOutputMt is the sum of TLT balance weight drawn down from marks that were at activity C in the previous import (left C entirely, or still at C with reduced weight). netBalance maps activity code to MT delta (curr − prev); negative = clearing, positive = accumulating. isGap=true when the two imports are more than one calendar day apart.
+ * One consecutive import pair. cuttingOutputMt is the sum of TLT balance weight drawn down from marks that were at activity C in the previous import (left C entirely, or still at C with reduced weight). netBalance maps activity code to MT delta (curr − prev); negative = clearing, positive = accumulating. isGap=true when the two imports are more than one calendar day apart. gated=true when either import in the pair pre-dates per-row Type/Status storage; in that case cuttingOutputMt=0 and netBalance={} — the pair cannot be computed.
 
  */
 export interface ProductionMovementDay {
@@ -33,7 +33,11 @@ export interface ProductionMovementDay {
   cuttingMarksLeft: number;
   /** Count of TLT marks still at C in both imports whose balance weight decreased. */
   cuttingMarksReduced: number;
-  /** Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key "FG" is derived from parseSummary fgWipByJob.
+  /** Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key "FG" is derived from parseSummary fgWipByJob. Empty ({}) when gated=true.
    */
   netBalance: ProductionMovementDayNetBalance;
+  /** True when either import in this pair pre-dates per-row Type/Status storage. Movement cannot be computed; cuttingOutputMt and netBalance are zeroed. */
+  gated?: boolean;
+  /** Names the specific unusable import when gated is true. */
+  gatedReason?: string;
 }

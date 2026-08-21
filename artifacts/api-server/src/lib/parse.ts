@@ -1,9 +1,17 @@
 import { createHash } from "node:crypto";
 import * as XLSX from "xlsx";
-import { deriveHoleOperation } from "@workspace/domain";
+import { canonicalActivity, deriveHoleOperation } from "@workspace/domain";
 import type { InsertRecordPool, ParseSummary } from "@workspace/db";
 
 export type { ParseSummary };
+
+/** The permanent ERP WIP CSV export has one fixed, 28-column header row. */
+export const WIP_CSV_COLUMN_COUNT = 28;
+
+/** True only when a CSV header has the fixed column count required at ingest. */
+export function hasExactWipCsvColumnCount(columnsFound: readonly string[]): boolean {
+  return columnsFound.length === WIP_CSV_COLUMN_COUNT;
+}
 
 // A parsed source row, identical in shape to a record_pool insert plus its
 // content hash. In-sheet duplicates are PRESERVED (no within-file de-dup).
@@ -12,6 +20,8 @@ export type ParsedRow = Omit<InsertRecordPool, "hash"> & { hash: string };
 export interface ParseResult {
   rows: ParsedRow[];
   summary: ParseSummary;
+  /** CSV source dates later than the selected report date. Import routes refuse these. */
+  futureDateCount: number;
 }
 
 type Cell = string | number | boolean | Date | null | undefined;
@@ -72,6 +82,10 @@ const KNOWN_ORDER_NATURES = new Set([
   "EARTHING",
   "GENERAL",
   "FOUNDATION BOLT",
+  "SOLAR STRUCTURE",
+  "RAILWAY STRUCTURE",
+  "RURAL ELECTRIFICATION",
+  "JOB WORK",
 ]);
 
 // Classify a row from its Order Nature (authoritative), Tower Sub Type (confirm
@@ -111,12 +125,18 @@ export function classifyMark(input: {
       groupKey: normalizeSectionKey(input.section) || "EARTHING",
       active: true,
     };
-  } else if (nature === "GENERAL") {
+  } else if (
+    nature === "GENERAL" ||
+    nature === "SOLAR STRUCTURE" ||
+    nature === "RAILWAY STRUCTURE" ||
+    nature === "RURAL ELECTRIFICATION" ||
+    nature === "JOB WORK"
+  ) {
     c = {
       category: "NTLT",
       ntltSubtype: "GENERAL",
       groupType: "section",
-      groupKey: normalizeSectionKey(input.section) || "GENERAL",
+      groupKey: normalizeSectionKey(input.section) || nature,
       active: true,
     };
   } else if (nature === "FOUNDATION BOLT") {
@@ -206,6 +226,7 @@ const COL = {
   orderNature: "Order Nature",
   contractor: "Contractor",
   jobCard: "Job Card No.",
+  jobCardDate: "Job Card Date",
   towerType: "Tower Type",
   towerSubType: "Tower Sub Type",
   alias: "Alias",
@@ -223,10 +244,49 @@ const COL = {
   lastProductionDate: "Last Production Entry Date",
   workOrderNo: "Work Order No.",
   woBatchNo: "WO Batch No.",
+  // ERP additions, Aug-2026 (cols Y + Z). OPTIONAL — files before 16-Aug-2026 do
+  // not carry them and must keep importing with the fields null (see
+  // OPTIONAL_WIP_COLUMNS below). Stored raw; no logic depends on them yet.
+  bomStatus: "BOM Status",
+  isWeldedStructure: "Is Welded Structure",
+  salesOrderStatus: "Sales Order Status",
+  isLastActivity: "Is Last Activity",
 } as const;
 
+// --- Source Column Watch -------------------------------------------------
+// ERP pass-through columns whose contents we snapshot on every import so the
+// day they start carrying real information gets noticed. Extensible by design:
+// append an entry here and the Data Check panel + export render it — no other
+// code changes. Descriptive only; never a DC rule, never affects pass/fail.
+// Declared here (before the column-tier lists) because a watched column is by
+// construction also a KNOWN column: OPTIONAL_WIP_COLUMNS derives from it.
+export const WATCHED_SOURCE_COLUMNS: ReadonlyArray<{ key: string; header: string }> = [
+  { key: "bomStatus", header: COL.bomStatus },
+  { key: "isWeldedStructure", header: COL.isWeldedStructure },
+];
+
+// COL entries that are allowed to be absent from a file's header row — they are
+// captured when present but never reported as "missing expected columns".
+// Derived from WATCHED_SOURCE_COLUMNS: adding a watched column automatically
+// makes it optional-known everywhere (format check included).
+const OPTIONAL_WIP_COLUMNS = new Set<string>(
+  [
+    ...WATCHED_SOURCE_COLUMNS.map((c) => c.header),
+    COL.salesOrderStatus,
+    COL.isLastActivity,
+  ],
+);
+
 // ── WIP format baseline & sanity check ──────────────────────────────────────
-// Update EXPECTED_WIP_COLUMNS here (ONE place) when the ERP format changes.
+// Three tiers of column classification (see also CRITICAL_WIP_COLUMN_LIST and
+// KNOWN_WIP_COLUMN_LIST below):
+//   1. Critical — required; missing means the file is refused at ingest.
+//   2. Known    — recognised; may or may not be present, neither case warns.
+//   3. Unknown  — anything else; the only tier that produces the staging
+//                 "unexpected column" warning.
+// When the ERP adds a column we decide to accept, add it to
+// KNOWN_WIP_COLUMN_LIST (one line). EXPECTED_WIP_COLUMNS remains the ordered
+// historical baseline used only for the rename/reorder heuristics.
 export const EXPECTED_WIP_COLUMNS: readonly string[] = [
   "Type",
   "Project Code",
@@ -254,17 +314,70 @@ export const EXPECTED_WIP_COLUMNS: readonly string[] = [
   "Batch No.",
 ];
 
-// Columns whose absence breaks core computed features.
-const CRITICAL_WIP_COLUMNS = new Set<string>([
+// Columns whose absence breaks core computed features. This is the ONE
+// critical-column list: a WIP file missing any of these is refused at ingest
+// (see missingCriticalWipColumns) — a partial import is worse than no import,
+// because nothing downstream can distinguish it from a complete one (that's
+// how the 19 gated imports happened). "Batch No." is satisfied by either the
+// new "Batch No." or the legacy "WO Batch No." header.
+export const CRITICAL_WIP_COLUMN_LIST: readonly string[] = [
   "Type",
-  "Job Card Status",
+  "Mark No.",
   "Contractor",
+  "Job Card Status",
   "Alias",
-  "Activity",
-  "Balance Wt.",
-  "Tower Sub Type",
+  "Batch No.",
+  "Order Nature",
   "Project Code",
-]);
+  "Balance Wt.",
+  "Activity",
+];
+const CRITICAL_WIP_COLUMNS = new Set<string>(CRITICAL_WIP_COLUMN_LIST);
+
+// Known-but-optional columns: recognised, presence NOT required. A file having
+// them is normal; a file lacking them is also normal (pre-16-Aug-2026 exports
+// lack the last two). Neither case produces a warning — only columns outside
+// critical ∪ known do. Adding the next accepted ERP column is a one-line edit
+// here. Watched columns (Source Column Watch) are appended automatically —
+// a column being watched implies it is known.
+const KNOWN_WIP_COLUMN_BASE: readonly string[] = [
+  "Job Card No.",
+  "Job Card Date",
+  "Tower Type",
+  "Tower Sub Type",
+  "Section",
+  "Length",
+  "Width",
+  "Wt/Pcs",
+  "Balance Qty.",
+  "Assign Date",
+  "Operation",
+  "Ref. Job Card No.",
+  "Last Production Entry Date",
+  "Work Order No.",
+];
+export const KNOWN_WIP_COLUMN_LIST: readonly string[] = [
+  ...KNOWN_WIP_COLUMN_BASE,
+  ...Array.from(OPTIONAL_WIP_COLUMNS),
+];
+
+// Returns the critical columns absent from a WIP file's header row. Matching is
+// EXACT (trimmed, case-sensitive) — deliberately as strict as the parser itself,
+// which indexes rows by the exact header string (row[COL.markNo] etc.). A
+// case-variant header like "Mark no." would pass a normalized check but parse
+// as null on every row, recreating the silent-corruption failure this gate
+// exists to prevent — so it must be refused too. The single equivalence is the
+// "WO Batch No." → "Batch No." rename, which the parser also resolves.
+// Empty array ⇒ the file may be ingested. Non-empty ⇒ refuse outright — no
+// partial import, no override. Extra/unknown columns never appear here.
+export function missingCriticalWipColumns(columnsFound: string[]): string[] {
+  const found = new Set(columnsFound.map((c) => c.trim()));
+  return CRITICAL_WIP_COLUMN_LIST.filter((c) => {
+    if (found.has(c)) return false;
+    if (c === "Batch No." && found.has("WO Batch No.")) return false;
+    return true;
+  });
+}
 
 export interface WipColumnRename {
   position: number; // 1-based
@@ -280,8 +393,12 @@ export interface WipFormatCheck {
   ok: boolean;
   expectedCount: number;
   foundCount: number;
+  /** Missing REQUIRED (critical) columns only — always equals criticalMissing. */
   missingExpected: string[];
+  /** Columns in the file recognised by neither the critical nor known list. */
   unexpectedFound: string[];
+  /** Known-optional columns absent from this file. Informational, never a warning. */
+  optionalAbsent: string[];
   renames: WipColumnRename[];
   reorders: WipColumnReorder[];
   criticalMissing: string[];
@@ -294,51 +411,41 @@ function normHeader(s: string): string {
 }
 
 export function checkWipFormat(columnsFound: string[]): WipFormatCheck {
-  const expected = EXPECTED_WIP_COLUMNS as readonly string[];
-  const expNorm = expected.map(normHeader);
   const fndNorm = columnsFound.map(normHeader);
 
-  // Quick exact-match (normalized) — common happy path
-  if (
-    fndNorm.length === expNorm.length &&
-    fndNorm.every((n, i) => n === expNorm[i])
-  ) {
-    return {
-      ok: true,
-      expectedCount: expected.length,
-      foundCount: columnsFound.length,
-      missingExpected: [],
-      unexpectedFound: [],
-      renames: [],
-      reorders: [],
-      criticalMissing: [],
-      isOldFormat: false,
-      impactNote: null,
-    };
-  }
+  // Recognised = critical ∪ known-optional ∪ the one legacy header alias
+  // ("WO Batch No." → "Batch No.", which the parser also resolves).
+  const recognizedNorm = new Set<string>([
+    ...CRITICAL_WIP_COLUMN_LIST.map(normHeader),
+    ...KNOWN_WIP_COLUMN_LIST.map(normHeader),
+    normHeader("WO Batch No."),
+  ]);
 
   // Build position maps (normalized name → 1-based position, first occurrence)
   const foundPosByNorm = new Map<string, number>();
   fndNorm.forEach((n, i) => {
     if (!foundPosByNorm.has(n)) foundPosByNorm.set(n, i + 1);
   });
-  const expPosByNorm = new Map<string, number>();
-  expNorm.forEach((n, i) => expPosByNorm.set(n, i + 1));
 
-  // Missing: expected names not anywhere in file
-  const missingExpected: string[] = [];
-  for (let i = 0; i < expected.length; i++) {
-    if (!foundPosByNorm.has(expNorm[i]!)) missingExpected.push(expected[i]!);
-  }
-  // Unexpected: file names not in expected
+  // Tier 1 — missing critical columns (exact-match gate, same as ingest refusal)
+  const criticalMissing = missingCriticalWipColumns(columnsFound);
+  // Tier 2 — known columns absent from this file (informational only)
+  const optionalAbsent = KNOWN_WIP_COLUMN_LIST.filter(
+    (c) => !foundPosByNorm.has(normHeader(c)),
+  );
+  // Tier 3 — columns recognised by neither list: the only warning-worthy case
   const unexpectedFound: string[] = [];
   for (let i = 0; i < columnsFound.length; i++) {
-    if (!expPosByNorm.has(fndNorm[i]!)) unexpectedFound.push(columnsFound[i]!);
+    if (!recognizedNorm.has(fndNorm[i]!)) unexpectedFound.push(columnsFound[i]!);
   }
 
-  // Renames: at position i, the expected name is missing AND the found name is
-  // unexpected (i.e. both ends of the slot belong to the "unmatched" sets).
-  const missingNormSet = new Set(missingExpected.map(normHeader));
+  const ok = criticalMissing.length === 0 && unexpectedFound.length === 0;
+
+  // Rename heuristic against the ordered historical baseline: at position i,
+  // the baseline name is missing-critical AND the found name is unrecognised.
+  const expected = EXPECTED_WIP_COLUMNS as readonly string[];
+  const expNorm = expected.map(normHeader);
+  const missingNormSet = new Set(criticalMissing.map(normHeader));
   const unexpectedNormSet = new Set(unexpectedFound.map(normHeader));
   const renames: WipColumnRename[] = [];
   const minLen = Math.min(expected.length, columnsFound.length);
@@ -352,7 +459,8 @@ export function checkWipFormat(columnsFound: string[]): WipFormatCheck {
     }
   }
 
-  // Reorders: expected column IS in file but at a different position
+  // Reorders vs the historical baseline. Informational only — the parser is
+  // name-based, so order never affects parsing and never blocks or warns.
   const reorders: WipColumnReorder[] = [];
   for (let i = 0; i < expected.length; i++) {
     const foundPos = foundPosByNorm.get(expNorm[i]!);
@@ -365,9 +473,6 @@ export function checkWipFormat(columnsFound: string[]): WipFormatCheck {
     }
   }
 
-  const criticalMissing = missingExpected.filter((c) =>
-    CRITICAL_WIP_COLUMNS.has(c),
-  );
   const isOldFormat =
     !foundPosByNorm.has("type") && foundPosByNorm.has("project code");
 
@@ -380,19 +485,18 @@ export function checkWipFormat(columnsFound: string[]): WipFormatCheck {
       '"Type" and/or "Job Card Status" are missing — Release Balance Computed, Assignment Balance, and the Fabrication Report cannot be computed from this file.';
   } else if (criticalMissing.length > 0) {
     impactNote = `Critical columns missing (${criticalMissing.join(", ")}) — some features may be unavailable or show incorrect values.`;
-  } else if (reorders.length > 0) {
-    impactNote =
-      "Column positions differ — if the parser uses fixed positions for any column, parsed values may be wrong.";
   }
 
   return {
-    ok: false,
-    expectedCount: expected.length,
+    ok,
+    expectedCount:
+      CRITICAL_WIP_COLUMN_LIST.length + KNOWN_WIP_COLUMN_LIST.length,
     foundCount: columnsFound.length,
-    missingExpected,
+    missingExpected: criticalMissing,
     unexpectedFound,
+    optionalAbsent,
     renames,
-    reorders,
+    reorders: ok ? [] : reorders,
     criticalMissing,
     isOldFormat,
     impactNote,
@@ -722,6 +826,110 @@ function resolveSheet(buffer: Buffer): { name: string; ws: XLSX.WorkSheet } {
   return { name, ws };
 }
 
+/**
+ * Direct RFC-4180-style CSV reader for the permanent WIP export. It deliberately
+ * avoids SheetJS: CSV fields are quoted, may contain commas, and use CRLF lines.
+ */
+function readCsvGrid(buffer: Buffer): string[][] {
+  const text = buffer.toString("utf8").replace(/^\uFEFF/, "");
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]!;
+    if (quoted) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      row.push(field);
+      field = "";
+    } else if (char === "\n") {
+      row.push(field.replace(/\r$/, ""));
+      rows.push(row);
+      row = [];
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+  if (quoted) throw new Error("CSV has an unterminated quoted field");
+  if (field !== "" || row.length > 0) {
+    row.push(field.replace(/\r$/, ""));
+    rows.push(row);
+  }
+  return rows;
+}
+
+/** True only for a direct CSV WIP header; Order Review CSV is not supported. */
+export function isCsvWip(buffer: Buffer): boolean {
+  try {
+    // Detection is called before parsing and in a few guards. Only inspect the
+    // header line here; building a 75k-row grid just to identify a CSV wastes
+    // substantial memory during upload.
+    const lineEnd = buffer.indexOf(0x0a);
+    const headerBuffer = lineEnd >= 0 ? buffer.subarray(0, lineEnd + 1) : buffer;
+    const headers = (readCsvGrid(headerBuffer)[0] ?? []).map((header) => header.trim());
+    return (
+      headers.includes(COL.projectCode) &&
+      headers.includes(COL.markNo) &&
+      headers.includes(COL.activity)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function csvRowsAsObjects(buffer: Buffer): { headers: string[]; rows: RawRow[] } {
+  const grid = readCsvGrid(buffer);
+  const headers = (grid[0] ?? []).map((value) => value.trim());
+  if (headers.length === 0 || !headers.includes(COL.projectCode)) {
+    throw new Error("CSV header row is missing Project Code");
+  }
+  return {
+    headers,
+    rows: grid.slice(1).map((values) => {
+      const row: RawRow = {};
+      headers.forEach((header, index) => {
+        row[header] = values[index] ?? null;
+      });
+      return row;
+    }),
+  };
+}
+
+function parseCsvDayFirst(value: Cell): string | null {
+  const raw = cellToString(value);
+  if (!raw) return null;
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(raw);
+  if (!match) return null;
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    candidate.getUTCFullYear() !== year ||
+    candidate.getUTCMonth() !== month - 1 ||
+    candidate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
 export interface StructuralRead {
   sheetName: string | null;
   headerRow: number | null;
@@ -736,6 +944,52 @@ export interface StructuralRead {
 // Best-effort, AI-free structural read of an uploaded file. Never authoritative;
 // used by the staging flow to describe the file before commit.
 export function readStructural(buffer: Buffer): StructuralRead {
+  if (isCsvWip(buffer)) {
+    try {
+      const { headers, rows } = csvRowsAsObjects(buffer);
+      const found = new Set(headers);
+      const missingColumns = Object.values(COL).filter((c) => {
+        if (OPTIONAL_WIP_COLUMNS.has(c)) return false;
+        if (found.has(c)) return false;
+        if (c === COL.woBatchNo && found.has("Batch No.")) return false;
+        return true;
+      });
+      const rowsWithMark = rows.filter((row) => cellToString(row[COL.markNo])).length;
+      const problems: string[] = [];
+      if (!hasExactWipCsvColumnCount(headers)) {
+        problems.push(
+          `Expected ${WIP_CSV_COLUMN_COUNT} CSV columns but found ${headers.length}.`,
+        );
+      }
+      if (missingColumns.length > 0) {
+        problems.push(`Missing expected columns: ${missingColumns.join(", ")}.`);
+      }
+      if (rowsWithMark === 0) {
+        problems.push('No data rows have a non-empty "Mark No.".');
+      }
+      return {
+        sheetName: "CSV",
+        headerRow: 0,
+        columnsFound: headers,
+        missingColumns,
+        rowsRead: rows.length,
+        rowsWithMark,
+        problems,
+        wipFormatCheck: checkWipFormat(headers),
+      };
+    } catch {
+      return {
+        sheetName: null,
+        headerRow: null,
+        columnsFound: [],
+        missingColumns: Object.values(COL),
+        rowsRead: 0,
+        rowsWithMark: 0,
+        problems: ["The file could not be read as a CSV report."],
+        wipFormatCheck: null,
+      };
+    }
+  }
   let name: string;
   let ws: XLSX.WorkSheet;
   try {
@@ -771,6 +1025,7 @@ export function readStructural(buffer: Buffer): StructuralRead {
   // "WO Batch No." was renamed to "Batch No." in newer file exports — treat
   // either header as satisfying the woBatchNo expectation.
   const missingColumns = expected.filter((c) => {
+    if (OPTIONAL_WIP_COLUMNS.has(c)) return false;
     if (found.has(c)) return false;
     if (c === COL.woBatchNo && found.has("Batch No.")) return false;
     return true;
@@ -812,22 +1067,47 @@ export function readStructural(buffer: Buffer): StructuralRead {
   };
 }
 
+// --- Source Column Watch (types) -------------------------------------------
+// WATCHED_SOURCE_COLUMNS itself is declared above, next to OPTIONAL_WIP_COLUMNS,
+// so that "watched implies known" holds by construction.
+export interface SourceColumnWatchColumn {
+  key: string;
+  header: string;
+  // false = the file was inspected and the column is absent ("not present in
+  // this file"). Imports whose summary lacks the snapshot entirely predate it.
+  present: boolean;
+  values: { value: string | null; marks: number; weightMt: number }[];
+  crossTab: { orderNature: string; value: string | null; marks: number }[];
+}
+
 export function parseWorkbook(
   buffer: Buffer,
   cleanups?: Cleanup[],
+  options?: { reportDate?: string | null },
 ): ParseResult {
-  const { ws } = resolveSheet(buffer);
-
-  // Header is no longer fixed to the third row. Scan the first rows for the one
-  // that contains a cell exactly equal to "Project Code"; data begins on the
-  // next row. Falls back to the third row (index 2) when not found.
-  const headerRow = detectHeaderRow(ws);
+  const csv = isCsvWip(buffer);
+  let headerRow = 0;
+  let headerCells: unknown[] = [];
+  let rawRows: RawRow[];
+  if (csv) {
+    const parsedCsv = csvRowsAsObjects(buffer);
+    headerCells = parsedCsv.headers;
+    rawRows = parsedCsv.rows;
+  } else {
+    const { ws } = resolveSheet(buffer);
+    // Header is no longer fixed to the third row. Scan the first rows for the one
+    // that contains a cell exactly equal to "Project Code"; data begins on the
+    // next row. Falls back to the third row (index 2) when not found.
+    headerRow = detectHeaderRow(ws);
+    rawRows = XLSX.utils.sheet_to_json<RawRow>(ws, {
+      range: headerRow,
+      defval: null,
+      raw: true,
+    });
+    headerCells =
+      XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, range: headerRow, raw: true })[0] ?? [];
+  }
   const cleanupMap = buildCleanupMap(cleanups);
-  const rawRows = XLSX.utils.sheet_to_json<RawRow>(ws, {
-    range: headerRow,
-    defval: null,
-    raw: true,
-  });
 
   // Closed value sets for Col A and Col G (verified on WIP 21-Jul, 60,594 rows).
   const KNOWN_WIP_TYPES = new Set([
@@ -842,6 +1122,7 @@ export function parseWorkbook(
   let ntltOrphanCount = 0;
   let ntltOrphanWtMt = 0;
   let unknownOrderNatureCount = 0;
+  let futureDateCount = 0;
   let unclassifiedRowCount = 0;
   let unclassifiedWtKg = 0;
   // Up to 5 distinct type+status combos captured as diagnostic samples.
@@ -958,6 +1239,12 @@ export function parseWorkbook(
       }
     }
 
+    const sourceActivity = emptyToNull(row[COL.activity]);
+    // Blank Job Card WIP rows remain blank in storage so the existing DC18 source
+    // warning can identify them. classifyWipPhase() maps only that scoped case to
+    // Quality Check at read time; all other blank-source behaviour is unchanged.
+    const activity = canonicalActivity(sourceActivity);
+
     const base: Omit<InsertRecordPool, "hash"> = {
       job,
       structure,
@@ -981,9 +1268,16 @@ export function parseWorkbook(
       wtPcs: toNumber(row[COL.wtPcs]),
       balanceQty: toNumber(row[COL.balanceQty]) ?? 0,
       balanceWt: toNumber(row[COL.balanceWt]) ?? 0,
-      assignDate: formatDate(row[COL.assignDate]),
-      lastProductionDate: formatDate(row[COL.lastProductionDate]),
-      activity: emptyToNull(row[COL.activity]),
+       assignDate: csv ? parseCsvDayFirst(row[COL.assignDate]) : formatDate(row[COL.assignDate]),
+       lastProductionDate: csv
+         ? parseCsvDayFirst(row[COL.lastProductionDate])
+         : formatDate(row[COL.lastProductionDate]),
+      activity,
+      // Preserve the source value only when canonicalization changed it. This
+      // remains null for every ordinary/existing row and is deliberately absent
+      // from hashRow so canonical activity identity remains stable.
+       activityRaw:
+         sourceActivity != null && activity !== sourceActivity ? sourceActivity : null,
       operation: emptyToNull(row[COL.operation]),
       refJobCardNo: emptyToNull(row[COL.refJobCard]),
       workOrderNo,
@@ -1040,6 +1334,24 @@ export function parseWorkbook(
     // the column). NOT part of the hash; defaults null for legacy rows.
     base.jobCardStatus = jcStatus || null;
     base.isInitialCutting = jcStatus === "INITIAL";
+    // ERP additions Aug-2026 (cols Y + Z): stored as raw trimmed strings, null
+    // when the column is absent (files before 16-Aug-2026). NOT part of the
+    // hash — attributes of the structure, not the mark's state — following the
+    // category/ntltSubtype/groupType/holeOperation pattern. No logic reads them.
+    base.bomStatus = emptyToNull(row[COL.bomStatus]);
+    base.isWeldedStructure = emptyToNull(row[COL.isWeldedStructure]);
+    base.salesOrderStatus = emptyToNull(row[COL.salesOrderStatus]);
+    base.isLastActivity = emptyToNull(row[COL.isLastActivity]);
+
+    if (csv && options?.reportDate) {
+      for (const date of [
+        parseCsvDayFirst(row[COL.jobCardDate]),
+        base.assignDate,
+        base.lastProductionDate,
+      ]) {
+        if (date != null && date > options.reportDate) futureDateCount++;
+      }
+    }
 
     // Detect rows that fall outside the verified closed value sets for Col A / Col G.
     // Only applies when the "Type" column is present (new-format files); old-format
@@ -1070,6 +1382,54 @@ export function parseWorkbook(
     rows.push({ ...base, hash: hashRow(base, rawBatch) });
   }
 
+  // --- Source Column Watch (Data Check panel) -------------------------------
+  // Per-import snapshot of the watched ERP pass-through columns, captured at
+  // parse time from THIS file's rows. Stored in imports.summary so it stays
+  // accurate forever: record_pool values are shared across imports and get
+  // re-stamped by later files, so a live pool join could never reconstruct
+  // what an earlier file actually contained. Descriptive only — no rule, no
+  // pass/fail, nothing downstream reads it for logic.
+  // Presence is read from the detected header row itself (not from a data
+  // row), so a file with headers but zero data rows still reports correctly.
+  const headerKeys = new Set(
+    headerCells.filter((c): c is string => typeof c === "string").map((c) => c.trim()),
+  );
+  const sourceColumnWatch: SourceColumnWatchColumn[] = WATCHED_SOURCE_COLUMNS.map(
+    ({ key, header }) => {
+      const present = headerKeys.has(header);
+      if (!present) return { key, header, present, values: [], crossTab: [] };
+      const valueAgg = new Map<string, { value: string | null; marks: number; weightKg: number }>();
+      const crossAgg = new Map<string, { orderNature: string; value: string | null; marks: number }>();
+      for (const r of rows) {
+        const raw = (r as Record<string, unknown>)[key];
+        const value = typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null;
+        const vKey = value ?? "\u0000blank";
+        const v = valueAgg.get(vKey) ?? { value, marks: 0, weightKg: 0 };
+        v.marks++;
+        v.weightKg += r.balanceWt ?? 0;
+        valueAgg.set(vKey, v);
+        const nature = (r.orderNature ?? "").trim() || "(blank)";
+        const cKey = `${nature}\u0000${vKey}`;
+        const c = crossAgg.get(cKey) ?? { orderNature: nature, value, marks: 0 };
+        c.marks++;
+        crossAgg.set(cKey, c);
+      }
+      return {
+        key,
+        header,
+        present,
+        values: Array.from(valueAgg.values())
+          .sort((a, b) => b.marks - a.marks)
+          .map(({ value, marks, weightKg }) => ({
+            value,
+            marks,
+            weightMt: weightKg / 1000,
+          })),
+        crossTab: Array.from(crossAgg.values()).sort((a, b) => b.marks - a.marks),
+      };
+    },
+  );
+
   const distinct = new Set(rows.map((r) => r.hash));
   const missingContractor = rows.filter((r) => r.contractor == null).length;
   const missingDate = rows.filter((r) => r.assignDate == null).length;
@@ -1097,6 +1457,7 @@ export function parseWorkbook(
 
   return {
     rows,
+    futureDateCount,
     summary: {
       rowsRead,
       rowsKept: rows.length,
@@ -1128,6 +1489,10 @@ export function parseWorkbook(
       })(),
       ...(Object.keys(fgWipByJob).length > 0 && { fgWipByJob }),
       ...(Object.keys(fgWipByStructure).length > 0 && { fgWipByStructure }),
+      // Always written (even when every watched column is absent) so the Data
+      // Check panel can distinguish "file predates the snapshot" (key missing)
+      // from "file inspected, column absent" (present: false).
+      sourceColumnWatch,
     },
   };
 }

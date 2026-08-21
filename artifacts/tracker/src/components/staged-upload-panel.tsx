@@ -350,7 +350,7 @@ export function StagedUploadPanel({
             <div className="relative">
               <input
                 type="file"
-                accept=".xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                accept=".xlsx,.xls,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 onChange={handleFileChange}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
                 disabled={busy || !selectedDate || dateTaken}
@@ -598,17 +598,26 @@ function StructuralSummary({ structural }: { structural: StructuralRead }) {
         </ul>
       )}
       {fc !== null && fc !== undefined && fc.ok && (
-        <div className="flex items-center gap-1.5 text-xs text-green-700 dark:text-green-400 font-medium">
-          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-          Format OK — {fc.foundCount} columns, matches expected layout.
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-1.5 text-xs text-green-700 dark:text-green-400 font-medium">
+            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+            {fc.foundCount} columns · all recognised
+          </div>
+          {fc.optionalAbsent.length > 0 && (
+            <div className="text-xs text-muted-foreground">
+              {fc.optionalAbsent.length} optional column
+              {fc.optionalAbsent.length === 1 ? "" : "s"} not present (
+              {fc.optionalAbsent.join(", ")})
+            </div>
+          )}
         </div>
       )}
       {fc !== null && fc !== undefined && !fc.ok && (
         <div className="text-xs text-muted-foreground">
           <span className="font-medium text-foreground">
-            Column layout differs
+            Unrecognised or missing columns
           </span>{" "}
-          — {fc.foundCount} columns found, {fc.expectedCount} expected.
+          — {fc.foundCount} columns found.
           {fc.isOldFormat && (
             <span className="ml-1 text-amber-600 dark:text-amber-400">
               Looks like the older 21-column format.
@@ -649,14 +658,15 @@ function WipFormatWarning({
           }`}
         >
           <AlertTriangle className="w-4 h-4 shrink-0" />
-          Column layout mismatch detected
+          {hasCritical
+            ? "Critical columns missing"
+            : "Unrecognised column detected"}
         </div>
 
         <div className="text-xs space-y-1 text-foreground/80">
           <div>
             Found <strong>{check.foundCount}</strong> column
-            {check.foundCount === 1 ? "" : "s"}, expected{" "}
-            <strong>{check.expectedCount}</strong>.
+            {check.foundCount === 1 ? "" : "s"}.
             {check.isOldFormat && (
               <span className="ml-1 text-amber-700 dark:text-amber-400">
                 This appears to be the older 21-column format.
@@ -664,23 +674,15 @@ function WipFormatWarning({
             )}
           </div>
 
-          {check.missingExpected.length > 0 && (
+          {check.criticalMissing.length > 0 && (
             <div>
               <span className="font-medium">
-                Missing ({check.missingExpected.length}):
+                Missing critical ({check.criticalMissing.length}):
               </span>{" "}
-              {check.missingExpected.map((col, i) => (
+              {check.criticalMissing.map((col, i) => (
                 <span key={col}>
                   {i > 0 && ", "}
-                  <span
-                    className={
-                      check.criticalMissing.includes(col)
-                        ? "text-destructive font-semibold"
-                        : undefined
-                    }
-                  >
-                    {col}
-                  </span>
+                  <span className="text-destructive font-semibold">{col}</span>
                 </span>
               ))}
             </div>
@@ -689,7 +691,7 @@ function WipFormatWarning({
           {check.unexpectedFound.length > 0 && (
             <div>
               <span className="font-medium">
-                New / unexpected ({check.unexpectedFound.length}):
+                Unrecognised ({check.unexpectedFound.length}):
               </span>{" "}
               {check.unexpectedFound.join(", ")}
             </div>
@@ -742,14 +744,21 @@ function WipFormatWarning({
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2">
-        <Button
-          variant="outline"
-          onClick={onProceed}
-          disabled={busy}
-          className="gap-2"
-        >
-          Proceed anyway
-        </Button>
+        {hasCritical ? (
+          <div className="text-xs text-destructive font-medium self-center">
+            This file cannot be imported until the missing critical column
+            {check.criticalMissing.length === 1 ? " is" : "s are"} restored.
+          </div>
+        ) : (
+          <Button
+            variant="outline"
+            onClick={onProceed}
+            disabled={busy}
+            className="gap-2"
+          >
+            Proceed anyway
+          </Button>
+        )}
         <Button
           variant="ghost"
           onClick={onDiscard}

@@ -57,6 +57,19 @@ export interface ParseSummary {
   // Same breakdown at project+structure granularity. Outer key = project;
   // inner key = alias (uppercased) = structure identifier.
   fgWipByStructure?: Record<string, Record<string, number>>;
+  // Source Column Watch (Data Check panel): per-import snapshot of the watched
+  // ERP pass-through columns (BOM Status, Is Welded Structure, ...), captured
+  // at parse time from THIS file's rows. Descriptive only — never a DC rule,
+  // never read for logic. Absent on imports that predate the snapshot; on
+  // those, the watched columns were not present in the file. `present: false`
+  // means the file was inspected and the column is absent.
+  sourceColumnWatch?: Array<{
+    key: string;
+    header: string;
+    present: boolean;
+    values: Array<{ value: string | null; marks: number; weightMt: number }>;
+    crossTab: Array<{ orderNature: string; value: string | null; marks: number }>;
+  }>;
 }
 
 export interface ChangeSummary {

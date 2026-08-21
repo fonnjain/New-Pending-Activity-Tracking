@@ -456,7 +456,7 @@ function DataViewContent() {
                   </div>
                   <div>
                     <span className="block text-muted-foreground text-xs uppercase mb-1">NTLT Orphan Weight</span>
-                    <span className="font-bold text-lg tabular-nums">{(selectedImport.summary.ntltOrphanWtMt ?? 0).toFixed(3)} MT</span>
+                    <span className="font-bold text-lg tabular-nums">{((selectedImport.summary.ntltOrphanWtMt ?? 0) / 1000).toFixed(3)} MT</span>
                     <span className="block text-xs text-muted-foreground">Attributed to (No Project), grouped by Section</span>
                   </div>
                 </>
@@ -1248,13 +1248,19 @@ function GeneratedOrderReviewContent() {
         const fgWt           = toMt(sum(fg));
         const genProgFg      = fgWt; // WIP "FG Pending For Dispatch" weight
         // Pure-WIP derivation — never mixes OR and WIP values in the same subtraction.
-        // genProgFab  = weight past fabrication  = in galv activities + FG.
-        // genProgGalv = weight past galvanising   = in FG only.
-        // Replaces the former chain (genProgRelease − genBalFab, genProgFab − genBalGalv)
-        // which produced kg-rounding negatives when OR's MT figures and WIP's kg figures
-        // diverged on nearly-complete structures (35 rows, −0.111 MT total).
-        const genProgFab     = genBalGalv + fgWt;
-        const genProgGalv    = fgWt;
+        // genProgFab  = weight at or past TS (fabrication complete) =
+        //               sum(TS) + sum(G/GB/Y) + sum(blank=FG).
+        //   OR stamps Progress Fabrication when a mark reaches TS; anything at
+        //   TS or beyond counts as fabricated.
+        // genProgGalv = weight at or past Y (galvanising complete) =
+        //               sum(Y) + sum(blank=FG).
+        //   OR stamps Progress Galvanising when a mark reaches Y (last galv step);
+        //   anything at Y or beyond counts as galvanised.
+        // Both are sums of non-negative values — structurally cannot go negative.
+        const tsWt           = toMt(sum(released.filter((r) => actOf(r) === "TS")));
+        const yWt            = toMt(sum(released.filter((r) => actOf(r) === "Y")));
+        const genProgFab     = tsWt + genBalGalv + fgWt;
+        const genProgGalv    = yWt + fgWt;
         const totalWt        = toMt(sum(marks));
         // OR FG = Galvanising − Despatch from OR file.
         // Kept as-is even when negative (Despatch > Galvanising is a source-data
@@ -3039,6 +3045,44 @@ type DataCheckResponse = {
   ntltTotalMarks: number;
   dc0StoredTotalRows: number;
   markMovement: DcMarkMovementResult | null;
+  dc17: Dc17Result | null;
+  sourceColumnWatch: DcSourceColumnWatch | null;
+};
+
+// Source Column Watch types (mirrored from API). Descriptive only — never a DC
+// rule, never affects the banner or any pass/fail count.
+type SourceWatchValue = { value: string | null; marks: number; weightMt: number };
+type SourceWatchColumn = {
+  key: string;
+  header: string;
+  present: boolean;
+  values: SourceWatchValue[];
+  crossTab: { orderNature: string; value: string | null; marks: number }[];
+};
+type DcSourceColumnWatch = {
+  currImportId: number;
+  currDayKey: string;
+  prevImportId: number | null;
+  prevDayKey: string | null;
+  current: SourceWatchColumn[] | null;
+  previous: SourceWatchColumn[] | null;
+};
+
+// DC17 types (mirrored from API)
+type Dc17StructureRow = {
+  project: string;
+  structure: string;
+  j: number;
+  q: number;
+  w: number;
+  gap: number;
+  category: "A" | "B" | "C" | "D" | "E" | "F" | "G";
+};
+type Dc17Result = {
+  structuresCompared: number;
+  structuresClean: number;
+  flagged: Dc17StructureRow[];
+  byCategory: Record<string, { count: number; totalMt: number }>;
 };
 
 const DATA_CHECK_QUERY_KEY = ["data-check"] as const;
@@ -3117,7 +3161,8 @@ function DataCheckContent() {
 
     const violCols: XlsxColumn[] = allViolations.length > 0
       ? [
-          { field: "rule",      label: "Rule",      numeric: false },
+          // Export-only: on screen each rule's violations render under the rule's own card.
+          { field: "rule",      label: "Rule",      numeric: false, headerNote: "Export-only column — on screen, violations are grouped under each rule's card." },
           { field: "project",   label: "Project",   numeric: false },
           { field: "structure", label: "Structure", numeric: false },
           ...Object.keys(allViolations[0]).filter((k) => !["rule","project","structure"].includes(k)).map((k) => ({
@@ -3132,9 +3177,95 @@ function DataCheckContent() {
 
     const violSheet: XlsxSheet = { name: "All Violations", columns: violCols, rows: violRows };
 
+    // Sheet 5: DC17 flagged structures
+    const dc17Sheet: XlsxSheet = data.dc17
+      ? {
+          name: "DC17 Order-vs-WIP Gap",
+          columns: [
+            // Export-only: on screen these render as category descriptions and
+            // group headings, not columns.
+            { field: "cat",       label: "Category",    numeric: false, headerNote: "Export-only column — on screen, categories render as headings above the table." },
+            { field: "group",     label: "Group",       numeric: false, headerNote: "Export-only column — on screen, groups render as headings above the table." },
+            { field: "project",   label: "Project",     numeric: false },
+            { field: "structure", label: "Structure",   numeric: false },
+            // Labels match the on-screen DC17 detail table headers, with the
+            // unit suffix added so the sheet is self-describing.
+            { field: "j",         label: "J (WO Qty) (MT)",   numeric: true, decimals: 3 },
+            { field: "q",         label: "Q (Despatch) (MT)", numeric: true, decimals: 3 },
+            { field: "w",         label: "W (WIP) (MT)",      numeric: true, decimals: 3 },
+            { field: "gap",       label: "Gap (MT)",          numeric: true, decimals: 3 },
+          ],
+          rows: data.dc17.flagged.map((r) => ({
+            cat: r.category,
+            group: DC17_CAT_INFO[r.category]?.group === "lag" ? "Likely job-card lag" : "Needs investigation",
+            project: r.project,
+            structure: r.structure,
+            j: r.j,
+            q: r.q,
+            w: r.w,
+            gap: r.gap,
+          })),
+        }
+      : { name: "DC17 Order-vs-WIP Gap", columns: [{ field: "note", label: "Note", numeric: false }], rows: [{ note: "No WIP import available." }] };
+
+    // Sheet 6: Source Column Watch — one block per watched column (descriptive only).
+    const watch = data.sourceColumnWatch;
+    const watchRows: Record<string, string | number>[] = [];
+    if (watch) {
+      const cols = watch.current ?? [];
+      if (watch.current === null) {
+        watchRows.push({ column: "(all watched columns)", value: "not present in this file", marks: "", weightMt: "", note: `import #${watch.currImportId}` });
+      }
+      for (const c of cols) {
+        if (!c.present) {
+          watchRows.push({ column: c.header, value: "not present in this file", marks: "", weightMt: "", note: "" });
+          continue;
+        }
+        const total = c.values.reduce((s, v) => s + v.marks, 0);
+        const prevCol = watch.previous?.find((p) => p.key === c.key && p.present) ?? null;
+        const prevLabels = new Set((prevCol?.values ?? []).map((v) => v.value ?? "(blank)"));
+        for (const v of c.values) {
+          const label = v.value ?? "(blank)";
+          watchRows.push({
+            column: c.header,
+            value: label,
+            marks: v.marks,
+            weightMt: v.weightMt,
+            note: [
+              total > 0 ? `${((v.marks / total) * 100).toFixed(1)}%` : "",
+              prevCol && !prevLabels.has(label) ? "NEW VALUE vs previous import" : "",
+              c.values.length === 1 ? "single value — no variation, carries no information yet" : "",
+            ].filter(Boolean).join(" · "),
+          });
+        }
+        for (const ct of c.crossTab) {
+          watchRows.push({
+            column: `${c.header} × Order Nature`,
+            value: `${ct.orderNature} / ${ct.value ?? "(blank)"}`,
+            marks: ct.marks,
+            weightMt: "",
+            note: "",
+          });
+        }
+      }
+    }
+    const watchSheet: XlsxSheet = {
+      name: "Source Column Watch",
+      columns: [
+        // Column and Note are export-only: on screen each watched column has its
+        // own panel, and share/new-value context renders as badges, not a column.
+        { field: "column",   label: "Column",      numeric: false, headerNote: "Export-only column — on screen each watched column has its own panel." },
+        { field: "value",    label: "Value",       numeric: false },
+        { field: "marks",    label: "Marks",       numeric: false },
+        { field: "weightMt", label: "Weight (MT)", numeric: false },
+        { field: "note",     label: "Note",        numeric: false, headerNote: "Export-only column — carries the on-screen Share / Prev share / NEW VALUE context." },
+      ],
+      rows: watchRows.length > 0 ? watchRows : [{ column: "", value: "No WIP import available.", marks: "", weightMt: "", note: "" }],
+    };
+
     await exportToXlsxSheets(
       `DataCheck_${exportTimestamp()}.xlsx`,
-      [hardRulesSheet, warningsSheet, wipSheet, violSheet],
+      [hardRulesSheet, warningsSheet, wipSheet, violSheet, dc17Sheet, watchSheet],
     );
   };
 
@@ -3317,10 +3448,10 @@ function DataCheckContent() {
             ))}
           </div>
 
-          {/* ---- Warnings DC7–DC11 ---- */}
+          {/* ---- Non-blocking warnings ---- */}
           <div className="space-y-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">
-              Warnings (DC7–DC11) — non-zero counts are expected; watch for large changes
+              Warnings — non-zero counts are expected; watch for large changes
             </h3>
             {data.warnings.map((w) => (
               <DcWarningRow key={w.id} warning={w} />
@@ -3330,6 +3461,16 @@ function DataCheckContent() {
           {/* ---- Movement checks DC12–DC14 ---- */}
           {data.markMovement && (
             <DcMarkMovementSection movement={data.markMovement} />
+          )}
+
+          {/* ---- Source Column Watch (descriptive only — no pass/fail) ---- */}
+          {data.sourceColumnWatch && (
+            <SourceColumnWatchSection watch={data.sourceColumnWatch} />
+          )}
+
+          {/* ---- Order vs WIP gap DC17 ---- */}
+          {data.dc17 && (
+            <Dc17Section dc17={data.dc17} />
           )}
         </>
       )}
@@ -3721,6 +3862,408 @@ function DcMarkMovementSection({ movement }: { movement: DcMarkMovementResult })
         );
       })()}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Source Column Watch — descriptive-only panel. NOT a DC rule: no pass/fail,
+// never touches the banner. Its job is to notice the day a watched ERP
+// pass-through column starts carrying real information (a new distinct value
+// or a shifted split). Extensible: the API sends a list of watched columns;
+// this renders whatever arrives — adding a third column requires no UI change.
+// ---------------------------------------------------------------------------
+
+const swBlankLabel = (v: string | null) => v ?? "(blank)";
+
+function SourceColumnWatchSection({ watch }: { watch: DcSourceColumnWatch }) {
+  const fmtDate = (d: string | null) => (d ? formatDate(d) : "—");
+  // Union of column keys across current + previous so a column that disappears
+  // outright is still shown.
+  const keys: string[] = [];
+  for (const c of [...(watch.current ?? []), ...(watch.previous ?? [])]) {
+    if (!keys.includes(c.key)) keys.push(c.key);
+  }
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">
+        Source Column Watch — descriptive only, no pass/fail
+      </h3>
+      <p className="text-xs text-muted-foreground px-1">
+        Watched ERP pass-through columns on import #{watch.currImportId} ({fmtDate(watch.currDayKey)})
+        {watch.prevImportId != null && (
+          <> · compared with #{watch.prevImportId} ({fmtDate(watch.prevDayKey)})</>
+        )}
+        . The point is to notice the day a new distinct value appears or the split moves — that is when these columns become worth building on.
+      </p>
+
+      {watch.current === null && (
+        <Card className="border-border">
+          <CardContent className="p-4 text-sm text-muted-foreground">
+            Import #{watch.currImportId} predates the source-column snapshot — the watched columns are not present in this file.
+          </CardContent>
+        </Card>
+      )}
+
+      {keys.map((key) => {
+        const curr = watch.current?.find((c) => c.key === key) ?? null;
+        const prev = watch.previous?.find((c) => c.key === key) ?? null;
+        if (!curr && !prev) return null;
+        const header = (curr ?? prev)!.header;
+        return (
+          <SourceColumnWatchCard
+            key={key}
+            header={header}
+            curr={curr}
+            prev={prev}
+            prevImportId={watch.prevImportId}
+            prevDayKey={watch.prevDayKey}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function SourceColumnWatchCard({
+  header,
+  curr,
+  prev,
+  prevImportId,
+  prevDayKey,
+}: {
+  header: string;
+  curr: SourceWatchColumn | null;
+  prev: SourceWatchColumn | null;
+  prevImportId: number | null;
+  prevDayKey: string | null;
+}) {
+  const currPresent = curr?.present ?? false;
+  const prevPresent = prev?.present ?? false;
+  const currValues = currPresent ? curr!.values : [];
+  const prevValues = prevPresent ? prev!.values : [];
+  const totalMarks = currValues.reduce((s, v) => s + v.marks, 0);
+  const prevTotalMarks = prevValues.reduce((s, v) => s + v.marks, 0);
+  const prevByValue = new Map(prevValues.map((v) => [swBlankLabel(v.value), v]));
+  const currLabels = new Set(currValues.map((v) => swBlankLabel(v.value)));
+
+  // Comparison: only meaningful when BOTH imports carried the column.
+  const comparable = currPresent && prevPresent;
+  const newValues = comparable
+    ? currValues.filter((v) => !prevByValue.has(swBlankLabel(v.value)))
+    : [];
+  const goneValues = comparable
+    ? prevValues.filter((v) => !currLabels.has(swBlankLabel(v.value)))
+    : [];
+
+  const pct = (marks: number, total: number) =>
+    total > 0 ? ((marks / total) * 100).toFixed(marks > 0 && (marks / total) * 100 < 0.1 ? 2 : 1) : "0";
+
+  return (
+    <Card className="border-border">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-bold font-mono bg-muted px-1.5 py-0.5 rounded">{header}</span>
+          {!currPresent && (
+            <span className="text-xs text-muted-foreground">not present in this file</span>
+          )}
+          {currPresent && comparable && newValues.length > 0 && (
+            <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-950/40 border border-amber-400/60 px-1.5 py-0.5 rounded">
+              NEW VALUE{newValues.length > 1 ? "S" : ""}: {newValues.map((v) => swBlankLabel(v.value)).join(", ")}
+            </span>
+          )}
+          {currPresent && !prevPresent && prevImportId != null && (
+            <span className="text-xs text-muted-foreground">
+              newly appeared — not present in #{prevImportId} ({prevDayKey ? formatDate(prevDayKey) : "—"})
+            </span>
+          )}
+        </div>
+
+        {currPresent && currValues.length === 1 && (
+          <p className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">{swBlankLabel(currValues[0].value)}</span>
+            {" "}on all {currValues[0].marks.toLocaleString()} rows — no variation, carries no information yet.
+          </p>
+        )}
+
+        {currPresent && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground">
+                  <th className="text-left py-1 pr-4 font-medium">Value</th>
+                  <th className="text-right py-1 pr-4 font-medium">Marks</th>
+                  <th className="text-right py-1 pr-4 font-medium">Weight (MT)</th>
+                  <th className="text-right py-1 pr-4 font-medium">Share</th>
+                  {comparable && <th className="text-right py-1 font-medium">Prev share</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {currValues.map((v) => {
+                  const label = swBlankLabel(v.value);
+                  const prevEntry = prevByValue.get(label);
+                  const isNew = comparable && !prevEntry;
+                  return (
+                    <tr key={label} className={`border-b border-border/50 ${isNew ? "bg-amber-50/60 dark:bg-amber-950/20" : ""}`}>
+                      <td className="py-1 pr-4 font-mono">
+                        {label}
+                        {isNew && <span className="ml-2 text-amber-700 dark:text-amber-400 font-semibold">← new</span>}
+                      </td>
+                      <td className="py-1 pr-4 text-right tabular-nums">{v.marks.toLocaleString()}</td>
+                      <td className="py-1 pr-4 text-right tabular-nums">{v.weightMt.toFixed(3)}</td>
+                      <td className="py-1 pr-4 text-right tabular-nums">{pct(v.marks, totalMarks)}%</td>
+                      {comparable && (
+                        <td className="py-1 text-right tabular-nums text-muted-foreground">
+                          {prevEntry ? `${pct(prevEntry.marks, prevTotalMarks)}%` : "—"}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+                {goneValues.map((v) => (
+                  <tr key={`gone-${swBlankLabel(v.value)}`} className="border-b border-border/50 text-muted-foreground">
+                    <td className="py-1 pr-4 font-mono line-through">{swBlankLabel(v.value)}</td>
+                    <td className="py-1 pr-4 text-right tabular-nums">0</td>
+                    <td className="py-1 pr-4 text-right tabular-nums">—</td>
+                    <td className="py-1 pr-4 text-right tabular-nums">0%</td>
+                    <td className="py-1 text-right tabular-nums">{pct(v.marks, prevTotalMarks)}% — value disappeared</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {currPresent && curr!.crossTab.length > 0 && (
+          <div>
+            <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
+              Cross-tab · Order Nature × {header}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="text-xs">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground">
+                    <th className="text-left py-1 pr-4 font-medium">Order Nature</th>
+                    <th className="text-left py-1 pr-4 font-medium">Value</th>
+                    <th className="text-right py-1 font-medium">Marks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {curr!.crossTab.map((c, i) => (
+                    <tr key={i} className="border-b border-border/50">
+                      <td className="py-1 pr-4">{c.orderNature}</td>
+                      <td className="py-1 pr-4 font-mono">{swBlankLabel(c.value)}</td>
+                      <td className="py-1 text-right tabular-nums">{c.marks.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DC17 — Order vs WIP gap section
+// ---------------------------------------------------------------------------
+
+const DC17_CAT_INFO: Record<
+  string,
+  { label: string; desc: string; group: "lag" | "investigate" }
+> = {
+  A: { label: "A — Not yet in production",              desc: "W=0, Q=0. Work order raised; no job card issued, nothing shipped.",                          group: "lag"       },
+  B: { label: "B — Left WIP without despatch record",   desc: "W=0, Q>0. Material gone from the floor but the order book shows a shortfall.",               group: "investigate"},
+  C: { label: "C — In production, WIP short",           desc: "W>0, Q=0. Job cards exist but balance weight falls short of the work order.",                group: "lag"       },
+  D: { label: "D — Partly shipped, WIP short",          desc: "W>0, Q>0. Partially despatched but WIP + despatch still falls short.",                       group: "lag"       },
+  E: { label: "E — Marks with no work order",           desc: "J=0. WIP marks exist for this structure but the order book has no matching work order.",      group: "investigate"},
+  F: { label: "F — Fully despatched per OR, WIP pending", desc: "|J−Q|≤50 kg. OR shows fully shipped, yet WIP marks remain on the floor.",                  group: "investigate"},
+  G: { label: "G — Shop holds more than order expects", desc: "Negative gap not matching E or F — WIP+despatch exceeds the work order.",                     group: "investigate"},
+};
+const DC17_LAG_CATS = ["A", "C", "D"] as const;
+const DC17_INV_CATS = ["B", "E", "F", "G"] as const;
+
+function Dc17Section({ dc17 }: { dc17: Dc17Result }) {
+  const lagRows = dc17.flagged.filter((r) => (DC17_LAG_CATS as readonly string[]).includes(r.category));
+  const invRows = dc17.flagged.filter((r) => (DC17_INV_CATS as readonly string[]).includes(r.category));
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">
+        Order vs WIP Gap — DC17
+      </h3>
+
+      {/* Summary card */}
+      <Card className="border-border">
+        <div className="px-4 py-3 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold font-mono bg-muted px-1.5 py-0.5 rounded">DC17</span>
+            <span className="text-xs font-semibold">
+              {dc17.flagged.length.toLocaleString()} flagged
+            </span>
+            <span className="text-xs text-muted-foreground">
+              of {dc17.structuresCompared.toLocaleString()} structures compared ·{" "}
+              {dc17.structuresClean.toLocaleString()} clean (within 50 kg)
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Per-structure gap: WO Order Qty (J) − Progress Despatch (Q) − WIP pending weight (W). Structures
+            outside ±50 kg are classified A–G. A, C, D are likely job-card lag. B, E, F, G need investigation.
+          </p>
+          {/* Per-category badge grid */}
+          <div className="grid grid-cols-7 gap-1.5">
+            {(["A","B","C","D","E","F","G"] as const).map((cat) => {
+              const byCat = dc17.byCategory[cat];
+              const isInv = (DC17_INV_CATS as readonly string[]).includes(cat);
+              return (
+                <div
+                  key={cat}
+                  className={`text-center rounded-md p-2 border ${
+                    isInv
+                      ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800"
+                      : "bg-muted/40 border-border"
+                  }`}
+                >
+                  <div className={`text-xs font-bold font-mono ${isInv ? "text-amber-700 dark:text-amber-400" : ""}`}>
+                    {cat}
+                  </div>
+                  <div className="text-sm font-semibold mt-0.5">{byCat?.count ?? 0}</div>
+                  <div className={`text-[10px] font-mono leading-tight mt-0.5 ${
+                    byCat && byCat.totalMt < 0 ? "text-destructive" : "text-muted-foreground"
+                  }`}>
+                    {byCat ? (byCat.totalMt >= 0 ? "+" : "") + byCat.totalMt.toFixed(1) : "—"} MT
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </Card>
+
+      {/* Likely job-card lag group */}
+      {lagRows.length > 0 && (
+        <Dc17Group
+          title="Likely job-card lag — A, C, D"
+          rows={lagRows}
+          cats={DC17_LAG_CATS as unknown as string[]}
+          dc17={dc17}
+          highlight={false}
+        />
+      )}
+
+      {/* Needs investigation group */}
+      {invRows.length > 0 && (
+        <Dc17Group
+          title="Needs investigation — B, E, F, G"
+          rows={invRows}
+          cats={DC17_INV_CATS as unknown as string[]}
+          dc17={dc17}
+          highlight
+        />
+      )}
+    </div>
+  );
+}
+
+function Dc17Group({
+  title,
+  rows,
+  cats,
+  dc17,
+  highlight,
+}: {
+  title: string;
+  rows: Dc17StructureRow[];
+  cats: string[];
+  dc17: Dc17Result;
+  highlight: boolean;
+}) {
+  const [expandedCat, setExpandedCat] = useState<string | null>(null);
+  const groupMt = rows.reduce((s, r) => s + r.gap, 0);
+
+  return (
+    <Card className={`border ${highlight ? "border-amber-400/60" : "border-border"}`}>
+      <div className="px-4 py-2.5 border-b border-border/40 flex items-center justify-between flex-wrap gap-2">
+        <span className={`text-xs font-semibold ${highlight ? "text-amber-700 dark:text-amber-400" : ""}`}>
+          {title}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {rows.length} structures · {groupMt >= 0 ? "+" : ""}{groupMt.toFixed(3)} MT
+        </span>
+      </div>
+
+      {cats.map((cat) => {
+        const catRows = rows.filter((r) => r.category === cat);
+        if (catRows.length === 0) return null;
+        const info = DC17_CAT_INFO[cat];
+        const byCat = dc17.byCategory[cat];
+        const isExpanded = expandedCat === cat;
+
+        return (
+          <div key={cat} className="border-b border-border/20 last:border-0">
+            <div
+              className="flex items-start gap-3 px-4 py-2.5 cursor-pointer select-none hover:bg-muted/20"
+              onClick={() => setExpandedCat(isExpanded ? null : cat)}
+            >
+              <span className="text-xs font-bold font-mono bg-muted px-1.5 py-0.5 rounded shrink-0 mt-0.5">
+                {cat}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-semibold">{info.label}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {byCat?.count ?? 0} structures ·{" "}
+                    {byCat && byCat.totalMt >= 0 ? "+" : ""}
+                    {byCat?.totalMt.toFixed(3) ?? "0.000"} MT
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{info.desc}</p>
+              </div>
+              <div className="shrink-0 text-muted-foreground mt-0.5">
+                {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              </div>
+            </div>
+
+            {isExpanded && (
+              <div className="border-t border-border/20 px-4 py-3">
+                <div className="overflow-auto max-h-96">
+                  <table className="w-full text-xs border-collapse">
+                    <thead className="sticky top-0 bg-background">
+                      <tr className="border-b border-border/40 bg-muted/40">
+                        <th className="text-left px-2 py-1 font-medium">Project</th>
+                        <th className="text-left px-2 py-1 font-medium">Structure</th>
+                        <th className="text-right px-2 py-1 font-medium whitespace-nowrap">J (WO Qty)</th>
+                        <th className="text-right px-2 py-1 font-medium whitespace-nowrap">Q (Despatch)</th>
+                        <th className="text-right px-2 py-1 font-medium whitespace-nowrap">W (WIP)</th>
+                        <th className="text-right px-2 py-1 font-medium whitespace-nowrap">Gap (MT)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {catRows.map((r, i) => (
+                        <tr key={i} className="border-b border-border/20 hover:bg-muted/20">
+                          <td className="px-2 py-1">{r.project}</td>
+                          <td className="px-2 py-1">{r.structure}</td>
+                          <td className="px-2 py-1 text-right font-mono">{r.j.toFixed(3)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{r.q.toFixed(3)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{r.w.toFixed(3)}</td>
+                          <td className={`px-2 py-1 text-right font-mono font-semibold ${
+                            r.gap < 0 ? "text-destructive" : ""
+                          }`}>
+                            {r.gap >= 0 ? "+" : ""}{r.gap.toFixed(3)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </Card>
   );
 }
 

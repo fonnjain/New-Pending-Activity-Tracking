@@ -31,6 +31,6 @@ export interface StructuralRead {
   rowsWithMark: number;
   /** Human-readable structural problems detected without AI. */
   problems: string[];
-  /** WIP column format check vs the 24-column baseline; null for non-WIP files. */
+  /** WIP column classification (critical / known-optional / unknown tiers); null for non-WIP files. */
   wipFormatCheck: WipFormatCheck | null;
 }

@@ -242,6 +242,24 @@ export interface InventoryPageData {
   buckets: InventoryBuckets;
   manualE: InventoryManualEntry[];
   projectMfcBatches: Map<string, string[]>;
+  // Per-bucket maps for the E add form cascade (bucket → project → batch).
+  cEligibleMfcBatches: Map<string, string[]>;
+  dEligibleMfcBatches: Map<string, string[]>;
+}
+
+// Build a project → sorted-batch-list map from a bucket's card array.
+// "Z" (unassigned batch) is always sorted last.
+function buildBatchMap(cards: InventoryStructureCard[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const card of cards) {
+    if (!map.has(card.project)) map.set(card.project, []);
+    const batches = map.get(card.project)!;
+    if (!batches.includes(card.mfcBatch)) batches.push(card.mfcBatch);
+  }
+  for (const [, batches] of map) {
+    batches.sort((a, b) => (a === "Z" ? 1 : b === "Z" ? -1 : a.localeCompare(b)));
+  }
+  return map;
 }
 
 export function useInventoryData(): InventoryPageData {
@@ -284,6 +302,16 @@ export function useInventoryData(): InventoryPageData {
     [rawRows, eExcludeKeys],
   );
 
+  // Must come after buckets — depends on buckets.c / buckets.d.
+  const cEligibleMfcBatches = useMemo(
+    () => buildBatchMap(buckets.c),
+    [buckets.c],
+  );
+  const dEligibleMfcBatches = useMemo(
+    () => buildBatchMap(buckets.d),
+    [buckets.d],
+  );
+
   return {
     available: bucketsData?.available ?? false,
     asOnDate: bucketsData?.asOnDate ?? null,
@@ -292,6 +320,8 @@ export function useInventoryData(): InventoryPageData {
     buckets,
     manualE: manualE ?? [],
     projectMfcBatches,
+    cEligibleMfcBatches,
+    dEligibleMfcBatches,
   };
 }
 

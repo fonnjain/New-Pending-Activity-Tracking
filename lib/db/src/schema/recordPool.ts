@@ -65,6 +65,11 @@ export const recordPoolTable = pgTable("record_pool", {
   // rows; nullable. Part of the row hash so a changed production date is a real change.
   lastProductionDate: date("last_production_date", { mode: "string" }),
   activity: text("activity"),
+  // Activity exactly as written in the source file before ACTIVITY_ALIASES is
+  // applied. Populated only when an alias fires (currently P/S -> RFI), so all
+  // historical and ordinary rows remain null. Additive audit field only: never
+  // part of the row hash and never exposed by the records API.
+  activityRaw: text("activity_raw"),
   operation: text("operation"),
   refJobCardNo: text("ref_job_card_no"),
   // --- Work Order + MFC batch (source cols T + U; part of the row hash). ---
@@ -126,6 +131,19 @@ export const recordPoolTable = pgTable("record_pool", {
   // Release Balance. Only Status="Authorized" marks have been physically released.
   // Defaults false (safe for old-format rows that have no Job Card Status column).
   isInitialCutting: boolean("is_initial_cutting").notNull().default(false),
+  // --- ERP additions, Aug-2026 (source cols Y + Z; additive, NOT part of the row hash). ---
+  // BOM Status (col Y): "Authorized" on every row of the first file that carried it.
+  // Stored for history; no logic depends on it. Null on rows imported before 16-Aug-2026.
+  bomStatus: text("bom_status"),
+  // Is Welded Structure (col Z): raw trimmed string as written by the ERP ("True"/"False"
+  // today; a text column absorbs future variants like Y/N or 1/0 without throwing).
+  // 354 of 58,945 TLT marks were True on 16-Aug-2026; every NTLT row was False.
+  // Stored for history; no logic depends on it. Null on rows imported before 16-Aug-2026.
+  isWeldedStructure: text("is_welded_structure"),
+  // CSV additions Aug-2026 (AA + AB). Retained only for audit/history; neither
+  // participates in identity, parsing rules, filters, exports, or reports.
+  salesOrderStatus: text("sales_order_status"),
+  isLastActivity: text("is_last_activity"),
 },
 (t) => [
   // Speeds up startup backfills that scan by category / is_initial_cutting, and

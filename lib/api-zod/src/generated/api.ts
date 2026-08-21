@@ -1219,7 +1219,8 @@ export const ListImportsResponseItem = zod.object({
   "netPendingQtyChange": zod.number(),
   "netPendingWtChange": zod.number(),
   "flags": zod.array(zod.string())
-}),zod.null()])
+}),zod.null()]),
+  "hasTypeData": zod.boolean().describe('True when this import has per-row job_card_type \/ job_card_status data stored in import_rows (i.e. it was ingested with the current code that writes those columns). False for imports uploaded before that code existed — their classification is fabricated via COALESCE from the pool and must never be shown as bucket figures.\n')
 })
 export const ListImportsResponse = zod.array(ListImportsResponseItem)
 
@@ -1343,7 +1344,8 @@ export const CommitStagedImportResponse = zod.union([zod.object({
   "netPendingQtyChange": zod.number(),
   "netPendingWtChange": zod.number(),
   "flags": zod.array(zod.string())
-}),zod.null()])
+}),zod.null()]),
+  "hasTypeData": zod.boolean().describe('True when this import has per-row job_card_type \/ job_card_status data stored in import_rows (i.e. it was ingested with the current code that writes those columns). False for imports uploaded before that code existed — their classification is fabricated via COALESCE from the pool and must never be shown as bucket figures.\n')
 }),
   "changeSet": zod.object({
   "fromImportId": zod.number().nullable(),
@@ -1614,7 +1616,8 @@ export const GetImportResponse = zod.object({
   "netPendingQtyChange": zod.number(),
   "netPendingWtChange": zod.number(),
   "flags": zod.array(zod.string())
-}),zod.null()])
+}),zod.null()]),
+  "hasTypeData": zod.boolean().describe('True when this import has per-row job_card_type \/ job_card_status data stored in import_rows (i.e. it was ingested with the current code that writes those columns). False for imports uploaded before that code existed — their classification is fabricated via COALESCE from the pool and must never be shown as bucket figures.\n')
 })
 
 
@@ -1858,8 +1861,10 @@ export const GetImportProductionMovementResponse = zod.object({
   "cuttingOutputMt": zod.number().describe('Mark-level TLT cutting output in MT. Sum of balance weight of marks that left C entirely plus the weight reduction of marks still at C. Excludes marks entering C (intake) and weight increases (corrections).\n'),
   "cuttingMarksLeft": zod.number().describe('Count of TLT marks that were at C in prev and are no longer at C in curr.'),
   "cuttingMarksReduced": zod.number().describe('Count of TLT marks still at C in both imports whose balance weight decreased.'),
-  "netBalance": zod.record(zod.string(), zod.number()).describe('Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key \"FG\" is derived from parseSummary fgWipByJob.\n')
-}).describe('One consecutive import pair. cuttingOutputMt is the sum of TLT balance weight drawn down from marks that were at activity C in the previous import (left C entirely, or still at C with reduced weight). netBalance maps activity code to MT delta (curr − prev); negative = clearing, positive = accumulating. isGap=true when the two imports are more than one calendar day apart.\n'))
+  "netBalance": zod.record(zod.string(), zod.number()).describe('Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key \"FG\" is derived from parseSummary fgWipByJob. Empty ({}) when gated=true.\n'),
+  "gated": zod.boolean().optional().describe('True when either import in this pair pre-dates per-row Type\/Status storage. Movement cannot be computed; cuttingOutputMt and netBalance are zeroed.'),
+  "gatedReason": zod.string().optional().describe('Names the specific unusable import when gated is true.')
+}).describe('One consecutive import pair. cuttingOutputMt is the sum of TLT balance weight drawn down from marks that were at activity C in the previous import (left C entirely, or still at C with reduced weight). netBalance maps activity code to MT delta (curr − prev); negative = clearing, positive = accumulating. isGap=true when the two imports are more than one calendar day apart. gated=true when either import in the pair pre-dates per-row Type\/Status storage; in that case cuttingOutputMt=0 and netBalance={} — the pair cannot be computed.\n'))
 }).describe('Cutting output (mark-level TLT) and net balance delta per activity for consecutive import pairs. Days are in chronological order (oldest first).\n')
 
 
@@ -1945,7 +1950,9 @@ export const GetReleaseBalanceQueryParams = zod.object({
 })
 
 export const GetReleaseBalanceResponse = zod.object({
-  "available": zod.boolean().describe('False when no WIP file with Not Started + Initial rows has been uploaded.'),
+  "available": zod.boolean().describe('False when no WIP file has been uploaded, or when the import is gated (hasTypeData false).'),
+  "hasTypeData": zod.boolean().optional().describe('Present and false when the import pre-dates per-row Type\/Status storage. The pre-computed Release Balance for such imports is derived from pool COALESCE (current state) and must not be displayed.'),
+  "reason": zod.string().optional().describe('Human-readable explanation when available is false due to a type-data gate.'),
   "orderReviewAsOnDate": zod.string().nullable().describe('\"As on\" date of the latest Order Review import; null if none.'),
   "rows": zod.array(zod.object({
   "project": zod.string(),
@@ -1956,9 +1963,9 @@ export const GetReleaseBalanceResponse = zod.object({
 }).describe('Per-(project, structure) Release Balance figures from the latest WIP file and Order Review.')),
   "batchBreakdown": zod.array(zod.object({
   "project": zod.string(),
-  "mfcBatch": zod.string().describe('MFC batch letter (A, B, C \u2026) or \'Z\' for unassigned marks.'),
+  "mfcBatch": zod.string().describe('MFC batch letter (A, B, C …) or \'Z\' for unassigned marks.'),
   "releaseBalanceComputedMt": zod.number()
-}).describe('Per-(project, mfcBatch) release balance sum with no OR join. Used by the batch-view client to attribute release balance to individual MFC batches.')),
+})).describe('Per-(project, mfcBatch) release balance sums with no OR join. Used by the batch-view client to attribute release balance to individual MFC batches without inflating the OR comparison table.'),
   "totals": zod.object({
   "releaseBalanceComputedMt": zod.number(),
   "releaseBalanceOrderReviewMt": zod.number(),
@@ -1974,7 +1981,8 @@ export const GetReleaseBalanceResponse = zod.object({
  * @summary Fabrication Report – Project Completion (TLT only)
  */
 export const GetFabricationProjectCompletionTltResponse = zod.object({
-  "available": zod.boolean().describe('False when no WIP import exists.'),
+  "available": zod.boolean().describe('False when no WIP import exists, or when the import is gated (pre-dates Type\/Status storage).'),
+  "reason": zod.string().optional().describe('Human-readable explanation when available is false due to a type-data gate.'),
   "rows": zod.array(zod.object({
   "project": zod.string().describe('Normalized project \/ job code.'),
   "bomLabel": zod.string().describe('BOM Label: Proto | Mass | Pre | Mixed | No BOM match.'),

@@ -45,7 +45,9 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsxSheets, exportTimestamp, type XlsxSheet, type XlsxSummaryRow } from "@/lib/export";
+import { EXPORT_ONLY_NOTE } from "@/lib/projectWiseColumns";
 import { formatDate } from "@/lib/utils";
+import { writeInventorySummarySheets } from "@/lib/inventorySummaryExport";
 
 function mt(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "-";
@@ -1073,59 +1075,104 @@ function ManualBucketSide({
   );
 }
 
+// Three-step cascade: bucket → project → batch.
+// cBatches / dBatches are the per-bucket project→sorted-batch maps from the hook.
 function ManualAddForm({
-  knownProjects,
-  projectMfcBatches,
+  cBatches,
+  dBatches,
   onAdd,
   isPending,
 }: {
-  knownProjects: string[];
-  projectMfcBatches?: Map<string, string[]>;
+  cBatches: Map<string, string[]>;
+  dBatches: Map<string, string[]>;
   onAdd: (projectCode: string, mfcBatch: string) => void;
   isPending: boolean;
 }) {
+  const [bucket, setBucket] = useState<"c" | "d" | "">("");
   const [projectCode, setProjectCode] = useState("");
   const [mfcBatch, setMfcBatch] = useState("");
 
+  const handleBucketChange = (v: string | null) => {
+    setBucket((v as "c" | "d" | "") ?? "");
+    setProjectCode("");
+    setMfcBatch("");
+  };
   const handleProjectChange = (v: string | null) => {
     setProjectCode(v ?? "");
     setMfcBatch("");
   };
 
-  const batchOptions = projectCode ? (projectMfcBatches?.get(projectCode) ?? []) : [];
+  const activeBatches = bucket === "c" ? cBatches : bucket === "d" ? dBatches : new Map<string, string[]>();
+  const projectOptions = Array.from(activeBatches.keys()).sort();
+  const batchOptions = projectCode ? (activeBatches.get(projectCode) ?? []) : [];
+
+  // Warn when the chosen project+batch also lives in the other bucket.
+  const otherBatches = bucket === "c" ? dBatches : cBatches;
+  const otherLabel = bucket === "c" ? "D" : bucket === "d" ? "C" : "";
+  const alsoInOther =
+    !!bucket && !!projectCode && !!mfcBatch &&
+    (otherBatches.get(projectCode)?.includes(mfcBatch) ?? false);
+
+  const canSubmit = !!bucket && !!projectCode.trim() && !!mfcBatch && !isPending;
 
   const submit = () => {
-    const code = projectCode.trim();
-    if (!code || !mfcBatch) return;
-    onAdd(code, mfcBatch);
+    if (!canSubmit) return;
+    onAdd(projectCode.trim(), mfcBatch);
+    setBucket("");
     setProjectCode("");
     setMfcBatch("");
   };
 
-  const canSubmit = !!projectCode.trim() && !!mfcBatch && !isPending;
+  const bucketGroups: import("@/components/ui/searchable-select").SelectGroup[] = [
+    {
+      options: [
+        { value: "c", label: `C — ${BUCKET_LABELS.c}` },
+        { value: "d", label: `D — ${BUCKET_LABELS.d}` },
+      ],
+    },
+  ];
 
   return (
-    <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b">
-      <div className="w-44">
-        <SearchableSelect
-          value={projectCode || null}
-          onChange={handleProjectChange}
-          options={knownProjects}
-          allLabel="Select project..."
-        />
+    <div className="space-y-2 px-3 py-2 border-b">
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Step 1 — bucket */}
+        <div className="w-80">
+          <SearchableSelect
+            value={bucket || null}
+            onChange={handleBucketChange}
+            groups={bucketGroups}
+            allLabel="Select bucket..."
+          />
+        </div>
+        {/* Step 2 — project */}
+        <div className="w-44">
+          <SearchableSelect
+            value={projectCode || null}
+            onChange={handleProjectChange}
+            options={projectOptions}
+            allLabel={bucket ? "Select project..." : "Select bucket first"}
+            disabled={!bucket}
+          />
+        </div>
+        {/* Step 3 — batch */}
+        <div className="w-36">
+          <SearchableSelect
+            value={mfcBatch || null}
+            onChange={(v) => setMfcBatch(v ?? "")}
+            options={batchOptions}
+            allLabel={projectCode ? "Select batch..." : "Select project first"}
+            disabled={!projectCode || batchOptions.length === 0}
+          />
+        </div>
+        <Button size="sm" className="h-8" disabled={!canSubmit} onClick={submit}>
+          Add
+        </Button>
       </div>
-      <div className="w-36">
-        <SearchableSelect
-          value={mfcBatch || null}
-          onChange={(v) => setMfcBatch(v ?? "")}
-          options={batchOptions}
-          allLabel={projectCode ? "Select batch..." : "Select project first"}
-          disabled={!projectCode || batchOptions.length === 0}
-        />
-      </div>
-      <Button size="sm" className="h-8" disabled={!canSubmit} onClick={submit}>
-        Add
-      </Button>
+      {alsoInOther && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          Also present in Bucket {otherLabel} — will be removed from both.
+        </p>
+      )}
     </div>
   );
 }
@@ -1552,7 +1599,7 @@ export default function InventoryView() {
   const [, navigate] = useLocation();
   const { filters, mfcViewMode, setMfcViewMode } = useTracker();
   const queryClient = useQueryClient();
-  const { available, asOnDate, isLoading, rawRows, buckets, manualE, projectMfcBatches } =
+  const { available, asOnDate, isLoading, rawRows, buckets, manualE, projectMfcBatches, cEligibleMfcBatches, dEligibleMfcBatches } =
     useInventoryData();
   const { data: authStatus } = useGetAuthStatus();
   const canEdit = !!authStatus?.authenticated;
@@ -1890,7 +1937,8 @@ export default function InventoryView() {
         decimals: 3,
         total: true,
       })),
-      { label: "Structures", field: "structureCount", numeric: true, decimals: 0 },
+      // Export-only: the on-screen bucket panels do not show a Structures column.
+      { label: "Structures", field: "structureCount", numeric: true, decimals: 0, headerNote: EXPORT_ONLY_NOTE },
     ];
     return {
       name,
@@ -1971,7 +2019,8 @@ export default function InventoryView() {
       {
         name: "E - Ready Not Dispatched",
         columns: [
-          { label: "Side", field: "side" },
+          // Export-only: Side is stored on each manual entry but not shown as a column on screen.
+          { label: "Side", field: "side", headerNote: "Export-only column — not shown on screen." },
           { label: "Project", field: "project" },
           { label: "MFC Batch", field: "mfcBatch" },
           {
@@ -2001,7 +2050,11 @@ export default function InventoryView() {
       : jobFilter
         ? jobFilter.replace(/[^\w-]+/g, "-")
         : "all";
-    void exportToXlsxSheets(`inventory_${baseTag}_${date}.xlsx`, sheets)
+    const filename = `inventory_${baseTag}_${date}.xlsx`;
+    const asAt = formatDate(new Date().toISOString().slice(0, 10)) ?? "";
+    void exportToXlsxSheets(filename, sheets, undefined, (wb) =>
+      writeInventorySummarySheets(wb, sheets, filename, asAt),
+    )
       .catch((err) => {
         console.error("[Export] inventory failed", err);
         toast({ title: "Export failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
@@ -2303,8 +2356,8 @@ export default function InventoryView() {
           <div className="px-3 pb-3 pt-3 space-y-3">
             {canEdit && (
               <ManualAddForm
-                knownProjects={knownProjects}
-                projectMfcBatches={projectMfcBatches}
+                cBatches={cEligibleMfcBatches}
+                dBatches={dEligibleMfcBatches}
                 onAdd={addE}
                 isPending={upsertE.isPending}
               />

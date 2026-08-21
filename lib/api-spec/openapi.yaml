@@ -2279,11 +2279,11 @@ components:
       required: [name, expectedPosition, foundPosition]
     WipFormatCheck:
       type: object
-      description: Result of comparing uploaded WIP file headers against the expected 24-column baseline.
+      description: Result of classifying uploaded WIP file headers into three tiers (critical / known-optional / unknown).
       properties:
         ok:
           type: boolean
-          description: True only when headers exactly match the baseline.
+          description: True when every column is recognised and no critical column is missing.
         expectedCount:
           type: integer
         foundCount:
@@ -2292,12 +2292,17 @@ components:
           type: array
           items:
             type: string
-          description: Expected columns not found anywhere in the file.
+          description: Missing REQUIRED (critical) columns only — always equals criticalMissing.
         unexpectedFound:
           type: array
           items:
             type: string
-          description: Columns in the file not in the baseline.
+          description: Columns recognised by neither the critical nor the known list.
+        optionalAbsent:
+          type: array
+          items:
+            type: string
+          description: Known-optional columns absent from this file. Informational, never a warning.
         renames:
           type: array
           items:
@@ -2325,6 +2330,7 @@ components:
         - foundCount
         - missingExpected
         - unexpectedFound
+        - optionalAbsent
         - renames
         - reorders
         - criticalMissing
@@ -2682,7 +2688,7 @@ components:
           oneOf:
             - $ref: "#/components/schemas/WipFormatCheck"
             - type: "null"
-          description: WIP column format check vs the 24-column baseline; null for non-WIP files.
+          description: WIP column classification (critical / known-optional / unknown tiers); null for non-WIP files.
       required:
         - sheetName
         - headerRow

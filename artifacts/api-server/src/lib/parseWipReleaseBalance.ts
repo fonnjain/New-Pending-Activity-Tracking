@@ -15,7 +15,7 @@
 // rows for the given import before reinserting, so historical imports are never
 // overwritten by a newer upload.
 import * as XLSX from "xlsx";
-import { normalizeProject, detectHeaderRow } from "./parse";
+import { normalizeProject, detectHeaderRow, isCsvWip, parseWorkbook } from "./parse";
 import {
   db,
   releaseBalanceWipTable,
@@ -50,6 +50,24 @@ export interface ReleaseBalanceStructureRow {
 export function parseWipReleaseBalance(
   buffer: Buffer,
 ): ReleaseBalanceStructureRow[] {
+  if (isCsvWip(buffer)) {
+    const agg = new Map<string, number>();
+    for (const row of parseWorkbook(buffer).rows) {
+      if (
+        (row.jobCardType ?? "").trim().toLowerCase() !== "job card not started" ||
+        (row.jobCardStatus ?? "").trim().toLowerCase() !== "initial"
+      ) {
+        continue;
+      }
+      if (!row.job || row.job === "(Unassigned)" || !row.structure) continue;
+      const key = `${row.job}\u0000${row.structure}\u0000${row.mfcBatch ?? "Z"}`;
+      agg.set(key, (agg.get(key) ?? 0) + (row.balanceWt ?? 0) / 1000);
+    }
+    return Array.from(agg.entries()).map(([key, releaseBalanceComputedMt]) => {
+      const [project, structure, mfcBatch] = key.split("\u0000");
+      return { project, structure, mfcBatch, releaseBalanceComputedMt };
+    });
+  }
   let wb: XLSX.WorkBook;
   try {
     wb = XLSX.read(buffer, { cellDates: true });
@@ -241,6 +259,25 @@ export interface AssignmentBalanceStructureRow {
 export function parseWipAssignmentBalance(
   buffer: Buffer,
 ): AssignmentBalanceStructureRow[] {
+  if (isCsvWip(buffer)) {
+    const agg = new Map<string, number>();
+    for (const row of parseWorkbook(buffer).rows) {
+      if (
+        (row.jobCardType ?? "").trim().toLowerCase() !== "job card not started" ||
+        (row.jobCardStatus ?? "").trim().toLowerCase() !== "authorized" ||
+        (row.contractor ?? "").trim() !== ""
+      ) {
+        continue;
+      }
+      if (!row.job || row.job === "(Unassigned)" || !row.structure) continue;
+      const key = `${row.job}\u0000${row.structure}`;
+      agg.set(key, (agg.get(key) ?? 0) + (row.balanceWt ?? 0) / 1000);
+    }
+    return Array.from(agg.entries()).map(([key, assignmentBalanceComputedMt]) => {
+      const [project, structure] = key.split("\u0000");
+      return { project, structure, assignmentBalanceComputedMt };
+    });
+  }
   let wb: XLSX.WorkBook;
   try {
     wb = XLSX.read(buffer, { cellDates: true });

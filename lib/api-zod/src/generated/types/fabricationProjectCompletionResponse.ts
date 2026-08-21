@@ -10,8 +10,10 @@ import type { FabricationProjectCompletionTotals } from './fabricationProjectCom
 import type { UnknownProjectCauses } from './unknownProjectCauses';
 
 export interface FabricationProjectCompletionResponse {
-  /** False when no WIP import exists. */
+  /** False when no WIP import exists, or when the import is gated (pre-dates Type/Status storage). */
   available: boolean;
+  /** Human-readable explanation when available is false due to a type-data gate. */
+  reason?: string;
   /** One row per (project, BOM Label), sorted by project then BOM label. */
   rows: FabricationProjectCompletionRow[];
   totals: FabricationProjectCompletionTotals;

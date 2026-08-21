@@ -76,6 +76,10 @@ import {
 import {
   parseWorkbook,
   readStructural,
+  isCsvWip,
+  hasExactWipCsvColumnCount,
+  WIP_CSV_COLUMN_COUNT,
+  missingCriticalWipColumns,
   computeAgeing,
   computeRoute,
   CLEANABLE_FIELDS,
@@ -633,6 +637,19 @@ async function mergeImport(
             // that were first inserted from an older format without these columns.
             jobCardType: sql`COALESCE(EXCLUDED.job_card_type, record_pool.job_card_type)`,
             jobCardStatus: sql`COALESCE(EXCLUDED.job_card_status, record_pool.job_card_status)`,
+            // ERP additions Aug-2026: stamp pool rows first seen from files that
+            // predate these columns when the same row reappears in a file that
+            // carries them. COALESCE keeps existing values when a legacy file is
+            // re-uploaded (EXCLUDED is null). Not a backfill of old imports —
+            // pool rows are shared, and the value comes from the new file itself.
+            bomStatus: sql`COALESCE(EXCLUDED.bom_status, record_pool.bom_status)`,
+            isWeldedStructure: sql`COALESCE(EXCLUDED.is_welded_structure, record_pool.is_welded_structure)`,
+            salesOrderStatus: sql`COALESCE(EXCLUDED.sales_order_status, record_pool.sales_order_status)`,
+            isLastActivity: sql`COALESCE(EXCLUDED.is_last_activity, record_pool.is_last_activity)`,
+            // Preserve the first aliased source activity when a canonical P/S
+            // row deduplicates against an existing RFI pool row. Ordinary rows
+            // carry null and therefore never alter this audit-only field.
+            activityRaw: sql`COALESCE(record_pool.activity_raw, EXCLUDED.activity_raw)`,
           },
         })
         .returning({ id: recordPoolTable.id, hash: recordPoolTable.hash });
@@ -783,14 +800,25 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
   const asOnDate =
     detectReportAsOnDate(file.buffer, file.originalname) ?? todayYmd();
 
+  // Critical-column gate: refuse outright rather than ingest a file whose
+  // critical fields would sit silently null (the failure mode that produced the
+  // 19 gated imports). No override — a partial import is worse than no import.
+  {
+    const gateResult = wipCriticalGate(file.buffer, detectFileType(file.buffer));
+    if (gateResult) {
+      res.status(400).json(gateResult);
+      return;
+    }
+  }
+
   let parsed;
   try {
-    parsed = parseWorkbook(file.buffer);
+    parsed = parseWorkbook(file.buffer, undefined, { reportDate: reportDate ?? asOnDate });
   } catch (err) {
     req.log.warn({ err }, "Failed to parse workbook");
     res
       .status(400)
-      .json({ error: "Could not parse the uploaded file as an .xlsx report" });
+      .json({ error: "Could not parse the uploaded file as a WIP report." });
     return;
   }
 
@@ -798,6 +826,13 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
     res.status(400).json({
       error:
         "No marks found in the file. Check that the sheet has a header on the third row and a 'Mark No.' column.",
+    });
+    return;
+  }
+  if (parsed.futureDateCount > 0) {
+    res.status(400).json({
+      error: `Refused: ${parsed.futureDateCount} CSV date value(s) are later than the selected report date ${reportDate ?? asOnDate}.`,
+      futureDateCount: parsed.futureDateCount,
     });
     return;
   }
@@ -864,6 +899,46 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
 const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_GATEKEEPER_ROWS = 400;
 
+// Critical-column gate shared by every WIP ingest surface (direct upload,
+// stage, commit). Returns a 400 payload when the file must be refused, null
+// when it may proceed. The gate fires for files detected as WIP, and also for
+// "unknown" files that are recognisably a WIP export with critical columns
+// stripped — type detection itself needs Project Code + Mark No. + Activity,
+// so a WIP missing one of those detects as unknown, yet it must still be
+// refused naming every missing column rather than reported as unrecognised.
+// The near-WIP signature is a detected "Project Code" header row. It applies
+// regardless of what detectFileType said: a WIP with Mark No. stripped scores
+// as "order-review" (its header still contains weight/despatch/release/bom
+// tokens), while genuine Order Review exports never carry an exact
+// "Project Code" column header (only "Project Code : NNN" banner cells) — so
+// the structural signature, not the detected type, decides whether the gate
+// fires.
+function wipCriticalGate(
+  buffer: Buffer,
+  detected: OrderReviewFileType,
+): { error: string; missingCriticalColumns?: string[]; expectedColumns?: number; foundColumns?: number } | null {
+  const structural = readStructural(buffer);
+  const nearWip =
+    detected === "wip" || structural.columnsFound.includes("Project Code");
+  if (!nearWip) return null;
+  // CSV is now the permanent ERP format. Unlike historical spreadsheets, it
+  // has one fixed header row and exactly 28 columns; accepting a shifted or
+  // truncated CSV would silently assign values to the wrong headers.
+  if (isCsvWip(buffer) && !hasExactWipCsvColumnCount(structural.columnsFound)) {
+    return {
+      error: `This WIP CSV must contain exactly ${WIP_CSV_COLUMN_COUNT} columns; found ${structural.columnsFound.length}. Re-export the report before importing it.`,
+      expectedColumns: WIP_CSV_COLUMN_COUNT,
+      foundColumns: structural.columnsFound.length,
+    };
+  }
+  const missingCritical = missingCriticalWipColumns(structural.columnsFound);
+  if (missingCritical.length === 0) return null;
+  return {
+    error: `This WIP file is missing critical column(s): ${missingCritical.join(", ")}. Importing it would leave those fields blank on every mark, so it was refused. Re-export the report with all columns included.`,
+    missingCriticalColumns: missingCritical,
+  };
+}
+
 // Read the optional per-slot expected type from a request body. Each upload slot
 // (WIP vs Order Review) tells the validator/commit which type it expects so a
 // mis-routed file is caught — auto-detect stays a secondary safety net.
@@ -914,6 +989,22 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
 
   await expireStagedUploads();
 
+  // Critical-column gate for WIP files, BEFORE any staging row is written: a
+  // refused file must leave nothing behind that could later be committed.
+  // Covers detected WIP files AND "unknown" files that are recognisably a WIP
+  // export with critical columns stripped (type detection itself needs Project
+  // Code + Mark No. + Activity, so a WIP missing one of those detects as
+  // unknown — it must still be refused BY NAME, not staged or reported as
+  // merely unrecognised).
+  const stagedFileType = detectFileType(file.buffer);
+  {
+    const gateResult = wipCriticalGate(file.buffer, stagedFileType);
+    if (gateResult) {
+      res.status(400).json(gateResult);
+      return;
+    }
+  }
+
   const stagingId = randomUUID();
   await db.insert(uploadStagingTable).values({
     id: stagingId,
@@ -923,7 +1014,7 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
     fileData: file.buffer,
   });
 
-  const fileType = detectFileType(file.buffer);
+  const fileType = stagedFileType;
 
   // Order Review (the second input file) gets a deterministic structural read of
   // its own; it never goes through the WIP structural reader / AI gatekeeper.
@@ -1170,7 +1261,7 @@ router.post("/imports/validate", requireAuth, async (req, res): Promise<void> =>
     res.json({
       available: true,
       verdict: "reject",
-      reason: "The file could not be parsed as an .xlsx balance/activity report.",
+      reason: "The file could not be parsed as a balance/activity report.",
       expectedShape:
         "An .xlsx export with a header row containing 'Project Code' and a 'Mark No.' column.",
       sanitize: [],
@@ -1346,6 +1437,19 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   if (expectedType && detected !== expectedType) {
     res.status(400).json({ error: typeMismatchMessage(detected) });
     return;
+  }
+
+  // Critical-column gate BEFORE the generic unknown rejection: a WIP export
+  // missing a detection column (Project Code / Mark No. / Activity) detects as
+  // "unknown", but must be refused NAMING the missing columns, not with the
+  // generic message. Also covers detected-WIP files staged before this guard
+  // existed or posted straight to commit bypassing /validate.
+  {
+    const gateResult = wipCriticalGate(staged.fileData, detected);
+    if (gateResult) {
+      res.status(400).json(gateResult);
+      return;
+    }
   }
 
   // Reject unrecognised files explicitly (defense in depth: a caller may post
@@ -1543,14 +1647,16 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
+  // (Critical-column gate already ran above, before the unknown/type checks.)
+
   let parsed;
   try {
-    parsed = parseWorkbook(staged.fileData, accepted);
+    parsed = parseWorkbook(staged.fileData, accepted, { reportDate: wipAsOnDate });
   } catch (err) {
     req.log.warn({ err, stagingId }, "Commit parse failed");
     res
       .status(400)
-      .json({ error: "Could not parse the staged file as an .xlsx report" });
+      .json({ error: "Could not parse the staged file as a WIP report." });
     return;
   }
 
@@ -1558,6 +1664,13 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     res.status(400).json({
       error:
         "No marks found in the file. Check that the sheet has a header row with 'Project Code' and a 'Mark No.' column.",
+    });
+    return;
+  }
+  if (parsed.futureDateCount > 0) {
+    res.status(400).json({
+      error: `Refused: ${parsed.futureDateCount} CSV date value(s) are later than the selected report date ${wipAsOnDate}.`,
+      futureDateCount: parsed.futureDateCount,
     });
     return;
   }

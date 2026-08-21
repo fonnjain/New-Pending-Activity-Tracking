@@ -99,17 +99,19 @@ export interface WipColumnReorder {
 }
 
 /**
- * Result of comparing uploaded WIP file headers against the expected 24-column baseline.
+ * Result of classifying uploaded WIP file headers into three tiers (critical / known-optional / unknown).
  */
 export interface WipFormatCheck {
-  /** True only when headers exactly match the baseline. */
+  /** True when every column is recognised and no critical column is missing. */
   ok: boolean;
   expectedCount: number;
   foundCount: number;
-  /** Expected columns not found anywhere in the file. */
+  /** Missing REQUIRED (critical) columns only — always equals criticalMissing. */
   missingExpected: string[];
-  /** Columns in the file not in the baseline. */
+  /** Columns recognised by neither the critical nor the known list. */
   unexpectedFound: string[];
+  /** Known-optional columns absent from this file. Informational, never a warning. */
+  optionalAbsent: string[];
   /** Positions where the header text changed and neither name appears elsewhere. */
   renames: WipColumnRename[];
   /** Expected columns that are present but at a different position. */
@@ -223,10 +225,7 @@ export interface Import {
   createdAt: string;
   summary: ParseSummary;
   changeSummary: ChangeSummary | null;
-  /**
-   * True when this import has per-row job_card_type / job_card_status stored in
-   * import_rows. False for imports ingested before that code existed — their
-   * bucket classification is fabricated and must not be shown as figures.
+  /** True when this import has per-row job_card_type / job_card_status data stored in import_rows (i.e. it was ingested with the current code that writes those columns). False for imports uploaded before that code existed — their classification is fabricated via COALESCE from the pool and must never be shown as bucket figures.
    */
   hasTypeData: boolean;
 }
@@ -313,7 +312,7 @@ export interface StructuralRead {
   rowsWithMark: number;
   /** Human-readable structural problems detected without AI. */
   problems: string[];
-  /** WIP column format check vs the 24-column baseline; null for non-WIP files. */
+  /** WIP column classification (critical / known-optional / unknown tiers); null for non-WIP files. */
   wipFormatCheck: WipFormatCheck | null;
 }
 
@@ -542,9 +541,6 @@ export interface CommitRequest {
   expectedType?: CommitRequestExpectedType;
   /** Descriptive cleanups the user accepted; applied before parse+merge. */
   acceptedSuggestions?: AcceptedSuggestion[];
-  /** Order Review only: when true, bypasses the stale-date guard that refuses
-   * uploads whose as-on date is older than the current stored Order Review. */
-  forceStaleDate?: boolean;
 }
 
 export type WipCommitResultKind = typeof WipCommitResultKind[keyof typeof WipCommitResultKind];
@@ -2257,29 +2253,31 @@ export interface ReleaseBalanceTotals {
   rowCount: number;
 }
 
+export type ReleaseBalanceResponseBatchBreakdownItem = {
+  project: string;
+  /** MFC batch letter (A, B, C …) or 'Z' for unassigned marks. */
+  mfcBatch: string;
+  releaseBalanceComputedMt: number;
+};
+
 /**
  * Release Balance Computed from the latest WIP file, joined to Order Review.
  */
 export interface ReleaseBalanceResponse {
-  /** False when no WIP file with Not Started + Initial rows has been uploaded. */
+  /** False when no WIP file has been uploaded, or when the import is gated (hasTypeData false). */
   available: boolean;
+  /** Present and false when the import pre-dates per-row Type/Status storage. The pre-computed Release Balance for such imports is derived from pool COALESCE (current state) and must not be displayed. */
+  hasTypeData?: boolean;
+  /** Human-readable explanation when available is false due to a type-data gate. */
+  reason?: string;
   /**
      * "As on" date of the latest Order Review import; null if none.
      * @nullable
      */
   orderReviewAsOnDate: string | null;
   rows: ReleaseBalanceRow[];
-  /**
-   * Per-(project, mfcBatch) release balance sums with no OR join.
-   * Used by the batch-view client to attribute release balance to individual
-   * MFC batches without inflating the OR comparison table.
-   */
-  batchBreakdown: Array<{
-    project: string;
-    /** MFC batch letter (A, B, C …) or 'Z' for unassigned marks. */
-    mfcBatch: string;
-    releaseBalanceComputedMt: number;
-  }>;
+  /** Per-(project, mfcBatch) release balance sums with no OR join. Used by the batch-view client to attribute release balance to individual MFC batches without inflating the OR comparison table. */
+  batchBreakdown: ReleaseBalanceResponseBatchBreakdownItem[];
   totals: ReleaseBalanceTotals;
 }
 
@@ -2366,8 +2364,10 @@ export interface UnknownProjectCauses {
 }
 
 export interface FabricationProjectCompletionResponse {
-  /** False when no WIP import exists. */
+  /** False when no WIP import exists, or when the import is gated (pre-dates Type/Status storage). */
   available: boolean;
+  /** Human-readable explanation when available is false due to a type-data gate. */
+  reason?: string;
   /** One row per (project, BOM Label), sorted by project then BOM label. */
   rows: FabricationProjectCompletionRow[];
   totals: FabricationProjectCompletionTotals;
@@ -2395,13 +2395,13 @@ export interface ReportResult {
 }
 
 /**
- * Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key "FG" is derived from parseSummary fgWipByJob.
+ * Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key "FG" is derived from parseSummary fgWipByJob. Empty ({}) when gated=true.
 
  */
 export type ProductionMovementDayNetBalance = {[key: string]: number};
 
 /**
- * One consecutive import pair. cuttingOutputMt is the sum of TLT balance weight drawn down from marks that were at activity C in the previous import (left C entirely, or still at C with reduced weight). netBalance maps activity code to MT delta (curr − prev); negative = clearing, positive = accumulating. isGap=true when the two imports are more than one calendar day apart.
+ * One consecutive import pair. cuttingOutputMt is the sum of TLT balance weight drawn down from marks that were at activity C in the previous import (left C entirely, or still at C with reduced weight). netBalance maps activity code to MT delta (curr − prev); negative = clearing, positive = accumulating. isGap=true when the two imports are more than one calendar day apart. gated=true when either import in the pair pre-dates per-row Type/Status storage; in that case cuttingOutputMt=0 and netBalance={} — the pair cannot be computed.
 
  */
 export interface ProductionMovementDay {
@@ -2426,9 +2426,13 @@ export interface ProductionMovementDay {
   cuttingMarksLeft: number;
   /** Count of TLT marks still at C in both imports whose balance weight decreased. */
   cuttingMarksReduced: number;
-  /** Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key "FG" is derived from parseSummary fgWipByJob.
+  /** Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key "FG" is derived from parseSummary fgWipByJob. Empty ({}) when gated=true.
    */
   netBalance: ProductionMovementDayNetBalance;
+  /** True when either import in this pair pre-dates per-row Type/Status storage. Movement cannot be computed; cuttingOutputMt and netBalance are zeroed. */
+  gated?: boolean;
+  /** Names the specific unusable import when gated is true. */
+  gatedReason?: string;
 }
 
 /**

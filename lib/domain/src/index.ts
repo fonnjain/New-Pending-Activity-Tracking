@@ -25,6 +25,24 @@ export const PROCESS_SEQUENCE = [
 
 export type ProcessStep = (typeof PROCESS_SEQUENCE)[number];
 
+// Activity codes the ERP emits that are folded into an existing stage before
+// storage. Punching (P) and stamping (S) are cutting-line operations that VTPL
+// does not track separately; their weight is reported under RFI, the earliest
+// in-production activity that carries marks. Applied at parse time, so no page,
+// export or rule in the app ever sees the original code.
+export const ACTIVITY_ALIASES: Readonly<Record<string, string>> = {
+  P: "RFI",
+  S: "RFI",
+};
+
+export function canonicalActivity(
+  activity: string | null | undefined,
+): string | null {
+  if (!activity) return null;
+  const normalized = activity.trim().toUpperCase();
+  return ACTIVITY_ALIASES[normalized] ?? activity;
+}
+
 // ---------------------------------------------------------------------------
 // Per-category process sequences (TLT vs NTLT subtypes)
 // ---------------------------------------------------------------------------
@@ -690,9 +708,10 @@ export const CONTRACTOR_CATEGORY_SEED: ContractorCategorySeed[] = [
   { name: "PLA ENSOL PRIVATE LIMITED-JW",                  category: "OUT_VENDOR", outVendorType: ["FAB"],  plantLocation: "job_work" },
 ];
 
-// Map an activity code to its coarse process phase (case-insensitive). Known TLT
-// and NTLT codes resolve to a phase; only genuinely unknown codes return null, so
-// callers can surface those separately rather than miscount.
+// Map a known activity code to its coarse process phase (case-insensitive).
+// Blank and genuinely unknown codes return null so callers can distinguish them
+// from a known activity. Use classifyWipPhase when Type/Status context is
+// available and the Job Card WIP blank-activity catch-all is required.
 export function processPhase(code: string | null | undefined): ProcessPhaseKey | null {
   const c = (code ?? "").trim().toUpperCase();
   if (!c) return null;
@@ -704,6 +723,22 @@ export function processPhase(code: string | null | undefined): ProcessPhaseKey |
 // is always preserved for display.
 export function normalizeActivity(code: string | null | undefined): string {
   return (code ?? "").trim().toUpperCase();
+}
+
+/**
+ * Classify the coarse phase for a WIP row with its Type/Status context.
+ *
+ * A blank activity is Quality Check only for Job Card WIP (IN_PRODUCTION).
+ * Blank activities on FG, not-started, or otherwise unknown rows remain null,
+ * preserving the generic processPhase contract and all non-WIP behavior.
+ */
+export function classifyWipPhase(
+  row: Parameters<typeof classifyWipCase>[0],
+): ProcessPhaseKey | null {
+  if (classifyWipCase(row) !== "IN_PRODUCTION") return null;
+  const phase = processPhase(row.activity);
+  if (phase) return phase;
+  return normalizeActivity(row.activity) === "" ? "quality" : null;
 }
 
 const RANK_BY_CODE = new Map<string, number>(
@@ -2441,3 +2476,45 @@ export function classifyNtltStage(r: {
 }
 
 export * from "./aggregate";
+
+// ─── DC17 — WO Qty vs WIP balance classifier ─────────────────────────────────
+
+/** 50 kg expressed in MT — gap tolerance for DC17. */
+export const DC17_TOLERANCE = 0.050;
+/** < 1 kg treated as zero for the W / Q / J category tests. */
+export const DC17_EPSILON   = 0.001;
+
+/**
+ * Classify a (project, structure) gap for DC17.
+ * Returns **null** when |gap| ≤ DC17_TOLERANCE (within tolerance, skip).
+ *
+ *   gap = J − Q − W   (WO Order Qty − Progress Despatch − WIP pending weight)
+ *
+ *   Positive gap (J−Q−W > +0.05 MT):
+ *     A  W=0 & Q=0  never in production
+ *     B  W=0 & Q>0  left WIP without a despatch record
+ *     C  W>0 & Q=0  in production, WIP short of work order
+ *     D  W>0 & Q>0  partly shipped, WIP short of remainder
+ *   Negative gap (J−Q−W < −0.05 MT):
+ *     E  J=0        marks in WIP with no work order
+ *     F  |J−Q|≤0.05 fully despatched per OR, WIP still pending
+ *     G  else       shop holds more than the order book expects
+ */
+export function classifyDc17(
+  j: number,
+  q: number,
+  w: number,
+): "A" | "B" | "C" | "D" | "E" | "F" | "G" | null {
+  const gap = j - q - w;
+  if (Math.abs(gap) <= DC17_TOLERANCE) return null;
+  if (gap > 0) {
+    if (w < DC17_EPSILON && q < DC17_EPSILON) return "A";
+    if (w < DC17_EPSILON)                     return "B";
+    if (q < DC17_EPSILON)                     return "C";
+    return "D";
+  } else {
+    if (j < DC17_EPSILON)                    return "E";
+    if (Math.abs(j - q) <= DC17_TOLERANCE)   return "F";
+    return "G";
+  }
+}

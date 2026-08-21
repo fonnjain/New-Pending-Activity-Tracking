@@ -7,7 +7,7 @@
  */
 
 /**
- * Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key "FG" is derived from parseSummary fgWipByJob.
+ * Net balance delta in MT per activity (curr balance − prev balance). Negative = material leaving (good); positive = material accumulating (potential bottleneck). Key "FG" is derived from parseSummary fgWipByJob. Empty ({}) when gated=true.
 
  */
 export type ProductionMovementDayNetBalance = {[key: string]: number};

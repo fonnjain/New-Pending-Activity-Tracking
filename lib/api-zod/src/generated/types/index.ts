@@ -158,6 +158,7 @@ export * from './recordSectionType';
 export * from './recordThicknessSource';
 export * from './rejectContractorDedupProposal200';
 export * from './releaseBalanceResponse';
+export * from './releaseBalanceResponseBatchBreakdownItem';
 export * from './releaseBalanceRow';
 export * from './releaseBalanceTotals';
 export * from './reportAction';

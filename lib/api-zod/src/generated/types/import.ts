@@ -20,10 +20,7 @@ export interface Import {
   createdAt: string;
   summary: ParseSummary;
   changeSummary: ChangeSummary | null;
-  /**
-   * True when this import has per-row job_card_type / job_card_status stored in
-   * import_rows. False for imports ingested before that code existed — their
-   * bucket classification is fabricated and must not be shown as figures.
+  /** True when this import has per-row job_card_type / job_card_status data stored in import_rows (i.e. it was ingested with the current code that writes those columns). False for imports uploaded before that code existed — their classification is fabricated via COALESCE from the pool and must never be shown as bucket figures.
    */
   hasTypeData: boolean;
 }

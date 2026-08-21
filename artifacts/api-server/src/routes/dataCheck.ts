@@ -7,8 +7,9 @@ import {
   orderReviewRowsTable,
 } from "@workspace/db";
 import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
-import { PROCESS_SEQUENCE, QC_ACTIVITY_SET, GALV_ACTIVITY_SET, classifyNtltStage } from "@workspace/domain";
+import { PROCESS_SEQUENCE, QC_ACTIVITY_SET, GALV_ACTIVITY_SET, classifyNtltStage, classifyDc17 } from "@workspace/domain";
 import { hasTypeData, loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
+import { type SourceColumnWatchColumn } from "../lib/parse";
 import { buildIdentityBridge, identityRawKey } from "../lib/identityBridge";
 
 const router: IRouter = Router();
@@ -93,6 +94,35 @@ export interface DcMarkMovementGated {
 
 export type DcMarkMovementResult = DcMarkMovement | DcMarkMovementGated;
 
+// ---------------------------------------------------------------------------
+// DC17 — per-structure WO vs WIP gap
+// ---------------------------------------------------------------------------
+
+export interface Dc17StructureRow {
+  project: string;
+  structure: string;
+  /** WO Order Qty (OR col J, MT) */
+  j: number;
+  /** Progress Despatch (OR col Q, MT) */
+  q: number;
+  /** WIP pending balance (MT) */
+  w: number;
+  /** gap = J − Q − W (MT, signed) */
+  gap: number;
+  /** Seven-way classification A–G (see inline comments). */
+  category: "A" | "B" | "C" | "D" | "E" | "F" | "G";
+}
+
+export interface Dc17Result {
+  /** All keys from OR ∪ WIP (full outer join). */
+  structuresCompared: number;
+  /** Structures within ±50 kg tolerance. */
+  structuresClean: number;
+  /** Flagged structures sorted by |gap| descending. */
+  flagged: Dc17StructureRow[];
+  byCategory: Record<string, { count: number; totalMt: number }>;
+}
+
 export interface DataCheckResponse {
   available: boolean;
   orImportId: number | null;
@@ -119,6 +149,22 @@ export interface DataCheckResponse {
   dc0StoredTotalRows: number;
   /** DC12–DC14 cross-import movement results. Null when only one import exists. */
   markMovement: DcMarkMovementResult | null;
+  /** DC17 — per-structure WO vs WIP gap. Null when no WIP import exists. */
+  dc17: Dc17Result | null;
+  /** Source Column Watch — descriptive-only snapshot of watched ERP columns.
+   * NOT a DC rule: never affects hardRuleFailures or the banner. Null when no
+   * WIP import exists. */
+  sourceColumnWatch: DcSourceColumnWatch | null;
+}
+
+export interface DcSourceColumnWatch {
+  currImportId: number;
+  currDayKey: string;
+  prevImportId: number | null;
+  prevDayKey: string | null;
+  /** Null = the import predates the per-import snapshot (columns not present). */
+  current: SourceColumnWatchColumn[] | null;
+  previous: SourceColumnWatchColumn[] | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +275,8 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     ntltTotalMarks: 0,
     dc0StoredTotalRows: 0,
     markMovement: null,
+    dc17: null,
+    sourceColumnWatch: null,
   };
 
   if (!orData) {
@@ -348,6 +396,12 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
   let wipUnclassifiedMarks = 0;
   let wipTotalMt = 0;
   let wipTotalMarks = 0;
+  let blankActivityWipMarks = 0;
+  let blankActivityWipMt = 0;
+  const blankActivityByStructure = new Map<
+    string,
+    { project: string; structure: string; mt: number }
+  >();
 
   // DC6 gate: delegate to the shared hasTypeData helper (one definition in dispatch.ts).
   const wipHasTypeData = latestWip ? await hasTypeData(latestWip.id) : false;
@@ -376,6 +430,8 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     const [wipTltRows, wipNtltRows, prevWipArr] = await Promise.all([
       // TLT rows for the six-bucket DC6 partition.
       db.select({
+        job: recordPoolTable.job,
+        structure: recordPoolTable.structure,
         jobCardType: importRowsTable.jobCardType,
         jobCardStatus: importRowsTable.jobCardStatus,
         contractor: recordPoolTable.contractor,
@@ -429,6 +485,20 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
       wipTotalMt += wMt;
       wipTotalMarks += copies;
 
+      if (tp === "job card wip" && a === "") {
+        blankActivityWipMarks += copies;
+        blankActivityWipMt += wMt;
+        const project = r.job || "(Unassigned)";
+        const structure = r.structure || "(blank)";
+        const key = `${project}\x01${structure}`;
+        const existing = blankActivityByStructure.get(key);
+        if (existing) {
+          existing.mt += wMt;
+        } else {
+          blankActivityByStructure.set(key, { project, structure, mt: wMt });
+        }
+      }
+
       if (tp === "job card not started" && st === "initial") {
         bucketCounts["Release"].mt += wMt;
         bucketCounts["Release"].marks += copies;
@@ -441,7 +511,7 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
           bucketCounts["Cutting"].mt += wMt;
           bucketCounts["Cutting"].marks += copies;
         }
-      } else if (tp === "job card wip" && QC_ACTIVITY_SET.has(a)) {
+      } else if (tp === "job card wip" && (a === "" || QC_ACTIVITY_SET.has(a))) {
         bucketCounts["Quality Check"].mt += wMt;
         bucketCounts["Quality Check"].marks += copies;
       } else if (tp === "job card wip" && GALV_ACTIVITY_SET.has(a)) {
@@ -497,6 +567,27 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
         pass: false,
         violations: [],
       };
+
+  let blankActivityWorst = {
+    project: "",
+    structure: "",
+    mt: 0,
+  };
+  for (const row of blankActivityByStructure.values()) {
+    if (row.mt > blankActivityWorst.mt) blankActivityWorst = row;
+  }
+  const r_dc18: DcWarning = {
+    id: "DC18",
+    label:
+      `Job Card WIP rows with a blank Activity are assigned to Quality Check as a catch-all. ` +
+      `Affected: ${blankActivityWipMarks.toLocaleString("en-US")} mark${blankActivityWipMarks === 1 ? "" : "s"}, ` +
+      `${blankActivityWipMt.toFixed(3)} MT. Correct the missing Activity in the ERP source.`,
+    structureCount: blankActivityByStructure.size,
+    totalMt: blankActivityWipMt,
+    worstProject: blankActivityWorst.project,
+    worstStructure: blankActivityWorst.structure,
+    worstMt: blankActivityWorst.mt,
+  };
 
   // -------------------------------------------------------------------------
   // DC16 — NTLT five-stage partition assembly
@@ -792,6 +883,144 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
   );
 
   // -------------------------------------------------------------------------
+  // DC17 — per-structure gap: J − Q − W  (WO Qty − Despatch − WIP pending)
+  // Tolerance: 50 kg (0.050 MT).  Seven categories A–G (evaluate in order,
+  // stop at first match):
+  //   Positive gap (J−Q−W > +0.05):
+  //     A — W=0 & Q=0: not yet in production
+  //     B — W=0 & Q>0: left WIP without a despatch record
+  //     C — W>0 & Q=0: in production, WIP short of work order
+  //     D — W>0 & Q>0: partly shipped, WIP short of remainder
+  //   Negative gap (J−Q−W < −0.05):
+  //     E — J=0:         marks with no work order
+  //     F — |J−Q|≤0.05: fully despatched per OR, WIP still pending
+  //     G — else:        shop holds more than the order expects
+  // -------------------------------------------------------------------------
+  let dc17: Dc17Result | null = null;
+  if (latestWip) {
+    // Aggregate TLT WIP balance by (job, structure)
+    const wipByStruct = await db
+      .select({
+        job:       recordPoolTable.job,
+        structure: recordPoolTable.structure,
+        wipMt:     sql<number>`SUM(${recordPoolTable.balanceWt} * ${importRowsTable.copies}) / 1000.0`,
+      })
+      .from(importRowsTable)
+      .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
+      .where(
+        and(
+          eq(importRowsTable.importId, latestWip.id),
+          eq(recordPoolTable.category, "TLT"),
+        ),
+      )
+      .groupBy(recordPoolTable.job, recordPoolTable.structure);
+
+    // WIP map: "\x01"-delimited key → MT  +  set of active TLT project codes
+    const wipMap = new Map<string, number>();
+    const wipProjectSet = new Set<string>();
+    for (const r of wipByStruct) {
+      wipMap.set(`${r.job}\x01${r.structure}`, r.wipMt ?? 0);
+      if (r.job) wipProjectSet.add(r.job);
+    }
+
+    // OR map from currentOrRows — scoped to projects present in the current WIP.
+    // The OR table accumulates rows across all historical imports; old projects
+    // (no longer in WIP) would inflate category-A counts and the structure total.
+    const orMap = new Map<string, { j: number; q: number; project: string; structure: string }>();
+    for (const r of currentOrRows) {
+      if (!wipProjectSet.has(r.project)) continue; // skip historical OR-only projects
+      orMap.set(`${r.project}\x01${r.structure}`, {
+        j: r.woOrderQtyMt ?? 0,
+        q: r.fileDespatchMt ?? 0,
+        project: r.project,
+        structure: r.structure,
+      });
+    }
+
+    const allKeys = new Set([...orMap.keys(), ...wipMap.keys()]);
+    const flagged: Dc17StructureRow[] = [];
+
+    for (const key of allKeys) {
+      const or  = orMap.get(key);
+      const w   = wipMap.get(key) ?? 0;
+      const sep = key.indexOf("\x01");
+      const project   = key.slice(0, sep);
+      const structure = key.slice(sep + 1);
+      const j   = or?.j ?? 0;
+      const q   = or?.q ?? 0;
+      const gap = j - q - w;
+
+      const category = classifyDc17(j, q, w);
+      if (category === null) continue; // within tolerance
+
+      flagged.push({ project, structure, j, q, w, gap, category });
+    }
+
+    flagged.sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
+
+    const byCategory: Record<string, { count: number; totalMt: number }> = {};
+    for (const r of flagged) {
+      if (!byCategory[r.category]) byCategory[r.category] = { count: 0, totalMt: 0 };
+      byCategory[r.category].count++;
+      byCategory[r.category].totalMt += r.gap;
+    }
+
+    dc17 = {
+      structuresCompared: allKeys.size,
+      structuresClean:    allKeys.size - flagged.length,
+      flagged,
+      byCategory,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Source Column Watch — descriptive only, never a DC rule, never touches
+  // hardRuleFailures/the banner. Snapshots are read from imports.summary
+  // (captured at parse time) because record_pool values are shared across
+  // imports and re-stamped by later files — a live pool join could not
+  // reconstruct what an earlier file contained. Summary key missing ⇒ the
+  // import predates the snapshot ⇒ "not present in this file".
+  let sourceColumnWatch: DcSourceColumnWatch | null = null;
+  if (latestWip) {
+    // Predecessor fetched independently of the wipHasTypeData gating above so
+    // the panel also works when movement checks are unavailable.
+    const [prevForWatch] = await db
+      .select({
+        id: importsTable.id,
+        reportDate: importsTable.reportDate,
+        createdAt: importsTable.createdAt,
+        summary: importsTable.summary,
+      })
+      .from(importsTable)
+      .where(
+        latestWip.reportDate != null
+          ? or(
+              lt(importsTable.reportDate, latestWip.reportDate),
+              and(eq(importsTable.reportDate, latestWip.reportDate), lt(importsTable.id, latestWip.id)),
+            )
+          : lt(importsTable.id, latestWip.id),
+      )
+      .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
+      .limit(1);
+
+    const snapshotOf = (summary: unknown): SourceColumnWatchColumn[] | null => {
+      const s = summary as { sourceColumnWatch?: SourceColumnWatchColumn[] } | null;
+      return Array.isArray(s?.sourceColumnWatch) ? s.sourceColumnWatch : null;
+    };
+
+    sourceColumnWatch = {
+      currImportId: latestWip.id,
+      currDayKey: importDayKey(latestWip.reportDate, latestWip.createdAt),
+      prevImportId: prevForWatch?.id ?? null,
+      prevDayKey: prevForWatch
+        ? importDayKey(prevForWatch.reportDate, prevForWatch.createdAt)
+        : null,
+      current: snapshotOf(latestWip.summary),
+      previous: prevForWatch ? snapshotOf(prevForWatch.summary) : null,
+    };
+  }
+
+  // -------------------------------------------------------------------------
   // Assemble response
   // -------------------------------------------------------------------------
   const allHardRules: DcHardRule[] = [r_dc1, r_dc2, r_dc3, r_dc4, r_dc5, dc6, dc16];
@@ -806,7 +1035,7 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     structuresEvaluated: currentOrRows.length,
     hardRuleFailures,
     hardRules: allHardRules,
-    warnings: [r_dc7, r_dc8, r_dc9, r_dc10, r_dc15],
+    warnings: [r_dc7, r_dc8, r_dc9, r_dc10, r_dc15, r_dc18],
     wipBuckets,
     wipUnclassifiedMarks,
     wipTotalMt,
@@ -817,6 +1046,8 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     ntltTotalMarks,
     dc0StoredTotalRows: dc0Count,
     markMovement,
+    dc17,
+    sourceColumnWatch,
   };
 
   res.json(response);

@@ -9,17 +9,19 @@ import type { WipColumnRename } from './wipColumnRename';
 import type { WipColumnReorder } from './wipColumnReorder';
 
 /**
- * Result of comparing uploaded WIP file headers against the expected 24-column baseline.
+ * Result of classifying uploaded WIP file headers into three tiers (critical / known-optional / unknown).
  */
 export interface WipFormatCheck {
-  /** True only when headers exactly match the baseline. */
+  /** True when every column is recognised and no critical column is missing. */
   ok: boolean;
   expectedCount: number;
   foundCount: number;
-  /** Expected columns not found anywhere in the file. */
+  /** Missing REQUIRED (critical) columns only — always equals criticalMissing. */
   missingExpected: string[];
-  /** Columns in the file not in the baseline. */
+  /** Columns recognised by neither the critical nor the known list. */
   unexpectedFound: string[];
+  /** Known-optional columns absent from this file. Informational, never a warning. */
+  optionalAbsent: string[];
   /** Positions where the header text changed and neither name appears elsewhere. */
   renames: WipColumnRename[];
   /** Expected columns that are present but at a different position. */
