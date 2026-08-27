@@ -49,6 +49,16 @@ export interface ParseSummary {
   // unclassifiedRowCount. Absent when zero such rows exist (normal case).
   unclassifiedWtKg?: number;
   unclassifiedSamples?: Array<{ type: string; status: string }>;
+  // Every observed ERP Type (Col A), with all casing variants combined. Blank
+  // is represented as "(blank / legacy)" so historic files are explicit.
+  typeCounts?: Array<{ type: string; rows: number }>;
+  // Explicit FG Pending For Dispatch rows. They stay stored for FG reporting
+  // but are excluded by live-work computations.
+  fgExcludedRowCount?: number;
+  // Unknown nonblank Type values only (separate from status diagnostics above).
+  // Kept small so an unexpected ERP change cannot bloat import summary JSON.
+  unknownTypeRowCount?: number;
+  unknownTypeValues?: Array<{ type: string; rows: number }>;
   // Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where
   // the WIP file's "Type" column (Col A, new ≥Jul-2026 format) equals
   // "FG Pending For Dispatch". Values in kg (same unit as balanceWt).
@@ -67,6 +77,12 @@ export interface ParseSummary {
     key: string;
     header: string;
     present: boolean;
+     /** How the descriptive-only Source Column Watch renders this field. */
+     mode?: "coverage" | "distribution" | "numeric";
+     /** Nonblank source values from this import. */
+     populatedCount?: number;
+     /** Present only for numeric watch columns. */
+     numericSummary?: { min: number; max: number; mean: number } | null;
     values: Array<{ value: string | null; marks: number; weightMt: number }>;
     crossTab: Array<{ orderNature: string; value: string | null; marks: number }>;
   }>;

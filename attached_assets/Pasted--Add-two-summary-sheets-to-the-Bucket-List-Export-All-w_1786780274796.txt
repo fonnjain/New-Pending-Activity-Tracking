@@ -1,0 +1,143 @@
+# Add two summary sheets to the Bucket List "Export All" workbook
+
+The Inventory (Bucket List) "export all" currently produces six sheets, one per bucket. Add two
+summary sheets **ahead** of them, so the workbook opens on a summary rather than on bucket A.
+
+Final sheet order:
+
+```
+Summary  ·  Summary - 2  ·  A - Project to Start  ·  Pre-B - Awaiting Colour Assign
+         ·  B - Raw Material Incomplete  ·  C - RM Complete
+         ·  D - Dispatch Clearance  ·  E - Ready Not Dispatched
+```
+
+The six existing sheets must be produced exactly as they are today — same columns, same rows,
+same footer blocks. Do not change them.
+
+---
+
+## SHEET 1 — "Summary"
+
+Two blocks on one sheet. **Pre-B is excluded from this sheet.**
+
+### Block 1 — Bucket overview, one row per bucket
+
+Columns: `Bucket` · `Meaning` (merged across two columns) · `Rows` · `Projects` ·
+`Structures` · `Release Bal. (MT)` · `Fab (MT)` · `Galva (MT)` · `Yard (MT)` · `Total (MT)`
+
+One row each for A, B, C, D, E. `Rows` is the count of project-batch rows on that bucket's
+sheet, `Projects` the distinct project count.
+
+For bucket A leave the four weight columns **blank** and put its Order Qty in `Total (MT)` —
+A has no pending weight, and its measure is the order quantity, not shop-floor weight.
+
+Expected values on the 15-Aug-2026 data:
+
+| Bucket | Rows | Projects | Structures | Rel. Bal. | Fab | Galva | Yard | Total |
+|---|---|---|---|---|---|---|---|---|
+| A | 78 | 78 | 411 | — | — | — | — | 8,009.803 |
+| B | 39 | 27 | 240 | 1,725.103 | 2,049.722 | 480.525 | 2,068.083 | 6,323.433 |
+| C | 90 | 55 | 612 | 0.000 | 1,846.768 | 638.183 | 9,577.796 | 12,062.747 |
+| D | 46 | 32 | 334 | 229.121 | 861.064 | 260.087 | 8,032.117 | 9,382.389 |
+| E | 0 | 0 | 0 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+
+Immediately below the table, an italic grey note spanning the width:
+
+> Bucket A is measured as Order Qty; B, C, D and E as pending weight — the two are different
+> measures. Buckets overlap and must not be added together: all 46 D rows also appear in C, and
+> 19 rows appear in both B and C.
+
+That note is not decoration. **The buckets genuinely overlap** — D is a complete subset of C, and
+B and C share 19 project-batch rows because the bucket rules are applied per structure, so one
+project-batch can hold structures on both sides of the release-balance test. Do not add a grand
+total across buckets anywhere on this sheet.
+
+### Block 2 — By project and MFC batch
+
+One row per distinct `(project, MFC batch)` across buckets A–E, sorted numerically by project
+then by batch, with non-numeric project codes (VS-, VR-, RAILWAY) sorted after the numeric ones.
+
+Columns: `Project` · `MFC Batch` · then **two columns per bucket** — `MT` and `Str.` — under a
+merged, colour-coded group header naming the bucket.
+
+`MT` is Order Qty for A and `Rel. Bal. + Fab + Galva + Yard` for B, C, D and E. Leave both cells
+**empty** where that project-batch does not appear in that bucket — do not write zeros, since an
+absent row and a zero row mean different things. Shade the filled cells in the bucket's colour so
+membership reads at a glance.
+
+Expected: **173 rows**, and a bold TOTAL row matching the Block 1 totals per bucket.
+
+Freeze panes below the column headers and to the right of `MFC Batch`.
+
+---
+
+## SHEET 2 — "Summary - 2"
+
+All five buckets reproduced **exactly as they appear on their own worksheets**, laid out left to
+right. This one includes A through E; Pre-B is again excluded.
+
+For each bucket, in order A, B, C, D, E:
+
+- A merged, colour-filled title band above the block: `A — Project to start`, etc.
+- The source sheet's own header row, unchanged.
+- Every row from that sheet in its original order, **including the footer block** — Total Release
+  Balance, Under Production, Total Yard, Operation Weight, Grand Total Weight, TOTAL — shaded and
+  bolded so it reads as a summary rather than as data.
+- One narrow spacer column (~2.5 width) before the next block.
+
+Column layout: A–G, I–O, Q–W, Y–AE, AG–AM. 39 columns in total.
+
+Blocks are independent and their rows do **not** align across buckets — bucket A's first row is
+project 906 while bucket C's is 821. That is correct and intended; the aligned view is Sheet 1.
+
+Bucket E currently has no rows, so it appears as a title band and header row only. Render it
+anyway rather than omitting it.
+
+Freeze panes below the header row.
+
+---
+
+## FORMATTING FOR BOTH SHEETS
+
+Use one shared palette, keyed by bucket, for the title bands and cell shading:
+
+```
+A  fill D9E2F3  text 2F5597        D  fill DDEBF7  text 2E75B6
+B  fill FCE4D6  text C55A11        E  fill E4DFEC  text 7030A0
+C  fill E2EFDA  text 548235
+```
+
+Headings in `1F3864`, muted notes in `595959`, thin borders in `BFBFBF`, medium borders in
+`1F3864` on block edges. Weight columns `#,##0.000`, counts `#,##0`. Gridlines off. Title in row
+1, and a grey subtitle in row 2 giving the source file name and the as-at date.
+
+Column widths: project and batch around 11, structures around 9.5, date columns 15, weight
+columns 12.5.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change the six existing bucket sheets, their columns, their row order, or their footer
+  blocks.
+- Do NOT change `computeAutoBuckets`, the A/B/C/D rules, `hasWipMarks`, `eExcludeKeys`, or the
+  Bucket E cascade.
+- Do NOT de-duplicate the overlap between buckets, or "correct" D being a subset of C. The
+  overlap is real and the note explains it.
+- Do NOT add a grand total across buckets.
+- Do NOT touch any other page or export.
+
+## ACCEPTANCE CHECK
+
+Export the workbook and confirm:
+
+1. Eight sheets, in the order listed at the top.
+2. Sheet 1 Block 1 matches the table above exactly, to three decimals.
+3. Sheet 1 Block 2 has 173 data rows plus a TOTAL row, and its per-bucket totals equal Block 1's
+   `Total (MT)` column: A 8,009.803 · B 6,323.433 · C 12,062.747 · D 9,382.389 · E 0.000, with
+   structure counts 411 · 240 · 612 · 334 · 0.
+4. On Sheet 1, project 824 shows values under **both** B and C on batch B — 9.297 and 9.359 MT.
+   That is the overlap working, not a bug.
+5. Sheet 2 spans 39 columns, and each block's footer figures match its source sheet.
+
+Paste the Block 1 table and the TOTAL row from Block 2 as they render.

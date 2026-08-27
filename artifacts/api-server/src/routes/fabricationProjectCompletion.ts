@@ -5,6 +5,7 @@ import {
   recordPoolTable,
   importsTable,
 } from "@workspace/db";
+import { GetFabricationProjectCompletionTltQueryParams } from "@workspace/api-zod";
 import { desc, eq, and, sql, or } from "drizzle-orm";
 import { QC_ACTIVITY_SET } from "@workspace/domain";
 import { hasTypeData, loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
@@ -113,7 +114,7 @@ const router: IRouter = Router();
 // distinct batches produce two rows with independent measure columns.
 router.get(
   "/reports/fabrication-project-completion-tlt",
-  async (_req, res): Promise<void> => {
+  async (req, res): Promise<void> => {
     const ZERO_TOTALS = {
       releaseBalanceCalcMt: 0,
       assignmentBalanceCalcMt: 0,
@@ -128,22 +129,51 @@ router.get(
       tsBalanceMt: 0, // Test/Sign-off — TS only (shown separately, excluded from Total)
     };
 
-    // 1. Find the latest WIP import.
-    const latestImport = await loadLatestWipImport();
+    const parsed = GetFabricationProjectCompletionTltQueryParams.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: "importId must be a positive integer" });
+      return;
+    }
 
-    if (!latestImport) {
-      res.json({ available: false, rows: [], totals: ZERO_TOTALS, unknownCauses: [] });
+    // The standalone report uses the newest snapshot only when no import is
+    // requested. A caller already scoped to a selected import (such as the
+    // Data-page ZIP) must never be substituted with another snapshot.
+    const requestedImportId = parsed.data.importId;
+    let targetImport: typeof importsTable.$inferSelect | null | undefined;
+    if (requestedImportId === undefined) {
+      targetImport = await loadLatestWipImport();
+    } else {
+      [targetImport] = await db
+          .select()
+          .from(importsTable)
+          .where(eq(importsTable.id, requestedImportId));
+      if (!targetImport) {
+        res.status(404).json({
+          importId: requestedImportId,
+          available: false,
+          reason: `WIP import #${requestedImportId} was not found.`,
+          rows: [],
+          totals: ZERO_TOTALS,
+          unknownCauses: [],
+        });
+        return;
+      }
+    }
+
+    if (!targetImport) {
+      res.json({ importId: null, available: false, rows: [], totals: ZERO_TOTALS, unknownCauses: [] });
       return;
     }
 
     // Gate: old-format imports lack per-row job_card_type — the Cutting balance
     // query's COALESCE falls through to pool (current state), producing a fabricated
     // historical snapshot.  Refuse to evaluate gated imports.
-    if (!await hasTypeData(latestImport.id)) {
+    if (!await hasTypeData(targetImport.id)) {
       res.json({
+        importId: targetImport.id,
         available: false,
         reason:
-          `WIP import #${latestImport.id} pre-dates per-row Type/Status storage. ` +
+          `WIP import #${targetImport.id} pre-dates per-row Type/Status storage. ` +
           `Fabrication completion figures cannot be computed for this import. ` +
           `Re-upload the source WIP file to restore this view.`,
         rows: [],
@@ -186,7 +216,7 @@ router.get(
         )
         .where(
           and(
-            eq(importRowsTable.importId, latestImport.id),
+            eq(importRowsTable.importId, targetImport.id),
             eq(recordPoolTable.category, "TLT"),
           ),
         )
@@ -224,7 +254,7 @@ router.get(
         )
         .where(
           and(
-            eq(importRowsTable.importId, latestImport.id),
+            eq(importRowsTable.importId, targetImport.id),
             eq(recordPoolTable.category, "TLT"),
             // Exclude Initial marks — use per-import status when available.
             sql`NOT COALESCE(upper(${importRowsTable.jobCardStatus}) = 'INITIAL', ${recordPoolTable.isInitialCutting}, false)`,
@@ -263,7 +293,7 @@ router.get(
         )
         .where(
           and(
-            eq(importRowsTable.importId, latestImport.id),
+            eq(importRowsTable.importId, targetImport.id),
             eq(recordPoolTable.category, "TLT"),
             fabMidFilter,
           ),
@@ -294,7 +324,7 @@ router.get(
         )
         .where(
           and(
-            eq(importRowsTable.importId, latestImport.id),
+            eq(importRowsTable.importId, targetImport.id),
             eq(recordPoolTable.category, "TLT"),
             // Use per-import status when available; fall back to pool flag.
             sql`COALESCE(upper(${importRowsTable.jobCardStatus}) = 'INITIAL', ${recordPoolTable.isInitialCutting}, false)`,
@@ -324,7 +354,7 @@ router.get(
         )
         .where(
           and(
-            eq(importRowsTable.importId, latestImport.id),
+            eq(importRowsTable.importId, targetImport.id),
             eq(recordPoolTable.category, "TLT"),
             sql`COALESCE(${importRowsTable.jobCardType}, ${recordPoolTable.jobCardType}) = 'Job Card Not Started'`,
             sql`COALESCE(${importRowsTable.jobCardStatus}, ${recordPoolTable.jobCardStatus}) = 'AUTHORIZED'`,
@@ -520,7 +550,7 @@ router.get(
       }),
     );
 
-    res.json({ available: true, rows, totals, unknownCauses });
+    res.json({ importId: targetImport.id, available: true, rows, totals, unknownCauses });
   },
 );
 

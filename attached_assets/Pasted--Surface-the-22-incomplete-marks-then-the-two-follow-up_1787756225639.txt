@@ -1,0 +1,146 @@
+# Surface the 22 incomplete marks, then the two follow-ups
+
+Your reconciliation is exact and the explanation is complete:
+
+```
+17,692 + 22 = 17,714 marks
+4,701.623 + 6.129 = 4,707.752 MT
+```
+
+Nothing is wrong with the grouping, and you were right not to change the predicate. The README
+additions are the right response to the kg/MT split and the Activity Wise scope — document the
+convention, do not change either export.
+
+But the 22 records themselves are a finding, and they should not sit quietly inside an FG total.
+
+---
+
+## PART 1 — the 22 marks are incomplete records, not finished goods
+
+Every one of them is:
+
+```
+Order Nature      Structure
+Type              Job Card WIP
+Job Card Status   Authorized
+Activity          blank
+Job Card No.      blank
+Contractor        blank
+```
+
+A mark in production with **no job card number and no contractor** is not finished goods. Activity
+Wise reports them as FG only because blank activity is displayed as FG — correct for genuine FG
+rows, misleading for these.
+
+Two patterns in the list suggest they are a real category rather than random bad rows:
+
+**Every mark number ends in `W` or `AW`** — 3W, 5W, 6W, 1W, 2W, 1AW, 2AW. That is a naming
+convention, not a coincidence.
+
+**Thirteen of the twenty-two are in project 920**, across six structures — 3BPI1, 3BPI3, 3CT1,
+3CT2, 3HISO, 3HLA, 3LA, 4ISO1. The rest are spread one or two each across 824, 848, 906 and VS-33.
+
+`W` and `AW` most likely mean welded or welded-assembly. The WIP file already carries an
+`Is Welded Structure` column, which makes that testable.
+
+### What to check
+
+```sql
+SELECT rp.is_welded_structure, count(*) AS marks,
+       sum(rp.balance_wt)/1000 AS mt
+  FROM record_pool rp
+  JOIN import_rows ir ON ...
+ WHERE ir.import_id = 86
+   AND rp.job = 'Structure'
+   AND rp.type = 'Job Card WIP'
+   AND (rp.activity IS NULL OR rp.activity = '')
+ GROUP BY 1;
+```
+
+If all 22 carry `Is Welded Structure = True`, that is the explanation and it can be documented
+rather than investigated. If they are a mix, it is a data-entry gap.
+
+Also report how many marks in the whole import have `Is Welded Structure = True` — the 26-Aug file
+has a few hundred — and how many of those have a blank job card. That distinguishes "welded items
+are handled outside the job-card flow" from "these 22 are simply incomplete".
+
+### What to change
+
+**Nothing in the six-bucket logic.** It already handles them correctly — the blank-activity
+catch-all puts them in Quality Check, which is where a `Job Card WIP` row belongs. No reported
+figure is wrong.
+
+**In Activity Wise**, separate them from genuine FG. Either a distinct row labelled *Blank activity
+(no job card)* with its own count and weight, or the existing FG row with a footnote naming the
+count. Do not merge them silently into FG — a report that shows 6.129 MT of unstarted work as
+finished is the kind of thing that is believed until someone goes looking for the material.
+
+**Add a Data Check warning** — not a hard rule — reporting `Job Card WIP` rows with a blank job
+card number. Today it is 22 marks and 6.129 MT. If it grows, somebody should see it.
+
+---
+
+## PART 2 — follow-up #66, staging evidence retention
+
+Please proceed with this one. It closes the gap that forced the reconstruction from retained
+source bytes earlier this week.
+
+The two properties that matter more than the schema:
+
+**It must survive deletion of its import.** That is the entire point — #65's override details went
+with it when it was deleted, leaving #66 looking complete when it was not.
+
+**It must be written even when the file is never imported.** A refused or skipped file is exactly
+the case where the evidence is most wanted later, and exactly the case where nothing is captured
+today.
+
+---
+
+## PART 3 — the authenticated lifecycle test needs its blocker removed, not the test cancelled
+
+This was proposed, then cancelled because the workspace password does not authenticate a
+development admin. Declining to reset credentials was right. But the answer is to create a
+development admin account, not to abandon the test.
+
+**The staging path is the only part of the guard never exercised end to end.** Everything verified
+so far is a file parse or a database query. `upload_stage_evidence` currently holds exactly one
+row, and that row is a reconstruction rather than a live stage-time capture. Until a real capture
+is seen, the mechanism is unproven — and it is the mechanism that stopped a wrong file reaching
+production twice this week.
+
+Please say what is needed to get a working development admin login. If it is a seeded test user in
+the development database only, that is straightforward and touches nothing in production.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change the Activity Wise grouping predicate. Add a distinct row or a footnote instead.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the eight material columns, the normaliser, or the regression
+  guard.
+- Do NOT change the kg/MT conventions in either export.
+- Do NOT reset or alter any existing user credentials.
+
+---
+
+## ACCEPTANCE CHECK
+
+```
+the Is Welded Structure query result for the 22 blank-activity WIP marks
+Activity Wise showing them separately from FG, with FG returning to 17,692 / 4,701.623 MT
+   or FG unchanged with a footnote stating the 22
+the new Data Check warning reporting 22 marks / 6.129 MT on import 86
+six buckets unchanged: TLT 12,655.341 MT / 70,642 marks · unclassified 0 · 67 projects
+```
+
+State which database each query ran against.
+
+---
+
+## FOR VTPL, SEPARATELY
+
+I will ask them what the `W` / `AW` mark suffix means and why those marks carry no job card,
+alongside the three still-open register entries — **840, 896 and VS-189** — and the question that
+matters most: whether the **141.5 tonnes** of finished steel from 896 and VS-189 was reallocated as
+775's was, or is still standing in the yard.

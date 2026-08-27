@@ -1,0 +1,126 @@
+# Preserve the staging evidence, then publish
+
+The classifier now returns three cancellations, one scope reduction and zero unrecognised, against
+one and three before. Both definition errors were mine and both are fixed. The mutual-exclusivity
+check on WO Order Qty alone — ends at zero, unchanged, falls but stays above tolerance, everything
+else — is a clean partition with no overlap possible.
+
+Two things: your proposed follow-up #66, and a publish.
+
+---
+
+## PART 1 — follow-up #66: preserve the panel and override evidence
+
+Please go ahead with this. It closes the gap that made today's investigation necessary.
+
+The whole audit problem this week was that **the staging panel's findings did not survive a
+delete-and-re-import cycle**. #65 was committed from the 24-August file, then deleted, and its
+override details went with it. #66 was committed later and retained only three of the four
+blockers. You had to reconstruct the original four-project panel from retained source bytes to
+answer whether 840 had blocked.
+
+That reconstruction was well done, but it should never need doing again.
+
+### What to store
+
+At **stage time**, before any import decision is made, persist the panel's findings independently
+of the import record — so that deleting an import cannot remove the evidence of what it showed:
+
+```
+staged_at              timestamp
+source_filename
+source_hash            so the panel can be tied back to exact file bytes
+kind                   wip | order_review
+compared_against       the import id used as the baseline
+blockers               jsonb   the full panel output, per project:
+                               signature · columns moved with both values ·
+                               columns that did not move · structure detail ·
+                               upward movements
+warnings               jsonb   absent projects, with despatch history and
+                               outstanding weight
+outcome                imported | skipped | refused
+import_id              null when skipped or refused
+```
+
+Two properties matter more than the schema:
+
+**It must survive deletion of the import.** That is the entire point. If an import is deleted, its
+staging record stays.
+
+**It must be written even when the file is never imported.** A refused or skipped file is exactly
+the case where the evidence is most likely to be wanted later, and exactly the case where nothing
+is recorded today.
+
+Link it to the anomaly register where the two describe the same event, so an open register entry
+can be traced back to the panel that raised it.
+
+### Backfill what is known
+
+You already reconstructed the 23-August against 24-August panel deterministically. Store that
+reconstruction as a staging record, clearly marked as a reconstruction rather than a live capture,
+so the four-project block list is durable rather than living in a chat transcript.
+
+---
+
+## PART 2 — publish
+
+The register migration and the corrected classifier are development-only. **Production is still
+running the old signature definitions**, so any file that blocks there before the next publish
+would come back as "unrecognised" for anything that is not 775-shaped.
+
+Nothing is queued for upload, so this is not urgent — but it should not sit indefinitely either.
+Bundle it with Part 1 and publish both together.
+
+Same conditions as last time:
+
+- Paste the Publish UI diff before approving. Expect additive changes only — the staging-evidence
+  table and the register's signature and reason columns.
+- **Stop and report if anything shows a rename, drop, type change or destructive operation.**
+- Leave **Overwrite data** off.
+
+### After publishing, confirm against production
+
+```
+the anomaly register holds five entries with the corrected signatures:
+   903 B correction superseded · 775 A short close explained
+   840 D scope reduction open · 896 A short close open · VS-189 A short close open
+
+'shourt close' no longer appears anywhere
+
+production figures untouched:
+   TLT 12,364.672 MT / 69,594 marks · unclassified 0 · 67 projects
+   Release 1,555.684 · Awaiting 860.838 · Cutting 1,177.156
+   Quality Check 2,172.292 · Galvanising 1,988.420 · FG 4,610.281
+
+both latest-import selectors resolve to 24-August
+```
+
+Watch the deployment window. The publish on 24 August served doubled figures for roughly ten
+minutes while the old runtime ran against new data. If the same happens, note the times rather
+than treating a transient reading as a defect.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change which regressions block, the block/warn split, the five-column rule, or the
+  tolerance.
+- Do NOT change the corrected signature definitions. They are right now.
+- Do NOT delete or re-import import #64. It is a merged-book residual, not an incomplete snapshot.
+- Do NOT touch the current 24-August imports.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the eight material columns, or the normaliser.
+- Do NOT approve a publish diff containing any destructive operation.
+
+---
+
+## AFTER THIS, THE BUILD LIST IS EMPTY
+
+Everything outstanding is a question for VTPL rather than work for the app. Three register entries
+remain open — **840, 896 and VS-189** — and I have sent VTPL explanations in English and Hindi
+asking about each.
+
+The one that matters most is physical rather than numerical: **141.5 tonnes of finished steel**
+belonging to 896 and VS-189 was standing in the yard on 23 August and appears in no report on
+24 August. If it was reallocated as 775's material was, everything reconciles. If it is still in
+the yard, it is now invisible to every report and nobody will chase it.

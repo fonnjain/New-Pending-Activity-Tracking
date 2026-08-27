@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { appUsersTable, userSessionLogTable } from "@workspace/db";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "./auth";
+import { getSingleRouteParam } from "../lib/route-boundaries";
 
 const DEFAULT_PASSWORD = "Vtpl@2026";
 
@@ -95,7 +96,11 @@ router.put(
   requireAuth,
   requireAdmin,
   async (req, res): Promise<void> => {
-    const { id } = req.params;
+    const id = getSingleRouteParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: "Invalid user id" });
+      return;
+    }
     try {
       const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
       const rows = await db
@@ -125,7 +130,11 @@ router.put(
   requireAuth,
   requireAdmin,
   async (req, res): Promise<void> => {
-    const { id } = req.params;
+    const id = getSingleRouteParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: "Invalid user id" });
+      return;
+    }
     const body = (req.body ?? {}) as { role?: unknown };
     const role =
       body.role === "admin" || body.role === "user"
@@ -158,7 +167,11 @@ router.delete(
   requireAuth,
   requireAdmin,
   async (req, res): Promise<void> => {
-    const { id } = req.params;
+    const id = getSingleRouteParam(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: "Invalid user id" });
+      return;
+    }
     if (id === req.user!.id) {
       res.status(400).json({ error: "Cannot delete your own account" });
       return;

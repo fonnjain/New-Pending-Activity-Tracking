@@ -1,0 +1,121 @@
+# Fix the project-code normaliser, then close the import gap
+
+Your validation was right and my summary was wrong. I only checked Progress Despatch; the rule
+says *any* cumulative column, and you implemented it correctly. **5 projects / 22 metric
+regressions** is the correct result against the committed baseline, and declining to suppress the
+extra three was the right call.
+
+Your baseline correction is also the more important finding — see Part 2.
+
+---
+
+## PART 1 — one of the five blockers is a false positive, caused by the normaliser
+
+`RAILWAY` is not a project. The Order Review carries two separate blocks:
+
+```
+Project Code : RAILWAY BATCH 10
+Project Code : RAILWAY BATCH 11
+```
+
+The project-code normaliser truncates at the first space, so both collapse into `RAILWAY`. On the
+24-August file, batch 11 has been closed and batch 10 is unchanged:
+
+```
+RAILWAY BATCH 10   despatch  420.828 -> 420.828   unchanged
+RAILWAY BATCH 11   despatch  149.340 -> ABSENT    closed
+merged "RAILWAY"   despatch  570.168 -> 420.828   apparent -149.340 regression
+```
+
+Nothing regressed. A normal closure has been turned into a blocking regression by the merge —
+**Test B misclassified as Test A**. The guard is behaving correctly on the data it was given; the
+data was mangled before it reached the guard.
+
+### The fix
+
+In the project-code normaliser, **stop truncating at whitespace**. Keep the existing behaviour
+that strips trailing dots and leading dashes — `907` and `907.` are genuinely one project, and
+that merge must not change. But `RAILWAY BATCH 10` and `RAILWAY BATCH 11` are two distinct order
+blocks and must stay separate.
+
+Please state the current normaliser's exact transformation before changing it, so we can see what
+else it affects. I first noticed this when a project count came back as 164 against my 165 and
+treated it as cosmetic. It is not — it now produces a false blocker, and it will recur on any
+project code containing a space whenever one of its batches closes.
+
+### After the fix, re-run the same validation
+
+Expected against the same committed baseline:
+
+```
+BLOCK   4 projects   775 · 840 · 896 · VS-189
+WARN    RAILWAY BATCH 11 joins the absent list; RAILWAY BATCH 10 is unchanged and clean
+```
+
+Report the new absent-project count and total. Both will move by one project and by
+RAILWAY BATCH 11's stored despatch and outstanding weight.
+
+Do NOT add a special case for `RAILWAY`. The fix belongs in the normaliser, not in the guard.
+
+---
+
+## PART 2 — the committed baseline is 21 August, not 23
+
+You reported that the 22 and 23 August workbooks were never committed, so the live baseline is
+**21 August**. That is a three-day gap, and nobody had noticed — I had been assuming 23 August was
+current, which is why my absent-project figures (49 projects, 5,656 MT) differ from your
+21-August-based ones (48 projects, 5,501.939 MT). **Yours are the ones that count.**
+
+Both intervening files were verified clean at the time, independently from source:
+
+```
+22-Aug WIP   TLT 13,333.434 MT / 75,045 marks · unclassified 0 · 92 projects
+23-Aug WIP   TLT 13,282.657 MT / 74,822 marks · unclassified 0 · 92 projects
+             NTLT 9,477.101 MT / 470 marks
+```
+
+Please confirm:
+
+1. Which import ids and dates are currently live, for both WIP and Order Review.
+2. Whether 22 and 23 August were staged and rejected, staged and abandoned, or never uploaded.
+3. Whether the app should be brought current to 23 August.
+
+If it should, import the 22-August pair and then the 23-August pair, in that order, and confirm
+the figures above. Do **not** import 24 August — it is still blocked pending VTPL's answer on 955
+MT of finished goods that left the WIP file with the closed projects.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT add a project-specific exception anywhere. The fix is in the normaliser.
+- Do NOT weaken the five-column cumulative rule. Testing all five was correct.
+- Do NOT change the block/warn split: regression within a surviving project blocks, a project
+  disappearing warns.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, or the eight material columns.
+- Do NOT import the 24-August files.
+
+---
+
+## ACCEPTANCE CHECK
+
+**After the normaliser fix**, with no import:
+
+```
+re-validate the 24-Aug Order Review against the committed baseline
+   -> 4 blocking projects, not 5
+   -> RAILWAY BATCH 10 present and clean; RAILWAY BATCH 11 in the absent list
+   -> report the revised absent count, despatch history and outstanding weight
+```
+
+**Then confirm the fix broke nothing else.** Re-validate the 23-August Order Review against the
+same baseline and confirm the project count it produces. If the normaliser previously merged other
+codes on whitespace, that count will change — report it either way, with the names of any project
+that split.
+
+**Then state the live import ids and dates** for WIP and Order Review, and whether production has
+been published. That last question has been outstanding since the pre-publish check and I still do
+not have an answer: if Publish was never clicked, production is on 16-August data and none of this
+month's work is live — the P/S alias, CSV support, the four column additions, the eight material
+fields, and this guard.

@@ -1,0 +1,157 @@
+# Build the despatch-regression guard, then stage the 23-August files
+
+The eight material columns are done and the figures reconcile against my own parse of the source.
+Your correction on `Issue Lot Rate` was right and mine was wrong — the true minimum is **2.9993**,
+carried on 8 rows, and I had rounded it when profiling. Retaining four decimals was the correct
+call. The upsert rule you chose — a blank value cannot erase a captured one — is also better than
+what I specified; latest-wins would have wiped a rate whenever a later export happened to omit it.
+
+Two things now, in this order.
+
+---
+
+## PART 1 — a blocking guard: cumulative despatch must never decrease
+
+**This is not hypothetical. Today's files trip it.**
+
+The 24-August exports arrived scoped down. The Order Review fell from **166 projects to 117** and
+2,267 rows to 1,734, and on eighteen projects the cumulative despatch figure **went down**:
+
+```
+project   despatched 22-Aug   despatched 24-Aug
+VS-68            966.931 MT           0.000 MT
+918              534.392 MT           0.000 MT
+931              481.179 MT           0.000 MT
+882              464.158 MT           0.000 MT
+775              417.889 MT           0.000 MT
+```
+
+Cumulative despatch cannot fall. Material does not un-ship. Those projects were removed from the
+export, not reduced.
+
+The WIP file matches: **92 projects down to 67**, with 26 gone carrying **955.479 MT**, almost all
+of it finished goods — 775 at 387.473 MT entirely FG, 837 at 229.020 MT entirely FG. The 66
+projects present on both days moved **−23.296 MT**, a completely normal day.
+
+### Why this must block rather than warn
+
+`order_review_rows` upserts one row per project and structure. A project absent from the incoming
+file **keeps its previous row untouched**. So importing today's file would leave the table holding
+22-August figures for the 49 missing projects and 24-August figures for the rest — two different
+days in one table.
+
+Nothing would look broken. The totals would still foot. Every report drawn from it would be
+quietly wrong and no screen would show it.
+
+### The rule
+
+At **staging**, before anything is written, compare the incoming Order Review against the current
+latest Order Review import:
+
+```
+For each project present in BOTH files:
+    if incoming Progress Despatch < stored Progress Despatch  -> BLOCK
+
+For each project present in the STORED file but absent from the incoming file:
+    if stored Progress Despatch > 0                           -> BLOCK
+```
+
+Report every failing project by name with both figures and the difference. Refuse the import — no
+override, no "proceed anyway". A file that fails this test is the wrong file, not a malformed one.
+
+Apply the same test to **Progress Release**, which is also cumulative, but report it as a warning
+rather than a block until we have seen it fire once.
+
+### Also add, as a loud warning rather than a block
+
+```
+Order Review project count   +/- 5 projects
+Order Review data rows       +/- 10%
+WIP project count            +/- 3 projects
+WIP total weight             +/- 5%
+any WIP bucket               +/- 10%
+NTLT mark count reaching zero
+```
+
+Show each as `previous -> new (change)`. A number alone cannot be judged; the person clicking
+Import needs both sides. Staging 24-August against 23-August should light up several of these.
+
+### First import of a kind
+
+Where there is nothing to compare against, say so plainly rather than showing a delta against
+zero.
+
+---
+
+## PART 2 — the staged upload that is still outstanding
+
+Sign in and stage the **23-August** files — **not today's**. The 23rd is the last known-good set.
+
+Order Review first, then WIP. Confirm:
+
+```
+the eight Source Column Watch cards populate
+  Lot Source Form            51,290 populated, 6 values, with the distribution shown
+  Issue Lot Rate             51,290 populated, min 2.9993, max 88.0000, mean 50.7919
+  Issue Document No.         51,290 populated, 3,729 distinct
+  Nearest SIN Date to Issue  50,774 populated, 50 distinct
+  Lot Document No.           51,290 populated, 1,828 distinct
+  Lot Document Date / Issue Document Date / SinRateForIssueMonth — populated counts
+
+TLT   13,282.657 MT / 74,822 marks · unclassified 0 · 92 projects
+NTLT   9,477.101 MT / 470 marks
+loadLatestWipImport() and loadLatestOrderReview() both resolve to 23-Aug
+```
+
+And confirm the day-first parse survived the round trip into the database, not just the parser:
+
+```sql
+SELECT min(nearest_sin_date_to_issue), max(nearest_sin_date_to_issue),
+       count(DISTINCT nearest_sin_date_to_issue)
+  FROM record_pool WHERE nearest_sin_date_to_issue IS NOT NULL;
+```
+
+Every value must be the **1st of a month** — 50 distinct dates. That column is ambiguous on every
+single row (`01/08/2024`, `01/10/2024`), so if anything read it month-first the dates will land on
+the 8th and 10th instead and the distinct count will be wrong.
+
+Do not bypass the sign-in gate. Declining to do that was correct.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the import selection helpers, or any of the eight new columns.
+- Do NOT enforce a column count. It has gone 24 -> 26 -> 28 -> 36 in three weeks.
+- Do NOT import the 24-August files to test the guard. Stage them only — the whole point is that
+  staging refuses before anything is written.
+- Do NOT add an override for the despatch block.
+
+---
+
+## ACCEPTANCE CHECK
+
+Two stagings, no imports.
+
+**Stage the 23-August pair.** Must pass with no blocking items. Deltas against the previous import
+are expected and fine.
+
+**Then stage the 24-August pair.** Must **refuse**, naming the eighteen projects whose despatch
+fell, and separately flagging the 49 projects present in the stored file but missing from the
+incoming one.
+
+If the 24-August pair stages clean, the guard is not working. That is the test.
+
+---
+
+## NOTE — what has been asked of VTPL
+
+I have sent VTPL an explanation of the 24-August problem in English and Hindi, asking one
+question: has a project filter been reapplied to both exports? The August change that retained
+completed projects and their finished goods is what cut the order-book mismatch from 2,160 MT to
+441 MT, and today's files look like that change has been undone.
+
+Until they answer, **23 August is the current state of the app** and no further files should be
+loaded. The guard in Part 1 is what makes that decision automatic rather than dependent on someone
+noticing.

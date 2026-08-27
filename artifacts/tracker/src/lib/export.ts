@@ -553,12 +553,12 @@ function writeCombinedBlockSheet(
   writeBand(outVendorGroups, "OUT-VENDOR", afterInHouse + 3);
 }
 
-// Stream a finished workbook to the browser as a .xlsx download.
-async function downloadWorkbook(wb: any, filename: string) {
-  const buf = await wb.xlsx.writeBuffer();
-  const blob = new Blob([buf], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
+export type DownloadableFile = {
+  filename: string;
+  bytes: Uint8Array;
+};
+
+function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.setAttribute("href", url);
@@ -570,6 +570,163 @@ async function downloadWorkbook(wb: any, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+async function workbookBytes(wb: ExcelJS.Workbook): Promise<Uint8Array> {
+  const buffer = await wb.xlsx.writeBuffer();
+  return Uint8Array.from(buffer as unknown as ArrayLike<number>);
+}
+
+function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const out = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(out).set(bytes);
+  return out;
+}
+
+// Stream a finished workbook to the browser as a .xlsx download.
+async function downloadWorkbook(wb: ExcelJS.Workbook, filename: string) {
+  const bytes = await workbookBytes(wb);
+  downloadBlob(new Blob([ownedArrayBuffer(bytes)], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  }), filename);
+}
+
+/**
+ * Produces the exact same styled XLSX used by `exportToXlsx`, but keeps the
+ * bytes in memory so callers can place it inside a ZIP instead of triggering a
+ * separate browser download.
+ */
+export async function createXlsxFile(
+  filename: string,
+  columns: XlsxColumn[],
+  rows: any[],
+  options: { sheetName?: string; summaryRows?: XlsxSummaryRow[] } = {},
+): Promise<DownloadableFile> {
+  const { sheetName = "Report", summaryRows = [] } = options;
+  const wb = new ExcelJS.Workbook();
+  wb.created = new Date();
+  writeSheet(wb, { name: sheetName, columns, rows, summaryRows }, new Set<string>());
+  return { filename, bytes: await workbookBytes(wb) };
+}
+
+/**
+ * Produces the same multi-sheet workbook as `exportToXlsxSheets`, without
+ * starting a download. This keeps existing report builders reusable by archive
+ * exports.
+ */
+export async function createXlsxSheetsFile(
+  filename: string,
+  sheets: XlsxSheet[],
+  combined?: { inHouse: XlsxBlockGroup[]; outVendor: XlsxBlockGroup[] },
+  buildFirst?: (wb: ExcelJS.Workbook) => void,
+): Promise<DownloadableFile> {
+  const wb = new ExcelJS.Workbook();
+  wb.created = new Date();
+  const used = new Set<string>();
+  if (buildFirst) {
+    buildFirst(wb);
+    for (const ws of wb.worksheets) used.add(String(ws.name).toLowerCase());
+  }
+  if (combined) writeCombinedBlockSheet(wb, combined.inHouse, combined.outVendor, used);
+  for (const sheet of sheets) writeSheet(wb, sheet, used);
+  return { filename, bytes: await workbookBytes(wb) };
+}
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipDate(now: Date): { time: number; date: number } {
+  const year = Math.max(1980, now.getFullYear());
+  return {
+    time: (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2),
+    date: ((year - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate(),
+  };
+}
+
+/**
+ * Creates a standards-compliant stored ZIP archive. XLSX files are already ZIP
+ * compressed internally, so storing them avoids spending extra CPU with no
+ * meaningful size reduction during a large report export.
+ */
+function createStoredZip(files: DownloadableFile[]): Uint8Array {
+  const encoder = new TextEncoder();
+  const now = zipDate(new Date());
+  const prepared = files.map((file) => {
+    const filename = file.filename.replace(/[\\/:*?"<>|]+/g, "-");
+    const name = encoder.encode(filename);
+    return { ...file, filename, name, crc: crc32(file.bytes) };
+  });
+  const localSize = prepared.reduce((total, f) => total + 30 + f.name.length + f.bytes.length, 0);
+  const centralSize = prepared.reduce((total, f) => total + 46 + f.name.length, 0);
+  const out = new Uint8Array(localSize + centralSize + 22);
+  const view = new DataView(out.buffer);
+  let offset = 0;
+  const writeLocal = (f: (typeof prepared)[number]) => {
+    view.setUint32(offset, 0x04034b50, true); offset += 4;
+    view.setUint16(offset, 20, true); offset += 2;
+    view.setUint16(offset, 0x0800, true); offset += 2;
+    view.setUint16(offset, 0, true); offset += 2;
+    view.setUint16(offset, now.time, true); offset += 2;
+    view.setUint16(offset, now.date, true); offset += 2;
+    view.setUint32(offset, f.crc, true); offset += 4;
+    view.setUint32(offset, f.bytes.length, true); offset += 4;
+    view.setUint32(offset, f.bytes.length, true); offset += 4;
+    view.setUint16(offset, f.name.length, true); offset += 2;
+    view.setUint16(offset, 0, true); offset += 2;
+    out.set(f.name, offset); offset += f.name.length;
+    out.set(f.bytes, offset); offset += f.bytes.length;
+  };
+  prepared.forEach(writeLocal);
+  const centralOffset = offset;
+  let localOffset = 0;
+  for (const f of prepared) {
+    view.setUint32(offset, 0x02014b50, true); offset += 4;
+    view.setUint16(offset, 20, true); offset += 2;
+    view.setUint16(offset, 20, true); offset += 2;
+    view.setUint16(offset, 0x0800, true); offset += 2;
+    view.setUint16(offset, 0, true); offset += 2;
+    view.setUint16(offset, now.time, true); offset += 2;
+    view.setUint16(offset, now.date, true); offset += 2;
+    view.setUint32(offset, f.crc, true); offset += 4;
+    view.setUint32(offset, f.bytes.length, true); offset += 4;
+    view.setUint32(offset, f.bytes.length, true); offset += 4;
+    view.setUint16(offset, f.name.length, true); offset += 2;
+    view.setUint16(offset, 0, true); offset += 2;
+    view.setUint16(offset, 0, true); offset += 2;
+    view.setUint16(offset, 0, true); offset += 2;
+    view.setUint16(offset, 0, true); offset += 2;
+    view.setUint32(offset, 0, true); offset += 4;
+    view.setUint32(offset, localOffset, true); offset += 4;
+    out.set(f.name, offset); offset += f.name.length;
+    localOffset += 30 + f.name.length + f.bytes.length;
+  }
+  view.setUint32(offset, 0x06054b50, true); offset += 4;
+  view.setUint16(offset, 0, true); offset += 2;
+  view.setUint16(offset, 0, true); offset += 2;
+  view.setUint16(offset, prepared.length, true); offset += 2;
+  view.setUint16(offset, prepared.length, true); offset += 2;
+  view.setUint32(offset, centralSize, true); offset += 4;
+  view.setUint32(offset, centralOffset, true); offset += 4;
+  view.setUint16(offset, 0, true);
+  return out;
+}
+
+export function createZipFile(filename: string, files: DownloadableFile[]): DownloadableFile {
+  if (files.length === 0) throw new Error("No Excel files are available to export.");
+  return { filename, bytes: createStoredZip(files) };
+}
+
+export function downloadZip(filename: string, files: DownloadableFile[]) {
+  const file = createZipFile(filename, files);
+  downloadBlob(new Blob([ownedArrayBuffer(file.bytes)], { type: "application/zip" }), file.filename);
+}
+
 // Export rows to a clean, professionally formatted single-sheet .xlsx: bold
 // header band, frozen header row, auto-filter, auto-sized columns, right-aligned
 // number columns, and a bold totals row summing the flagged numeric columns.
@@ -579,11 +736,10 @@ export async function exportToXlsx(
   rows: any[],
   options: { sheetName?: string; summaryRows?: XlsxSummaryRow[] } = {},
 ) {
-  const { sheetName = "Report", summaryRows = [] } = options;
-  const wb = new ExcelJS.Workbook();
-  wb.created = new Date();
-  writeSheet(wb, { name: sheetName, columns, rows, summaryRows }, new Set<string>());
-  await downloadWorkbook(wb, filename);
+  const file = await createXlsxFile(filename, columns, rows, options);
+  downloadBlob(new Blob([ownedArrayBuffer(file.bytes)], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  }), file.filename);
 }
 
 // Export a workbook with one styled worksheet per supplied sheet definition
@@ -598,16 +754,10 @@ export async function exportToXlsxSheets(
   combined?: { inHouse: XlsxBlockGroup[]; outVendor: XlsxBlockGroup[] },
   buildFirst?: (wb: any) => void,
 ) {
-  const wb = new ExcelJS.Workbook();
-  wb.created = new Date();
-  const used = new Set<string>();
-  if (buildFirst) {
-    buildFirst(wb);
-    for (const ws of wb.worksheets) used.add(String(ws.name).toLowerCase());
-  }
-  if (combined) writeCombinedBlockSheet(wb, combined.inHouse, combined.outVendor, used);
-  for (const sheet of sheets) writeSheet(wb, sheet, used);
-  await downloadWorkbook(wb, filename);
+  const file = await createXlsxSheetsFile(filename, sheets, combined, buildFirst);
+  downloadBlob(new Blob([ownedArrayBuffer(file.bytes)], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  }), file.filename);
 }
 
 // A block of side-by-side columns sharing one merged title (e.g. one load
@@ -638,10 +788,10 @@ export type XlsxGridSheet = {
 // totals row. Every block is boxed with a medium outer border and separated by
 // a narrow blank column, with compact auto-sized columns. Sheets with
 // `sections` stack multiple grids vertically with banner rows between them.
-export async function exportToXlsxBlockGrid(
+export async function createXlsxBlockGridFile(
   filename: string,
   sheets: XlsxGridSheet[],
-) {
+): Promise<DownloadableFile> {
   const wb = new ExcelJS.Workbook();
   wb.created = new Date();
   const used = new Set<string>();
@@ -830,7 +980,19 @@ export async function exportToXlsxBlockGrid(
     }
   }
 
-  await downloadWorkbook(wb, filename);
+  return { filename, bytes: await workbookBytes(wb) };
+}
+
+// Browser-download wrapper for the block-grid renderer. Keeping this thin means
+// page downloads and archive entries share the identical workbook construction.
+export async function exportToXlsxBlockGrid(
+  filename: string,
+  sheets: XlsxGridSheet[],
+) {
+  const file = await createXlsxBlockGridFile(filename, sheets);
+  downloadBlob(new Blob([ownedArrayBuffer(file.bytes)], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  }), file.filename);
 }
 
 // Render the AI report result into a downloadable PDF. Plain text layout with

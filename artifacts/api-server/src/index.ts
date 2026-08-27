@@ -2,11 +2,13 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { ensureContractorDedupTables } from "./lib/ensureContractorDedupTables";
 import { ensureOrderReviewColumns } from "./lib/ensureOrderReviewColumns";
+import { backfillAugustOrderReviewEvidence } from "./lib/upload-stage-evidence";
 import { backfillClassification, backfillHoleOperation, backfillInitialCutting, backfillJobCardType } from "./lib/backfill";
 import { backfillReleaseBalanceFromPool, backfillAssignmentBalanceFromPool } from "./lib/parseWipReleaseBalance";
 import { seedContractorCategories } from "./lib/seedContractorCategories";
 import { seedRsjThickness } from "./lib/seedRsjThickness";
 import { seedUsersIfEmpty } from "./lib/seedUsers";
+import { seedDevelopmentStagingAdmin } from "./lib/dev-staging-fixture";
 import { warmMembershipCaches } from "./routes/imports";
 
 const rawPort = process.env["PORT"];
@@ -30,6 +32,11 @@ if (Number.isNaN(port) || port <= 0) {
 async function startServer(): Promise<void> {
   await ensureContractorDedupTables();
   await ensureOrderReviewColumns();
+  await backfillAugustOrderReviewEvidence();
+  // A reserved browser-test administrator is created only by the local
+  // development workflow. It uses conflict-safe insertion and never changes
+  // normal users or any production/staging database.
+  await seedDevelopmentStagingAdmin();
 
   app.listen(port, (err) => {
     if (err) {

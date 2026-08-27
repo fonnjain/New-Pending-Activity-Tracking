@@ -15,4 +15,13 @@ export interface CommitRequest {
   expectedType?: CommitRequestExpectedType;
   /** Descriptive cleanups the user accepted; applied before parse+merge. */
   acceptedSuggestions?: AcceptedSuggestion[];
+  /** One-use Order Review override for an otherwise-blocking cumulative progress regression. Requires cumulativeOverrideReason; never persists in staging or applies to a later import.
+   */
+  forceCumulativeRegressionOverride?: boolean;
+  /**
+     * Required operator explanation when forcing a cumulative regression.
+     * @minLength 1
+     * @maxLength 1000
+     */
+  cumulativeOverrideReason?: string;
 }

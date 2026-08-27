@@ -1,0 +1,129 @@
+# Reverse the 22-August Order Review override — new information
+
+**Stop and read before acting on my previous instruction.**
+
+I told you to override the 22-August Order Review and gave you a reason to record. That
+instruction was based on an incorrect understanding. **Do not proceed with it**, and if it has
+already been carried out, reverse it as described below.
+
+## What actually happened
+
+VTPL have explained project 903:
+
+> A packing list dated 29-06-2026 contained an error. The Dispatch Department **deleted it and
+> re-authorised it** — approximately 34 MT. The 22-August export was taken during that window,
+> after the deletion and before the re-authorisation.
+
+So the 22-August Order Review does not contain a correction. **It contains a mid-transaction
+snapshot.** The true cumulative despatch for 903 is **326.511 MT**, which is what the 24-August
+file shows and which is consistent with the 21-August figure of 325.411 MT.
+
+The guard was right to block it. My reading of *why* it blocked was wrong.
+
+---
+
+## PART 1 — if the override has already been applied
+
+Roll it back so no 22-August Order Review data remains:
+
+1. Delete the Order Review import created by the override, and any `order_review_rows` it wrote or
+   updated. If rows were upserted over 21-August values, restore them from the 21-August import —
+   an upsert that overwrote a stored row must not be left in place, because the 22-August value is
+   the wrong one.
+2. Confirm afterwards that project 903's stored Progress Despatch reads **325.411 MT**, the
+   21-August value, and not 291.882.
+3. Leave the override audit record in place rather than deleting it, and append to
+   `override_reason`:
+
+```
+REVERSED. VTPL confirmed the cause: packing list dated 29-06-2026 was deleted and
+re-authorised by the Dispatch Department (~34 MT), and the 22-Aug export was taken
+mid-transaction. The file held a transient state, not a correction. True cumulative
+despatch for 903 is 326.511 MT, confirmed on 24-Aug. Override should not have been
+granted.
+```
+
+An override that was granted and then reversed is worth keeping visible. Deleting the record
+hides the fact that it happened.
+
+## PART 2 — if it has not yet been applied
+
+Do nothing to the 22-August Order Review. Skip it entirely. It is not to be imported, with or
+without an override.
+
+---
+
+## PART 3 — what to do instead
+
+**Keep 22-August WIP import 67.** The WIP file is sound; only the Order Review caught the ERP
+mid-change.
+
+**Import the 23-August pair** — Order Review first, then WIP.
+
+Against the 21-August baseline, project 903 moves 325.411 → 326.510, which **rises**, so no block
+is expected. If anything blocks, stop and report rather than overriding. Two overrides in a week
+would mean the rule needs examining, not bypassing.
+
+### Expected end state
+
+```
+23-Aug   TLT  13,282.657 MT / 74,822 marks · unclassified 0 · 92 projects
+         NTLT  9,477.101 MT / 470 marks
+         reconciliation gap -441.4 MT (3.3%), 65 of 92 projects within +/-0.5 MT
+
+loadLatestWipImport()    -> 23-August
+loadLatestOrderReview()  -> 23-August
+```
+
+Report the six buckets after the import, not just the total. State which database.
+
+### Record the gap deliberately
+
+22-August will have a WIP import with no matching Order Review. Note in the import log why, so it
+is not mistaken later for a failed or abandoned import:
+
+```
+22-Aug Order Review deliberately skipped — export taken mid-transaction during a
+packing-list delete/re-authorise cycle. 23-Aug supersedes it.
+```
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT weaken the guard. It blocked correctly on both occasions this week.
+- Do NOT add an exception for project 903.
+- Do NOT override the 23-August import if it blocks — report and stop.
+- Do NOT import the 24-August files.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, or the eight material columns.
+
+---
+
+## WHY THIS MATTERS BEYOND TODAY
+
+This is the **second time in one week** that a daily export has caught the ERP mid-change. The
+first was the 24-August scope filter; this is a packing list being deleted and re-authorised.
+
+It means any morning's file can contain a transient state that looks like data. Nothing in the
+file itself reveals it — the 22-August Order Review parses perfectly, its totals foot, and only
+comparison against the previous day exposes it.
+
+The guard is the only thing that would have noticed. It has now earned its place twice.
+
+---
+
+## STILL OUTSTANDING
+
+Unanswered across several exchanges:
+
+1. **The project-code normaliser fix** — it truncates at whitespace, merging
+   `RAILWAY BATCH 10` and `RAILWAY BATCH 11` into one code and turning a normal closure into a
+   false 149 MT despatch regression. Trailing-dot merging must stay; whitespace truncation must
+   go.
+2. **Whether production has been published.** The last I have is the pre-publish check confirming
+   two additive columns and "click Publish to deploy" — a manual step. If it was never clicked,
+   production is on 16-August data and none of this month's work is live: the P/S alias, CSV
+   support, the four column additions, the eight material fields, and the guard itself.
+
+Please answer both, even if the answer is "not yet".

@@ -1,0 +1,144 @@
+# Silently map activity `P` and `S` to `RFI` at parse time
+
+The ERP has started reporting two activity codes the app has never seen. On the 19-Aug WIP file,
+**475 marks (122.692 MT) carry activity `P`**. `S` has not appeared as an activity yet but sits
+beside `P` in the planned route on all 74,541 rows, so it will follow.
+
+VTPL has confirmed these are **punching and stamping**, and has decided they are **not to be
+tracked or displayed anywhere in the app**. Their weight should simply be counted under `RFI`.
+
+**Nothing about the app's display may change.** No new page, no new column, no new dropdown
+value, no change to any export layout, no new Data Check rule beyond the one warning described in
+Part 3. The mapping happens before the row is stored, so the rest of the application never sees
+`P` or `S` at all.
+
+---
+
+## PART 1 — the alias
+
+In `artifacts/api-server/src/lib/parse.ts`, the activity is read at line 986:
+
+```ts
+activity: emptyToNull(row[COL.activity]),
+```
+
+Introduce a canonical alias applied at that point, with the map exported from `lib/domain` so
+there is one definition rather than a literal buried in the parser:
+
+```ts
+// lib/domain/src/index.ts
+// Activity codes the ERP emits that are folded into an existing stage before
+// storage. Punching (P) and stamping (S) are cutting-line operations that VTPL
+// does not track separately; their weight is reported under RFI, the earliest
+// in-production activity that carries marks. Applied at parse time, so no page,
+// export or rule in the app ever sees the original code.
+export const ACTIVITY_ALIASES: Readonly<Record<string, string>> = { P: "RFI", S: "RFI" };
+
+export function canonicalActivity(a: string | null | undefined): string | null {
+  if (!a) return null;
+  const t = a.trim().toUpperCase();
+  return ACTIVITY_ALIASES[t] ?? a;
+}
+```
+
+Then in the parser: `activity: canonicalActivity(emptyToNull(row[COL.activity]))`.
+
+### Why RFI and not C
+
+Do **not** put `P` or `S` into the Cutting bucket, however VTPL describes the operation on the
+shop floor. Cutting means *Job Card Not Started, authorised, contractor assigned* — a
+pre-production state. All 475 `P` rows are **Job Card WIP, with a Last Production Entry Date and
+no contractor**, so they would fall into Awaiting Assignment, which is plainly wrong.
+
+`HG` would be the technically correct neighbour — it sits between C and RFI in
+`PROCESS_SEQUENCE` — but HG has **zero marks** on both the 16-Aug and 19-Aug files. Aliasing to a
+code nobody uses would invent a stage that only ever holds punched material. RFI is the earliest
+in-production activity that actually carries marks, and it keeps the weight inside the Quality
+Check bucket where it belongs.
+
+### Do NOT change `PROCESS_SEQUENCE`
+
+Leave it as the existing twelve steps. Adding `P` and `S` there would make them appear in
+dropdowns, ageing tables, chart legends and Activity Wise — exactly what has been ruled out. The
+alias replaces the need for it.
+
+---
+
+## PART 2 — keep the original value
+
+Add one additive column to `record_pool`, following the pattern of `bom_status`:
+
+```ts
+// Activity exactly as written in the source file, before ACTIVITY_ALIASES is
+// applied. Null where no alias was applied — populated only for aliased rows,
+// so it stays empty on every existing import. Stored so the decision to fold
+// P and S into RFI is reversible without re-importing.
+activityRaw: text("activity_raw"),
+```
+
+Populate it **only when the alias actually fires** — leave it null otherwise, so no existing row
+is touched and the column stays empty until a P- or S-bearing file arrives.
+
+**Do NOT add `activity_raw` to the row hash.** It would change the hash of every existing mark
+and cause the next import to append a fresh pool row for all ~59,000 of them, destroying mark
+identity and every movement figure. It is an attribute of the row, not part of its state — the
+same treatment `category`, `ntltSubtype` and `holeOperation` already have.
+
+**Do NOT surface it on any page or export.**
+
+---
+
+## PART 3 — the blank-activity rows
+
+The same file carries **23 marks (7.410 MT) with Type = `Job Card WIP` and no activity at all**.
+Their routes begin `Q;TS;G;GB;Y`, so they are past RFI, not at it. They currently fall into no
+bucket.
+
+If they stay unclassified, DC6 fails every day on 7.410 MT and a red hard rule becomes background
+noise. Classify them into **Quality Check** as a catch-all — `Job Card WIP` with a blank activity
+— and add **one Data Check warning** reporting the count and weight so the anomaly stays visible.
+
+That warning is the only permitted addition to the tab. Do not create a new hard rule and do not
+let it affect the banner.
+
+---
+
+## WHAT MUST NOT CHANGE
+
+- No change to any page, column, dropdown, chart, export layout, or the order of anything.
+- No change to `PROCESS_SEQUENCE`, `QC_ACTIVITY_SET`, `GALV_ACTIVITY_SET`, the six bucket
+  definitions, the NTLT five-stage model, `classifyDc17`, `hasTypeData`, the import selection
+  helpers, or the Bucket E cascade.
+- No change to `hashRow`.
+- Do not build parser tolerance for the new WIP file's other differences — sheet name, header
+  row, or the semicolon route separator. Those are a separate question and the file is still
+  blocked on its date corruption.
+
+---
+
+## ACCEPTANCE CHECK
+
+**No import currently in the database contains `P` or `S` as an activity.** Every figure must
+therefore be byte-identical. Confirm on the 16-Aug import:
+
+```
+Release 1,886.620 (9,759)   Awaiting 924.667 (4,730)   Cutting 1,209.729 (8,587)
+Quality Check 1,875.200 (14,825)   Galvanising 1,804.723 (11,064)   FG 2,707.992 (9,980)
+TOTAL 10,408.931 MT / 58,945 marks · zero unclassified · 67 TLT projects
+
+Project Wise: Work Order Qty 27,235.326 · Dispatch Qty 14,667.211
+              Dispatch Balance 12,568.115 · FG (Order Review) 5,067.113
+NTLT: 7,296.551 MT / 331 marks
+Data Check: DC3 = 1 violation (893 / 1BPI4) · DC7 = 51 · DC15 = 0
+```
+
+Then confirm `SELECT count(*) FROM record_pool WHERE activity_raw IS NOT NULL;` returns **0** —
+no existing row should be touched.
+
+If any figure moves, the alias is being applied somewhere other than at parse time. Revert.
+
+### For reference — what the alias will do when a P-bearing file is loaded
+
+On the 19-Aug file it would give Quality Check 2,043.187 → **2,165.879 MT**, RFI absorbing 475
+marks, and unclassified falling from 130.103 MT to 0. Do not load that file to test this — its
+dates are corrupted at source and it is blocked for a separate reason.

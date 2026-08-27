@@ -1,0 +1,23 @@
+Six related fixes in the WIP import, part matching and balance paths. Do not change any ERP export layout — no column is to be added, removed, reordered or renamed in any export file.
+1. Read and store the WIP `Type` column
+The WIP's first column, `Type`, has three values: `Job Card WIP`, `Job Card Not Started`, and `FG Pending For Dispatch`. It is currently recognised as a valid header but discarded during cleaning, so it never reaches the master rows. Store it on the cleaned/master WIP card records.
+Background so the intent is clear: `FG Pending For Dispatch` rows are finished goods awaiting dispatch. Their manufacturing route is complete — which is why their Activity is blank and `Is Last Activity` is 1. They still carry a non-zero Balance Qty, but that is finished stock in stores, not work available at any stage. On the 27-Aug WIP that is 18,008 rows out of 71,135.
+2. Exclude `FG Pending For Dispatch` from all live-work logic
+These rows must not be treated as workable. Exclude them from:
+
+* the part and job-card dropdowns/choosers on every form (Fabrication and Galvanizing, TLT and NTLT),
+* balance calculation and the balance cap,
+* balance write-back / draw-down,
+* gap detection and back-fill generation (both the missing-activity scan and the row builder).
+
+Treat `Job Card WIP` and `Job Card Not Started` as live work. If an unrecognised `Type` value appears in a future file, include it in live work (do not silently drop it) and flag it in the import summary.
+Note: FG rows currently stay out of the forms only as a side effect of their Activity being blank. That is incidental, not intentional — make the exclusion explicit and driven by `Type`.
+3. Filter by `Type` BEFORE selecting the highest balance
+This ordering is the whole point of the fix. Roughly 2,286 keys (Job Card + Section + Mark) exist both as a live WIP row and as an FG row. The cap takes the highest matching balance, so if the Type filter is applied after selection, FG stock can still set the cap — an operator would be offered a quantity that is actually finished stock in stores. Restrict the candidate rows by `Type` first, then apply the existing highest-balance rule within that filtered set.
+4. Report the `Type` split on import
+In the import summary and the downloadable report, show the row count per `Type` value and state how many rows were excluded as FG.
+5. Block TLT lines that match no WIP row
+NTLT already blocks Add when no WIP row matches, but a TLT line can still be saved uncapped when both the exact Job Card + Section + Mark match and the Project + Structure + Mark + Section fallback fail. Make TLT fail closed the same way: if neither path resolves a WIP row, block the line with a clear message and do not accept an uncapped quantity.
+6. Make the TLT fallback fail closed on activity
+When the Project + Structure + Mark + Section fallback returns candidates but none of them has an Activity equal to the form's activity, rows at other activities currently remain selectable. Treat that as no match instead — only rows at the form's own activity are valid fallback candidates. (Rows at the correct activity are still narrowed and, if more than one remains, presented to the operator to choose, as now.)
+Leave unchanged: all ERP export layouts, the semicolon route splitting, the batched upload, the TLT/NTLT classification list, activity filtering on the forms, and the balance pre-fill / write-back / edit-reversal behaviour.

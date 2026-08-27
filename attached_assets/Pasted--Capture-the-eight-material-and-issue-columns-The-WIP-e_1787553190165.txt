@@ -1,0 +1,140 @@
+# Capture the eight material and issue columns
+
+The WIP export gained eight columns between 20 and 22 August. They arrive daily, they are
+populated on two thirds of rows, and the app currently reads past them — nothing is stored.
+
+```
+20-Aug   28 columns   Sales Order Status · Is Last Activity          (already captured)
+22-Aug   36 columns   the eight below                                (NOT captured)
+23-Aug   36 columns   unchanged
+```
+
+Every day this runs without them is a day of material-cost history that cannot be recovered
+except by re-importing the source file. That is the same clock that ran on `bom_status`.
+
+**Scope: store and watch only.** No page, no export, no calculation, no Data Check rule uses
+these values yet. Two of them have a units question outstanding — see the note at the end.
+
+---
+
+## PART 1 — schema
+
+Eight additive columns on `record_pool`, following the `bom_status` pattern:
+
+```ts
+// ERP material/issue block, added to the WIP export 22-Aug-2026 (source cols AC–AJ).
+// Additive, NOT part of the row hash. Populated on ~68% of rows — present on
+// Job Card WIP and FG Pending, absent on every Job Card Not Started row, because
+// material is issued when work starts.
+lotDocumentNo:        text("lot_document_no"),        // e.g. SIN/VT/26-27/U2/PG/00002 — max 29 chars observed
+lotDocumentDate:      date("lot_document_date"),      // dd/mm/yyyy in source
+lotSourceForm:        text("lot_source_form"),        // 6 values, see below
+issueLotRate:         numeric("issue_lot_rate", { precision: 12, scale: 4 }),
+issueDocumentNo:      text("issue_document_no"),      // e.g. VTMI/26-27/001243
+issueDocumentDate:    date("issue_document_date"),    // dd/mm/yyyy in source
+sinRateForIssueMonth: numeric("sin_rate_for_issue_month", { precision: 12, scale: 4 }),
+nearestSinDateToIssue: date("nearest_sin_date_to_issue"), // dd/mm/yyyy, always the 1st of a month
+```
+
+`Lot Source Form` takes exactly six values today — `Material Return`, `SIN Lot Entry`,
+`SIN Entry`, `RM Stock Transfer`, `RawMaterial Stock Adjustment`, `CBOM Rejection`. Store as
+text; do not build an enum, the list will grow.
+
+### The three dates must use `parseCsvDayFirst`
+
+All three are `dd/mm/yyyy` text and all three are **ambiguous on a large share of rows** —
+`Lot Document Date` 14,692 of 51,290, `Issue Document Date` 16,359, and
+`NearestSinDateToIssue` on **every single row**, because it is always the 1st of a month.
+
+A generic or locale-aware parser will read `01/08/2024` as 8 January instead of 1 August and
+nothing will look wrong. Route all three through the existing `parseCsvDayFirst` helper, the same
+one already used for Job Card Date, Assign Date and Last Production Entry Date.
+
+### Both rates carry four decimal places
+
+`Issue Lot Rate` and `SinRateForIssueMonth` are given to 4 dp on every populated row. Store as
+numeric with scale 4 — rounding to 2 would lose real precision on a per-kilogram rate applied to
+75,000 marks.
+
+---
+
+## PART 2 — the hash, and how updates behave
+
+**None of the eight goes in `hashRow`.** Adding any of them changes the hash of every existing
+mark and appends ~59,000 fresh pool rows on the next import, destroying mark identity and every
+movement figure.
+
+**But there is a consequence to think through.** These are the first additive columns whose value
+can legitimately change while the hash stays the same — a mark re-issued from a different lot
+keeps its identity but gets a new rate. Confirm the pool upsert **updates** these columns on
+conflict rather than leaving the first value in place, so the latest issue wins.
+
+Please state which behaviour the current `onConflictDoUpdate` gives.
+
+One helpful fact: **no mark key carries two different Lot Document numbers** — checked across all
+46,976 distinct project + mark + job card keys on the 23-Aug file. So one lot per mark holds
+today, and a single column is the right shape.
+
+---
+
+## PART 3 — Source Column Watch
+
+Add all eight to the watch panel so their arrival and their coverage stay visible:
+
+- `Lot Source Form` — show the value distribution, as it does for `BOM Status`
+- `Issue Lot Rate` and `SinRateForIssueMonth` — show populated count, min, max and mean
+- the rest — populated count only
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT add any of the eight to `hashRow`.
+- Do NOT use them in any bucket, Data Check rule, export or page.
+- Do NOT compute a cost figure from either rate column yet.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `classifyDc17`, the
+  NTLT model, or the import selection helpers.
+- Do NOT enforce a column count. It has gone 24 → 26 → 28 → 36 in three weeks; header-name
+  resolution is what makes that survivable.
+
+---
+
+## ACCEPTANCE CHECK
+
+Re-import the 23-Aug WIP CSV and confirm:
+
+```
+rows                     75,292          columns 36
+lot_document_no          51,290 populated (68.1%)   1,828 distinct
+lot_source_form          51,290 populated           6 distinct values
+issue_lot_rate           51,290 populated           min 3.0000  max 88.0000  mean 50.79
+issue_document_no        51,290 populated           3,729 distinct
+sin_rate_for_issue_month 50,774 populated           min 41.1200 max 69,500.0000
+nearest_sin_date_to_issue 50,774 populated          50 distinct, every one the 1st of a month
+```
+
+And confirm coverage by Type, which is the check that proves the columns landed on the right rows:
+
+```
+Job Card WIP              28,531 of 30,156 have issue_lot_rate
+FG Pending For Dispatch   22,759 of 23,143
+Job Card Not Started           0 of 21,993     ← must be zero
+```
+
+Then confirm every existing figure is unchanged: TLT **13,282.657 MT / 74,822 marks**, unclassified
+0, NTLT **9,477.101 MT / 470 marks**, 92 projects.
+
+---
+
+## NOTE — why no calculation yet
+
+`Issue Lot Rate` is the first cost-per-tonne data the tracker has ever received. Mean ₹50.79 per
+kilogram, range 3.00 to 88.00, nothing above 1,000 — it looks clean and usable.
+
+`SinRateForIssueMonth` does not. 50,435 values sit below 100 but **339 carry 1,348 to 69,500**,
+and on those rows it exceeds the Issue Lot Rate on the same line by more than a hundredfold. That
+is rupees per tonne mixed with rupees per kilogram in one column.
+
+Store both. Compute from neither until VTPL confirms the units and says which is authoritative.
+A cost report built on the wrong one would be out by a factor of a thousand on those rows, and
+nothing in the output would show it.

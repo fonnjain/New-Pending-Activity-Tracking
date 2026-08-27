@@ -10,6 +10,8 @@ import type { FabricationProjectCompletionTotals } from './fabricationProjectCom
 import type { UnknownProjectCauses } from './unknownProjectCauses';
 
 export interface FabricationProjectCompletionResponse {
+  /** WIP import used to calculate this response, or null when no WIP import exists. */
+  importId: number | null;
   /** False when no WIP import exists, or when the import is gated (pre-dates Type/Status storage). */
   available: boolean;
   /** Human-readable explanation when available is false due to a type-data gate. */

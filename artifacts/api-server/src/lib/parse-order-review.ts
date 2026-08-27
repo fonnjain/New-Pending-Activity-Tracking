@@ -1,6 +1,11 @@
 import * as XLSX from "xlsx";
-import { isCsvWip } from "./parse";
+import { isCsvWip, normalizeProject } from "./parse";
 import type { OrderReviewSummary } from "@workspace/db";
+import {
+  ORDER_REVIEW_CUMULATIVE_COLUMNS,
+  ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT,
+  type OrderReviewCumulativeColumnKey,
+} from "@workspace/domain";
 import { logger } from "./logger";
 
 // ---------------------------------------------------------------------------
@@ -20,6 +25,11 @@ export type OrderReviewFileType = "wip" | "order-review" | "unknown";
 
 export interface ParsedOrderReviewRow {
   project: string;
+  /**
+   * Tower Type Code. A deliberately empty string represents a numeric source
+   * row whose Tower Type is blank; it is retained for project totals but cannot
+   * participate in a normal project+structure WIP join.
+   */
   structure: string;
   subType: string | null;
   sets: number | null;
@@ -48,6 +58,370 @@ export interface OrderReviewParseResult {
   asOnDate: string | null;
   rows: ParsedOrderReviewRow[];
   summary: OrderReviewSummary;
+}
+
+/**
+ * A project-level view of the cumulative Progress figures. The source file
+ * is structured by project + tower type, but a scoped export can drop every
+ * tower type for one project. Comparing at this level catches that failure
+ * mode before the current-row UPSERT can mix two report dates together.
+ */
+export interface OrderReviewProjectCumulativeRow {
+  project: string;
+  /** Present for parsed snapshots; optional so project-total test inputs remain concise. */
+  structure?: string;
+  woOrderQtyMt: number | null;
+  releaseMt: number | null;
+  fabMt: number | null;
+  galvMt: number | null;
+  inspectionMt: number | null;
+  fileDespatchMt: number | null;
+}
+
+export interface CumulativeProjectRegression {
+  project: string;
+  column: OrderReviewCumulativeColumnKey;
+  label: string;
+  previousMt: number;
+  currentMt: number;
+  differenceMt: number;
+}
+
+export type CumulativeRegressionClassification =
+  | "cancellation-transfer"
+  | "correction"
+  | "scope-reduction"
+  | "unclassified";
+
+export interface CumulativeRegressionMetricDetail {
+  key: "woOrderQtyMt" | OrderReviewCumulativeColumnKey;
+  label: string;
+  previousMt: number;
+  currentMt: number;
+  differenceMt: number;
+}
+
+export interface CumulativeRegressionStructureDetail {
+  structure: string;
+  movedColumns: CumulativeRegressionMetricDetail[];
+  unchangedColumns: CumulativeRegressionMetricDetail[];
+  hasUpwardMovement: boolean;
+}
+
+/**
+ * Read-only context for a project that already has one or more blocking
+ * cumulative regressions. It explains the observed data pattern only; callers
+ * must continue using `regressions` itself to decide whether to block an import.
+ */
+export interface CumulativeRegressionProjectDetail {
+  project: string;
+  classification: CumulativeRegressionClassification;
+  movedColumns: CumulativeRegressionMetricDetail[];
+  unchangedColumns: CumulativeRegressionMetricDetail[];
+  structureListReplaced: boolean;
+  storedOnlyStructures: string[];
+  incomingOnlyStructures: string[];
+  upwardStructures: string[];
+  affectedStructures: CumulativeRegressionStructureDetail[];
+}
+
+export interface CumulativeMissingProjectWarning {
+  project: string;
+  storedDespatchMt: number;
+  outstandingMt: number;
+}
+
+export interface OrderReviewCumulativeComparison {
+  hasBaseline: boolean;
+  regressions: CumulativeProjectRegression[];
+  missingProjects: CumulativeMissingProjectWarning[];
+}
+
+type ProjectCumulativeTotals = Record<OrderReviewCumulativeColumnKey, number> & {
+  woOrderQtyMt: number;
+};
+
+const CUMULATIVE_DETAIL_COLUMNS: Array<{
+  key: "woOrderQtyMt" | OrderReviewCumulativeColumnKey;
+  label: string;
+}> = [
+  { key: "woOrderQtyMt", label: "WO Order Qty" },
+  ...ORDER_REVIEW_CUMULATIVE_COLUMNS,
+];
+
+function projectCumulativeTotals(
+  rows: readonly OrderReviewProjectCumulativeRow[],
+): Map<string, ProjectCumulativeTotals> {
+  const totals = new Map<string, ProjectCumulativeTotals>();
+  for (const row of rows) {
+    const project = row.project.trim();
+    if (!project) continue;
+    const current = totals.get(project) ?? {
+      woOrderQtyMt: 0,
+      releaseMt: 0,
+      fabMt: 0,
+      galvMt: 0,
+      inspectionMt: 0,
+      fileDespatchMt: 0,
+    };
+    current.woOrderQtyMt += Number.isFinite(row.woOrderQtyMt) ? row.woOrderQtyMt! : 0;
+    for (const { key } of ORDER_REVIEW_CUMULATIVE_COLUMNS) {
+      current[key] += Number.isFinite(row[key]) ? row[key]! : 0;
+    }
+    totals.set(project, current);
+  }
+  return totals;
+}
+
+function structureCumulativeTotals(
+  rows: readonly OrderReviewProjectCumulativeRow[],
+): Map<string, Map<string, ProjectCumulativeTotals>> {
+  const projects = new Map<string, Map<string, ProjectCumulativeTotals>>();
+  for (const row of rows) {
+    const project = row.project.trim();
+    if (!project) continue;
+    const structure = "structure" in row && typeof row.structure === "string"
+      ? row.structure.trim() || "(blank)"
+      : "(blank)";
+    const structures = projects.get(project) ?? new Map<string, ProjectCumulativeTotals>();
+    const current = structures.get(structure) ?? {
+      woOrderQtyMt: 0,
+      releaseMt: 0,
+      fabMt: 0,
+      galvMt: 0,
+      inspectionMt: 0,
+      fileDespatchMt: 0,
+    };
+    current.woOrderQtyMt += Number.isFinite(row.woOrderQtyMt) ? row.woOrderQtyMt! : 0;
+    for (const { key } of ORDER_REVIEW_CUMULATIVE_COLUMNS) {
+      current[key] += Number.isFinite(row[key]) ? row[key]! : 0;
+    }
+    structures.set(structure, current);
+    projects.set(project, structures);
+  }
+  return projects;
+}
+
+function metricDetails(
+  previous: ProjectCumulativeTotals,
+  current: ProjectCumulativeTotals,
+): CumulativeRegressionMetricDetail[] {
+  return CUMULATIVE_DETAIL_COLUMNS.map(({ key, label }) => ({
+    key,
+    label,
+    previousMt: previous[key],
+    currentMt: current[key],
+    differenceMt: current[key] - previous[key],
+  }));
+}
+
+/**
+ * Describes the source-data signature behind already-blocking projects:
+ * cancellation/transfer, correction, or unclassified. This is deliberately
+ * separate from cumulativeRegressions() so explanation can never relax a block.
+ */
+export function classifyCumulativeRegressionProjects(
+  incomingRows: readonly OrderReviewProjectCumulativeRow[],
+  previousRows: readonly OrderReviewProjectCumulativeRow[] | null,
+  regressions: readonly CumulativeProjectRegression[],
+): CumulativeRegressionProjectDetail[] {
+  if (previousRows == null || regressions.length === 0) return [];
+
+  const previousProjects = projectCumulativeTotals(previousRows);
+  const incomingProjects = projectCumulativeTotals(incomingRows);
+  const previousStructures = structureCumulativeTotals(previousRows);
+  const incomingStructures = structureCumulativeTotals(incomingRows);
+  const blockedProjects = [...new Set(regressions.map((row) => row.project))].sort(
+    (a, b) => a.localeCompare(b),
+  );
+
+  return blockedProjects.flatMap((project) => {
+    const previous = previousProjects.get(project);
+    const incoming = incomingProjects.get(project);
+    if (!previous || !incoming) return [];
+
+    const details = metricDetails(previous, incoming);
+    const woOrderQty = details[0]!;
+    const cumulativeDetails = details.slice(1);
+    const movedColumns = details.filter(
+      (column) =>
+        Math.abs(column.differenceMt) > ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT,
+    );
+    const unchangedColumns = details.filter(
+      (column) =>
+        Math.abs(column.differenceMt) <= ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT,
+    );
+    const allCumulativeEndAtZero = cumulativeDetails.every(
+      (column) =>
+        Math.abs(column.currentMt) <= ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT,
+    );
+    const workOrderEndsAtZero =
+      Math.abs(woOrderQty.currentMt) <= ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT;
+    const hasDecreasedColumn = movedColumns.some(
+      (column) => column.differenceMt < -ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT,
+    );
+    const workOrderDecreased =
+      woOrderQty.differenceMt < -ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT;
+    const hasCumulativeFall = cumulativeDetails.some(
+      (column) => column.differenceMt < -ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT,
+    );
+    const hasUnchangedCumulative = cumulativeDetails.some(
+      (column) =>
+        Math.abs(column.differenceMt) <= ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT,
+    );
+    const workOrderUnchanged =
+      Math.abs(woOrderQty.differenceMt) <= ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT;
+    const classification: CumulativeRegressionClassification =
+      allCumulativeEndAtZero &&
+      workOrderEndsAtZero &&
+      hasDecreasedColumn
+        ? "cancellation-transfer"
+        : workOrderUnchanged && hasCumulativeFall && hasUnchangedCumulative
+          ? "correction"
+          : workOrderDecreased &&
+              incoming.woOrderQtyMt > ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT &&
+              hasCumulativeFall
+            ? "scope-reduction"
+          : "unclassified";
+
+    const storedStructures = previousStructures.get(project) ?? new Map();
+    const newStructures = incomingStructures.get(project) ?? new Map();
+    const storedNames = [...storedStructures.keys()].sort((a, b) => a.localeCompare(b));
+    const incomingNames = [...newStructures.keys()].sort((a, b) => a.localeCompare(b));
+    const storedOnlyStructures = storedNames.filter((name) => !newStructures.has(name));
+    const incomingOnlyStructures = incomingNames.filter((name) => !storedStructures.has(name));
+    const sharedStructures = storedNames.filter((name) => newStructures.has(name));
+    const affectedStructures: CumulativeRegressionStructureDetail[] = [];
+    const upwardStructures: string[] = [];
+
+    for (const structure of [...new Set([...storedNames, ...incomingNames])].sort((a, b) =>
+      a.localeCompare(b),
+    )) {
+      const previousTotals = storedStructures.get(structure) ?? {
+        woOrderQtyMt: 0,
+        releaseMt: 0,
+        fabMt: 0,
+        galvMt: 0,
+        inspectionMt: 0,
+        fileDespatchMt: 0,
+      };
+      const incomingTotals = newStructures.get(structure) ?? {
+        woOrderQtyMt: 0,
+        releaseMt: 0,
+        fabMt: 0,
+        galvMt: 0,
+        inspectionMt: 0,
+        fileDespatchMt: 0,
+      };
+      const structureMetrics = metricDetails(previousTotals, incomingTotals);
+      const moved = structureMetrics.filter(
+        (column) =>
+          Math.abs(column.differenceMt) > ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT,
+      );
+      if (moved.length === 0) continue;
+      const hasUpwardMovement = moved.some(
+        (column) => column.differenceMt > ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT,
+      );
+      if (hasUpwardMovement) upwardStructures.push(structure);
+      affectedStructures.push({
+        structure,
+        movedColumns: moved,
+        unchangedColumns: structureMetrics.filter(
+          (column) =>
+            Math.abs(column.differenceMt) <= ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT,
+        ),
+        hasUpwardMovement,
+      });
+    }
+
+    return [{
+      project,
+      classification,
+      movedColumns,
+      unchangedColumns,
+      structureListReplaced:
+        storedNames.length > 0 && incomingNames.length > 0 && sharedStructures.length === 0,
+      storedOnlyStructures,
+      incomingOnlyStructures,
+      upwardStructures,
+      affectedStructures,
+    }];
+  });
+}
+
+function cumulativeRegressions(
+  previous: Map<string, ProjectCumulativeTotals>,
+  incoming: Map<string, ProjectCumulativeTotals>,
+): CumulativeProjectRegression[] {
+  const regressions: CumulativeProjectRegression[] = [];
+  for (const [project, previousTotals] of previous) {
+    const currentTotals = incoming.get(project);
+    // Closed projects can legitimately disappear from a scoped ERP export. They
+    // are intentionally handled as warnings below, never as a zero-valued row.
+    if (!currentTotals) continue;
+    for (const { key, label } of ORDER_REVIEW_CUMULATIVE_COLUMNS) {
+      const previousMt = previousTotals[key];
+      const currentMt = currentTotals[key];
+      if (previousMt - currentMt <= ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT) continue;
+      regressions.push({
+        project,
+        column: key,
+        label,
+        previousMt,
+        currentMt,
+        differenceMt: currentMt - previousMt,
+      });
+    }
+  }
+  return regressions.sort(
+    (a, b) =>
+      a.project.localeCompare(b.project) ||
+      ORDER_REVIEW_CUMULATIVE_COLUMNS.findIndex((column) => column.key === a.column) -
+        ORDER_REVIEW_CUMULATIVE_COLUMNS.findIndex((column) => column.key === b.column),
+  );
+}
+
+function missingProjectWarnings(
+  previous: Map<string, ProjectCumulativeTotals>,
+  incoming: Map<string, ProjectCumulativeTotals>,
+): CumulativeMissingProjectWarning[] {
+  const warnings: CumulativeMissingProjectWarning[] = [];
+  for (const [project, totals] of previous) {
+    if (incoming.has(project)) continue;
+    const storedDespatchMt = totals.fileDespatchMt;
+    const outstandingMt = totals.woOrderQtyMt - storedDespatchMt;
+    if (storedDespatchMt <= 0 && outstandingMt <= 0) continue;
+    warnings.push({ project, storedDespatchMt, outstandingMt });
+  }
+  return warnings.sort((a, b) => a.project.localeCompare(b.project));
+}
+
+/**
+ * Compare project totals from an incoming Order Review against the latest
+ * committed snapshot. Any decrease beyond the shared tolerance on a project
+ * that remains in the incoming file is a blocking regression. Projects that
+ * disappear are warnings only when they retain dispatched or outstanding work.
+ * A null stored set is intentionally distinct from an empty file: it means this
+ * is the first Order Review and therefore has no baseline to compare.
+ */
+export function compareOrderReviewCumulativeProgress(
+  incomingRows: readonly OrderReviewProjectCumulativeRow[],
+  previousRows: readonly OrderReviewProjectCumulativeRow[] | null,
+): OrderReviewCumulativeComparison {
+  if (previousRows == null) {
+    return {
+      hasBaseline: false,
+      regressions: [],
+      missingProjects: [],
+    };
+  }
+  const previous = projectCumulativeTotals(previousRows);
+  const incoming = projectCumulativeTotals(incomingRows);
+  return {
+    hasBaseline: true,
+    regressions: cumulativeRegressions(previous, incoming),
+    missingProjects: missingProjectWarnings(previous, incoming),
+  };
 }
 
 type Cell = string | number | boolean | Date | null | undefined;
@@ -102,15 +476,6 @@ function toInt(value: Cell): number | null {
   return n == null ? null : Math.round(n);
 }
 
-// Project normalization, mirroring parse.ts: "920.0" -> "920", "794." -> "794".
-function normalizeProject(value: string): string {
-  let s = value.trim();
-  if (!s) return "";
-  s = s.replace(/\.0+$/, "");
-  s = s.replace(/\.$/, "");
-  return s.trim();
-}
-
 // Structure (Tower Type Code / col C) canonicalization: trim + collapse internal
 // whitespace runs to a single space. Case is PRESERVED — the structure is the
 // join key to a WIP mark's derived structure (alias), which is case-sensitive, so
@@ -146,6 +511,91 @@ function getGrid(buffer: Buffer): unknown[][] {
     raw: false,
     blankrows: true,
   });
+}
+
+/** The expected header area for the Order Review workbook. */
+export interface OrderReviewStagingShape {
+  sheetName: string | null;
+  headerRow: number | null;
+  dataStartRow: number | null;
+  physicalColumnCount: number;
+  rawBanners: number;
+  normalisedBanners: number;
+  layoutOk: boolean;
+}
+
+/**
+ * Inspect the Order Review workbook header area without changing the forgiving
+ * parser. This is deliberately a staging-only guard: import parsing can remain
+ * resilient while the operator is told when the ERP export itself has changed.
+ * Column count is intentionally descriptive only; exports may add or remove
+ * non-critical columns without being refused.
+ */
+export function inspectOrderReviewStaging(buffer: Buffer): OrderReviewStagingShape {
+  try {
+    const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
+    const sheetName = wb.SheetNames.includes("OrderReview") ? "OrderReview" : null;
+    const ws = sheetName ? wb.Sheets[sheetName] : undefined;
+    if (!ws) {
+      return {
+        sheetName: null,
+        headerRow: null,
+        dataStartRow: null,
+        physicalColumnCount: 0,
+        rawBanners: 0,
+        normalisedBanners: 0,
+        layoutOk: false,
+      };
+    }
+    const grid = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+      header: 1,
+      defval: null,
+      raw: false,
+      blankrows: true,
+    });
+    const headerRow = 5; // Excel row 6
+    const dataStartRow = 7; // Excel row 8, after the two-tier header
+    const header = Array.isArray(grid[headerRow]) ? grid[headerRow] : [];
+    const subHeader = Array.isArray(grid[headerRow + 1]) ? grid[headerRow + 1] : [];
+    const physicalColumnCount = Math.max(header.length, subHeader.length);
+    const headerText = [...header, ...subHeader]
+      .map((value) => cellStr(value as Cell).toLowerCase())
+      .join(" ");
+    const rawBanners = new Set<string>();
+    const normalised = new Set<string>();
+    for (const cells of grid) {
+      if (!Array.isArray(cells)) continue;
+      for (const cell of cells) {
+        const match = cellStr(cell as Cell).match(PROJECT_BANNER);
+        if (!match?.[1]) continue;
+        rawBanners.add(`${rawBanners.size}\u0001${match[0]}`);
+        normalised.add(normalizeProject(match[1]));
+      }
+    }
+    const layoutOk =
+      headerText.includes("tower type") &&
+      headerText.includes("sets") &&
+      grid.length > dataStartRow;
+    return {
+      sheetName,
+      headerRow,
+      dataStartRow,
+      physicalColumnCount,
+      rawBanners: rawBanners.size,
+      normalisedBanners: normalised.size,
+      layoutOk,
+    };
+  } catch {
+    return {
+      sheetName: null,
+      headerRow: null,
+      dataStartRow: null,
+      physicalColumnCount: 0,
+      rawBanners: 0,
+      normalisedBanners: 0,
+      layoutOk: false,
+    };
+  }
 }
 
 // Flatten the first `limit` rows into a single lowercased haystack for keyword
@@ -446,7 +896,10 @@ export function detectReportAsOnDate(
   return null;
 }
 
-const PROJECT_BANNER = /project\s*code\s*:?\s*([A-Za-z0-9.\-/]+)/i;
+// Capture the complete banner value, including meaningful internal spaces
+// ("RAILWAY BATCH 10"). The shared normalizer handles harmless whitespace,
+// leading-dash, and trailing-dot formatting.
+const PROJECT_BANNER = /project\s*code\s*:?\s*(.+?)\s*$/i;
 const TOTAL_ROW = /^(sub\s*total|grand\s*total|total)\b/i;
 
 // Parse an Order Review workbook into per-(project, structure) rows. Forward-fills
@@ -565,8 +1018,10 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
         currentStructure = rawStructure;
       }
     }
-    if (!currentStructure) {
-      // No structure yet in this project group — genuinely orphaned row.
+    if (!currentStructure && !hasNumericData) {
+      // A non-numeric row without a structure is not a usable data row. Numeric
+      // rows are retained below with structure="" so their project-level order
+      // and despatch figures are not silently lost.
       const anyValue = cells.some((c) => cellStr(c as Cell) !== "");
       if (anyValue) {
         missingStructure++;
@@ -574,6 +1029,10 @@ export function parseOrderReview(buffer: Buffer): OrderReviewParseResult {
       }
       continue;
     }
+    // Some exports contain a one-row project block with real figures but no
+    // Tower Type Code, followed immediately by Sub Total. Keep that row under
+    // an intentional empty structure key: it contributes to project totals and
+    // remains visibly unmatched at structure level instead of being discarded.
     const structure = currentStructure;
 
     rowsRead++;

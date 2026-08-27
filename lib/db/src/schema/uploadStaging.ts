@@ -27,6 +27,10 @@ export const uploadStagingTable = pgTable("upload_staging", {
   sourceFilename: text("source_filename").notNull(),
   label: text("label"),
   reportDate: date("report_date", { mode: "string" }),
+  // The upload slot selected by the user. This is retained only while raw
+  // staging bytes exist, so a WIP reset never discards a staged Order Review
+  // just because a malformed file cannot be auto-detected.
+  expectedKind: text("expected_kind").$type<"wip" | "order-review">(),
   fileData: bytea("file_data").notNull(),
   // Set once this staged file has been committed into an import. Used to make
   // commit idempotent against duplicate/retried requests.

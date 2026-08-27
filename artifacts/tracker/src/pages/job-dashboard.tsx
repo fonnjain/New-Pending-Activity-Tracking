@@ -345,8 +345,12 @@ function JobDashboardContent() {
           // (built on classifyWipCase). Only populated for NTLT records.
           if ((r.category || "TLT") === "NTLT") {
             const stg = classifyNtltStage(r);
-            ntltStages[stg].marks += 1;
-            ntltStages[stg].weight += r.balanceWt;
+            // Exceptions are deliberately not folded into Not Started. DC16
+            // names and drills into these rows for the active WIP import.
+            if (stg !== "unclassified") {
+              ntltStages[stg].marks += 1;
+              ntltStages[stg].weight += r.balanceWt;
+            }
           }
         }
         return {

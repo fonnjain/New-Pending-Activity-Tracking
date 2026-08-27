@@ -1,0 +1,128 @@
+# Confirm the 24-August re-upload, then check import #64 for contamination
+
+The production correction was done correctly — both selectors resolved to 23-August, aggregates
+matched, zero orphaned pool references. Thank you for reporting the repointing behaviour rather
+than leaving it implicit; that detail is what Part 2 is about.
+
+The export dated 24-Aug 17:16 confirms the 24-August pair has been re-uploaded, and it is **no
+longer doubled**. Every figure matches my own parse of the source file exactly:
+
+```
+Release      1,555.684      Quality Check  2,172.292
+Awaiting       860.838      Galvanising    1,988.420
+Cutting      1,177.156      FG             4,610.281
+Total       12,364.672 MT · 67 projects · 69,594 marks
+```
+
+The project list confirms it independently: **895 present** — it exists only in the 24-August file
+— and 775, 896, VS-189 absent along with 23 others, the same 26 projects carrying 955.479 MT.
+
+That also settles the 16:24 anomaly: the doubling was the old runtime serving against new data
+during the publish window, exactly as you diagnosed.
+
+---
+
+## PART 1 — three figures to confirm on the re-upload
+
+**1. Unclassified.** Must be **0**. The 16:24 export showed 1,967.185 MT unclassified from the
+faulty runtime. Quality Check reading 2,172.292 suggests classification is now correct, but state
+the figure rather than leaving it inferred.
+
+**2. What the guard blocked, and on how many projects.** Expected **four**:
+
+```
+775       all five cumulative columns and WO Order Qty to zero; structure list
+          replaced by a single new OC-1A at 1.423 MT
+840       all five fall by ~13 MT; WO Order Qty also falls — a scope reduction
+896       all five to zero; six structures replaced by a single ISODT
+VS-189    Release/Fabrication/Galvanising to zero; A11 replaced by A13
+```
+
+**If it blocked on five and RAILWAY is among them, the normaliser fix has not reached the deployed
+build.** `RAILWAY BATCH 10` and `RAILWAY BATCH 11` are separate order blocks; batch 11 closed and
+batch 10 did not move, so a merged code makes a normal closure look like a 149.340 MT regression.
+Report which build production is running if that happens.
+
+**3. Which of the four were overridden, and what reason was recorded.** VTPL have now explained
+775 — cancelled by the client at the final stage, finished material reallocated to other projects
+and despatched. The other three are still open and I have sent VTPL a note asking about each.
+
+---
+
+## PART 2 — check whether import #64 was contaminated by the deletion
+
+You reported:
+
+> rows last seen in deleted Order Review #65 were subsequently repointed to the surviving latest
+> import #64 by the deletion logic
+
+For rows present in both files that is harmless. The risk is rows that existed **only** in the
+24-August file. If those were repointed rather than removed, **#64 is no longer a clean 23-August
+snapshot** — it would contain structures that were never in the 23-August export.
+
+Two queries settle it. Both projects had their structure lists replaced on 24-August, so the new
+names are unmistakable:
+
+```sql
+SELECT structure, tower_sub_type, wo_order_qty, progress_despatch
+  FROM order_review_rows
+ WHERE import_id = 64 AND project_code = '775';
+-- EXPECTED: the IS / COLUMN structures from the 23-Aug file
+-- CONTAMINATED if 'OC-1A' appears
+
+SELECT structure, tower_sub_type, wo_order_qty, progress_despatch
+  FROM order_review_rows
+ WHERE import_id = 64 AND project_code = '896';
+-- EXPECTED: 3HA, 3HB, 3HF, 3HH, 3PI, CTD
+-- CONTAMINATED if 'ISODT' appears
+```
+
+Also report:
+
+- **#64's total row count**, and whether it matches the 23-August file as parsed. You reported
+  2,108 persisted after the deletion, against 504 before it — that jump is the repointing, and it
+  needs to be shown as legitimate rather than assumed.
+- **#64's project count.** The 23-August file has 92 TLT projects with live WIP. If #64 now holds
+  fewer or more, say so.
+
+### If it is contaminated
+
+Do not attempt a surgical repair. Delete #64 and re-import the 23-August Order Review from source,
+then confirm it reproduces the 23-August figures. Importing an older report date will not disturb
+the current selection — 24-August has the later date and stays current.
+
+**Do not do this without reporting the query results first.**
+
+### And fix the deletion logic either way
+
+Repointing rows to a surviving import silently changes that import's contents. Whatever the
+answer, deleting an import should remove its rows, not reassign them — otherwise every deletion
+quietly rewrites history and no figure verified before the deletion can be trusted afterwards.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT delete or re-import anything before reporting the Part 2 query results.
+- Do NOT change which regressions block, the block/warn split, the five-column rule, the
+  tolerance, or the signature classifier.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the eight material columns, or the normaliser.
+- Do NOT roll back the publish. It is working correctly now.
+
+---
+
+## STILL OUTSTANDING
+
+The guard usability work from the earlier prompt has not been started and is now the last open
+build item:
+
+1. **Recommend the reversible action.** Skip when the cause is unknown; override only when it is
+   confirmed. One line wherever the override is offered: *skipping is reversible, overriding is
+   not.*
+2. **A register of anomalies awaiting explanation**, seeded with 903 (superseded), 775
+   (explained), and 840, 896, VS-189 (open). Three of the five 24-August blocks still have no
+   explanation and nothing is tracking them.
+3. **A warning when an override was granted within the last seven days.**
+
+Nothing about what blocks changes. Start it once Part 2 is reported.

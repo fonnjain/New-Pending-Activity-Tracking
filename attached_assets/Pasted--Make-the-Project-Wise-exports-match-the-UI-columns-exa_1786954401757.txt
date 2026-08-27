@@ -1,0 +1,105 @@
+# Make the Project Wise exports match the UI columns exactly
+
+The Excel export and the on-screen table have drifted apart. Column *order* is already correct —
+the problems are naming, missing mark counts, and undeclared extra columns.
+
+Apply the same treatment to all three Project Wise views (`Project with MFC`, `View by MFC`,
+`Project Then MFC`) and to the Bucket List and Data Check exports.
+
+---
+
+## 1 — Column names must match the on-screen headers
+
+| Export today | UI header | Fix |
+|---|---|---|
+| `Work Order (MT)` | Work Order Qty | rename to `Work Order Qty (MT)` |
+| `Dispatch (MT)` | Dispatch Qty | rename to `Dispatch Qty (MT)` |
+
+Also carry the activity qualifiers that the UI shows, so an exported sheet is self-describing
+away from the screen:
+
+```
+Awaiting Assignment (No contractor)
+Cutting (C)
+Quality Check (HG, RFI, NH, B, HAB, W, Q, TS)
+Galvanising (G, GB, Y)
+FG (WIP file)
+```
+
+Where the UI renders a two-line header — a name with `wt / marks` beneath — the export keeps two
+columns, suffixed `Wt (MT)` and `Marks`. That part is already right and should not change.
+
+## 2 — Two mark counts are missing, and their absence breaks the row
+
+`Release Balance Computed` and `FG (WIP file)` have a weight column but no marks column, in both
+the UI and the export. Every other bucket has both. The result is that the marks on a row do not
+add up:
+
+```
+Awaiting 4,730 + Cutting 8,587 + Quality Check 14,825 + Galvanising 11,064 = 39,206
+Total Marks                                                               = 58,945
+unaccounted                                                                 19,739
+
+Release Balance marks 9,759 + FG (WIP file) marks 9,980                   = 19,739
+```
+
+The gap is exactly the two missing columns. Anyone checking a row finds a third of the marks
+missing with nothing to explain it.
+
+**Add `Release Balance Computed Marks` and `FG (WIP file) Marks` to both the UI and the export.**
+On the 16-Aug import they must read **9,759** and **9,980**, and the six bucket mark columns must
+then sum to Total Marks of 58,945 exactly.
+
+## 3 — Declare the columns the export has and the screen does not
+
+The export carries six columns with no on-screen equivalent:
+
+```
+First Assign · Structures · Balance Qty · 0-30d · 31-60d · 60d+
+```
+
+Keep them — they are useful and removing data from an export is the wrong fix — but make the
+relationship explicit:
+
+- Group them after `Avg Ageing (d)`, which is where they already sit, and leave them last.
+- Add a header comment or a first-row note on the sheet reading
+  `Columns beyond this point are export-only and are not shown on screen.`
+- The three ageing buckets need a qualifier. They cover **assigned marks only**: on 16-Aug they
+  total 44,042 of 58,945 marks, because Release Balance and Awaiting Assignment marks have no
+  assign date and therefore no age. Rename them `0-30d (assigned)`, `31-60d (assigned)`,
+  `60d+ (assigned)` so the shortfall is self-explaining rather than looking like missing data.
+
+## 4 — One source of truth for the column set
+
+Define the column list once — label, key, unit, and whether it is UI-visible or export-only — and
+have both the table component and the export builder read from it. They have drifted apart once
+and will again if the definition is duplicated.
+
+This is the same consolidation already applied to `QC_ACTIVITY_SET` / `GALV_ACTIVITY_SET` in
+`lib/domain` and to `classifyDc17`.
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change any calculation, filter, join, or the values themselves. This is naming, two
+  additional count columns, and one shared definition.
+- Do NOT drop the six export-only columns.
+- Do NOT change the column order — it already matches the UI.
+- Do NOT touch DC0–DC17, the bucket definitions, `hasTypeData`, the import selection helpers, or
+  the Bucket E cascade.
+
+## ACCEPTANCE CHECK
+
+Export Project Wise on the 16-Aug import and confirm every figure is unchanged:
+
+```
+Work Order Qty 27,235.326 · Dispatch Qty 14,667.211 · Dispatch Balance 12,568.115
+FG (Order Review) 5,067.113
+
+Release 1,886.620 (9,759)   Awaiting 924.667 (4,730)   Cutting 1,209.729 (8,587)
+Quality Check 1,875.200 (14,825)   Galvanising 1,804.723 (11,064)   FG 2,707.992 (9,980)
+TOTAL 10,408.931 MT / 58,945 marks · 67 projects · Balance Qty 1,034,743
+```
+
+And confirm the six bucket mark columns now sum to 58,945 exactly.
+
+Paste the export header row for all three Project Wise views.

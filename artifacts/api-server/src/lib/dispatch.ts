@@ -13,6 +13,7 @@ import {
   type DispatchLedgerRow,
   type OrderReviewChangeLog,
   type OrderReviewFieldChange,
+  type OrderReviewCumulativeOverrideDetails,
 } from "@workspace/db";
 import { bundleActivitySet } from "@workspace/domain";
 import {
@@ -657,12 +658,15 @@ function matchKey(project: string, structure: string): string {
 // Collapse parsed rows to ONE value set per (project, structure) match key. The
 // Order Review file is unique per key, but defensively sum numeric measures and
 // take the first non-null text if a key repeats — mirrors the dispatch-seed sum.
-function collapseOrderRows(
+//
+// An intentionally blank Tower Type remains a valid project-level order row. Its
+// empty structure key is persisted and aggregated here, but later cannot match a
+// normal WIP project+structure key.
+export function collapseOrderRows(
   rows: ParsedOrderReviewRow[],
 ): Map<string, ParsedOrderReviewRow> {
   const byKey = new Map<string, ParsedOrderReviewRow>();
   for (const r of rows) {
-    if (!r.structure) continue;
     const key = matchKey(r.project, r.structure);
     const prev = byKey.get(key);
     if (!prev) {
@@ -714,7 +718,17 @@ function diffOrderValues(
 // logic (it is rebuilt from WIP yard-departures, unaffected by order-book edits).
 export async function ingestOrderReview(
   buffer: Buffer,
-  meta: { sourceFilename: string; label: string | null; asOnDate?: string | null },
+  meta: {
+    sourceFilename: string;
+    label: string | null;
+    asOnDate?: string | null;
+    cumulativeOverride?: {
+      reason: string;
+      at: Date;
+      by: string;
+      details: OrderReviewCumulativeOverrideDetails;
+    };
+  },
 ): Promise<IngestOrderReviewResult> {
   const parsed = parseOrderReview(buffer);
   const coverage = await computeWipCoverage(parsed.rows);
@@ -728,6 +742,10 @@ export async function ingestOrderReview(
       // Prefer caller-supplied date (user-selected), else fall back to file banner.
       asOnDate: meta.asOnDate ?? parsed.asOnDate,
       summary,
+      overrideReason: meta.cumulativeOverride?.reason ?? null,
+      overrideAt: meta.cumulativeOverride?.at ?? null,
+      overrideBy: meta.cumulativeOverride?.by ?? null,
+      overrideDetails: meta.cumulativeOverride?.details ?? null,
     })
     .returning({ id: orderReviewImportsTable.id });
 

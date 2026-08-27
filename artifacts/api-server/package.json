@@ -8,6 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "test": "tsx --test src/**/*.test.ts",
+    "test:staging-lifecycle": "NODE_ENV=development tsx --test src/lib/dev-staging-lifecycle.integration.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

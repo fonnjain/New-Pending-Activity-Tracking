@@ -1,0 +1,22 @@
+The run is complete. Please now ingest the 21-Aug WIP CSV and Order Review through the app, and report from the database and the Data Check tab — not from a file parse. State which database each query ran against.
+
+1. Six buckets, 21-Aug — corrected targets. My earlier Quality Check figure was wrong; the blank-activity catch-all was specified in the alias prompt and the app is right:
+
+Release        1,622.711 MT    9,593      Quality Check  2,140.043 MT   18,016
+Awaiting         887.087 MT    5,074      Galvanising    1,920.442 MT   11,571
+Cutting        1,226.579 MT    7,629      FG             5,509.449 MT   22,910
+TOTAL         13,306.311 MT   74,793 marks · unclassified 0 · 92 TLT projects
+
+Confirm 497 rows arrived with activity P and all canonicalised to RFI, and that activity_raw is populated on exactly those 497 and null everywhere else.
+
+2. NTLT — total 9,574.097 MT / 461 marks (my earlier 9,569.104 / 459 was an arithmetic error). Report where GENERAL / BL / 3.190 MT and RAILWAY STRUCTURE / blank / 2.202 MT land. Both are Type = Job Card WIP, so a Type-first classifier cannot place them in Not Started — if it does, paste the classifier. unknownOrderNatureCount must be 0.
+
+3. Order Review — are 802., 868, 880 and VR074 now parsed? Each has one data row with a blank Tower Type followed by a Sub Total. 868 is live in WIP and is the 0.774 MT reconciliation difference. Report the banner count (169 raw), data rows, and the orphan count — which should now be 0, not the long-standing 4 / 63.882 MT.
+
+4. Reconciliation — 92 projects, WIP 13,306.311 MT, expected gap −441.393 MT once 868 parses. Worst five: 900 −161.584 · 912 −137.963 · 907 −93.540 · 938 −72.806 · VS-33 −68.150.
+
+5. Data Check tab — DC0 through DC17 plus the Source Column Watch, which should now list all four watched columns and flag the eight new material/issue columns as newly appeared.
+
+6. Which imports loadLatestWipImport() and loadLatestOrderReview() resolve to, by id and date. Both should be 21-Aug.
+
+7. Production deploy — six changes are now built and unreleased: the critical-column gate, the four new record_pool columns, Source Column Watch, export column alignment, the P/S alias, and the CSV format support. Production last saw 16-Aug data. What does the deploy need, and can it happen today

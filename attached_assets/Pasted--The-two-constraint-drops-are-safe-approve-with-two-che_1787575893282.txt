@@ -1,0 +1,109 @@
+# The two constraint drops are safe — approve, with two checks first
+
+Stopping was correct and I would rather you stopped on something benign than proceeded on
+something that was not. My instruction said stop on any drop, and you followed it exactly.
+
+But looking at these two specifically: **they are safe, and they are a consequence of my own
+instruction.** I asked you to add `signature` and `reason` to a table whose seeded rows already
+existed, and I widened the `status` value set. Both drops follow from that.
+
+```
+order_review_anomalies_status_check
+    a CHECK constraint on status. I added 'superseded' alongside 'open' and
+    'explained'. Postgres has no ALTER for a CHECK constraint — it must be
+    dropped and recreated to permit the new value.
+
+order_review_anomalies_project_key
+    a unique constraint being replaced by a unique index, which the preflight
+    says it is providing. Functionally identical.
+```
+
+Neither drops a column or loses a row, which is consistent with the preflight reporting no
+structural data loss.
+
+---
+
+## Two checks before approving
+
+**1. Does the diff create a replacement CHECK constraint, not only drop the old one?**
+
+If the old constraint goes and no new one arrives, `status` becomes unconstrained. Not dangerous,
+but not what was intended — the point of the constraint is that a typo cannot enter the column.
+The replacement should permit exactly `open`, `explained`, `superseded`.
+
+**2. Does the replacement unique index cover the same column set as the constraint it replaces?**
+
+A narrower set would reject rows that are legitimate today. A wider set would permit duplicates
+the constraint currently prevents. Paste both definitions side by side.
+
+**If both replacements are present and equivalent — approve the publish.**
+
+**If either drop has no matching create — stop again and report.** That is a different situation
+from the one I am authorising here.
+
+---
+
+## Same conditions as before
+
+- Leave **Overwrite data** off.
+- Paste the full diff as approved, not only the disallowed portion.
+- Stop on anything beyond these two constraint replacements — a column drop, a type change, or a
+  rename is not covered by this authorisation.
+
+---
+
+## After publishing, confirm against production
+
+```
+anomaly register — five entries, corrected signatures:
+   903 B correction superseded · 775 A short close explained
+   840 D scope reduction open · 896 A short close open · VS-189 A short close open
+
+'shourt close' no longer appears anywhere
+upload_stage_evidence exists and is empty, or holds only the backfilled
+   23-to-24 August reconstruction if that was written
+
+production figures untouched:
+   TLT 12,364.672 MT / 69,594 marks · unclassified 0 · 67 projects
+   Release 1,555.684 · Awaiting 860.838 · Cutting 1,177.156
+   Quality Check 2,172.292 · Galvanising 1,988.420 · FG 4,610.281
+
+both latest-import selectors resolve to 24-August
+```
+
+Watch the deployment window. The 24-August publish served doubled figures for roughly ten minutes
+while the old runtime ran against new data. If it happens again, note the times rather than
+treating a transient reading as a defect.
+
+---
+
+## On the local authentication test
+
+Declining to reset credentials to make a test pass was the right call. The lifecycle test can wait
+for a working admin login — it is not worth weakening authentication to exercise a test path.
+Please leave it open rather than working around it.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT approve any drop beyond the two named constraint replacements.
+- Do NOT enable Overwrite data.
+- Do NOT change which regressions block, the block/warn split, the five-column rule, the
+  tolerance, or the corrected signature definitions.
+- Do NOT delete or re-import import #64.
+- Do NOT touch the current 24-August imports.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the eight material columns, or the normaliser.
+
+---
+
+## NOTE ON TIMING
+
+Nothing is queued for upload. If you would rather not approve a constraint change at the end of a
+long session, publishing tomorrow costs nothing — production simply keeps the old signature labels
+until then, and no file is waiting.
+
+The only consequence of delay is that a file blocking on production before the publish would come
+back as "unrecognised" for anything that is not 775-shaped. Since no upload is expected, that is a
+theoretical cost rather than a real one.

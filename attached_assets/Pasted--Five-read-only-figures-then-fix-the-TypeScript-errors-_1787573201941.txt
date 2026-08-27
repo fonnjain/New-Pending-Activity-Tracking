@@ -1,0 +1,120 @@
+# Five read-only figures, then fix the TypeScript errors
+
+The deletion fix is the right one — removing rows last seen in the deleted upload rather than
+reassigning them, with the dispatch ledger replayed from durable data. That closes a real hole and
+the anomaly register is exactly what was needed.
+
+But it prevents future contamination. It does not tell us whether **import #64 was already
+contaminated** by the old behaviour, and that question is still open from two prompts ago.
+
+Nothing below changes any data. Five figures, then one piece of work.
+
+---
+
+## PART 1 — was import #64 contaminated?
+
+#64 was deleted-from under the **old** logic. It went from 504 rows to 2,108 by repointing, and
+nothing has yet confirmed those rows belong to the 23-August file rather than the 24-August one.
+
+Both projects had their structure lists **replaced** on 24-August, so the new names could only have
+come from that file. That makes the test unambiguous:
+
+```sql
+SELECT structure, tower_sub_type, wo_order_qty, progress_despatch
+  FROM order_review_rows
+ WHERE import_id = 64 AND project_code = '775';
+-- EXPECTED: the IS / COLUMN structures from the 23-Aug file
+-- CONTAMINATED if 'OC-1A' appears
+
+SELECT structure, tower_sub_type, wo_order_qty, progress_despatch
+  FROM order_review_rows
+ WHERE import_id = 64 AND project_code = '896';
+-- EXPECTED: 3HA, 3HB, 3HF, 3HH, 3PI, CTD
+-- CONTAMINATED if 'ISODT' appears
+```
+
+Also report **#64's total row count and project count**.
+
+**Do not repair anything before reporting these.** If it is contaminated, the remedy is to delete
+#64 and re-import the 23-August Order Review from source — the new deletion logic makes that safe,
+and importing an older report date will not disturb the current selection since 24-August has the
+later date.
+
+---
+
+## PART 2 — three figures from the 24-August re-upload
+
+The 17:16 export confirmed the figures are correct and no longer doubled. Three things it cannot
+show:
+
+**1. Unclassified on the current import.** Must be **0**. The 16:24 export showed 1,967.185 MT
+unclassified from the faulty runtime, so this needs stating rather than inferring.
+
+**2. How many projects the guard blocked.** Expected **four**: 775, 840, 896, VS-189.
+
+**If it blocked on five and RAILWAY was among them, the normaliser fix is not in the deployed
+build.** `RAILWAY BATCH 10` and `RAILWAY BATCH 11` are separate order blocks; batch 11 closed and
+batch 10 did not move, so a merged code turns a normal closure into a false 149.340 MT regression.
+Report which build production is running if that happens.
+
+**3. Which were overridden, and what reason was recorded** on each.
+
+---
+
+## PART 3 — fix the 17 TypeScript errors
+
+Please raise the priority of follow-up #64 and do it next.
+
+This has been outstanding since the `P`/`S` alias work three weeks ago, and the cost has been
+accumulating the whole time. **Every verification this month has been manual** — my own Python
+parses against the source files — because the build cannot act as a safety net.
+
+Two defects this month would plausibly have been caught by a clean typecheck:
+
+- `latestWipArr[0]` used on an object return, which silently zeroed every Data Check WIP total
+- this afternoon's classification regression, which put **1,967.185 MT** into unclassified on the
+  live public site
+
+Seventeen errors sitting in routes that are being actively changed is not background noise. It is
+the difference between a build that tells you something and one that does not.
+
+Please report:
+
+- the seventeen errors grouped by file, with the error code for each
+- how many are in `parse.ts`, `lib/domain`, `dataCheck.ts` or any file touched this month — those
+  are not "pre-existing" in any useful sense, and "pre-existing" should be proved against the
+  commit before the change rather than asserted
+- whether `pnpm --filter @workspace/api-server run typecheck` is wired into the build at all, or
+  only the tracker's
+
+Then fix them. If any cannot be fixed without a behavioural change, list those separately and stop
+before changing behaviour.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT delete or re-import anything before reporting Part 1.
+- Do NOT change which regressions block, the block/warn split, the five-column rule, the
+  tolerance, or the signature classifier.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the eight material columns, or the normaliser.
+- Do NOT alter behaviour to make a type error go away. Report it instead.
+
+---
+
+## ACCEPTANCE CHECK
+
+After the TypeScript work, confirm every figure is unchanged on the current production import:
+
+```
+TLT           12,364.672 MT / 69,594 marks · unclassified 0 · 67 projects
+Release        1,555.684    Quality Check  2,172.292
+Awaiting         860.838    Galvanising    1,988.420
+Cutting        1,177.156    FG             4,610.281
+```
+
+And that `pnpm --filter @workspace/api-server run typecheck` passes clean, alongside the tracker
+typecheck and the 19 API tests.
+
+State which database every query ran against.

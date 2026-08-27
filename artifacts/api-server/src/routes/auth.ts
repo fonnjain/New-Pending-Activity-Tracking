@@ -8,7 +8,12 @@ import {
 import bcrypt from "bcryptjs";
 import { db } from "@workspace/db";
 import { appUsersTable, userSessionLogTable, type AppUserRow } from "@workspace/db";
-import { eq, and, isNull, desc } from "drizzle-orm";
+import { eq, and, isNull, desc, sql } from "drizzle-orm";
+import {
+  DEV_STAGING_FIXTURE_PROJECT,
+  DEV_STAGING_FIXTURE_ROW_HASH,
+  isDevelopmentStagingFixtureRuntime,
+} from "../lib/dev-staging-fixture";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -260,6 +265,38 @@ router.post("/auth/logout", async (req, res): Promise<void> => {
 
   res.json({ authenticated: false });
 });
+
+// This cleanup exists solely for the browser staging-safeguard check. It is
+// unavailable outside NODE_ENV=development and removes only the orphaned
+// fixture row identified by both its reserved project marker and full-row hash.
+router.post(
+  "/auth/dev-staging-fixture-cleanup",
+  requireAuth,
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    if (!isDevelopmentStagingFixtureRuntime()) {
+      res.sendStatus(404);
+      return;
+    }
+    try {
+      const deleted = await db.execute(sql`
+        DELETE FROM "record_pool" AS pool
+        WHERE pool."job" = ${DEV_STAGING_FIXTURE_PROJECT}
+          AND pool."hash" = ${DEV_STAGING_FIXTURE_ROW_HASH}
+          AND NOT EXISTS (
+            SELECT 1
+            FROM "import_rows" AS membership
+            WHERE membership."pool_id" = pool."id"
+          )
+        RETURNING pool."id"
+      `);
+      res.json({ deletedPoolRows: deleted.rowCount ?? 0 });
+    } catch (err) {
+      req.log.error({ err }, "Development staging fixture cleanup failed");
+      res.status(500).json({ error: "Development staging fixture cleanup failed" });
+    }
+  },
+);
 
 router.post(
   "/auth/change-password",

@@ -1,0 +1,168 @@
+# A general cumulative-regression guard, with a two-step override
+
+Please replace the rule I specified in the previous prompt. It was wrong in two ways: it treated a
+legitimate business event as corruption, and it had no override.
+
+## What changed my mind
+
+I reported eighteen projects whose cumulative despatch fell to zero. That was largely my own
+error — my comparison returned zero for a project that was simply absent, rather than reporting it
+as absent. Checking properly against the 22-August and 24-August Order Reviews:
+
+```
+projects in the stored file, absent from the incoming file      47
+projects present in both, cumulative despatch DECREASED          2
+projects present in both, cumulative despatch increased          3
+```
+
+VTPL have since confirmed they closed projects in the ERP. So **47 of the 49 disappearances are
+normal business**. A guard built to my original spec would refuse every closure day, and a blocker
+that fires on routine activity gets switched off within a week.
+
+Only two cases survive as genuine anomalies, and both are projects that stayed in the file.
+
+---
+
+## PART 1 — the rule, in general form
+
+**Nothing in this may be hardcoded.** No project codes, no dates, no file names, no counts. The
+rule compares whatever Order Review is being staged against whatever Order Review is currently the
+latest stored import, and must behave identically on any pair.
+
+### Cumulative columns
+
+Progress Release, Progress Fabrication, Progress Galvanising, Progress Inspection and Progress
+Despatch are all cumulative-to-date. Define them once, in `lib/domain`, as a named set rather than
+a literal list repeated at the call site.
+
+### The two tests
+
+```
+TEST A — regression within a surviving project              severity: BLOCK
+  For each project present in BOTH the stored and incoming files:
+      if incoming[col] < stored[col] - TOLERANCE  for any cumulative column
+      -> record a regression
+
+TEST B — project no longer present                          severity: WARN
+  For each project in the stored file but not in the incoming file:
+      if stored[Progress Despatch] > 0 or stored outstanding (WO Order Qty - Despatch) > 0
+      -> record a disappearance
+```
+
+`TOLERANCE` should be a single named constant, not a literal. Start at 0.001 MT.
+
+**Test A blocks because a cumulative figure cannot fall while the project is still being
+reported.** Test B only warns, because project closure is now a known and legitimate reason for a
+project to leave the export.
+
+Report Test B with enough detail to judge it: the project count, the names, the despatch-to-date
+that will stop being maintained, and the outstanding weight that will be written off. On the
+current file pair that is 47 projects, 5,656 MT of despatch history and 466 MT outstanding — but
+those numbers must be computed, never assumed.
+
+### The same shape for the WIP file
+
+Apply the delta checks to the staged WIP against the latest stored WIP, all as warnings:
+
+```
+total weight            +/- 5%
+any of the six buckets  +/- 10%
+project count           +/- 3
+NTLT mark count         reaching zero
+```
+
+Show every one as `stored -> incoming (change)`. A number alone cannot be judged.
+
+### First import of a kind
+
+Where there is nothing to compare against, say so plainly rather than showing a delta against
+zero.
+
+---
+
+## PART 2 — the override
+
+The person uploading may proceed, but only deliberately.
+
+**Step 1 — refuse.** Staging stops. Show each blocking regression as a row: project, column,
+stored value, incoming value, difference. State plainly what will happen if it proceeds — the
+Order Review upserts one row per project and structure, so a project missing from the incoming
+file keeps its stored row untouched, and the table ends up holding two different days at once.
+
+**Step 2 — a second, different confirmation.** Not the same button again. Require an explicit
+acknowledgement the person has to act on — a typed confirmation, or a checkbox plus a separate
+control — and a short free-text reason. Restate the specific consequence in that dialog, not a
+generic "are you sure".
+
+Then allow the import.
+
+**Never auto-clear.** Refreshing, re-selecting the file or re-staging must present step 1 again.
+The override applies to one import action and does not persist.
+
+---
+
+## PART 3 — record the override
+
+An overridden import must be identifiable afterwards, otherwise a wrong figure has no explanation
+six weeks later. On the import record store:
+
+```
+override_reason        text     the free-text reason given
+override_at            timestamp
+override_by            text     the authenticated user
+override_details       jsonb    the regressions that were bypassed, with both values
+```
+
+Show a marker on the Data Check tab and in the import list wherever an overridden import is the
+current one, so its provenance is visible without going looking.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT hardcode any project code, date, file name or count anywhere in the rule.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the import selection helpers, or the eight material columns.
+- Do NOT block on a project disappearing. That is now known to be normal.
+- Do NOT enforce a column count. It has gone 24 -> 26 -> 28 -> 36 in three weeks.
+- Do NOT let the override persist across staging attempts.
+
+---
+
+## ACCEPTANCE CHECK
+
+The rule must be general; the test may use real files. Stage each pair without importing.
+
+**Stage the 23-August pair against the 22-August stored import.** Expect no blocks. Deltas are
+expected and fine.
+
+**Stage the 24-August pair against the 22-August stored import.** Expect:
+
+```
+BLOCK   2 projects with a cumulative regression
+        one where Progress Despatch falls to zero while the project remains in the file
+        with its structure list replaced
+        one where Progress Despatch falls by roughly 10 MT
+
+WARN   47 projects present in the stored file and absent from the incoming one
+       report their count, names, despatch-to-date and outstanding weight
+```
+
+**Then exercise the override** on the 24-August pair: confirm step 1 refuses, step 2 requires a
+distinct action plus a reason, the import then proceeds, and `override_reason`, `override_at`,
+`override_by` and `override_details` are all populated on the resulting import record.
+
+**Then confirm the override did not persist** — re-stage the same file and confirm step 1 appears
+again.
+
+If staging the 24-August pair produces 49 blocks, Test B has been implemented as a block instead
+of a warning. If it produces none, Test A is not comparing the right pair.
+
+---
+
+## NOTE
+
+Do not import the 24-August files for real. Stage them, exercise the override path, then roll back
+or use a scratch database — and say which database you used. 23 August remains the current state
+of the app until VTPL answer the outstanding question about 955 MT of finished goods that left the
+WIP file with the closed projects.

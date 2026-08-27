@@ -1,0 +1,158 @@
+# Fix the signature classifier — two definition errors, both mine
+
+Your reconstruction settled all three questions and corrected two of my assumptions. Thank you for
+building it from the retained source bytes rather than guessing, and for being explicit that the
+original panel output was not retained.
+
+Three things follow from it, and the first two are corrections to definitions I wrote.
+
+---
+
+## PART 1 — signature A is defined wrongly
+
+I wrote the test as *"every cumulative column **falls to** zero"*. That is wrong. It should be
+*"every cumulative column **ends at** zero"*.
+
+The difference is why three of four blocks came back as "treat with caution":
+
+```
+775       all six columns non-zero before, all zero after   -> matched A
+896       Progress Despatch was ALREADY 0.000, so it did
+          not FALL to zero                                  -> failed A, fell to C
+VS-189    Inspection and Despatch both already 0.000        -> failed A, fell to C
+```
+
+896 and VS-189 are cancellations. They behave exactly like 775 — whole order zeroed, structure
+list replaced. The only difference is that they had not despatched anything yet, so some columns
+were already at zero and had nowhere to fall from.
+
+### Corrected definition
+
+```
+Signature A · likely cancellation or scope transfer
+
+    project present in both files
+AND every cumulative column ENDS at zero (within tolerance)
+AND WO Order Qty ENDS at zero
+AND at least one column actually decreased
+```
+
+The last clause keeps a project that was already entirely zero on both days from being classified
+as a cancellation.
+
+Under this, 775, 896 and VS-189 all classify as A — which is what they are.
+
+---
+
+## PART 2 — there is a fourth signature I never defined
+
+840 came back as "unrecognised" because no rule covered it. It is not a cancellation and not a
+correction. **The order itself shrank.**
+
+```
+840   WO Order Qty       370.608 -> 357.143   -13.465
+      Progress Release   374.700 -> 361.237   -13.463
+      Fabrication        374.700 -> 361.237   -13.463
+      Galvanising        374.700 -> 361.237   -13.463
+      Inspection         364.005 -> 350.615   -13.390
+      Despatch           271.432 -> 261.205   -10.227
+```
+
+Every stage followed the order down by almost exactly the same amount. At structure level, 1DA2
+went 3.124 → 0.281, 1DB2 7.071 → 2.004, 1DC2 3.673 → 1.130 — quantities reduced, not removed. And
+two structures moved **upward**: 1DD2A +0.406 and 1DD9M +2.624.
+
+That is a scope reduction — towers taken out of the order, with a little reallocation.
+
+### New definition
+
+```
+Signature D · likely scope reduction
+
+    project present in both files
+AND WO Order Qty decreased
+AND WO Order Qty in the incoming file is greater than zero
+AND at least one cumulative column decreased
+```
+
+Message: **"Looks like the order itself was reduced."** State that WO Order Qty came down and the
+stages followed it, and list any structures that moved upward — reallocation within a reduced
+scope is a strong corroborating signal.
+
+### Check the four are mutually exclusive
+
+A requires WO Order Qty to end at zero; D requires it to end above zero. B requires WO Order Qty
+unchanged. C is everything else. Confirm no observed case matches two, and that C is now genuinely
+rare rather than the default.
+
+---
+
+## PART 3 — reclassify the existing register entries
+
+The five seeded entries were classified under the old definitions:
+
+```
+775       A   correct, no change
+896       C -> A     cancellation
+VS-189    C -> A     cancellation
+840       C -> D     scope reduction
+903       B   correct, no change — despatch restated, WO Order Qty unchanged
+```
+
+Update the signature on each and adjust the recorded reason where it is now wrong:
+
+- 896 and VS-189: reason should read **short close**, matching 775, rather than being left blank
+  or as an unrecognised pattern. VTPL have confirmed 775 was cancelled by the client with material
+  reallocated; a note that the same is assumed for these two pending confirmation would be
+  accurate.
+- 840: reason should read **scope reduction**, not short close. They are different events and
+  VTPL will read these later.
+- Correct `shourt close` to `short close` wherever it appears.
+
+Statuses stay as they are: 903 superseded, 775 explained, and 840, 896, VS-189 open pending VTPL's
+answer.
+
+---
+
+## WHAT I WAS WRONG ABOUT, FOR THE RECORD
+
+I said import #64 was an incomplete snapshot needing repair. Your explanation is correct and mine
+was not: `order_review_rows` is a **merged current book with last-seen ownership**, not a
+per-import snapshot table. 504 rows means 504 structures have not been superseded by #66, and
+#64's import summary still records 2,289 parsed and kept with the source retained and
+hash-verified.
+
+**No repair is needed on #64.** Please disregard that instruction entirely.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change which regressions block. All four blocked correctly; only the labelling was wrong.
+- Do NOT change the block/warn split, the five-column rule, or the tolerance.
+- Do NOT delete or re-import import #64.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the eight material columns, or the normaliser.
+- Do NOT touch the current 24-August imports.
+
+---
+
+## ACCEPTANCE CHECK
+
+Re-run the same reconstruction — 23-August source against 24-August source, no import — and
+confirm the classification is now:
+
+```
+Likely cancellation or scope transfer (3)   775 · 896 · VS-189
+Likely scope reduction (1)                  840
+Unrecognised (0)
+```
+
+Then confirm the register holds five entries with the corrected signatures and reasons, and that
+production figures are untouched:
+
+```
+TLT  12,364.672 MT / 69,594 marks · unclassified 0 · 67 projects
+```
+
+State which database every query ran against.

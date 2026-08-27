@@ -1,0 +1,110 @@
+# Bucket E: source the dropdowns from Buckets C and D only
+
+On the Inventory (Bucket List) page, a project cannot currently be moved into **Bucket E —
+Material Ready But Not Dispatched**. The Add button never enables.
+
+## THE CAUSE
+
+`ManualAddForm` requires both a project and a batch before it will submit:
+
+```ts
+const canSubmit = !!projectCode.trim() && !!mfcBatch && !isPending;
+```
+
+The batch dropdown is fed by `projectMfcBatches` in `artifacts/tracker/src/lib/inventory.ts`
+(line 255), which is built from every raw row that still has pending marks:
+
+```ts
+for (const r of rawRows) {
+  if (!r.hasWipMarks) continue;
+  ...
+}
+```
+
+So the batch list is drawn from **unfinished** material, while Bucket E is for material that is
+**finished and ready to ship**. Where a project has no pending marks the list comes back empty,
+the second dropdown is disabled, and the Add button can never enable.
+
+## THE RULE TO IMPLEMENT
+
+A project and batch may only be moved into E if it is currently sitting in **Bucket C or Bucket
+D**. That is the correct closure: an E entry suppresses matching entries from C and D, so E
+should only ever be reachable from those two buckets.
+
+Two-step selection, unchanged in shape:
+
+1. **Project dropdown** — only projects that appear in Bucket C or Bucket D.
+2. **Batch dropdown** — only the MFC batches that project has in C or D. Disabled until a
+   project is chosen.
+3. **Add** — enables only when both are set.
+
+For reference, the two source buckets are:
+
+- **C** — "RM Complete – Material Under Production": `fileBalReleaseMt <= 0`, has WIP marks
+- **D** — "Dispatch Clearance Recd But Production Not Complete": `inspectionMt > 0`, has WIP marks
+
+## HOW TO BUILD IT
+
+Add a **separate** map — do not change `projectMfcBatches`. That map is also consumed by
+`MfcBatchColorForm` (line 1136) and by the stale-batch warning in the manual entry list
+(line 978), and both of those legitimately want the full pending-marks set. Changing it in place
+would alter the Colour form's behaviour as a side effect.
+
+In `lib/inventory.ts`, alongside the existing map, build and return:
+
+```ts
+// Projects and batches eligible for Bucket E — drawn from the computed
+// C and D buckets only, since an E entry suppresses matching C/D entries.
+const eEligibleMfcBatches = useMemo(() => {
+  const map = new Map<string, string[]>();
+  for (const card of [...buckets.c, ...buckets.d]) {
+    if (!map.has(card.project)) map.set(card.project, []);
+    const batches = map.get(card.project)!;
+    if (!batches.includes(card.mfcBatch)) batches.push(card.mfcBatch);
+  }
+  for (const [, batches] of map) {
+    batches.sort((a, b) => (a === "Z" ? 1 : b === "Z" ? -1 : a.localeCompare(b)));
+  }
+  return map;
+}, [buckets.c, buckets.d]);
+```
+
+Note this must be computed **after** `buckets`, not before — it depends on `computeAutoBuckets`.
+
+Then in `inventory.tsx`:
+
+- Pass `eEligibleMfcBatches` to the Bucket E `ManualAddForm` (line 2307) in place of
+  `projectMfcBatches`.
+- Derive that form's project list from `Array.from(eEligibleMfcBatches.keys()).sort()` rather
+  than from `knownProjects`, so the project dropdown is restricted too.
+- Leave the `MfcBatchColorForm` (line 2325) on `projectMfcBatches` exactly as it is.
+
+## A CONSEQUENCE TO EXPECT, NOT TO FIX
+
+Because C and D are computed **with** `eExcludeKeys` already applied, a project and batch already
+in E is suppressed from C and D and therefore will not reappear in the dropdown. That is correct
+— it prevents duplicate entries. Do not add separate de-duplication logic.
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change `computeAutoBuckets`, the A/B/C/D rules, the `hasWipMarks` filter, or the
+  `eExcludeKeys` suppression logic.
+- Do NOT change `projectMfcBatches` itself, or the Colour form that uses it.
+- Do NOT change the `inventory_manual_e` schema, the upsert, or the delete path.
+- Do NOT remove the `canEdit` wrapper — the form should still be hidden for unauthenticated
+  users.
+- Do NOT touch anything outside the Inventory page.
+
+## ACCEPTANCE CHECK
+
+1. Pick any project shown in Bucket C or D. It must appear in the E project dropdown, the batch
+   dropdown must offer exactly the batches that project holds in C or D, and Add must enable.
+2. A project present only in Bucket A or B must **not** appear in the E project dropdown.
+3. After adding, that project and batch must disappear from C or D, the E list must show it, and
+   the `eRemovedFromCCount` / `eRemovedFromDCount` counters must move by the corresponding number
+   of structures.
+4. Deleting the E entry must return it to C or D.
+5. The MFC Batch Colour form must be unchanged — same project list, same batch list as before.
+
+Please paste the project list the E dropdown now offers, and the batch list for one project,
+alongside the C and D contents for that same project so I can confirm they match.

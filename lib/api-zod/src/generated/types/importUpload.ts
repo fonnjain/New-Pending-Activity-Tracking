@@ -5,9 +5,13 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ImportUploadExpectedType } from './importUploadExpectedType';
 
 export interface ImportUpload {
   file: Blob;
   label?: string;
   reportDate?: string;
+  /** The upload slot chosen by the user. Retained only with temporary staging bytes so a WIP reset cannot discard a staged Order Review that a malformed workbook prevents auto-detecting.
+   */
+  expectedType?: ImportUploadExpectedType;
 }

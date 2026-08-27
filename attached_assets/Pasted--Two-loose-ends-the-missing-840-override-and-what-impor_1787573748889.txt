@@ -1,0 +1,118 @@
+# Two loose ends: the missing 840 override, and what import #64 actually is
+
+The TypeScript work is a real improvement — the API typecheck now gates the build, and confirming
+that `parse.ts`, `lib/domain` and `dataCheck.ts` had zero diagnostics is the reassuring part. The
+seventeen were all in `ai.ts`, `imports.ts`, `productionMovement.ts` and `users.ts`, away from the
+calculation path.
+
+The production figures also reconcile exactly against my own parse of the source file, and
+`unclassified = 0` closes this afternoon's regression.
+
+Two things in your report do not line up, and you flagged the first yourself.
+
+---
+
+## PART 1 — project 840 is missing from the override record
+
+You reported the override metadata on Order Review #66 as **775, 896 and VS-189**, all with reason
+`shourt close`, and noted that 840 is absent.
+
+The three short-closed projects make sense together. **840 does not belong with them.** It is a
+different event:
+
+```
+775 · 896 · VS-189    all five cumulative columns to zero, structure list replaced
+                      -> short close. VTPL confirmed 775 was cancelled by the
+                         client with material reallocated
+
+840                   still fully present with every structure intact
+                      WO Order Qty       370.608 -> 357.143   -13.465
+                      Progress Despatch  271.432 -> 261.205   -10.227
+                      -> the ORDER ITSELF shrank and every stage followed it.
+                         A scope reduction, not a close
+```
+
+So either 840 blocked and was not persisted, or it did not block at all. Please run:
+
+```sql
+SELECT project_code, columns_affected, stored_value, incoming_value,
+       signature, action_taken, status
+  FROM anomaly_register
+ WHERE seen_on >= '2026-08-24'
+ ORDER BY project_code;
+```
+
+and report the staging output for the 24-August Order Review — the full block list as the panel
+showed it, not only what was persisted.
+
+**If 840 did not block**, that is a rule gap. Its despatch fell 271.432 → 261.205 MT, a plain
+cumulative decrease well outside the 0.001 MT tolerance, and the five-column rule should catch it.
+Find out why it did not and report before changing anything.
+
+**If it blocked but was not recorded**, the override persistence is dropping entries and the
+register will inherit the gap. That matters more than the single project — an audit record that
+silently omits one of four is worse than none, because it looks complete.
+
+### While the entries are being touched
+
+- Correct `shourt close` to `short close`. VTPL will read these later.
+- Once 840's entry is found or created, its reason should say **scope reduction**, not short close.
+  The distinction is the whole point of the signature classifier.
+
+---
+
+## PART 2 — import #64 is not a usable 23-August snapshot
+
+You now report #64 as **504 rows across 55 projects**. After the deletion you reported it as
+**2,108 rows**. So the repointing has been undone at some point — which is good, and the structure
+checks are clean: no `OC-1A` under 775, no `ISODT` under 896. **#64 was not contaminated.**
+
+But 504 rows over 55 projects is far short of what the 23-August file contains. The source has
+roughly **2,280 data rows** and the 23-August WIP has **92 TLT projects**.
+
+So #64 is intact but incomplete. It is not in use — 24-August is current — and nothing on screen
+is affected. It only matters if a 23-August fallback is ever needed, and today it would give about
+a fifth of the order book.
+
+Please report:
+
+1. What reverted #64 from 2,108 rows to 504 — was that the new deletion logic pruning the
+   repointed rows, or something else?
+2. Whether 504 rows / 55 projects is what the 23-August Order Review import originally created, or
+   whether rows have been lost.
+
+**Then, if it is incomplete:** delete #64 and re-import the 23-August Order Review from source.
+The new deletion logic makes this safe, and importing an older report date will not disturb the
+current selection because 24-August has the later date. Confirm afterwards that it reproduces the
+23-August figures — roughly 2,280 parsed rows and 92 projects with live WIP.
+
+Do not do this before reporting the two answers above.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change which regressions block, the block/warn split, the five-column rule, the
+  tolerance, or the signature classifier — until Part 1 establishes whether 840 blocked.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the eight material columns, or the normaliser.
+- Do NOT touch the current 24-August imports. They are correct.
+- Do NOT alter behaviour to make a figure match. Report the discrepancy instead.
+
+---
+
+## ACCEPTANCE CHECK
+
+After any change, confirm the current production import is untouched:
+
+```
+TLT           12,364.672 MT / 69,594 marks · unclassified 0 · 67 projects
+Release        1,555.684    Quality Check  2,172.292
+Awaiting         860.838    Galvanising    1,988.420
+Cutting        1,177.156    FG             4,610.281
+```
+
+And that the anomaly register holds **five** entries — 903 superseded, 775 explained, and 840, 896,
+VS-189 open — with 840 present and described as a scope reduction.
+
+State which database every query ran against.

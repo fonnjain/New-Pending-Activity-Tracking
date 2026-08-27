@@ -8,6 +8,7 @@ import {
   type ParseSummary,
 } from "@workspace/db";
 import { GetImportMovementParams } from "@workspace/api-zod";
+import { previousImportCondition } from "../lib/previous-import-condition";
 
 const router = Router();
 
@@ -76,10 +77,7 @@ router.get("/imports/:id/contractor-movement", async (req, res): Promise<void> =
       createdAt: importsTable.createdAt,
     })
     .from(importsTable)
-    .where(or(
-      lt(importsTable.reportDate, target.reportDate),
-      and(eq(importsTable.reportDate, target.reportDate), lt(importsTable.id, target.id)),
-    ))
+    .where(previousImportCondition(target.reportDate, target.id))
     .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
     .limit(7);
 
@@ -267,10 +265,7 @@ router.get("/imports/:id/production-movement", async (req, res): Promise<void> =
       summary: importsTable.summary,
     })
     .from(importsTable)
-    .where(or(
-      lt(importsTable.reportDate, target.reportDate),
-      and(eq(importsTable.reportDate, target.reportDate), lt(importsTable.id, target.id)),
-    ))
+    .where(previousImportCondition(target.reportDate, target.id))
     .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
     .limit(7);
 

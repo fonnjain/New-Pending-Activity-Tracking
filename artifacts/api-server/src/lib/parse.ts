@@ -1,17 +1,9 @@
 import { createHash } from "node:crypto";
 import * as XLSX from "xlsx";
-import { canonicalActivity, deriveHoleOperation } from "@workspace/domain";
+import { canonicalActivity, deriveHoleOperation, isFinishedGoodsType } from "@workspace/domain";
 import type { InsertRecordPool, ParseSummary } from "@workspace/db";
 
 export type { ParseSummary };
-
-/** The permanent ERP WIP CSV export has one fixed, 28-column header row. */
-export const WIP_CSV_COLUMN_COUNT = 28;
-
-/** True only when a CSV header has the fixed column count required at ingest. */
-export function hasExactWipCsvColumnCount(columnsFound: readonly string[]): boolean {
-  return columnsFound.length === WIP_CSV_COLUMN_COUNT;
-}
 
 // A parsed source row, identical in shape to a record_pool insert plus its
 // content hash. In-sheet duplicates are PRESERVED (no within-file de-dup).
@@ -22,6 +14,8 @@ export interface ParseResult {
   summary: ParseSummary;
   /** CSV source dates later than the selected report date. Import routes refuse these. */
   futureDateCount: number;
+  /** Per-source-column date read and future-date counts for the staging panel. */
+  dateStats: Record<"jobCardDate" | "assignDate" | "lastProductionDate", { parsed: number; future: number }>;
 }
 
 type Cell = string | number | boolean | Date | null | undefined;
@@ -87,6 +81,11 @@ const KNOWN_ORDER_NATURES = new Set([
   "RURAL ELECTRIFICATION",
   "JOB WORK",
 ]);
+
+/** Whether an ERP Order Nature is part of the currently understood value set. */
+export function isKnownOrderNature(value: string | null | undefined): boolean {
+  return KNOWN_ORDER_NATURES.has((value ?? "").trim().toUpperCase());
+}
 
 // Classify a row from its Order Nature (authoritative), Tower Sub Type (confirm
 // only), Section, and resolved job. Returns the classification plus whether the
@@ -173,6 +172,12 @@ export function classifyMark(input: {
 export function normalizeProject(value: Cell): string {
   let s = cellToString(value);
   if (!s) return "";
+  // Project codes are identifiers, not whitespace-delimited numbers. Preserve
+  // meaningful words such as "RAILWAY BATCH 10", while normalizing harmless
+  // formatting differences shared by WIP and Order Review.
+  s = s.replace(/\s+/g, " ").trim();
+  // A single leading dash is a formatting artifact in the source export.
+  if (s.startsWith("-") && s.length > 1) s = s.slice(1).trim();
   // "920.0" -> "920", "794." -> "794"
   s = s.replace(/\.0+$/, "");
   s = s.replace(/\.$/, "");
@@ -251,6 +256,16 @@ const COL = {
   isWeldedStructure: "Is Welded Structure",
   salesOrderStatus: "Sales Order Status",
   isLastActivity: "Is Last Activity",
+  // ERP material/issue block, added 22-Aug-2026 (CSV cols AC–AJ). Optional:
+  // older WIP exports must continue to ingest without these fields.
+  lotDocumentNo: "Lot Document No.",
+  lotDocumentDate: "Lot Document Date",
+  lotSourceForm: "Lot Source Form",
+  issueLotRate: "Issue Lot Rate",
+  issueDocumentNo: "Issue Document No.",
+  issueDocumentDate: "Issue Document Date",
+  sinRateForIssueMonth: "SinRateForIssueMonth",
+  nearestSinDateToIssue: "NearestSinDateToIssue",
 } as const;
 
 // --- Source Column Watch -------------------------------------------------
@@ -260,9 +275,23 @@ const COL = {
 // code changes. Descriptive only; never a DC rule, never affects pass/fail.
 // Declared here (before the column-tier lists) because a watched column is by
 // construction also a KNOWN column: OPTIONAL_WIP_COLUMNS derives from it.
-export const WATCHED_SOURCE_COLUMNS: ReadonlyArray<{ key: string; header: string }> = [
-  { key: "bomStatus", header: COL.bomStatus },
-  { key: "isWeldedStructure", header: COL.isWeldedStructure },
+export const WATCHED_SOURCE_COLUMNS: ReadonlyArray<{
+  key: string;
+  header: string;
+  mode: SourceColumnWatchMode;
+}> = [
+  { key: "bomStatus", header: COL.bomStatus, mode: "distribution" },
+  { key: "isWeldedStructure", header: COL.isWeldedStructure, mode: "distribution" },
+  { key: "salesOrderStatus", header: COL.salesOrderStatus, mode: "distribution" },
+  { key: "isLastActivity", header: COL.isLastActivity, mode: "distribution" },
+  { key: "lotDocumentNo", header: COL.lotDocumentNo, mode: "coverage" },
+  { key: "lotDocumentDate", header: COL.lotDocumentDate, mode: "coverage" },
+  { key: "lotSourceForm", header: COL.lotSourceForm, mode: "distribution" },
+  { key: "issueLotRate", header: COL.issueLotRate, mode: "numeric" },
+  { key: "issueDocumentNo", header: COL.issueDocumentNo, mode: "coverage" },
+  { key: "issueDocumentDate", header: COL.issueDocumentDate, mode: "coverage" },
+  { key: "sinRateForIssueMonth", header: COL.sinRateForIssueMonth, mode: "numeric" },
+  { key: "nearestSinDateToIssue", header: COL.nearestSinDateToIssue, mode: "coverage" },
 ];
 
 // COL entries that are allowed to be absent from a file's header row — they are
@@ -270,11 +299,7 @@ export const WATCHED_SOURCE_COLUMNS: ReadonlyArray<{ key: string; header: string
 // Derived from WATCHED_SOURCE_COLUMNS: adding a watched column automatically
 // makes it optional-known everywhere (format check included).
 const OPTIONAL_WIP_COLUMNS = new Set<string>(
-  [
-    ...WATCHED_SOURCE_COLUMNS.map((c) => c.header),
-    COL.salesOrderStatus,
-    COL.isLastActivity,
-  ],
+  WATCHED_SOURCE_COLUMNS.map((c) => c.header),
 );
 
 // ── WIP format baseline & sanity check ──────────────────────────────────────
@@ -356,8 +381,20 @@ const KNOWN_WIP_COLUMN_BASE: readonly string[] = [
   "Last Production Entry Date",
   "Work Order No.",
 ];
+/** Newer CSV columns accepted and carried through untouched for source visibility. */
+export const APPENDED_WIP_COLUMNS: readonly string[] = [
+  "Lot Document No.",
+  "Lot Document Date",
+  "Lot Source Form",
+  "Issue Lot Rate",
+  "Issue Document No.",
+  "Issue Document Date",
+  "SinRateForIssueMonth",
+  "NearestSinDateToIssue",
+];
 export const KNOWN_WIP_COLUMN_LIST: readonly string[] = [
   ...KNOWN_WIP_COLUMN_BASE,
+  ...APPENDED_WIP_COLUMNS,
   ...Array.from(OPTIONAL_WIP_COLUMNS),
 ];
 
@@ -399,6 +436,8 @@ export interface WipFormatCheck {
   unexpectedFound: string[];
   /** Known-optional columns absent from this file. Informational, never a warning. */
   optionalAbsent: string[];
+  /** Recognised appended ERP columns present in this file; informational only. */
+  appendedNew: string[];
   renames: WipColumnRename[];
   reorders: WipColumnReorder[];
   criticalMissing: string[];
@@ -432,6 +471,9 @@ export function checkWipFormat(columnsFound: string[]): WipFormatCheck {
   // Tier 2 — known columns absent from this file (informational only)
   const optionalAbsent = KNOWN_WIP_COLUMN_LIST.filter(
     (c) => !foundPosByNorm.has(normHeader(c)),
+  );
+  const appendedNew = APPENDED_WIP_COLUMNS.filter((c) =>
+    foundPosByNorm.has(normHeader(c)),
   );
   // Tier 3 — columns recognised by neither list: the only warning-worthy case
   const unexpectedFound: string[] = [];
@@ -495,6 +537,7 @@ export function checkWipFormat(columnsFound: string[]): WipFormatCheck {
     missingExpected: criticalMissing,
     unexpectedFound,
     optionalAbsent,
+    appendedNew,
     renames,
     reorders: ok ? [] : reorders,
     criticalMissing,
@@ -956,11 +999,6 @@ export function readStructural(buffer: Buffer): StructuralRead {
       });
       const rowsWithMark = rows.filter((row) => cellToString(row[COL.markNo])).length;
       const problems: string[] = [];
-      if (!hasExactWipCsvColumnCount(headers)) {
-        problems.push(
-          `Expected ${WIP_CSV_COLUMN_COUNT} CSV columns but found ${headers.length}.`,
-        );
-      }
       if (missingColumns.length > 0) {
         problems.push(`Missing expected columns: ${missingColumns.join(", ")}.`);
       }
@@ -1076,9 +1114,14 @@ export interface SourceColumnWatchColumn {
   // false = the file was inspected and the column is absent ("not present in
   // this file"). Imports whose summary lacks the snapshot entirely predate it.
   present: boolean;
+  mode: SourceColumnWatchMode;
+  populatedCount: number;
+  numericSummary: { min: number; max: number; mean: number } | null;
   values: { value: string | null; marks: number; weightMt: number }[];
   crossTab: { orderNature: string; value: string | null; marks: number }[];
 }
+
+type SourceColumnWatchMode = "coverage" | "distribution" | "numeric";
 
 export function parseWorkbook(
   buffer: Buffer,
@@ -1123,10 +1166,21 @@ export function parseWorkbook(
   let ntltOrphanWtMt = 0;
   let unknownOrderNatureCount = 0;
   let futureDateCount = 0;
+  const dateStats: ParseResult["dateStats"] = {
+    jobCardDate: { parsed: 0, future: 0 },
+    assignDate: { parsed: 0, future: 0 },
+    lastProductionDate: { parsed: 0, future: 0 },
+  };
   let unclassifiedRowCount = 0;
   let unclassifiedWtKg = 0;
   // Up to 5 distinct type+status combos captured as diagnostic samples.
   const unclassifiedSampleMap = new Map<string, { type: string; status: string }>();
+  // Type is the source of truth for finished-goods exclusion. Preserve a
+  // compact import audit of every value so new ERP values are visible instead
+  // of silently being treated as live work.
+  const typeCountMap = new Map<string, { type: string; rows: number }>();
+  const unknownTypeMap = new Map<string, { type: string; rows: number }>();
+  let fgExcludedRowCount = 0;
   // Per-NTLT-section: distinct Tower Types seen. Used to flag Section→TowerType
   // mismatches (a source-data quality signal, not a parse error).
   const ntltSectionTowerTypes = new Map<string, { types: Set<string>; marks: number }>();
@@ -1155,7 +1209,7 @@ export function parseWorkbook(
     // stale/accumulated variable). Falls through to normal mark processing so
     // identity/hashing is completely unchanged.
     const rowType = cellToString(row["Type"]);
-    if (rowType && rowType.trim().toUpperCase() === "FG PENDING FOR DISPATCH") {
+    if (isFinishedGoodsType(rowType)) {
       const fgProject = rawProject || UNASSIGNED_JOB;
       const fgWt = toNumber(row[COL.balanceWt]) ?? 0;
       fgWipByJob[fgProject] = (fgWipByJob[fgProject] ?? 0) + fgWt;
@@ -1214,7 +1268,7 @@ export function parseWorkbook(
     if (conflict) classificationConflicts++;
 
     // Track rows with unknown/blank Order Nature for the upload sanity check.
-    if (!KNOWN_ORDER_NATURES.has((orderNature ?? "").trim().toUpperCase())) {
+    if (!isKnownOrderNature(orderNature)) {
       unknownOrderNatureCount++;
     }
 
@@ -1342,14 +1396,36 @@ export function parseWorkbook(
     base.isWeldedStructure = emptyToNull(row[COL.isWeldedStructure]);
     base.salesOrderStatus = emptyToNull(row[COL.salesOrderStatus]);
     base.isLastActivity = emptyToNull(row[COL.isLastActivity]);
+    // Material/issue additions (AC–AJ): all descriptive and deliberately
+    // outside hashRow. Their day-first CSV dates must not pass through a
+    // locale parser (01/08/2024 means 1 August, never 8 January).
+    base.lotDocumentNo = emptyToNull(row[COL.lotDocumentNo]);
+    base.lotDocumentDate =
+      parseCsvDayFirst(row[COL.lotDocumentDate]) ?? formatDate(row[COL.lotDocumentDate]);
+    base.lotSourceForm = emptyToNull(row[COL.lotSourceForm]);
+    base.issueLotRate = toNumber(row[COL.issueLotRate]);
+    base.issueDocumentNo = emptyToNull(row[COL.issueDocumentNo]);
+    base.issueDocumentDate =
+      parseCsvDayFirst(row[COL.issueDocumentDate]) ?? formatDate(row[COL.issueDocumentDate]);
+    base.sinRateForIssueMonth = toNumber(row[COL.sinRateForIssueMonth]);
+    base.nearestSinDateToIssue =
+      parseCsvDayFirst(row[COL.nearestSinDateToIssue]) ?? formatDate(row[COL.nearestSinDateToIssue]);
 
-    if (csv && options?.reportDate) {
-      for (const date of [
-        parseCsvDayFirst(row[COL.jobCardDate]),
-        base.assignDate,
-        base.lastProductionDate,
-      ]) {
-        if (date != null && date > options.reportDate) futureDateCount++;
+    const sourceDates = {
+      jobCardDate: csv
+        ? parseCsvDayFirst(row[COL.jobCardDate])
+        : formatDate(row[COL.jobCardDate]),
+      assignDate: base.assignDate,
+      lastProductionDate: base.lastProductionDate,
+    };
+    for (const [key, date] of Object.entries(sourceDates) as Array<
+      [keyof ParseResult["dateStats"], string | null]
+    >) {
+      if (date == null) continue;
+      dateStats[key].parsed++;
+      if (options?.reportDate && date > options.reportDate) {
+        dateStats[key].future++;
+        futureDateCount++;
       }
     }
 
@@ -1358,8 +1434,24 @@ export function parseWorkbook(
     // files have no rowType and are skipped. A non-zero count means the file has a
     // new value not yet handled — surface as a warning rather than silently bucketing.
     const rowTypeUpper = rowType.trim().toUpperCase();
+    const typeKey = rowTypeUpper || "\u0000blank";
+    const typeCount = typeCountMap.get(typeKey);
+    if (typeCount) {
+      typeCount.rows++;
+    } else {
+      typeCountMap.set(typeKey, { type: rowType.trim() || "(blank / legacy)", rows: 1 });
+    }
+    if (isFinishedGoodsType(rowType)) fgExcludedRowCount++;
     if (rowTypeUpper) {
       const unknownType = !KNOWN_WIP_TYPES.has(rowTypeUpper);
+      if (unknownType) {
+        const unknown = unknownTypeMap.get(rowTypeUpper);
+        if (unknown) {
+          unknown.rows++;
+        } else {
+          unknownTypeMap.set(rowTypeUpper, { type: rowType.trim(), rows: 1 });
+        }
+      }
       // For rows with a known Type (excluding FG whose status is always blank),
       // any non-empty Job Card Status must also be a known value.
       const unknownStatus =
@@ -1395,9 +1487,59 @@ export function parseWorkbook(
     headerCells.filter((c): c is string => typeof c === "string").map((c) => c.trim()),
   );
   const sourceColumnWatch: SourceColumnWatchColumn[] = WATCHED_SOURCE_COLUMNS.map(
-    ({ key, header }) => {
+    ({ key, header, mode }) => {
       const present = headerKeys.has(header);
-      if (!present) return { key, header, present, values: [], crossTab: [] };
+      if (!present) {
+        return {
+          key,
+          header,
+          present,
+          mode,
+          populatedCount: 0,
+          numericSummary: null,
+          values: [],
+          crossTab: [],
+        };
+      }
+      const rawValues = rows
+        .map((r) => (r as Record<string, unknown>)[key])
+        .filter((value) => value !== null && value !== undefined && value !== "");
+      if (mode === "numeric") {
+        const values = rawValues.filter(
+          (value): value is number => typeof value === "number" && Number.isFinite(value),
+        );
+        const populatedCount = values.length;
+        const sum = values.reduce((total, value) => total + value, 0);
+        return {
+          key,
+          header,
+          present,
+          mode,
+          populatedCount,
+          numericSummary: populatedCount
+            ? {
+                min: Math.min(...values),
+                max: Math.max(...values),
+                mean: sum / populatedCount,
+              }
+            : null,
+          values: [],
+          crossTab: [],
+        };
+      }
+      const populatedCount = rawValues.length;
+      if (mode === "coverage") {
+        return {
+          key,
+          header,
+          present,
+          mode,
+          populatedCount,
+          numericSummary: null,
+          values: [],
+          crossTab: [],
+        };
+      }
       const valueAgg = new Map<string, { value: string | null; marks: number; weightKg: number }>();
       const crossAgg = new Map<string, { orderNature: string; value: string | null; marks: number }>();
       for (const r of rows) {
@@ -1418,6 +1560,9 @@ export function parseWorkbook(
         key,
         header,
         present,
+        mode,
+        populatedCount,
+        numericSummary: null,
         values: Array.from(valueAgg.values())
           .sort((a, b) => b.marks - a.marks)
           .map(({ value, marks, weightKg }) => ({
@@ -1458,6 +1603,7 @@ export function parseWorkbook(
   return {
     rows,
     futureDateCount,
+    dateStats,
     summary: {
       rowsRead,
       rowsKept: rows.length,
@@ -1476,6 +1622,19 @@ export function parseWorkbook(
         unclassifiedRowCount,
         unclassifiedWtKg,
         unclassifiedSamples: Array.from(unclassifiedSampleMap.values()),
+      }),
+      typeCounts: Array.from(typeCountMap.values()).sort(
+        (a, b) => b.rows - a.rows || a.type.localeCompare(b.type),
+      ),
+      ...(fgExcludedRowCount > 0 && { fgExcludedRowCount }),
+      ...(unknownTypeMap.size > 0 && {
+        unknownTypeRowCount: Array.from(unknownTypeMap.values()).reduce(
+          (total, entry) => total + entry.rows,
+          0,
+        ),
+        unknownTypeValues: Array.from(unknownTypeMap.values())
+          .sort((a, b) => b.rows - a.rows || a.type.localeCompare(b.type))
+          .slice(0, 5),
       }),
       ...(() => {
         const mismatches = Array.from(ntltSectionTowerTypes.entries())

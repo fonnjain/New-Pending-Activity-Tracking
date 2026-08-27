@@ -1,0 +1,100 @@
+# Three checks, then publish
+
+The 21-Aug import verifies. I have confirmed against the source files that TLT is
+**13,306.311 MT / 74,793 marks** with all six buckets matching and unclassified 0, NTLT is
+**9,574.097 MT / 461 marks**, the `P` alias fired on exactly **497 marks / 119.844 MT**, and the
+whole-file weight is **22,880.408 MT**. Every one is exact.
+
+The two engineering additions were necessary and correct — raising the upload ceiling for a
+33.5 MB file, and batching the hash lookups so a 75k-row import stays under Postgres's parameter
+limit. Neither was asked for and both would have blocked ingest.
+
+Three things to report before publishing, all read-only. **State which database each ran against.**
+
+---
+
+## 1. The order-book reconciliation
+
+Not in the last report. Per project, `WIP Total = WO Order Qty − Progress Despatch`, TLT only:
+
+```
+expected: 92 projects · WIP 13,306.311 MT · total gap −441.393 MT (3.32%)
+          within ±0.5 MT  65 of 92
+          within ±5 MT    80 of 92
+worst five: 900 −161.584 · 912 −137.963 · 907 −93.540 · 938 −72.806 · VS-33 −68.150
+```
+
+If the gap comes back as **−440.619** rather than −441.393, project **868** is still not parsing —
+that 0.774 MT difference is its single blank-Tower-Type row.
+
+Also give DC17's category breakdown (A–G, count and weight each), not just the 303 flagged total.
+Category **B** is the only actionable one and it is the figure VTPL will be asked about.
+
+## 2. `activity_raw` isolation
+
+```sql
+SELECT count(*) FROM record_pool WHERE activity_raw IS NOT NULL;
+SELECT activity, activity_raw, count(*) FROM record_pool
+ WHERE activity_raw IS NOT NULL GROUP BY 1,2;
+```
+
+Expected: **497 rows, all `activity = 'RFI'` with `activity_raw = 'P'`**, and nothing else.
+
+This is the check that proves the alias ran at parse time on the new file only, and did not stamp
+any pre-existing row. The last report confirmed the alias fired but not that it left the rest
+alone.
+
+## 3. Order Review project count
+
+The 21-Aug file has **169 raw project banners collapsing to 165** after normalisation. Four codes
+appear twice and merge:
+
+```
+840 · 866 · 907 · 912
+```
+
+The report says **164**. That is one short. Please list the 164 the parser produced so I can
+identify which is missing — **907 and 912 are two of the five reconciliation outliers**, so if one
+of those is the missing project the gap figures in item 1 will not be comparable.
+
+---
+
+## THEN PUBLISH
+
+Six changes have been built and verified in dev and none is live. Production last saw 16-Aug data:
+
+```
+critical-column gate (#42)      ·  four new record_pool columns
+Source Column Watch panel       ·  export column alignment
+P/S → RFI alias                 ·  CSV format support
+```
+
+The schema delta is two additive, non-destructive columns — `sales_order_status` and
+`is_last_activity`. Publish today.
+
+**One reason not to wait.** `bom_status` and `is_welded_structure` are snapshotted at parse time,
+so every production import since 16-Aug has lost those values permanently. Re-importing the source
+files is the only recovery, and only while those files are still retained.
+
+After publishing, confirm against production:
+
+```
+the 21-Aug import ingests and reproduces the figures above
+loadLatestWipImport() and loadLatestOrderReview() both resolve to 21-Aug
+DC3 = 1 violation (893 / 1BPI4)  ·  DC6 pass  ·  DC16 pass  ·  unclassified 0
+```
+
+---
+
+## NOT NOW — two open items, correctly parked
+
+**Follow-up #49, the NTLT fallback.** Confirmed as a real defect. Not Started moved from 4,641.607
+to 4,646.999 MT and 135 to 137 marks, absorbing two `Job Card WIP` rows — `GENERAL / BL / 3.190`
+and `RAILWAY STRUCTURE / blank / 2.202`. A Type-first model should not place WIP rows in Not
+Started. It is 5.392 MT so nothing is distorted, and raising it rather than guessing a rule was
+the right call. Leave it until VTPL says what `BL` means.
+
+**DC12–DC14 are not comparable to the earlier baselines.** They span 16-Aug to 21-Aug, a five-day
+gap, which is why they read 271 / 231 / 863 against roughly 169 / 142 / 884 on a one-day pair.
+Nothing is wrong — but do not treat these as the new normal. Once consecutive daily imports
+resume, re-baseline them on a one-day pair.

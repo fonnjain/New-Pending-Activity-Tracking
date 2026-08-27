@@ -1205,6 +1205,16 @@ export const ListImportsResponseItem = zod.object({
   "type": zod.string(),
   "status": zod.string()
 })).optional().describe('Up to 5 distinct Type+Status combos from unclassified rows, for diagnosis. Absent when unclassifiedRowCount is absent or zero.\n'),
+  "typeCounts": zod.array(zod.object({
+  "type": zod.string(),
+  "rows": zod.number()
+})).optional().describe('Every observed WIP Type value, with casing variants combined. Blank legacy Type values are represented as \"(blank \/ legacy)\".\n'),
+  "fgExcludedRowCount": zod.number().optional().describe('Explicit FG Pending For Dispatch rows. They remain available for FG reporting but are excluded from live-work calculations.\n'),
+  "unknownTypeRowCount": zod.number().optional().describe('Number of rows with an unknown nonblank WIP Type.'),
+  "unknownTypeValues": zod.array(zod.object({
+  "type": zod.string(),
+  "rows": zod.number()
+})).optional().describe('Up to five unknown WIP Type values, with row counts.'),
   "fgWipByJob": zod.record(zod.string(), zod.number()).optional().describe('Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = \"FG Pending For Dispatch\". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.\n'),
   "fgWipByStructure": zod.record(zod.string(), zod.record(zod.string(), zod.number())).optional().describe('Same as fgWipByJob but broken down by structure. Outer key = project; inner key = alias\/structure (uppercased). Values in kg (same unit as balanceWt). Absent when the file has no Type column or no FG rows.\n')
 }),
@@ -1233,7 +1243,8 @@ export const ListImportsResponse = zod.array(ListImportsResponseItem)
 export const UploadImportBody = zod.object({
   "file": zod.instanceof(File),
   "label": zod.string().optional(),
-  "reportDate": zod.string().optional()
+  "reportDate": zod.string().optional(),
+  "expectedType": zod.enum(['wip', 'order-review']).optional().describe('The upload slot chosen by the user. Retained only with temporary staging bytes so a WIP reset cannot discard a staged Order Review that a malformed workbook prevents auto-detecting.\n')
 })
 
 
@@ -1256,7 +1267,8 @@ export const DeleteAllImportsResponse = zod.object({
 export const StageImportBody = zod.object({
   "file": zod.instanceof(File),
   "label": zod.string().optional(),
-  "reportDate": zod.string().optional()
+  "reportDate": zod.string().optional(),
+  "expectedType": zod.enum(['wip', 'order-review']).optional().describe('The upload slot chosen by the user. Retained only with temporary staging bytes so a WIP reset cannot discard a staged Order Review that a malformed workbook prevents auto-detecting.\n')
 })
 
 
@@ -1292,6 +1304,10 @@ export const ValidateStagedImportResponse = zod.object({
 
  * @summary Commit a staged upload
  */
+export const commitStagedImportBodyCumulativeOverrideReasonMax = 1000;
+
+
+
 export const CommitStagedImportBody = zod.object({
   "stagingId": zod.string(),
   "expectedType": zod.enum(['wip', 'order-review']).optional().describe('The file type the upload slot expects. When set and the detected type differs, the commit is rejected (defense-in-depth so a mis-routed file never commits).\n'),
@@ -1299,7 +1315,9 @@ export const CommitStagedImportBody = zod.object({
   "field": zod.string(),
   "from": zod.string().nullable(),
   "to": zod.string().nullable()
-})).optional().describe('Descriptive cleanups the user accepted; applied before parse+merge.')
+})).optional().describe('Descriptive cleanups the user accepted; applied before parse+merge.'),
+  "forceCumulativeRegressionOverride": zod.boolean().optional().describe('One-use Order Review override for an otherwise-blocking cumulative progress regression. Requires cumulativeOverrideReason; never persists in staging or applies to a later import.\n'),
+  "cumulativeOverrideReason": zod.string().min(1).max(commitStagedImportBodyCumulativeOverrideReasonMax).optional().describe('Required operator explanation when forcing a cumulative regression.')
 })
 
 export const CommitStagedImportResponse = zod.union([zod.object({
@@ -1330,6 +1348,16 @@ export const CommitStagedImportResponse = zod.union([zod.object({
   "type": zod.string(),
   "status": zod.string()
 })).optional().describe('Up to 5 distinct Type+Status combos from unclassified rows, for diagnosis. Absent when unclassifiedRowCount is absent or zero.\n'),
+  "typeCounts": zod.array(zod.object({
+  "type": zod.string(),
+  "rows": zod.number()
+})).optional().describe('Every observed WIP Type value, with casing variants combined. Blank legacy Type values are represented as \"(blank \/ legacy)\".\n'),
+  "fgExcludedRowCount": zod.number().optional().describe('Explicit FG Pending For Dispatch rows. They remain available for FG reporting but are excluded from live-work calculations.\n'),
+  "unknownTypeRowCount": zod.number().optional().describe('Number of rows with an unknown nonblank WIP Type.'),
+  "unknownTypeValues": zod.array(zod.object({
+  "type": zod.string(),
+  "rows": zod.number()
+})).optional().describe('Up to five unknown WIP Type values, with row counts.'),
   "fgWipByJob": zod.record(zod.string(), zod.number()).optional().describe('Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = \"FG Pending For Dispatch\". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.\n'),
   "fgWipByStructure": zod.record(zod.string(), zod.record(zod.string(), zod.number())).optional().describe('Same as fgWipByJob but broken down by structure. Outer key = project; inner key = alias\/structure (uppercased). Values in kg (same unit as balanceWt). Absent when the file has no Type column or no FG rows.\n')
 }),
@@ -1431,6 +1459,7 @@ export const CommitStagedImportResponse = zod.union([zod.object({
   "totalReleaseMt": zod.number(),
   "totalFileDespatchMt": zod.number(),
   "skippedTotals": zod.number(),
+  "skippedBanner": zod.number().optional().describe('Banner rows intentionally skipped while parsing.'),
   "missingStructure": zod.number(),
   "missingStructureWtMt": zod.number().optional().describe('Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added.\n'),
   "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
@@ -1456,6 +1485,20 @@ export const CommitStagedImportResponse = zod.union([zod.object({
   "structure": zod.string()
 }).describe('A (project, structure) order-row reference.')).describe('Current rows absent from this upload (kept, not deleted).')
 }).describe('What one Order Review upload changed vs the current order rows.'),zod.null()]),
+  "overrideReason": zod.string().nullable().describe('Reason recorded for a deliberate cumulative-regression override.'),
+  "overrideAt": zod.string().nullable().describe('Timestamp at which a cumulative-regression override was accepted.'),
+  "overrideBy": zod.string().nullable().describe('Authenticated operator who accepted the cumulative-regression override.'),
+  "overrideDetails": zod.union([zod.object({
+  "baselineImportId": zod.number().nullable(),
+  "regressions": zod.array(zod.object({
+  "project": zod.string(),
+  "column": zod.string(),
+  "label": zod.string(),
+  "previousMt": zod.number(),
+  "currentMt": zod.number(),
+  "differenceMt": zod.number()
+}))
+}).describe('Exact project and cumulative-column regressions accepted for one Order Review import.'),zod.null()]),
   "createdAt": zod.string()
 }).describe('One Order Review file upload (rows are upserted, not appended).'),
   "seeded": zod.number().describe('Number of newly seeded (project, structure) dispatch keys.')
@@ -1477,6 +1520,66 @@ export const ListDeletionLogResponseItem = zod.object({
   "deletedBy": zod.string().describe('Display name or email of the user who deleted the file.')
 }).describe('One entry in the import deletion audit log.')
 export const ListDeletionLogResponse = zod.array(ListDeletionLogResponseItem)
+
+
+/**
+ * Authenticated administrator-only audit history of WIP and Order Review staging panels. Evidence is retained independently of staged rows and imports, so deleting or re-importing a file cannot remove its findings.
+
+ * @summary List durable upload staging evidence
+ */
+export const listUploadStageEvidenceResponseReportDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+
+
+export const ListUploadStageEvidenceResponseItem = zod.object({
+  "id": zod.number(),
+  "stagingId": zod.string(),
+  "stagedAt": zod.string(),
+  "sourceFilename": zod.string(),
+  "sourceHash": zod.string().describe('SHA-256 of the exact uploaded source bytes.'),
+  "kind": zod.enum(['wip', 'order-review', 'unknown']),
+  "reportDate": zod.string().regex(listUploadStageEvidenceResponseReportDateRegExp).nullable(),
+  "comparedAgainstImportId": zod.number().nullable(),
+  "blockers": zod.array(zod.unknown()),
+  "warnings": zod.array(zod.unknown()),
+  "assessment": zod.object({
+  "verdict": zod.enum(['blocked', 'review', 'ready']),
+  "blocking": zod.array(zod.object({
+  "title": zod.string(),
+  "detail": zod.string(),
+  "classification": zod.enum(['cancellation-transfer', 'correction', 'scope-reduction', 'unclassified']).optional().describe('Optional read-only classification for a blocking cumulative Order Review regression.')
+})),
+  "warnings": zod.array(zod.object({
+  "title": zod.string(),
+  "detail": zod.string(),
+  "classification": zod.enum(['cancellation-transfer', 'correction', 'scope-reduction', 'unclassified']).optional().describe('Optional read-only classification for a blocking cumulative Order Review regression.')
+})),
+  "deltas": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "previous": zod.number(),
+  "current": zod.number(),
+  "changePercent": zod.union([zod.number(),zod.null()]),
+  "requiresAcknowledgement": zod.boolean()
+})),
+  "information": zod.array(zod.object({
+  "title": zod.string(),
+  "detail": zod.string(),
+  "classification": zod.enum(['cancellation-transfer', 'correction', 'scope-reduction', 'unclassified']).optional().describe('Optional read-only classification for a blocking cumulative Order Review regression.')
+})),
+  "cumulativeOverrideRequired": zod.boolean().describe('True only when the current blocking findings are cumulative Order Review regressions that may be deliberately overridden for this one import after acknowledgement and a recorded reason.\n')
+}),
+  "details": zod.record(zod.string(), zod.unknown()),
+  "projectCodes": zod.array(zod.string()),
+  "outcome": zod.union([zod.literal('imported'),zod.literal('skipped'),zod.literal('expired'),zod.literal('refused'),zod.literal(null)]).nullable(),
+  "outcomeAt": zod.string().nullable(),
+  "outcomeReason": zod.string().nullable(),
+  "importId": zod.number().nullable(),
+  "importDeletedAt": zod.string().nullable(),
+  "importDeletionScope": zod.string().nullable(),
+  "isReconstruction": zod.boolean(),
+  "reconstructionNote": zod.string().nullable()
+}).describe('Immutable evidence of the exact staging-panel findings for one source file. It is independent of the disposable staging row and mutable import history, and never changes import guards or report calculations.\n')
+export const ListUploadStageEvidenceResponse = zod.array(ListUploadStageEvidenceResponseItem)
 
 
 /**
@@ -1602,6 +1705,16 @@ export const GetImportResponse = zod.object({
   "type": zod.string(),
   "status": zod.string()
 })).optional().describe('Up to 5 distinct Type+Status combos from unclassified rows, for diagnosis. Absent when unclassifiedRowCount is absent or zero.\n'),
+  "typeCounts": zod.array(zod.object({
+  "type": zod.string(),
+  "rows": zod.number()
+})).optional().describe('Every observed WIP Type value, with casing variants combined. Blank legacy Type values are represented as \"(blank \/ legacy)\".\n'),
+  "fgExcludedRowCount": zod.number().optional().describe('Explicit FG Pending For Dispatch rows. They remain available for FG reporting but are excluded from live-work calculations.\n'),
+  "unknownTypeRowCount": zod.number().optional().describe('Number of rows with an unknown nonblank WIP Type.'),
+  "unknownTypeValues": zod.array(zod.object({
+  "type": zod.string(),
+  "rows": zod.number()
+})).optional().describe('Up to five unknown WIP Type values, with row counts.'),
   "fgWipByJob": zod.record(zod.string(), zod.number()).optional().describe('Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = \"FG Pending For Dispatch\". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.\n'),
   "fgWipByStructure": zod.record(zod.string(), zod.record(zod.string(), zod.number())).optional().describe('Same as fgWipByJob but broken down by structure. Outer key = project; inner key = alias\/structure (uppercased). Values in kg (same unit as balanceWt). Absent when the file has no Type column or no FG rows.\n')
 }),
@@ -1980,7 +2093,16 @@ export const GetReleaseBalanceResponse = zod.object({
 
  * @summary Fabrication Report – Project Completion (TLT only)
  */
+export const getFabricationProjectCompletionTltQueryImportIdMultipleOf = 1;
+
+
+
+export const GetFabricationProjectCompletionTltQueryParams = zod.object({
+  "importId": zod.coerce.number().min(1).multipleOf(getFabricationProjectCompletionTltQueryImportIdMultipleOf).optional().describe('WIP import to calculate. When omitted, uses the most recently committed WIP import for the standalone report pages.\n')
+})
+
 export const GetFabricationProjectCompletionTltResponse = zod.object({
+  "importId": zod.number().nullable().describe('WIP import used to calculate this response, or null when no WIP import exists.'),
   "available": zod.boolean().describe('False when no WIP import exists, or when the import is gated (pre-dates Type\/Status storage).'),
   "reason": zod.string().optional().describe('Human-readable explanation when available is false due to a type-data gate.'),
   "rows": zod.array(zod.object({
@@ -2060,6 +2182,7 @@ export const GetOrderStatusResponse = zod.object({
   "totalReleaseMt": zod.number(),
   "totalFileDespatchMt": zod.number(),
   "skippedTotals": zod.number(),
+  "skippedBanner": zod.number().optional().describe('Banner rows intentionally skipped while parsing.'),
   "missingStructure": zod.number(),
   "missingStructureWtMt": zod.number().optional().describe('Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added.\n'),
   "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
@@ -2085,6 +2208,20 @@ export const GetOrderStatusResponse = zod.object({
   "structure": zod.string()
 }).describe('A (project, structure) order-row reference.')).describe('Current rows absent from this upload (kept, not deleted).')
 }).describe('What one Order Review upload changed vs the current order rows.'),zod.null()]),
+  "overrideReason": zod.string().nullable().describe('Reason recorded for a deliberate cumulative-regression override.'),
+  "overrideAt": zod.string().nullable().describe('Timestamp at which a cumulative-regression override was accepted.'),
+  "overrideBy": zod.string().nullable().describe('Authenticated operator who accepted the cumulative-regression override.'),
+  "overrideDetails": zod.union([zod.object({
+  "baselineImportId": zod.number().nullable(),
+  "regressions": zod.array(zod.object({
+  "project": zod.string(),
+  "column": zod.string(),
+  "label": zod.string(),
+  "previousMt": zod.number(),
+  "currentMt": zod.number(),
+  "differenceMt": zod.number()
+}))
+}).describe('Exact project and cumulative-column regressions accepted for one Order Review import.'),zod.null()]),
   "createdAt": zod.string()
 }).describe('One Order Review file upload (rows are upserted, not appended).'),zod.null()]),
   "rows": zod.array(zod.object({
@@ -2162,6 +2299,7 @@ export const GetOrderStatusResponse = zod.object({
   "totalReleaseMt": zod.number(),
   "totalFileDespatchMt": zod.number(),
   "skippedTotals": zod.number(),
+  "skippedBanner": zod.number().optional().describe('Banner rows intentionally skipped while parsing.'),
   "missingStructure": zod.number(),
   "missingStructureWtMt": zod.number().optional().describe('Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added.\n'),
   "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
@@ -2187,19 +2325,140 @@ export const GetOrderStatusResponse = zod.object({
   "structure": zod.string()
 }).describe('A (project, structure) order-row reference.')).describe('Current rows absent from this upload (kept, not deleted).')
 }).describe('What one Order Review upload changed vs the current order rows.'),zod.null()]),
+  "overrideReason": zod.string().nullable().describe('Reason recorded for a deliberate cumulative-regression override.'),
+  "overrideAt": zod.string().nullable().describe('Timestamp at which a cumulative-regression override was accepted.'),
+  "overrideBy": zod.string().nullable().describe('Authenticated operator who accepted the cumulative-regression override.'),
+  "overrideDetails": zod.union([zod.object({
+  "baselineImportId": zod.number().nullable(),
+  "regressions": zod.array(zod.object({
+  "project": zod.string(),
+  "column": zod.string(),
+  "label": zod.string(),
+  "previousMt": zod.number(),
+  "currentMt": zod.number(),
+  "differenceMt": zod.number()
+}))
+}).describe('Exact project and cumulative-column regressions accepted for one Order Review import.'),zod.null()]),
   "createdAt": zod.string()
-}).describe('One Order Review file upload (rows are upserted, not appended).'))
+}).describe('One Order Review file upload (rows are upserted, not appended).')),
+  "recentCumulativeOverrides": zod.array(zod.object({
+  "id": zod.number(),
+  "label": zod.string().nullable(),
+  "sourceFilename": zod.string(),
+  "asOnDate": zod.string().nullable(),
+  "summary": zod.object({
+  "rowsRead": zod.number(),
+  "rowsKept": zod.number(),
+  "projectsFound": zod.number(),
+  "totalWeightMt": zod.number(),
+  "totalReleaseMt": zod.number(),
+  "totalFileDespatchMt": zod.number(),
+  "skippedTotals": zod.number(),
+  "skippedBanner": zod.number().optional().describe('Banner rows intentionally skipped while parsing.'),
+  "missingStructure": zod.number(),
+  "missingStructureWtMt": zod.number().optional().describe('Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added.\n'),
+  "matchedToWip": zod.number().describe('File structures that match a structure in the newest WIP import.'),
+  "unmatchedToWip": zod.number().describe('File structures with no matching structure in the newest WIP import.')
+}).describe('Parse summary for an Order Review ingest.'),
+  "changeLog": zod.union([zod.object({
+  "inserted": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string()
+}).describe('A (project, structure) order-row reference.')),
+  "updated": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string(),
+  "changes": zod.array(zod.object({
+  "field": zod.string(),
+  "from": zod.union([zod.string(),zod.number()]).nullable(),
+  "to": zod.union([zod.string(),zod.number()]).nullable()
+}).describe('One field\'s value change for an updated order row.'))
+}).describe('One updated (project, structure) order row with its field changes.')),
+  "unchanged": zod.number(),
+  "flagged": zod.array(zod.object({
+  "project": zod.string(),
+  "structure": zod.string()
+}).describe('A (project, structure) order-row reference.')).describe('Current rows absent from this upload (kept, not deleted).')
+}).describe('What one Order Review upload changed vs the current order rows.'),zod.null()]),
+  "overrideReason": zod.string().nullable().describe('Reason recorded for a deliberate cumulative-regression override.'),
+  "overrideAt": zod.string().nullable().describe('Timestamp at which a cumulative-regression override was accepted.'),
+  "overrideBy": zod.string().nullable().describe('Authenticated operator who accepted the cumulative-regression override.'),
+  "overrideDetails": zod.union([zod.object({
+  "baselineImportId": zod.number().nullable(),
+  "regressions": zod.array(zod.object({
+  "project": zod.string(),
+  "column": zod.string(),
+  "label": zod.string(),
+  "previousMt": zod.number(),
+  "currentMt": zod.number(),
+  "differenceMt": zod.number()
+}))
+}).describe('Exact project and cumulative-column regressions accepted for one Order Review import.'),zod.null()]),
+  "createdAt": zod.string()
+}).describe('One Order Review file upload (rows are upserted, not appended).')).describe('Overrides accepted within the last seven days, shown to operators as a safety warning.')
 }).describe('Order Review overlay joined to computed dispatch.')
 
 
 /**
- * Removes a single Order Review upload from the history log. The Order Review file is a daily snapshot merged (UPSERTed) into one current order book, so deleting a history entry does NOT roll back the current order-book values. Deleting the most recent upload re-points the current snapshot rows to the now-latest remaining upload. Deleting the last remaining upload clears the entire order book (rows + computed dispatch). Purely additive to WIP state — never touches WIP parsing, activity, dedup, ageing, warning, or milestone math.
+ * Removes a single Order Review upload from the history log. The Order Review file is a daily snapshot merged (UPSERTed) into one current order book, so deleting a history entry cannot reconstruct older row values. Rows last seen in the deleted import are removed rather than re-pointed to a surviving import; rows last seen in other uploads remain. Deleting the last remaining upload clears the entire order book (rows + computed dispatch). Purely additive to WIP state — never touches WIP parsing, activity, dedup, ageing, warning, or milestone math.
 
  * @summary Delete one Order Review file from the upload history
  */
 export const DeleteOrderImportParams = zod.object({
   "id": zod.coerce.number()
 })
+
+
+/**
+ * Authenticated administrator-only register of projects awaiting explanation. This register is audit metadata only and never changes regression blockers or calculations.
+ * @summary List Order Review cumulative-regression anomalies
+ */
+export const ListOrderReviewAnomaliesResponseItem = zod.object({
+  "id": zod.number(),
+  "project": zod.string(),
+  "signature": zod.enum(['A', 'B', 'C', 'D']).describe('Read-only signature classification for the anomaly.'),
+  "reason": zod.string().describe('Normalized investigation reason for the signature.'),
+  "status": zod.enum(['open', 'explained', 'superseded']),
+  "explanation": zod.string(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string(),
+  "updatedBy": zod.string().nullable()
+}).describe('Persistent investigation record for a project-level cumulative-regression anomaly.')
+export const ListOrderReviewAnomaliesResponse = zod.array(ListOrderReviewAnomaliesResponseItem)
+
+
+/**
+ * Authenticated administrator-only audit metadata update. Does not alter blockers or calculations.
+ * @summary Update one Order Review anomaly's status and explanation
+ */
+export const updateOrderReviewAnomalyPathProjectMax = 100;
+
+
+
+export const UpdateOrderReviewAnomalyParams = zod.object({
+  "project": zod.coerce.string().min(1).max(updateOrderReviewAnomalyPathProjectMax)
+})
+
+export const updateOrderReviewAnomalyBodyExplanationMax = 2000;
+
+
+
+export const UpdateOrderReviewAnomalyBody = zod.object({
+  "status": zod.enum(['open', 'explained', 'superseded']),
+  "explanation": zod.string().min(1).max(updateOrderReviewAnomalyBodyExplanationMax)
+})
+
+export const UpdateOrderReviewAnomalyResponse = zod.object({
+  "id": zod.number(),
+  "project": zod.string(),
+  "signature": zod.enum(['A', 'B', 'C', 'D']).describe('Read-only signature classification for the anomaly.'),
+  "reason": zod.string().describe('Normalized investigation reason for the signature.'),
+  "status": zod.enum(['open', 'explained', 'superseded']),
+  "explanation": zod.string(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string(),
+  "updatedBy": zod.string().nullable()
+}).describe('Persistent investigation record for a project-level cumulative-regression anomaly.')
 
 
 /**

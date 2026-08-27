@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { exportToXlsxSheets, exportTimestamp, type XlsxSheet } from "@/lib/export";
 import { formatWeight } from "@/lib/utils";
 import { useState, useMemo } from "react";
-import { activityDisplayKey, compareActivity } from "@workspace/domain";
+import { activityDisplayKeyForRecord, compareActivity } from "@workspace/domain";
 import { useSettings } from "@/lib/settings";
 
 const ROW_CAP = 300;
@@ -814,7 +814,7 @@ function ActivityContent() {
         relBalRecords.push(r);
         return;
       }
-      const act = activityDisplayKey(r.activity, r.category);
+      const act = activityDisplayKeyForRecord(r);
       if (!activities.has(act)) activities.set(act, []);
       activities.get(act)!.push(r);
     });

@@ -229,10 +229,6 @@ function NtltStageOverview({ records }: { records: any[] }) {
 
     for (const r of records) {
       const stg = classifyNtltStage(r);
-      stageTotals[stg].marks  += 1;
-      stageTotals[stg].weight += r.balanceWt;
-      stageTotals[stg].qty    += r.balanceQty;
-
       const sec = r.groupKey || r.section || "(Unassigned)";
       if (!sectionMap.has(sec)) {
         sectionMap.set(sec, {
@@ -241,11 +237,20 @@ function NtltStageOverview({ records }: { records: any[] }) {
         });
       }
       const sg = sectionMap.get(sec)!;
-      sg[stg].marks  += 1;
-      sg[stg].weight += r.balanceWt;
-      sg[stg].qty    += r.balanceQty;
       sg.totalMarks  += 1;
       sg.totalWeight += r.balanceWt;
+
+      // Unknown Job Card WIP activities are source exceptions, not Not
+      // Started. Keep them out of the approved-stage columns; DC16 provides
+      // their actionable row-level drill-down.
+      if (stg !== "unclassified") {
+        stageTotals[stg].marks  += 1;
+        stageTotals[stg].weight += r.balanceWt;
+        stageTotals[stg].qty    += r.balanceQty;
+        sg[stg].marks  += 1;
+        sg[stg].weight += r.balanceWt;
+        sg[stg].qty    += r.balanceQty;
+      }
     }
 
     const bySection = Array.from(sectionMap.entries())

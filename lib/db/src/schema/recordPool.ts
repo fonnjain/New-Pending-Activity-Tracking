@@ -4,6 +4,7 @@ import {
   text,
   date,
   doublePrecision,
+  numeric,
   boolean,
   index,
 } from "drizzle-orm/pg-core";
@@ -144,6 +145,21 @@ export const recordPoolTable = pgTable("record_pool", {
   // participates in identity, parsing rules, filters, exports, or reports.
   salesOrderStatus: text("sales_order_status"),
   isLastActivity: text("is_last_activity"),
+  // ERP material/issue block, added to the WIP export on 22-Aug-2026 (AC–AJ).
+  // These are additive audit fields, not part of the row hash: material may be
+  // re-issued while the mark's operational identity stays unchanged.
+  lotDocumentNo: text("lot_document_no"),
+  lotDocumentDate: date("lot_document_date", { mode: "string" }),
+  lotSourceForm: text("lot_source_form"),
+  issueLotRate: numeric("issue_lot_rate", { precision: 12, scale: 4, mode: "number" }),
+  issueDocumentNo: text("issue_document_no"),
+  issueDocumentDate: date("issue_document_date", { mode: "string" }),
+  sinRateForIssueMonth: numeric("sin_rate_for_issue_month", {
+    precision: 12,
+    scale: 4,
+    mode: "number",
+  }),
+  nearestSinDateToIssue: date("nearest_sin_date_to_issue", { mode: "string" }),
 },
 (t) => [
   // Speeds up startup backfills that scan by category / is_initial_cutting, and

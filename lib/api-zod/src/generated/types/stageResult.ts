@@ -7,10 +7,16 @@
  */
 import type { OrderReviewStageInfo } from './orderReviewStageInfo';
 import type { StageResultFileType } from './stageResultFileType';
+import type { StagingAssessment } from './stagingAssessment';
 import type { StructuralRead } from './structuralRead';
 
 export interface StageResult {
   stagingId: string;
+  /**
+     * Durable audit record created for a recognised WIP or Order Review file.
+     * @nullable
+     */
+  evidenceId: number | null;
   sourceFilename: string;
   /** Detected file type; routes the staged flow (WIP vs Order Review). */
   fileType: StageResultFileType;
@@ -18,4 +24,5 @@ export interface StageResult {
   structural: StructuralRead | null;
   /** Deterministic read for Order Review files; null for WIP files. */
   orderReview?: OrderReviewStageInfo | null;
+  assessment: StagingAssessment;
 }

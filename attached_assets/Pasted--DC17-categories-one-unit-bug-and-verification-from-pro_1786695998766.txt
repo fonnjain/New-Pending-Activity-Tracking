@@ -1,0 +1,116 @@
+# DC17 categories, one unit bug, and verification from production
+
+Three parts. Part 1 is a question, Part 2 is a one-line fix, Part 3 is read-only.
+
+Your DC6 and DC16 figures for 12, 13 and 14-Aug are **correct** — I have independently verified
+all fifteen bucket values and both mark counts against the source files. The two anomalies you
+flagged are real and confirmed: NTLT Not Started jumps 3,599.720 → 5,086.084 MT on 14-Aug, and
+NTLT Y drops 1,000.865 → 566.238 MT on 13-Aug. The 4,900 MT drop in WO Order Qty on the 14-Aug
+Order Review is also real.
+
+---
+
+## PART 1 — DC17's categories do not match what was built
+
+The report labels categories by **gap magnitude**:
+
+```
+A = any positive gap        B = -0.05 to -5 MT
+C = -5 to -20 MT            G = balanced
+```
+
+The version implemented in `dataCheck.ts` labels them by **failure mode**, keyed on WIP pending
+weight (W), Progress Despatch (Q) and WO Order Qty (J):
+
+```
+positive gap (J - Q - W > +0.05):
+  A  W = 0 and Q = 0     never started - no job card, nothing shipped
+  B  W = 0 and Q > 0     left WIP with no despatch record
+  C  W > 0 and Q = 0     in production, WIP short of the work order
+  D  W > 0 and Q > 0     partly shipped, WIP short of the remainder
+
+negative gap (J - Q - W < -0.05):
+  E  J = 0               marks in WIP with no work order
+  F  |J - Q| <= 0.05     fully despatched per the order book, marks still pending
+  G  everything else      shop holds more than the order book expects
+```
+
+Structure `884/2MD2` at −7.727 MT was **category F** when DC17 was first spot-checked. It is
+labelled **C** in this report. Same structure, same number, different letter.
+
+**Answer before changing anything:**
+
+1. Which classification is live in the app right now — the failure-mode one or the magnitude one?
+2. Did `artifacts/api-server/src/scripts/verify-disk.ts` reimplement the classification, or does
+   it import it from the same place `dataCheck.ts` uses?
+
+If it reimplemented it, that is a second definition of the same rule sitting in the codebase —
+the same problem we fixed by moving `QC_ACTIVITY_SET` and `GALV_ACTIVITY_SET` into `lib/domain`.
+Export the classifier from one module and have both call sites import it. Do not leave two.
+
+**Why the failure-mode version is the one that matters:** the magnitude bands put all 440
+positive structures into a single group worth +2,155 MT. That group mixes category A — a work
+order raised and nobody has cut it yet, which is benign and roughly 70% of the total — with
+category B, material that has left the shop floor with no despatch record. B was 37 structures
+and 261.573 MT, and it is the only part of DC17 anyone needs to act on. A magnitude band cannot
+separate them; only the W and Q tests can.
+
+---
+
+## PART 2 — unit bug on the Data page
+
+**NTLT Orphan Weight displays `7186441.330 MT`.** The value is in kilograms. Divide by 1000 so it
+reads **7,186.441 MT**.
+
+Confirmed against the 14-Aug source file: NTLT totals 7,186.441 MT across 312 marks, and the
+page's mark count of 312 is already correct. The orphan population is the whole NTLT population,
+which is expected — every NTLT row carries a blank project code.
+
+Fix that one stat only. Do not change the mark count or any other figure on the page.
+
+---
+
+## PART 3 — verification from production, not from disk
+
+The last three verification requests were answered with a disk parse. A disk script cannot
+exercise the ingest pipeline, the `hasTypeData` gate, the date-based import sort,
+`loadLatestWipImport()`, `loadLatestOrderReview()`, or the `/data-check` route — and every defect
+found in this project has been in one of those layers. Correct figures from a disk parse do not
+tell us the app produces them.
+
+**State which database each query runs against.** An earlier report said no Order Review had been
+loaded since 29-Jul and that `loadLatestOrderReview()` resolved to import 55; the production Data
+page shows Order Review files ingested for 11, 12, 13 and 14-Aug. That report was not describing
+production.
+
+From the **production API and Data Check tab**, report:
+
+**(a) DC6 and DC16 for the 13-Aug and 14-Aug imports.** Targets, which must match to 0.001 MT and
+exactly on marks:
+
+```
+13-Aug  Release 1,964.275   Awaiting   933.653   Cutting 1,356.323
+        QualityCheck 1,938.176   Galvanising 1,765.260   FG 2,648.489
+        TOTAL 10,606.176 MT / 59,958 marks
+        NTLT  5,859.160 MT / 287 marks
+        (NotStarted 3,599.720  TS 118.349  Galv 791.906  Y 566.238  FG 782.946)
+
+14-Aug  Release 1,935.795   Awaiting 1,014.232   Cutting 1,215.935
+        QualityCheck 1,846.123   Galvanising 1,714.532   FG 2,756.896
+        TOTAL 10,483.514 MT / 59,028 marks
+        NTLT  7,186.441 MT / 312 marks
+        (NotStarted 5,086.084  TS 75.907  Galv 732.941  Y 566.646  FG 724.864)
+```
+
+Zero unclassified throughout. Both days have **67 TLT projects**.
+
+**(b) DC12 to DC14** for the 13→14 Aug pair, from the app's route so `buildIdentityBridge` is
+applied. Name both import ids and dates, and state which mark-identity key was used.
+
+**(c) DC17 on the 14-Aug import**, using the failure-mode categories, with the count and weight
+per category A to G.
+
+**(d) Which import `loadLatestWipImport()` and `loadLatestOrderReview()` resolve to**, by id and
+date.
+
+Do not change any code in Part 3. Report only.

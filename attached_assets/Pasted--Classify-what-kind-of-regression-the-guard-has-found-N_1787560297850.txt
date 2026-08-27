@@ -1,0 +1,132 @@
+# Classify what kind of regression the guard has found
+
+**No change to what blocks.** Everything that blocks today must still block. This changes only
+what the person deciding is told, so they can tell three very different events apart.
+
+## Why
+
+VTPL have explained project 775: **the client cancelled the order at the final stage, and the
+finished material was reallocated to other projects and despatched.**
+
+That is a real business event, and it produces a signature the guard currently reports as a plain
+cumulative regression:
+
+```
+775   22-Aug -> 24-Aug
+      WO Order Qty      805.437 -> 0.000
+      Release           805.434 -> 0.000
+      Fabrication       805.327 -> 0.000
+      Galvanising       805.327 -> 0.000
+      Inspection        715.234 -> 0.000
+      Despatch          417.889 -> 0.000
+      structure list replaced: previously IS/COLUMN structures,
+      now a single new OC-1A S.S.T at 1.423 MT marked "Pre"
+```
+
+Compare it with project 903, which blocked the 22-August import for an entirely different reason —
+a despatch restatement of −33.529 MT across ten structures, with Work Order Qty and Inspection
+unchanged on every one, and one structure moving *upward*. That one has since resolved: 903's
+despatch on 24-August reads **326.510 MT**, above its 21-August figure of 325.411.
+
+Same rule fired. Completely different events. The message should say which.
+
+---
+
+## The three signatures
+
+Classify every blocking regression into one of these and label it in the staging output.
+
+### A · Likely cancellation or scope transfer
+
+```
+project present in both files
+AND every cumulative column falls to zero (within tolerance)
+AND WO Order Qty also falls to zero
+```
+
+Message: **"Looks like a cancelled or transferred order."** Note that the scope may have moved to
+other projects, and that the receiving projects will show an increase in Work Order Qty. Where the
+incoming file gives the project a structure list that shares no structure name with the stored
+one, say so — that indicates the code has been reused for new scope.
+
+### B · Likely restatement or correction
+
+```
+project present in both files
+AND at least one cumulative column falls
+AND WO Order Qty is unchanged
+AND at least one cumulative column is unchanged
+```
+
+Message: **"Looks like a correction to recorded progress."** List the affected structures with
+both values, and state which columns did *not* move — that is what distinguishes a correction from
+a cancellation. If any structure moved upward, say so; it strengthens the reading.
+
+### C · Unclassified
+
+Anything else. Message: **"Unrecognised regression pattern — treat with caution."** Do not guess.
+
+### And the existing warning, unchanged
+
+A project present in the stored file and absent from the incoming one stays a **warning**, not a
+block. VTPL close projects in the ERP routinely and 47 of the 49 disappearances on 24-August were
+exactly that.
+
+---
+
+## What the staging panel should show
+
+For each blocking project: the classification, the columns that moved with both values, the
+columns that did not move, and any structure-level detail available. Group by classification so
+five cancellations do not read as five separate mysteries.
+
+Keep the verdict line honest — **"Looks like"**, not "This is". The classifier is reading a
+pattern, not the underlying event, and the person overriding needs to know that.
+
+---
+
+## WHAT MUST NOT CHANGE
+
+- Do NOT change which regressions block. A cancellation must still stop the import — 805 MT of
+  scope disappearing should make someone look.
+- Do NOT auto-approve signature A. Classification informs the decision; it does not make it.
+- Do NOT add a project-specific exception for 775, 903 or any other code.
+- Do NOT change the block/warn split, the five-column rule, or the tolerance.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, or the eight material columns.
+
+---
+
+## ACCEPTANCE CHECK
+
+Validate the 24-August Order Review against the committed baseline, without importing:
+
+```
+775        -> signature A   all five columns and WO Order Qty to zero, structure list replaced
+840        -> signature B   all five fall, WO Order Qty unchanged
+896        -> signature B   four columns to zero, WO Order Qty unchanged
+VS-189     -> signature B   three columns to zero, WO Order Qty unchanged
+RAILWAY    -> should disappear from the block list entirely once the normaliser fix lands
+```
+
+`RAILWAY` is not a project. The file carries `RAILWAY BATCH 10` and `RAILWAY BATCH 11` as separate
+blocks; the normaliser truncates at the first space and merges them. Batch 11 closed, batch 10 did
+not move, and the merged total appears to fall by 149.340 MT. **That fix is still outstanding and
+is a prerequisite for this acceptance check to read correctly.** Trailing-dot merging must stay —
+`907` and `907.` are genuinely one project — but whitespace truncation must go.
+
+Report each project with its classification and the reasoning shown.
+
+---
+
+## STILL OUTSTANDING
+
+Three things, unanswered across several exchanges:
+
+1. **The project-code normaliser fix** — whitespace truncation, as above.
+2. **The 22 and 23 August imports.** 903's despatch on 24-August is 326.510 MT, above its
+   21-August figure, so the 22-August dip was transient and has resolved. That makes overriding
+   the 22-August Order Review straightforward, or skipping it and going to 23-August cleaner.
+   Either way the app should not be left holding 22-August WIP against 21-August Order Review.
+3. **Whether production has been published.** Still no answer. If Publish was never clicked,
+   production is on 16-August data and none of this month's work is live.

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { OrderReviewChangeLog } from './orderReviewChangeLog';
+import type { OrderReviewCumulativeOverrideDetails } from './orderReviewCumulativeOverrideDetails';
 import type { OrderReviewSummary } from './orderReviewSummary';
 
 /**
@@ -20,5 +21,21 @@ export interface OrderReviewImport {
   asOnDate: string | null;
   summary: OrderReviewSummary;
   changeLog: OrderReviewChangeLog | null;
+  /**
+     * Reason recorded for a deliberate cumulative-regression override.
+     * @nullable
+     */
+  overrideReason: string | null;
+  /**
+     * Timestamp at which a cumulative-regression override was accepted.
+     * @nullable
+     */
+  overrideAt: string | null;
+  /**
+     * Authenticated operator who accepted the cumulative-regression override.
+     * @nullable
+     */
+  overrideBy: string | null;
+  overrideDetails: OrderReviewCumulativeOverrideDetails | null;
   createdAt: string;
 }

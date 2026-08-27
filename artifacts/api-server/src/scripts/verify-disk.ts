@@ -126,7 +126,7 @@ function dc16(rows: ReturnType<typeof parseWorkbook>["rows"], date: string) {
   const LABEL: Record<string, string> = {
     notStarted: "Not Started", ts: "TS", galvanising: "Galvanising", y: "Y", fg: "Finished Goods",
   };
-  let total = 0, totalMarks = 0;
+  let total = 0, totalMarks = 0, unclassified = 0;
 
   for (const r of rows) {
     if (r.category === "TLT") continue;
@@ -139,12 +139,16 @@ function dc16(rows: ReturnType<typeof parseWorkbook>["rows"], date: string) {
       jobCardStatus: r.jobCardStatus,
       contractor: r.contractor,
     });
-    stages[stage].mt += wMt;
-    stages[stage].marks++;
+    if (stage === "unclassified") {
+      unclassified++;
+    } else {
+      stages[stage].mt += wMt;
+      stages[stage].marks++;
+    }
   }
 
   const stageSum = Object.values(stages).reduce((s, b) => s + b.mt, 0);
-  const pass = Math.abs(total - stageSum) < 0.001;
+  const pass = unclassified === 0 && Math.abs(total - stageSum) < 0.001;
 
   console.log(`\n━━━ DC16 NTLT five-stage — ${date} ━━━`);
   for (const [key, b] of Object.entries(stages)) {
@@ -152,6 +156,7 @@ function dc16(rows: ReturnType<typeof parseWorkbook>["rows"], date: string) {
   }
   console.log(`  ${"TOTAL".padEnd(22)} ${fmt(total)} MT  ${fmtN(totalMarks)} marks`);
   console.log(`  Stage sum diff:       ${(total - stageSum).toFixed(3)}   → ${pass ? "✅ PASS" : "❌ FAIL"}`);
+  console.log(`  Unclassified:         ${unclassified}`);
 }
 
 // ─── DC17 — WIP vs OR gap analysis ───────────────────────────────────────────

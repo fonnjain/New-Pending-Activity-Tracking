@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import { NetBalanceMovementPanel } from "@/components/NetBalanceMovementPanel";
 import { ContractorNetMovementPanel } from "@/components/ContractorNetMovementPanel";
 import {
-  activityDisplayKey,
+  activityDisplayKeyForRecord,
   activityRank,
   assignDayKey,
   bundleActivitySet,
@@ -364,7 +364,7 @@ function ReportBuilder() {
       { balanceQty: number; balanceWt: number; ageSum: number; ageCount: number }
     >();
     for (const r of rows) {
-      const key = activityDisplayKey(r.activity, r.category);
+      const key = activityDisplayKeyForRecord(r);
       const g = groups.get(key) ?? { balanceQty: 0, balanceWt: 0, ageSum: 0, ageCount: 0 };
       g.balanceQty += r.balanceQty ?? 0;
       g.balanceWt += r.balanceWt ?? 0;
@@ -468,7 +468,7 @@ function ReportBuilder() {
       { marks: number; qty: number; wt: number; ageSum: number; ageCount: number }
     >();
     for (const r of rows) {
-      const key = activityDisplayKey(r.activity, r.category);
+      const key = activityDisplayKeyForRecord(r);
       const g = groups.get(key) ?? { marks: 0, qty: 0, wt: 0, ageSum: 0, ageCount: 0 };
       g.marks += 1;
       g.qty += r.balanceQty ?? 0;
@@ -559,7 +559,7 @@ function ReportBuilder() {
     // Group otherEnriched by activity for the per-activity sheets.
     const byActivity = new Map<string, typeof enrichedRows>();
     for (const r of otherEnriched) {
-      const key = activityDisplayKey(r.activity, r.category);
+      const key = activityDisplayKeyForRecord(r);
       if (!byActivity.has(key)) byActivity.set(key, []);
       byActivity.get(key)!.push(r);
     }
@@ -635,7 +635,7 @@ function ReportBuilder() {
     const visible = otherEnriched.slice(0, TABLE_CAP);
     const groups = new Map<string, typeof enrichedRows>();
     for (const r of visible) {
-      const key = activityDisplayKey(r.activity, r.category);
+      const key = activityDisplayKeyForRecord(r);
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(r);
     }
@@ -3122,7 +3122,7 @@ function DailyProductionMovementReport() {
     for (const r of records) {
       // Exclude NOT_RELEASED (initial cutting) but keep AWAITING_ASSIGNMENT in activity map.
       if (isCutting(r.activity) && !isActiveCutting(r) && !isAwaitingAssignment(r)) continue;
-      const act = activityDisplayKey(r.activity, r.category);
+      const act = activityDisplayKeyForRecord(r);
       if (!activities.has(act)) activities.set(act, []);
       activities.get(act)!.push(r);
     }

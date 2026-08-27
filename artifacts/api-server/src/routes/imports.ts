@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router, type IRouter, type RequestHandler } from "express";
 import multer from "multer";
-import { requireAuth } from "./auth";
+import { requireAdmin, requireAuth } from "./auth";
 import { desc, eq, lt, inArray, sql, and, isNull, or } from "drizzle-orm";
 import {
   db,
@@ -9,6 +9,7 @@ import {
   recordPoolTable,
   importRowsTable,
   uploadStagingTable,
+  uploadStageEvidenceTable,
   orderReviewImportsTable,
   importDeletionLogTable,
   settingsTable,
@@ -24,6 +25,7 @@ import {
   type ChangeSummary,
   type RecordPoolRow,
   type AliasEntry,
+  type OrderReviewCumulativeOverrideDetails,
 } from "@workspace/db";
 import {
   GetImportParams,
@@ -38,6 +40,7 @@ import {
 } from "@workspace/api-zod";
 import {
   activityRank,
+  classifyWipCase,
   isKnownActivity,
   migrateTurnaroundSettings,
   velocityForMark,
@@ -62,24 +65,35 @@ import {
   recomputeDispatch,
   ingestOrderReview,
   computeWipCoverage,
+  loadLatestOrderReview,
 } from "../lib/dispatch";
 import { recomputeContractorMovement } from "../lib/contractorMovement";
 import { recomputeReleaseBalance, recomputeAssignmentBalance } from "../lib/parseWipReleaseBalance";
 import { cutoffSql, loadValidFrom, importDayKey } from "../lib/cutoff";
+import { expandCopies } from "../lib/copies";
+import { previousImportCondition } from "../lib/previous-import-condition";
+import { resolveWipImportDate } from "../lib/import-date";
 import {
   detectFileType,
   parseOrderReview,
   detectReportAsOnDate,
   checkOrderReview,
+  compareOrderReviewCumulativeProgress,
+  classifyCumulativeRegressionProjects,
+  inspectOrderReviewStaging,
   type OrderReviewFileType,
+  type CumulativeProjectRegression,
+  type CumulativeRegressionClassification,
+  type CumulativeRegressionMetricDetail,
+  type CumulativeRegressionProjectDetail,
+  type OrderReviewProjectCumulativeRow,
 } from "../lib/parse-order-review";
 import {
   parseWorkbook,
   readStructural,
-  isCsvWip,
-  hasExactWipCsvColumnCount,
-  WIP_CSV_COLUMN_COUNT,
   missingCriticalWipColumns,
+  isKnownOrderNature,
+  isCsvWip,
   computeAgeing,
   computeRoute,
   CLEANABLE_FIELDS,
@@ -97,10 +111,19 @@ import {
   callClaude,
   parseJsonObject,
 } from "../lib/ai";
+import {
+  expireStageEvidence,
+  evidenceKindForDetectedFileType,
+  persistStageEvidence,
+  recordStageEvidenceOutcome,
+  shouldDiscardStagingForWipReset,
+} from "../lib/upload-stage-evidence";
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
+  // Daily WIP CSV exports can exceed 25 MiB (the 21-Aug-2026 report is 33.5 MiB).
+  // Keep a bounded in-memory ceiling while allowing the permanent export format.
+  limits: { fileSize: 50 * 1024 * 1024 },
 });
 
 const uploadSingle: RequestHandler = (req, res, next) => {
@@ -121,6 +144,265 @@ const uploadSingle: RequestHandler = (req, res, next) => {
 const router: IRouter = Router();
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+type StageFinding = {
+  title: string;
+  detail: string;
+  classification?: CumulativeRegressionClassification;
+};
+type StageDelta = {
+  key: string;
+  label: string;
+  previous: number;
+  current: number;
+  changePercent: number | null;
+  requiresAcknowledgement: boolean;
+};
+type StageAssessment = {
+  verdict: "blocked" | "review" | "ready";
+  blocking: StageFinding[];
+  warnings: StageFinding[];
+  deltas: StageDelta[];
+  information: StageFinding[];
+  cumulativeOverrideRequired: boolean;
+};
+
+type StageWipRow = Pick<
+  RecordPoolRow,
+  | "balanceWt"
+  | "category"
+  | "job"
+  | "activity"
+  | "jobCardType"
+  | "jobCardStatus"
+  | "contractor"
+  | "isInitialCutting"
+  | "ntltSubtype"
+> & { activityRaw?: string | null; orderNature?: string | null };
+
+type WipStageMetrics = {
+  rows: number;
+  weightMt: number;
+  buckets: Record<string, number>;
+  tltProjects: number;
+  ntltMarks: number;
+};
+
+const stageBucketLabels: Record<string, string> = {
+  NOT_RELEASED: "Not Released",
+  CUTTING: "Cutting",
+  AWAITING_ASSIGNMENT: "Awaiting Assignment",
+  IN_PRODUCTION: "In Production",
+  FINISHED_GOODS: "Finished Goods",
+  UNCLASSIFIED: "Unclassified",
+};
+
+function wipStageMetrics(
+  entries: Array<{ row: StageWipRow; copies: number }>,
+): WipStageMetrics {
+  const buckets = Object.fromEntries(
+    Object.keys(stageBucketLabels).map((key) => [key, 0]),
+  ) as Record<string, number>;
+  const tltProjects = new Set<string>();
+  let rows = 0;
+  let weightMt = 0;
+  let ntltMarks = 0;
+  for (const { row, copies } of entries) {
+    const quantity = Number(copies) || 0;
+    rows += quantity;
+    weightMt += (Number(row.balanceWt) || 0) * quantity / 1000;
+    const bucket = classifyWipCase(row);
+    // Bucket deltas are a material-balance safety check, so compare MT rather
+    // than mark copies. A wrong WIP can retain the same mark count while
+    // doubling finished-goods weight.
+    buckets[bucket] =
+      (buckets[bucket] ?? 0) + ((Number(row.balanceWt) || 0) * quantity) / 1000;
+    if (row.category === "TLT" && row.job) tltProjects.add(row.job);
+    if (row.category === "NTLT") ntltMarks += quantity;
+  }
+  return { rows, weightMt, buckets, tltProjects: tltProjects.size, ntltMarks };
+}
+
+function stageDelta(
+  key: string,
+  label: string,
+  previous: number,
+  current: number,
+  threshold: number,
+  absolute = false,
+  zeroIsWarning = false,
+): StageDelta {
+  const changePercent = previous === 0 ? null : ((current - previous) / previous) * 100;
+  const requiresAcknowledgement =
+    absolute
+      ? Math.abs(current - previous) > threshold
+      : previous === 0
+        ? current !== 0
+        : Math.abs(changePercent ?? 0) > threshold ||
+          (zeroIsWarning && current === 0);
+  return { key, label, previous, current, changePercent, requiresAcknowledgement };
+}
+
+function makeAssessment(
+  blocking: StageFinding[],
+  warnings: StageFinding[],
+  deltas: StageDelta[],
+  information: StageFinding[],
+  cumulativeOverrideRequired = false,
+): StageAssessment {
+  return {
+    verdict: blocking.length ? "blocked" : warnings.length || deltas.some((d) => d.requiresAcknowledgement) ? "review" : "ready",
+    blocking,
+    warnings,
+    deltas,
+    information,
+    cumulativeOverrideRequired,
+  };
+}
+
+function formatMt(value: number): string {
+  return `${value.toFixed(3)} MT`;
+}
+
+function formatSignedMt(value: number): string {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(3)} MT`;
+}
+
+function formatMetricDetail(metric: CumulativeRegressionMetricDetail): string {
+  return `${metric.label}: ${formatMt(metric.previousMt)} → ${formatMt(metric.currentMt)} (${formatSignedMt(metric.differenceMt)})`;
+}
+
+function classificationMessage(
+  classification: CumulativeRegressionClassification,
+): string {
+  switch (classification) {
+    case "cancellation-transfer":
+      return "Looks like a cancelled or transferred order.";
+    case "correction":
+      return "Looks like a correction to recorded progress.";
+    case "scope-reduction":
+      return "Looks like the order itself was reduced.";
+    default:
+      return "Unrecognised regression pattern — treat with caution.";
+  }
+}
+
+function classificationTitle(
+  classification: CumulativeRegressionClassification,
+): string {
+  switch (classification) {
+    case "cancellation-transfer":
+      return "Likely cancellation or scope transfer";
+    case "correction":
+      return "Likely restatement or correction";
+    case "scope-reduction":
+      return "Likely scope reduction";
+    default:
+      return "Unclassified regression pattern";
+  }
+}
+
+function formatRegressionProjectDetail(
+  detail: CumulativeRegressionProjectDetail,
+): string {
+  const lines = [
+    detail.project,
+    classificationMessage(detail.classification),
+    `Moved: ${detail.movedColumns.map(formatMetricDetail).join("; ")}`,
+    `Did not move: ${
+      detail.unchangedColumns.length > 0
+        ? detail.unchangedColumns
+            .map((metric) => `${metric.label} (${formatMt(metric.currentMt)})`)
+            .join("; ")
+        : "none"
+    }`,
+  ];
+
+  if (detail.structureListReplaced) {
+    lines.push(
+      "Stored and incoming structure lists share no structure name; the project code may have been reused for new scope.",
+    );
+  }
+  if (detail.storedOnlyStructures.length > 0) {
+    lines.push(`Stored-only structures: ${detail.storedOnlyStructures.join(", ")}`);
+  }
+  if (detail.incomingOnlyStructures.length > 0) {
+    lines.push(`Incoming-only structures: ${detail.incomingOnlyStructures.join(", ")}`);
+  }
+  if (detail.upwardStructures.length > 0) {
+    lines.push(
+      `Upward movement at structure level: ${detail.upwardStructures.join(", ")}.`,
+    );
+  }
+  if (detail.affectedStructures.length > 0) {
+    lines.push(
+      `Affected structures:\n${detail.affectedStructures
+        .map(
+          (structure) =>
+            `  ${structure.structure}: ${structure.movedColumns
+              .map(formatMetricDetail)
+              .join("; ")}`,
+        )
+        .join("\n")}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function cumulativeRegressionFindings(
+  regressions: readonly CumulativeProjectRegression[],
+  incomingRows: readonly OrderReviewProjectCumulativeRow[],
+  previousRows: readonly OrderReviewProjectCumulativeRow[] | null,
+): StageFinding[] {
+  if (regressions.length === 0) return [];
+  const details = classifyCumulativeRegressionProjects(
+    incomingRows,
+    previousRows,
+    regressions,
+  );
+  if (details.length === 0) {
+    return [{
+      title: `Cumulative progress decreased (${regressions.length} regression${regressions.length === 1 ? "" : "s"})`,
+      detail: regressions
+        .map(
+          (row) =>
+            `${row.project} — ${row.label}: stored ${formatMt(row.previousMt)} → incoming ${formatMt(row.currentMt)} (change ${formatSignedMt(row.differenceMt)})`,
+        )
+        .join("\n"),
+    }];
+  }
+
+  const order: CumulativeRegressionClassification[] = [
+    "cancellation-transfer",
+    "scope-reduction",
+    "correction",
+    "unclassified",
+  ];
+  return order.flatMap((classification) => {
+    const grouped = details.filter((detail) => detail.classification === classification);
+    if (grouped.length === 0) return [];
+    return [{
+      title: `${classificationTitle(classification)} (${grouped.length} project${grouped.length === 1 ? "" : "s"})`,
+      detail: grouped.map(formatRegressionProjectDetail).join("\n\n"),
+      classification,
+    }];
+  });
+}
+
+function missingProjectFindings(
+  warnings: readonly { project: string; storedDespatchMt: number; outstandingMt: number }[],
+): StageFinding[] {
+  if (warnings.length === 0) return [];
+  return [{
+    title: `Stored projects absent from incoming file (${warnings.length} project${warnings.length === 1 ? "" : "s"})`,
+    detail: warnings
+      .map(
+        (row) =>
+          `${row.project}: stored Despatch ${formatMt(row.storedDespatchMt)}; outstanding ${formatMt(row.outstandingMt)}`,
+      )
+      .join("\n"),
+  }];
+}
 
 // ---------------------------------------------------------------------------
 // In-process membership cache. Imports are append-only and immutable, so
@@ -606,17 +888,22 @@ async function mergeImport(
     // Ensure pool rows exist for every distinct hash (immutable, deduped).
     const hashes = Array.from(multiset.keys());
     const poolIdByHash = new Map<string, number>();
-    const existing = await tx
-      .select({ id: recordPoolTable.id, hash: recordPoolTable.hash })
-      .from(recordPoolTable)
-      .where(inArray(recordPoolTable.hash, hashes));
-    for (const e of existing) poolIdByHash.set(e.hash, e.id);
+    // PostgreSQL caps a prepared statement at 65,535 parameters. A daily CSV can
+    // carry >75k distinct hashes, so this initial pool lookup must be chunked just
+    // like the later insert and unresolved-hash lookups.
+    const chunk = 500;
+    for (let i = 0; i < hashes.length; i += chunk) {
+      const existing = await tx
+        .select({ id: recordPoolTable.id, hash: recordPoolTable.hash })
+        .from(recordPoolTable)
+        .where(inArray(recordPoolTable.hash, hashes.slice(i, i + chunk)));
+      for (const e of existing) poolIdByHash.set(e.hash, e.id);
+    }
 
     const toInsert: InsertRecordPool[] = [];
     for (const [hash, { row }] of multiset) {
       toInsert.push(row as InsertRecordPool);
     }
-    const chunk = 500;
     for (let i = 0; i < toInsert.length; i += chunk) {
       // onConflictDoUpdate instead of onConflictDoNothing: updates the derived
       // is_initial_cutting flag on re-upload so a parse-logic fix propagates to
@@ -646,6 +933,18 @@ async function mergeImport(
             isWeldedStructure: sql`COALESCE(EXCLUDED.is_welded_structure, record_pool.is_welded_structure)`,
             salesOrderStatus: sql`COALESCE(EXCLUDED.sales_order_status, record_pool.sales_order_status)`,
             isLastActivity: sql`COALESCE(EXCLUDED.is_last_activity, record_pool.is_last_activity)`,
+            // Material/issue fields are mutable attributes of a stable mark. A
+            // same-hash re-import therefore refreshes each one when the latest
+            // file carries a nonblank value, while legacy/reduced files cannot
+            // erase an already captured value.
+            lotDocumentNo: sql`COALESCE(EXCLUDED.lot_document_no, record_pool.lot_document_no)`,
+            lotDocumentDate: sql`COALESCE(EXCLUDED.lot_document_date, record_pool.lot_document_date)`,
+            lotSourceForm: sql`COALESCE(EXCLUDED.lot_source_form, record_pool.lot_source_form)`,
+            issueLotRate: sql`COALESCE(EXCLUDED.issue_lot_rate, record_pool.issue_lot_rate)`,
+            issueDocumentNo: sql`COALESCE(EXCLUDED.issue_document_no, record_pool.issue_document_no)`,
+            issueDocumentDate: sql`COALESCE(EXCLUDED.issue_document_date, record_pool.issue_document_date)`,
+            sinRateForIssueMonth: sql`COALESCE(EXCLUDED.sin_rate_for_issue_month, record_pool.sin_rate_for_issue_month)`,
+            nearestSinDateToIssue: sql`COALESCE(EXCLUDED.nearest_sin_date_to_issue, record_pool.nearest_sin_date_to_issue)`,
             // Preserve the first aliased source activity when a canonical P/S
             // row deduplicates against an existing RFI pool row. Ordinary rows
             // carry null and therefore never alter this audit-only field.
@@ -794,11 +1093,15 @@ router.post("/imports", requireAuth, uploadSingle, async (req, res): Promise<voi
   const reportDate = /^\d{4}-\d{2}-\d{2}$/.test(reportDateRaw)
     ? reportDateRaw
     : null;
-  // Pairing date for the Order Review gate: the report's own "As on" banner date or
-  // the date encoded in its filename, falling back to today (the upload date) when
-  // neither is present/parseable.
-  const asOnDate =
-    detectReportAsOnDate(file.buffer, file.originalname) ?? todayYmd();
+  // The operator-selected report date is authoritative for a WIP upload. It
+  // must also be the internal pairing date; otherwise a 17-August upload made
+  // today would be stored and displayed as today's date. Files without an
+  // explicit selection retain the banner/filename, then today, fallback.
+  const asOnDate = resolveWipImportDate(
+    reportDate,
+    detectReportAsOnDate(file.buffer, file.originalname),
+    todayYmd(),
+  );
 
   // Critical-column gate: refuse outright rather than ingest a file whose
   // critical fields would sit silently null (the failure mode that produced the
@@ -921,16 +1224,9 @@ function wipCriticalGate(
   const nearWip =
     detected === "wip" || structural.columnsFound.includes("Project Code");
   if (!nearWip) return null;
-  // CSV is now the permanent ERP format. Unlike historical spreadsheets, it
-  // has one fixed header row and exactly 28 columns; accepting a shifted or
-  // truncated CSV would silently assign values to the wrong headers.
-  if (isCsvWip(buffer) && !hasExactWipCsvColumnCount(structural.columnsFound)) {
-    return {
-      error: `This WIP CSV must contain exactly ${WIP_CSV_COLUMN_COUNT} columns; found ${structural.columnsFound.length}. Re-export the report before importing it.`,
-      expectedColumns: WIP_CSV_COLUMN_COUNT,
-      foundColumns: structural.columnsFound.length,
-    };
-  }
+  // CSV rows are resolved by their header names, not fixed positions. Extra
+  // columns are accepted and surfaced by the format check; required business
+  // columns below still gate the import to prevent silent partial ingestion.
   const missingCritical = missingCriticalWipColumns(structural.columnsFound);
   if (missingCritical.length === 0) return null;
   return {
@@ -942,7 +1238,7 @@ function wipCriticalGate(
 // Read the optional per-slot expected type from a request body. Each upload slot
 // (WIP vs Order Review) tells the validator/commit which type it expects so a
 // mis-routed file is caught — auto-detect stays a secondary safety net.
-function readExpectedType(body: unknown): OrderReviewFileType | null {
+function readExpectedType(body: unknown): "wip" | "order-review" | null {
   const v = (body as { expectedType?: unknown })?.expectedType;
   return v === "wip" || v === "order-review" ? v : null;
 }
@@ -965,6 +1261,11 @@ function typeMismatchMessage(detected: OrderReviewFileType): string {
 // Opportunistically drop staged rows older than the TTL.
 async function expireStagedUploads(): Promise<void> {
   const cutoff = new Date(Date.now() - STAGING_TTL_MS);
+  const expired = await db
+    .select({ id: uploadStagingTable.id })
+    .from(uploadStagingTable)
+    .where(lt(uploadStagingTable.createdAt, cutoff));
+  await expireStageEvidence(expired.map((row) => row.id));
   await db.delete(uploadStagingTable).where(lt(uploadStagingTable.createdAt, cutoff));
 }
 
@@ -986,24 +1287,13 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
   const reportDate = /^\d{4}-\d{2}-\d{2}$/.test(reportDateRaw)
     ? reportDateRaw
     : null;
+  const expectedType = readExpectedType(req.body);
 
   await expireStagedUploads();
 
-  // Critical-column gate for WIP files, BEFORE any staging row is written: a
-  // refused file must leave nothing behind that could later be committed.
-  // Covers detected WIP files AND "unknown" files that are recognisably a WIP
-  // export with critical columns stripped (type detection itself needs Project
-  // Code + Mark No. + Activity, so a WIP missing one of those detects as
-  // unknown — it must still be refused BY NAME, not staged or reported as
-  // merely unrecognised).
+  // Staging must preserve visible blocking findings. The same critical-column
+  // gate runs again at commit time so a staged file can never bypass it.
   const stagedFileType = detectFileType(file.buffer);
-  {
-    const gateResult = wipCriticalGate(file.buffer, stagedFileType);
-    if (gateResult) {
-      res.status(400).json(gateResult);
-      return;
-    }
-  }
 
   const stagingId = randomUUID();
   await db.insert(uploadStagingTable).values({
@@ -1011,6 +1301,7 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
     sourceFilename: file.originalname,
     label,
     reportDate,
+    expectedKind: expectedType,
     fileData: file.buffer,
   });
 
@@ -1021,6 +1312,15 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
   if (fileType === "order-review") {
     let orderReview;
     let sanityCheck = null;
+    let comparedAgainstImportId: number | null = null;
+    let evidenceDetails: Record<string, unknown> = {};
+    let projectCodes: string[] = [];
+    let assessment: StageAssessment = makeAssessment(
+      [{ title: "Could not parse Order Review", detail: "No usable Order Review rows were found." }],
+      [],
+      [],
+      [],
+    );
     try {
       orderReview = parseOrderReview(file.buffer);
       const coverage = await computeWipCoverage(orderReview.rows);
@@ -1028,31 +1328,144 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
         ...orderReview,
         summary: { ...orderReview.summary, ...coverage },
       };
-      // Query the latest committed Order Review import for prev-date and prev
-      // unmatched count — used by the stale-date and unmatched-spike checks.
-      // Sort by as_on_date DESC (not id DESC) so the "current" OR matches what
-      // loadLatestOrderReview uses — a bulk upload can assign higher ids to
-      // older-dated files, making id order ≠ date order.
-      const prevOrRows = await db
-        .select({
-          asOnDate: orderReviewImportsTable.asOnDate,
-          summary: orderReviewImportsTable.summary,
-        })
-        .from(orderReviewImportsTable)
-        .orderBy(sql`${orderReviewImportsTable.asOnDate} DESC NULLS LAST`, desc(orderReviewImportsTable.id))
-        .limit(1);
-      const prevOr = prevOrRows[0] ?? null;
+      // The current Order Review snapshot is selected by source as-on date, not
+      // database id. Its rows are restricted to that import, which lets staging
+      // distinguish a genuinely lower project total from a project omitted by a
+      // scoped export.
+      const latestOr = await loadLatestOrderReview();
+      const prevOr = latestOr?.import ?? null;
+      comparedAgainstImportId = prevOr?.id ?? null;
       const prevSummary = prevOr?.summary as { unmatchedToWip?: number } | null;
       sanityCheck = checkOrderReview(file.buffer, orderReview, {
         prevSummary,
         prevAsOnDate: prevOr?.asOnDate ?? null,
       });
+      const shape = inspectOrderReviewStaging(file.buffer);
+      const selectedAsOnDate = detectReportAsOnDate(file.buffer, file.originalname) ?? orderReview.asOnDate;
+      const blocking: StageFinding[] = [];
+      const warnings: StageFinding[] = [];
+      if (!shape.layoutOk) {
+        blocking.push({
+          title: "Order Review layout changed",
+          detail: `Expected the OrderReview sheet with recognizable headers on rows 6–7; found ${shape.sheetName ?? "no OrderReview sheet"} with ${shape.physicalColumnCount} columns.`,
+        });
+      }
+      if (!reportDate || !selectedAsOnDate || selectedAsOnDate !== reportDate) {
+        blocking.push({
+          title: "As-on date does not match",
+          detail: `Selected ${reportDate ?? "no date"}; file resolves to ${selectedAsOnDate ?? "no date"}.`,
+        });
+      }
+      const cumulative = compareOrderReviewCumulativeProgress(
+        orderReview.rows,
+        latestOr?.rows ?? null,
+      );
+      const projectDetails = classifyCumulativeRegressionProjects(
+        orderReview.rows,
+        latestOr?.rows ?? null,
+        cumulative.regressions,
+      );
+      projectCodes = projectDetails.map((detail) => detail.project);
+      const cumulativeOverrideRequired = cumulative.regressions.length > 0 && blocking.length === 0;
+      blocking.push(
+        ...cumulativeRegressionFindings(
+          cumulative.regressions,
+          orderReview.rows,
+          latestOr?.rows ?? null,
+        ),
+      );
+      warnings.push(...missingProjectFindings(cumulative.missingProjects));
+      const previous = prevOr?.summary as
+        | { projectsFound?: number; rowsKept?: number; totalReleaseMt?: number; totalFileDespatchMt?: number }
+        | null;
+      const current = orderReview.summary;
+      const deltas = previous
+        ? [
+            stageDelta("projects", "Projects", previous.projectsFound ?? 0, current.projectsFound ?? 0, 5, true),
+            stageDelta("rows", "Data rows", previous.rowsKept ?? 0, current.rowsKept ?? 0, 10),
+            stageDelta("release", "Progress Release (MT)", previous.totalReleaseMt ?? 0, current.totalReleaseMt ?? 0, Number.POSITIVE_INFINITY),
+            stageDelta("despatch", "Progress Despatch (MT)", previous.totalFileDespatchMt ?? 0, current.totalFileDespatchMt ?? 0, Number.POSITIVE_INFINITY),
+          ]
+        : [];
+      for (const delta of deltas) {
+        if ((delta.key === "release" || delta.key === "despatch") && delta.current < delta.previous) {
+          delta.requiresAcknowledgement = true;
+        }
+      }
+      const blankTowerRows = orderReview.rows.filter(
+        (row) => !row.structure && (row.weightMt ?? 0) !== 0,
+      );
+      assessment = makeAssessment(blocking, warnings, deltas, [
+        ...(cumulative.hasBaseline
+          ? []
+          : [{
+              title: "No previous Order Review baseline",
+              detail: "This is the first committed Order Review, so cumulative Progress Release and Progress Despatch cannot be compared yet.",
+            }]),
+        {
+          title: "Project banners",
+          detail: `${shape.rawBanners} raw banners; ${shape.normalisedBanners} normalised project codes.`,
+        },
+        {
+          title: "Data rows and subtotals",
+          detail: `${orderReview.summary.rowsKept} data rows; ${orderReview.summary.skippedTotals} subtotal/total rows skipped.`,
+        },
+        {
+          title: "Blank Tower Type rows",
+          detail: `${blankTowerRows.length} numeric row(s), ${blankTowerRows.reduce((sum, row) => sum + (row.weightMt ?? 0), 0).toFixed(3)} MT, retained only in project totals.`,
+        },
+        {
+          title: "Total-labelled structures",
+          detail: `${orderReview.rows.filter((row) => /^total\b|^grand total\b/i.test(row.structure ?? "")).length} rows.`,
+        },
+      ], cumulativeOverrideRequired);
+      evidenceDetails = {
+        orderReview: {
+          asOnDate: selectedAsOnDate,
+          summary: orderReview.summary,
+          sanityCheck,
+        },
+        structural: shape,
+        cumulative: {
+          regressions: cumulative.regressions,
+          missingProjects: cumulative.missingProjects,
+          projectDetails,
+        },
+      };
     } catch (err) {
       req.log.warn({ err }, "Order Review parse failed for staged upload");
       orderReview = { asOnDate: null, rows: [], summary: null };
+      evidenceDetails = {
+        parseFailure: true,
+        message: "The Order Review could not be parsed during staging.",
+      };
+    }
+    let evidenceId: number;
+    try {
+      evidenceId = await persistStageEvidence({
+        stagingId,
+        sourceFilename: file.originalname,
+        fileData: file.buffer,
+        kind: "order-review",
+        reportDate:
+          detectReportAsOnDate(file.buffer, file.originalname) ??
+          orderReview.asOnDate ??
+          reportDate,
+        comparedAgainstImportId,
+        assessment,
+        blockers: assessment.blocking,
+        warnings: assessment.warnings,
+        details: evidenceDetails,
+        projectCodes,
+      });
+    } catch (err) {
+      req.log.error({ err, stagingId }, "Could not persist Order Review staging evidence");
+      res.status(500).json({ error: "Could not preserve staging evidence for this upload." });
+      return;
     }
     res.status(201).json({
       stagingId,
+      evidenceId,
       sourceFilename: file.originalname,
       fileType,
       orderReview: {
@@ -1065,6 +1478,7 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
         sanityCheck,
       },
       structural: null,
+      assessment,
     });
     return;
   }
@@ -1086,11 +1500,168 @@ router.post("/imports/stage", requireAuth, uploadSingle, async (req, res): Promi
     };
   }
 
+  let assessment: StageAssessment;
+  let comparedAgainstImportId: number | null = null;
+  let evidenceDetails: Record<string, unknown> = {};
+  try {
+    const parsed = parseWorkbook(file.buffer, undefined, { reportDate: reportDate ?? undefined });
+    const gate = wipCriticalGate(file.buffer, stagedFileType);
+    const blocking: StageFinding[] = [];
+    if (gate) {
+      blocking.push({ title: "Missing critical WIP columns", detail: gate.error });
+    }
+    if (parsed.rows.length === 0) {
+      blocking.push({
+        title: "No importable marks found",
+        detail: "No rows with a Mark No. were found. Re-export the WIP report before importing.",
+      });
+    }
+    for (const [column, stat] of Object.entries(parsed.dateStats)) {
+      if (stat.future > 0) {
+        blocking.push({
+          title: `Future ${column} values`,
+          detail: `${stat.future} of ${stat.parsed} parsed values are after the selected report date.`,
+        });
+      }
+    }
+    const [previousImport] = await db
+      .select({ id: importsTable.id, reportDate: importsTable.reportDate })
+      .from(importsTable)
+      .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
+      .limit(1);
+    comparedAgainstImportId = previousImport?.id ?? null;
+    const currentMetrics = wipStageMetrics(
+      // parseWorkbook has already computed the transitional initial-cutting
+      // classification. Preserve it so staged bucket deltas match commit-time
+      // classification instead of reclassifying every row as non-initial.
+      parsed.rows.map((row) => ({ row: row as unknown as StageWipRow, copies: 1 })),
+    );
+    let deltas: StageDelta[] = [];
+    if (previousImport) {
+      const previousRows = await loadMembership(db, previousImport.id);
+      const previousMetrics = wipStageMetrics(
+        previousRows.map(({ pool, copies, irJobCardStatus, irJobCardType }) => ({
+          row: {
+            ...pool,
+            jobCardStatus: irJobCardStatus ?? pool.jobCardStatus,
+            jobCardType: irJobCardType ?? pool.jobCardType,
+          },
+          copies,
+        })),
+      );
+      deltas = [
+        stageDelta("rows", "Rows", previousMetrics.rows, currentMetrics.rows, 5),
+        stageDelta("weight", "Total weight (MT)", previousMetrics.weightMt, currentMetrics.weightMt, 5),
+        ...Object.keys(stageBucketLabels).map((bucket) =>
+          stageDelta(`bucket:${bucket}`, `${stageBucketLabels[bucket]!} (MT)`, previousMetrics.buckets[bucket] ?? 0, currentMetrics.buckets[bucket] ?? 0, 10),
+        ),
+        stageDelta("tltProjects", "WIP project count", previousMetrics.tltProjects, currentMetrics.tltProjects, 3, true),
+        stageDelta("ntltMarks", "NTLT mark count", previousMetrics.ntltMarks, currentMetrics.ntltMarks, 25, false, true),
+      ];
+    }
+    const unknownActivities = [...new Set(parsed.rows
+      .filter((row) => row.activity && !isKnownActivity(row.activity))
+      .map((row) => row.activity!))];
+    const newOrderNature = [...new Set(parsed.rows
+      .filter((row) => row.orderNature && !isKnownOrderNature(row.orderNature))
+      .map((row) => row.orderNature!))];
+    const aliases = new Map<string, number>();
+    for (const row of parsed.rows) {
+      if (row.activityRaw && row.activityRaw !== row.activity) aliases.set(`${row.activityRaw} → ${row.activity}`, (aliases.get(`${row.activityRaw} → ${row.activity}`) ?? 0) + 1);
+    }
+    assessment = makeAssessment(blocking, isCsvWip(file.buffer) ? [] : [{
+      title: "Excel WIP upload",
+      detail: "CSV is the supported permanent format. Review this Excel export carefully before importing.",
+    }], deltas, [
+      ...(previousImport
+        ? []
+        : [{
+            title: "No previous WIP baseline",
+            detail: "This is the first committed WIP report, so file-level deltas are not available yet.",
+          }]),
+      {
+        title: "Protected date columns",
+        detail: Object.entries(parsed.dateStats)
+          .map(([column, stat]) => `${column}: ${stat.parsed} parsed, ${stat.future} future`)
+          .join("; "),
+      },
+      {
+        title: "Column set",
+        detail: (() => {
+          const check = structural?.wipFormatCheck;
+          const unknown = check?.unexpectedFound ?? [];
+          const recognised = (structural?.columnsFound ?? []).filter((column: string) => !unknown.includes(column));
+          return `Recognised: ${recognised.join(", ") || "none"}. Appended ERP: ${(check?.appendedNew ?? []).join(", ") || "none"}. Missing expected: ${(check?.missingExpected ?? []).join(", ") || "none"}. Unrecognised: ${unknown.join(", ") || "none"}.`;
+        })(),
+      },
+      { title: "Duplicate rows", detail: `${parsed.summary.duplicateRowCopies} copies (${parsed.summary.rowsKept ? ((parsed.summary.duplicateRowCopies / parsed.summary.rowsKept) * 100).toFixed(1) : "0"}%).` },
+      {
+        title: "ERP Type breakdown",
+        detail: (parsed.summary.typeCounts ?? [])
+          .map(({ type, rows }) => `${type}: ${rows.toLocaleString()} row${rows === 1 ? "" : "s"}`)
+          .join("; ") || "No importable marks.",
+      },
+      {
+        title: "Finished goods excluded from live work",
+        detail: `${(parsed.summary.fgExcludedRowCount ?? 0).toLocaleString()} explicit FG Pending For Dispatch row${parsed.summary.fgExcludedRowCount === 1 ? "" : "s"} will remain available for FG reporting but are excluded from live-work calculations.`,
+      },
+      {
+        title: "Unknown ERP Type values",
+        detail: parsed.summary.unknownTypeValues?.length
+          ? `${(parsed.summary.unknownTypeRowCount ?? 0).toLocaleString()} row${parsed.summary.unknownTypeRowCount === 1 ? "" : "s"}: ${parsed.summary.unknownTypeValues.map(({ type, rows }) => `"${type}" (${rows})`).join(", ")}. These remain in live work pending review.`
+          : "None.",
+      },
+      { title: "Activity aliases", detail: aliases.size ? [...aliases.entries()].map(([name, count]) => `${name} (${count})`).join(", ") : "None." },
+      { title: "New activity values", detail: unknownActivities.length ? unknownActivities.join(", ") : "None." },
+      { title: "New Order Nature values", detail: newOrderNature.length ? newOrderNature.join(", ") : "None." },
+      { title: "Unclassified preview", detail: `${currentMetrics.buckets.UNCLASSIFIED ?? 0} mark copies.` },
+    ]);
+    evidenceDetails = {
+      structural,
+      currentMetrics,
+      reportDate,
+      previousImportId: previousImport?.id ?? null,
+    };
+  } catch (err) {
+    req.log.warn({ err }, "WIP staging assessment failed");
+    assessment = makeAssessment([{ title: "Could not parse WIP", detail: "The file could not be assessed as a WIP report." }], [], [], []);
+    evidenceDetails = {
+      structural,
+      parseFailure: true,
+      message: "The WIP file could not be parsed during staging.",
+    };
+  }
+  const evidenceKind = evidenceKindForDetectedFileType(fileType);
+  let evidenceId: number;
+  try {
+    evidenceId = await persistStageEvidence({
+      stagingId,
+      sourceFilename: file.originalname,
+      fileData: file.buffer,
+      kind: evidenceKind,
+      reportDate,
+      comparedAgainstImportId,
+      assessment,
+      blockers: assessment.blocking,
+      warnings: assessment.warnings,
+      details: {
+        ...evidenceDetails,
+        detectedFileType: fileType,
+      },
+    });
+  } catch (err) {
+    req.log.error({ err, stagingId }, "Could not persist staging evidence");
+    res.status(500).json({ error: "Could not preserve staging evidence for this upload." });
+    return;
+  }
+
   res.status(201).json({
     stagingId,
+    evidenceId,
     sourceFilename: file.originalname,
     fileType,
     structural,
+    assessment,
   });
 });
 
@@ -1420,6 +1991,23 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     }
   }
 
+  const forceCumulativeRegressionOverride =
+    req.body?.forceCumulativeRegressionOverride === true;
+  const cumulativeOverrideReasonRaw = req.body?.cumulativeOverrideReason;
+  const cumulativeOverrideReason =
+    typeof cumulativeOverrideReasonRaw === "string"
+      ? cumulativeOverrideReasonRaw.trim()
+      : "";
+  if (
+    forceCumulativeRegressionOverride &&
+    (cumulativeOverrideReason.length === 0 || cumulativeOverrideReason.length > 1000)
+  ) {
+    res.status(400).json({
+      error: "A cumulative-regression override requires a reason of up to 1,000 characters.",
+    });
+    return;
+  }
+
   const [staged] = await db
     .select()
     .from(uploadStagingTable)
@@ -1428,6 +2016,13 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     res.status(404).json({ error: "Staged upload not found" });
     return;
   }
+  const recordRefusal = () =>
+    recordStageEvidenceOutcome(
+      stagingId,
+      "refused",
+      undefined,
+      "Refused by commit-time validation; the staging assessment retains the structural findings.",
+    );
 
   // Type-matched commit (defense in depth): when the slot declares an expected
   // type, a file whose detected type differs must NOT commit, even if a caller
@@ -1435,6 +2030,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   const detected = detectFileType(staged.fileData);
   const expectedType = readExpectedType(req.body);
   if (expectedType && detected !== expectedType) {
+    await recordRefusal();
     res.status(400).json({ error: typeMismatchMessage(detected) });
     return;
   }
@@ -1447,6 +2043,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   {
     const gateResult = wipCriticalGate(staged.fileData, detected);
     if (gateResult) {
+      await recordRefusal();
       res.status(400).json(gateResult);
       return;
     }
@@ -1455,6 +2052,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   // Reject unrecognised files explicitly (defense in depth: a caller may post
   // straight to commit, bypassing /validate). Only WIP and Order Review commit.
   if (detected === "unknown") {
+    await recordRefusal();
     res.status(400).json({
       error:
         "Unrecognised file. Upload either a WIP balance/activity report (Project Code + Mark No. + Activity) or an Order Review export.",
@@ -1472,6 +2070,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
         .from(orderReviewImportsTable)
         .where(eq(orderReviewImportsTable.id, staged.committedOrderReviewImportId));
       if (imp) {
+        await recordStageEvidenceOutcome(stagingId, "imported", imp.id);
         res
           .status(200)
           .json({ kind: "order-review", orderReviewImport: imp, seeded: 0 });
@@ -1479,26 +2078,43 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
       }
     }
 
-    // Strict per-date pairing: an Order Review may only be committed for a date
-    // that already has a committed WIP / Balance & Activity import. The pairing key
-    // is the user-selected date (staged.reportDate) OR the "As on" banner/filename
-    // date. The user-selected date takes priority.
-    const orderAsOnDate =
-      staged.reportDate ??
-      detectReportAsOnDate(staged.fileData, staged.sourceFilename);
-    if (!orderAsOnDate) {
+    // The staging verdict is advisory only for warnings, but its deterministic
+    // blockers are authoritative. Re-check the immutable staged bytes here so a
+    // direct commit request can never bypass the fixed ERP layout/date contract.
+    const orderShape = inspectOrderReviewStaging(staged.fileData);
+    if (!orderShape.layoutOk) {
+      await recordRefusal();
       res.status(400).json({
-        error:
-          "Could not read the Order Review's 'As on' date, so it can't be matched to a WIP report.",
+        error: `Refused: expected the OrderReview sheet with recognizable headers on rows 6–7; found ${orderShape.sheetName ?? "no OrderReview sheet"} with ${orderShape.physicalColumnCount} columns.`,
       });
       return;
     }
+    const fileAsOnDate = detectReportAsOnDate(
+      staged.fileData,
+      staged.sourceFilename,
+    );
+    if (
+      !staged.reportDate ||
+      !fileAsOnDate ||
+      staged.reportDate !== fileAsOnDate
+    ) {
+      await recordRefusal();
+      res.status(400).json({
+        error:
+          `Refused: selected date ${staged.reportDate ?? "missing"} does not match the Order Review file date ${fileAsOnDate ?? "missing"}.`,
+      });
+      return;
+    }
+    // Strict per-date pairing: an Order Review may only be committed for the
+    // date embedded in its own bytes, after it has matched the selected date.
+    const orderAsOnDate = fileAsOnDate;
     const [wipMatch] = await db
       .select({ id: importsTable.id })
       .from(importsTable)
       .where(eq(importsTable.asOnDate, orderAsOnDate))
       .limit(1);
     if (!wipMatch) {
+      await recordRefusal();
       res.status(409).json({
         error: `Upload and accept the WIP / Balance & Activity report for ${orderAsOnDate} before its Order Review.`,
       });
@@ -1511,8 +2127,40 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
       .where(eq(orderReviewImportsTable.asOnDate, orderAsOnDate))
       .limit(1);
     if (existingOr) {
+      await recordRefusal();
       res.status(409).json({
         error: `An Order Review for ${orderAsOnDate} already exists. Delete it first before uploading a new one.`,
+      });
+      return;
+    }
+    // Re-run the cumulative guard immediately before ingest. Staging has already
+    // shown the same named project findings, but a direct commit request must
+    // never be able to bypass that assessment.
+    let parsedForCumulativeGuard;
+    try {
+      parsedForCumulativeGuard = parseOrderReview(staged.fileData);
+    } catch {
+      await recordRefusal();
+      res.status(400).json({ error: "Could not parse the staged Order Review file." });
+      return;
+    }
+    const latestForCumulativeGuard = await loadLatestOrderReview();
+    const cumulativeAtCommit = compareOrderReviewCumulativeProgress(
+      parsedForCumulativeGuard.rows,
+      latestForCumulativeGuard?.rows ?? null,
+    );
+    const cumulativeFindings = cumulativeRegressionFindings(
+      cumulativeAtCommit.regressions,
+      parsedForCumulativeGuard.rows,
+      latestForCumulativeGuard?.rows ?? null,
+    );
+    if (cumulativeFindings.length > 0 && !forceCumulativeRegressionOverride) {
+      await recordRefusal();
+      res.status(409).json({
+        error:
+          "Normal import was refused because cumulative progress decreased. Continuing would mix this incoming snapshot with current rows from earlier snapshots. Use the separate override confirmation, acknowledge that consequence, and record why.",
+        blocking: cumulativeFindings,
+        cumulativeOverrideRequired: true,
       });
       return;
     }
@@ -1530,6 +2178,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
         .limit(1);
       const newestDate = newestOr?.asOnDate ?? null;
       if (newestDate && orderAsOnDate < newestDate) {
+        await recordRefusal();
         res.status(409).json({
           error: `This file's date (${orderAsOnDate}) is older than the current Order Review (${newestDate}). Uploading would revert the order book to an earlier snapshot.`,
           staleDateWarning: true,
@@ -1547,11 +2196,14 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     // a dropped import (wrongly flagged "not in latest"). Holding the lock for
     // this transaction's lifetime forces concurrent commits to wait, then observe
     // the idempotency guard already set and replay the winner without re-ingesting.
-    let outcome: {
-      importRow: typeof orderReviewImportsTable.$inferSelect;
-      seeded: number;
-      created: boolean;
-    };
+    let outcome:
+      | {
+          importRow: typeof orderReviewImportsTable.$inferSelect;
+          seeded: number;
+          created: boolean;
+        }
+      | { blocked: StageFinding[] }
+      | { dateTaken: true };
     try {
       outcome = await db.transaction(async (tx) => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(728041)`);
@@ -1572,6 +2224,55 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
             .where(eq(orderReviewImportsTable.id, winnerId));
           if (winner) return { importRow: winner, seeded: 0, created: false };
         }
+        // The earlier date check gives a fast response in the common case. This
+        // second check is the authoritative one: another request may have passed
+        // that first check while this request waited for the advisory lock.
+        const [existingDateUnderLock] = await tx
+          .select({ id: orderReviewImportsTable.id })
+          .from(orderReviewImportsTable)
+          .where(eq(orderReviewImportsTable.asOnDate, orderAsOnDate))
+          .limit(1);
+        if (existingDateUnderLock) return { dateTaken: true };
+        // A concurrent commit may have finished while this request waited for
+        // the advisory lock. Reload only after acquiring it, so the comparison
+        // cannot approve a now-regressive file against the old snapshot.
+        const latestUnderLock = await loadLatestOrderReview();
+        const cumulativeUnderLock = compareOrderReviewCumulativeProgress(
+          parsedForCumulativeGuard.rows,
+          latestUnderLock?.rows ?? null,
+        );
+        const blockedUnderLock = cumulativeRegressionFindings(
+          cumulativeUnderLock.regressions,
+          parsedForCumulativeGuard.rows,
+          latestUnderLock?.rows ?? null,
+        );
+        if (blockedUnderLock.length > 0 && !forceCumulativeRegressionOverride) {
+          return { blocked: blockedUnderLock };
+        }
+        const cumulativeOverride: {
+          reason: string;
+          at: Date;
+          by: string;
+          details: OrderReviewCumulativeOverrideDetails;
+        } | undefined =
+          blockedUnderLock.length > 0
+            ? {
+                reason: cumulativeOverrideReason,
+                at: new Date(),
+                by: req.user?.displayName || req.user?.email || req.user?.id || "Unknown user",
+                details: {
+                  baselineImportId: latestUnderLock?.import.id ?? null,
+                  regressions: cumulativeUnderLock.regressions.map((row) => ({
+                    project: row.project,
+                    column: row.column,
+                    label: row.label,
+                    previousMt: row.previousMt,
+                    currentMt: row.currentMt,
+                    differenceMt: row.differenceMt,
+                  })),
+                },
+              }
+            : undefined;
         // We hold the lock and the file is unclaimed: this transaction owns the
         // ingest. ingestOrderReview runs its own writes via the pool, serialized
         // by the lock we hold here.
@@ -1579,6 +2280,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
           sourceFilename: staged.sourceFilename,
           label: staged.label,
           asOnDate: orderAsOnDate,
+          cumulativeOverride,
         });
         await tx
           .update(uploadStagingTable)
@@ -1592,10 +2294,33 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
       });
     } catch (err) {
       req.log.warn({ err, stagingId }, "Order Review ingest failed");
+      await recordRefusal();
       res.status(400).json({ error: "Could not ingest the Order Review file" });
       return;
     }
+    if ("blocked" in outcome) {
+      await recordRefusal();
+      res.status(409).json({
+        error:
+          "Normal import was refused because cumulative progress decreased. Continuing would mix this incoming snapshot with current rows from earlier snapshots. Use the separate override confirmation, acknowledge that consequence, and record why.",
+        blocking: outcome.blocked,
+        cumulativeOverrideRequired: true,
+      });
+      return;
+    }
+    if ("dateTaken" in outcome) {
+      await recordRefusal();
+      res.status(409).json({
+        error: `An Order Review for ${orderAsOnDate} already exists. Delete it first before uploading a new one.`,
+      });
+      return;
+    }
 
+    await recordStageEvidenceOutcome(
+      stagingId,
+      "imported",
+      outcome.importRow.id,
+    );
     res.status(outcome.created ? 201 : 200).json({
       kind: "order-review",
       orderReviewImport: outcome.importRow,
@@ -1613,6 +2338,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
       .from(importsTable)
       .where(eq(importsTable.id, staged.committedImportId));
     if (imp) {
+      await recordStageEvidenceOutcome(stagingId, "imported", imp.id);
       req.log.info(
         { stagingId, importId: imp.id },
         "Commit replayed: staged file already committed",
@@ -1641,6 +2367,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     .where(eq(importsTable.asOnDate, wipAsOnDate))
     .limit(1);
   if (existingWip) {
+    await recordRefusal();
     res.status(409).json({
       error: `A WIP report for ${wipAsOnDate} already exists. Delete it first before uploading a new one for this date.`,
     });
@@ -1654,6 +2381,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     parsed = parseWorkbook(staged.fileData, accepted, { reportDate: wipAsOnDate });
   } catch (err) {
     req.log.warn({ err, stagingId }, "Commit parse failed");
+    await recordRefusal();
     res
       .status(400)
       .json({ error: "Could not parse the staged file as a WIP report." });
@@ -1661,6 +2389,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   }
 
   if (parsed.rows.length === 0) {
+    await recordRefusal();
     res.status(400).json({
       error:
         "No marks found in the file. Check that the sheet has a header row with 'Project Code' and a 'Mark No.' column.",
@@ -1668,6 +2397,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
     return;
   }
   if (parsed.futureDateCount > 0) {
+    await recordRefusal();
     res.status(400).json({
       error: `Refused: ${parsed.futureDateCount} CSV date value(s) are later than the selected report date ${wipAsOnDate}.`,
       futureDateCount: parsed.futureDateCount,
@@ -1721,6 +2451,7 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
       // Roll back the duplicate import we just created (cascades its
       // import_rows; the shared record pool is permanent and untouched).
       await db.delete(importsTable).where(eq(importsTable.id, result.import.id));
+      await recordStageEvidenceOutcome(stagingId, "imported", winner.id);
       req.log.warn(
         { stagingId, droppedImportId: result.import.id, importId: winner.id },
         "Concurrent commit detected: dropped duplicate import",
@@ -1770,12 +2501,19 @@ router.post("/imports/commit", requireAuth, async (req, res): Promise<void> => {
   } catch (err) {
     req.log.warn({ err }, "Assignment balance recompute failed after commit");
   }
+  await recordStageEvidenceOutcome(stagingId, "imported", result.import.id);
   res.status(201).json({ kind: "wip", ...result });
 });
 
 // DELETE /imports/stage/:id — discard a staged upload without committing.
 router.delete("/imports/stage/:id", requireAuth, async (req, res): Promise<void> => {
   const id = String(req.params.id);
+  await recordStageEvidenceOutcome(
+    id,
+    "skipped",
+    undefined,
+    "Discarded before import by an authenticated user.",
+  );
   await db.delete(uploadStagingTable).where(eq(uploadStagingTable.id, id));
   res.status(204).end();
 });
@@ -1789,6 +2527,47 @@ router.get("/imports/deletion-log", requireAuth, async (_req, res): Promise<void
     .orderBy(desc(importDeletionLogTable.deletedAt));
   res.json(rows);
 });
+
+// Durable staging audit history. The evidence table has no cascading foreign
+// keys to imports by design: deleting a report must not erase what its panel
+// showed before the import decision.
+router.get(
+  "/imports/stage-evidence",
+  requireAuth,
+  requireAdmin,
+  async (_req, res): Promise<void> => {
+    const rows = await db
+      .select()
+      .from(uploadStageEvidenceTable)
+      .orderBy(desc(uploadStageEvidenceTable.stagedAt), desc(uploadStageEvidenceTable.id))
+      .limit(250);
+    res.json(
+      rows.map((row) => ({
+        id: row.id,
+        stagingId: row.stagingId,
+        stagedAt: row.stagedAt.toISOString(),
+        sourceFilename: row.sourceFilename,
+        sourceHash: row.sourceHash,
+        kind: row.kind,
+        reportDate: row.reportDate,
+        comparedAgainstImportId: row.comparedAgainstImportId,
+        blockers: row.blockers,
+        warnings: row.warnings,
+        assessment: row.assessment,
+        details: row.details,
+        projectCodes: row.projectCodes,
+        outcome: row.outcome,
+        outcomeAt: row.outcomeAt?.toISOString() ?? null,
+        outcomeReason: row.outcomeReason,
+        importId: row.importId,
+        importDeletedAt: row.importDeletedAt?.toISOString() ?? null,
+        importDeletionScope: row.importDeletionScope,
+        isReconstruction: row.isReconstruction,
+        reconstructionNote: row.reconstructionNote,
+      })),
+    );
+  },
+);
 
 router.get("/imports/compare", async (req, res): Promise<void> => {
   const params = CompareImportsQueryParams.safeParse(req.query);
@@ -1923,10 +2702,62 @@ router.delete("/imports", requireAuth, async (req, res): Promise<void> => {
     // can never interleave with an upload and leave a partial/inconsistent state.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(728041)`);
     const deletedImports = await tx.delete(importsTable).returning({ id: importsTable.id });
+    const deletedImportIds = deletedImports.map((row) => row.id);
+    if (deletedImportIds.length > 0) {
+      await tx
+        .update(uploadStageEvidenceTable)
+        .set({
+          importDeletedAt: new Date(),
+          importDeletionScope: "bulk WIP reset",
+        })
+        .where(
+          and(
+            eq(uploadStageEvidenceTable.kind, "wip"),
+            inArray(uploadStageEvidenceTable.importId, deletedImportIds),
+          ),
+        );
+    }
+    const stagedRows = await tx
+      .select({
+        id: uploadStagingTable.id,
+        fileData: uploadStagingTable.fileData,
+        expectedKind: uploadStagingTable.expectedKind,
+      })
+      .from(uploadStagingTable);
+    // A WIP reset must not discard a separately staged Order Review file — its
+    // declared slot is authoritative even when a malformed workbook cannot be
+    // auto-detected. Legacy rows without a declared slot are deleted only when
+    // they can positively be identified as WIP.
+    const stagingIds = stagedRows
+      .filter(
+        (row) =>
+          shouldDiscardStagingForWipReset(
+            row.expectedKind,
+            detectFileType(row.fileData),
+          ),
+      )
+      .map((row) => row.id);
+    if (stagingIds.length > 0) {
+      await tx
+        .update(uploadStageEvidenceTable)
+        .set({
+          outcome: "skipped",
+          outcomeAt: new Date(),
+          outcomeReason: "Discarded during bulk WIP reset before import.",
+        })
+        .where(
+          and(
+            inArray(uploadStageEvidenceTable.stagingId, stagingIds),
+            isNull(uploadStageEvidenceTable.outcome),
+          ),
+        );
+      await tx.delete(uploadStagingTable).where(inArray(uploadStagingTable.id, stagingIds));
+    }
     const deletedPool = await tx.delete(recordPoolTable).returning({ id: recordPoolTable.id });
     return {
       importsDeleted: deletedImports.length,
       poolRowsDeleted: deletedPool.length,
+      stagedUploadsDeleted: stagingIds.length,
     };
   });
 
@@ -1942,40 +2773,50 @@ router.delete("/imports/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  // Fetch metadata before deleting so we can write the deletion log.
-  const [target] = await db
-    .select({
-      id: importsTable.id,
-      sourceFilename: importsTable.sourceFilename,
-      asOnDate: importsTable.asOnDate,
-    })
-    .from(importsTable)
-    .where(eq(importsTable.id, params.data.id));
+  const actor = req.user?.displayName || req.user?.email || "unknown";
+  const deleted = await db.transaction(async (tx) => {
+    const [target] = await tx
+      .select({
+        id: importsTable.id,
+        sourceFilename: importsTable.sourceFilename,
+        asOnDate: importsTable.asOnDate,
+      })
+      .from(importsTable)
+      .where(eq(importsTable.id, params.data.id));
+    if (!target) return null;
 
-  if (!target) {
-    res.status(404).json({ error: "Import not found" });
-    return;
-  }
-
-  // Write audit log entry before deletion (if the delete fails, the log entry
-  // is harmless; if the log write fails, the delete still proceeds).
-  try {
-    const actor = req.user?.displayName || req.user?.email || "unknown";
-    await db.insert(importDeletionLogTable).values({
-      importId: target.id,
-      fileType: "wip",
-      sourceFilename: target.sourceFilename,
-      reportDate: target.asOnDate ?? null,
-      deletedBy: actor,
-    });
-  } catch (err) {
-    req.log.warn({ err, importId: target.id }, "Could not write deletion log");
-  }
-
-  const [deleted] = await db
-    .delete(importsTable)
-    .where(eq(importsTable.id, params.data.id))
-    .returning();
+    // The deletion log is supplementary; evidence linkage below is part of the
+    // transaction and must succeed for the import deletion to commit.
+    try {
+      await tx.insert(importDeletionLogTable).values({
+        importId: target.id,
+        fileType: "wip",
+        sourceFilename: target.sourceFilename,
+        reportDate: target.asOnDate ?? null,
+        deletedBy: actor,
+      });
+    } catch (err) {
+      req.log.warn({ err, importId: target.id }, "Could not write WIP deletion log");
+    }
+    const [deletedImport] = await tx
+      .delete(importsTable)
+      .where(eq(importsTable.id, params.data.id))
+      .returning();
+    if (!deletedImport) return null;
+    await tx
+      .update(uploadStageEvidenceTable)
+      .set({
+        importDeletedAt: new Date(),
+        importDeletionScope: "single import deletion",
+      })
+      .where(
+        and(
+          eq(uploadStageEvidenceTable.kind, "wip"),
+          eq(uploadStageEvidenceTable.importId, params.data.id),
+        ),
+      );
+    return deletedImport;
+  });
 
   if (!deleted) {
     res.status(404).json({ error: "Import not found" });
@@ -2038,14 +2879,11 @@ router.get("/imports/:id/records", async (req, res): Promise<void> => {
   ]);
   rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
 
-  const out: ReturnType<typeof serializeRecord>[] = [];
   let nextId = 1;
-  for (const { pool, copies, irJobCardStatus, irJobCardType } of rows) {
+  const out = expandCopies(rows, ({ pool, irJobCardStatus, irJobCardType }) => {
     const clientMfcDate = projectDates.get(`${pool.job}|${pool.mfcBatch ?? "Z"}`) ?? null;
-    for (let c = 0; c < copies; c++) {
-      out.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate, irJobCardStatus, irJobCardType));
-    }
-  }
+    return serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate, irJobCardStatus, irJobCardType);
+  });
   serializedRecordsCache.set(params.data.id, out);
 
   res.json(out);
@@ -2092,14 +2930,11 @@ router.post("/imports/:id/summary", async (req, res): Promise<void> => {
       loadProjectDates(),
     ]);
     rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
-    serialized = [];
     let nextId = 1;
-    for (const { pool, copies, irJobCardStatus, irJobCardType } of rows) {
+    serialized = expandCopies(rows, ({ pool, irJobCardStatus, irJobCardType }) => {
       const clientMfcDate = projectDatesForSummary.get(`${pool.job}|${pool.mfcBatch ?? "Z"}`) ?? null;
-      for (let c = 0; c < copies; c++) {
-        serialized.push(serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate, irJobCardStatus, irJobCardType));
-      }
-    }
+      return serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate, irJobCardStatus, irJobCardType);
+    });
     serializedRecordsCache.set(params.data.id, serialized);
   }
 
@@ -2214,10 +3049,7 @@ router.get("/imports/:id/changes", async (req, res): Promise<void> => {
     .select()
     .from(importsTable)
     .where(and(
-      or(
-        lt(importsTable.reportDate, toImport.reportDate),
-        and(eq(importsTable.reportDate, toImport.reportDate), lt(importsTable.id, toImport.id)),
-      ),
+      previousImportCondition(toImport.reportDate, toImport.id),
       cutoffSql(changesCutoff),
     ))
     .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
@@ -2271,10 +3103,7 @@ router.get("/imports/:id/movement", async (req, res): Promise<void> => {
     .select({ id: importsTable.id, createdAt: importsTable.createdAt })
     .from(importsTable)
     .where(and(
-      or(
-        lt(importsTable.reportDate, target.reportDate),
-        and(eq(importsTable.reportDate, target.reportDate), lt(importsTable.id, target.id)),
-      ),
+      previousImportCondition(target.reportDate, target.id),
       cutoffSql(movementCutoff),
     ))
     .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id));
@@ -2438,10 +3267,7 @@ async function computeVelocityItems(
     })
     .from(importsTable)
     .where(and(
-      or(
-        lt(importsTable.reportDate, target.reportDate),
-        and(eq(importsTable.reportDate, target.reportDate), lt(importsTable.id, target.id)),
-      ),
+      previousImportCondition(target.reportDate, target.id),
       cutoffSql(velocityCutoff),
     ))
     .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id));

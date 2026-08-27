@@ -139,15 +139,40 @@ export interface SetRoleRequest {
   role: SetRoleRequestRole;
 }
 
+/**
+ * The upload slot chosen by the user. Retained only with temporary staging bytes so a WIP reset cannot discard a staged Order Review that a malformed workbook prevents auto-detecting.
+
+ */
+export type ImportUploadExpectedType = typeof ImportUploadExpectedType[keyof typeof ImportUploadExpectedType];
+
+
+export const ImportUploadExpectedType = {
+  wip: 'wip',
+  'order-review': 'order-review',
+} as const;
+
 export interface ImportUpload {
   file: Blob;
   label?: string;
   reportDate?: string;
+  /** The upload slot chosen by the user. Retained only with temporary staging bytes so a WIP reset cannot discard a staged Order Review that a malformed workbook prevents auto-detecting.
+   */
+  expectedType?: ImportUploadExpectedType;
 }
 
 export type ParseSummaryUnclassifiedSamplesItem = {
   type: string;
   status: string;
+};
+
+export type ParseSummaryTypeCountsItem = {
+  type: string;
+  rows: number;
+};
+
+export type ParseSummaryUnknownTypeValuesItem = {
+  type: string;
+  rows: number;
 };
 
 /**
@@ -191,6 +216,16 @@ export interface ParseSummary {
   /** Up to 5 distinct Type+Status combos from unclassified rows, for diagnosis. Absent when unclassifiedRowCount is absent or zero.
    */
   unclassifiedSamples?: ParseSummaryUnclassifiedSamplesItem[];
+  /** Every observed WIP Type value, with casing variants combined. Blank legacy Type values are represented as "(blank / legacy)".
+   */
+  typeCounts?: ParseSummaryTypeCountsItem[];
+  /** Explicit FG Pending For Dispatch rows. They remain available for FG reporting but are excluded from live-work calculations.
+   */
+  fgExcludedRowCount?: number;
+  /** Number of rows with an unknown nonblank WIP Type. */
+  unknownTypeRowCount?: number;
+  /** Up to five unknown WIP Type values, with row counts. */
+  unknownTypeValues?: ParseSummaryUnknownTypeValuesItem[];
   /** Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = "FG Pending For Dispatch". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.
    */
   fgWipByJob?: ParseSummaryFgWipByJob;
@@ -339,6 +374,8 @@ export interface OrderReviewSummary {
   totalReleaseMt: number;
   totalFileDespatchMt: number;
   skippedTotals: number;
+  /** Banner rows intentionally skipped while parsing. */
+  skippedBanner?: number;
   missingStructure: number;
   /** Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added.
    */
@@ -413,8 +450,62 @@ export interface OrderReviewStageInfo {
   sanityCheck: OrSanityResult | null;
 }
 
+export type StagingAssessmentVerdict = typeof StagingAssessmentVerdict[keyof typeof StagingAssessmentVerdict];
+
+
+export const StagingAssessmentVerdict = {
+  blocked: 'blocked',
+  review: 'review',
+  ready: 'ready',
+} as const;
+
+/**
+ * Optional read-only classification for a blocking cumulative Order Review regression.
+ */
+export type StageFindingClassification = typeof StageFindingClassification[keyof typeof StageFindingClassification];
+
+
+export const StageFindingClassification = {
+  'cancellation-transfer': 'cancellation-transfer',
+  correction: 'correction',
+  'scope-reduction': 'scope-reduction',
+  unclassified: 'unclassified',
+} as const;
+
+export interface StageFinding {
+  title: string;
+  detail: string;
+  /** Optional read-only classification for a blocking cumulative Order Review regression. */
+  classification?: StageFindingClassification;
+}
+
+export interface StageDelta {
+  key: string;
+  label: string;
+  previous: number;
+  current: number;
+  changePercent: number | null;
+  requiresAcknowledgement: boolean;
+}
+
+export interface StagingAssessment {
+  verdict: StagingAssessmentVerdict;
+  blocking: StageFinding[];
+  warnings: StageFinding[];
+  deltas: StageDelta[];
+  information: StageFinding[];
+  /** True only when the current blocking findings are cumulative Order Review regressions that may be deliberately overridden for this one import after acknowledgement and a recorded reason.
+   */
+  cumulativeOverrideRequired: boolean;
+}
+
 export interface StageResult {
   stagingId: string;
+  /**
+     * Durable audit record created for a recognised WIP or Order Review file.
+     * @nullable
+     */
+  evidenceId: number | null;
   sourceFilename: string;
   /** Detected file type; routes the staged flow (WIP vs Order Review). */
   fileType: StageResultFileType;
@@ -422,6 +513,72 @@ export interface StageResult {
   structural: StructuralRead | null;
   /** Deterministic read for Order Review files; null for WIP files. */
   orderReview?: OrderReviewStageInfo | null;
+  assessment: StagingAssessment;
+}
+
+export type UploadStageEvidenceKind = typeof UploadStageEvidenceKind[keyof typeof UploadStageEvidenceKind];
+
+
+export const UploadStageEvidenceKind = {
+  wip: 'wip',
+  'order-review': 'order-review',
+  unknown: 'unknown',
+} as const;
+
+export type UploadStageEvidenceDetails = { [key: string]: unknown };
+
+/**
+ * @nullable
+ */
+export type UploadStageEvidenceOutcome = typeof UploadStageEvidenceOutcome[keyof typeof UploadStageEvidenceOutcome] | null;
+
+
+export const UploadStageEvidenceOutcome = {
+  imported: 'imported',
+  skipped: 'skipped',
+  expired: 'expired',
+  refused: 'refused',
+} as const;
+
+/**
+ * Immutable evidence of the exact staging-panel findings for one source file. It is independent of the disposable staging row and mutable import history, and never changes import guards or report calculations.
+
+ */
+export interface UploadStageEvidence {
+  id: number;
+  stagingId: string;
+  stagedAt: string;
+  sourceFilename: string;
+  /** SHA-256 of the exact uploaded source bytes. */
+  sourceHash: string;
+  kind: UploadStageEvidenceKind;
+  /**
+     * @nullable
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
+  reportDate: string | null;
+  /** @nullable */
+  comparedAgainstImportId: number | null;
+  blockers: unknown[];
+  warnings: unknown[];
+  assessment: StagingAssessment;
+  details: UploadStageEvidenceDetails;
+  projectCodes: string[];
+  /** @nullable */
+  outcome: UploadStageEvidenceOutcome;
+  /** @nullable */
+  outcomeAt: string | null;
+  /** @nullable */
+  outcomeReason: string | null;
+  /** @nullable */
+  importId: number | null;
+  /** @nullable */
+  importDeletedAt: string | null;
+  /** @nullable */
+  importDeletionScope: string | null;
+  isReconstruction: boolean;
+  /** @nullable */
+  reconstructionNote: string | null;
 }
 
 /**
@@ -541,6 +698,15 @@ export interface CommitRequest {
   expectedType?: CommitRequestExpectedType;
   /** Descriptive cleanups the user accepted; applied before parse+merge. */
   acceptedSuggestions?: AcceptedSuggestion[];
+  /** One-use Order Review override for an otherwise-blocking cumulative progress regression. Requires cumulativeOverrideReason; never persists in staging or applies to a later import.
+   */
+  forceCumulativeRegressionOverride?: boolean;
+  /**
+     * Required operator explanation when forcing a cumulative regression.
+     * @minLength 1
+     * @maxLength 1000
+     */
+  cumulativeOverrideReason?: string;
 }
 
 export type WipCommitResultKind = typeof WipCommitResultKind[keyof typeof WipCommitResultKind];
@@ -605,6 +771,24 @@ export interface OrderReviewChangeLog {
   flagged: OrderReviewKeyRef[];
 }
 
+export type OrderReviewCumulativeOverrideDetailsRegressionsItem = {
+  project: string;
+  column: string;
+  label: string;
+  previousMt: number;
+  currentMt: number;
+  differenceMt: number;
+};
+
+/**
+ * Exact project and cumulative-column regressions accepted for one Order Review import.
+ */
+export interface OrderReviewCumulativeOverrideDetails {
+  /** @nullable */
+  baselineImportId: number | null;
+  regressions: OrderReviewCumulativeOverrideDetailsRegressionsItem[];
+}
+
 /**
  * One Order Review file upload (rows are upserted, not appended).
  */
@@ -617,6 +801,22 @@ export interface OrderReviewImport {
   asOnDate: string | null;
   summary: OrderReviewSummary;
   changeLog: OrderReviewChangeLog | null;
+  /**
+     * Reason recorded for a deliberate cumulative-regression override.
+     * @nullable
+     */
+  overrideReason: string | null;
+  /**
+     * Timestamp at which a cumulative-regression override was accepted.
+     * @nullable
+     */
+  overrideAt: string | null;
+  /**
+     * Authenticated operator who accepted the cumulative-regression override.
+     * @nullable
+     */
+  overrideBy: string | null;
+  overrideDetails: OrderReviewCumulativeOverrideDetails | null;
   createdAt: string;
 }
 
@@ -1815,6 +2015,64 @@ export interface AdminRecomputeResult {
 }
 
 /**
+ * Read-only signature classification for the anomaly.
+ */
+export type OrderReviewAnomalySignature = typeof OrderReviewAnomalySignature[keyof typeof OrderReviewAnomalySignature];
+
+
+export const OrderReviewAnomalySignature = {
+  A: 'A',
+  B: 'B',
+  C: 'C',
+  D: 'D',
+} as const;
+
+export type OrderReviewAnomalyStatus = typeof OrderReviewAnomalyStatus[keyof typeof OrderReviewAnomalyStatus];
+
+
+export const OrderReviewAnomalyStatus = {
+  open: 'open',
+  explained: 'explained',
+  superseded: 'superseded',
+} as const;
+
+/**
+ * Persistent investigation record for a project-level cumulative-regression anomaly.
+ */
+export interface OrderReviewAnomaly {
+  id: number;
+  project: string;
+  /** Read-only signature classification for the anomaly. */
+  signature: OrderReviewAnomalySignature;
+  /** Normalized investigation reason for the signature. */
+  reason: string;
+  status: OrderReviewAnomalyStatus;
+  explanation: string;
+  createdAt: string;
+  updatedAt: string;
+  /** @nullable */
+  updatedBy: string | null;
+}
+
+export type OrderReviewAnomalyUpdateStatus = typeof OrderReviewAnomalyUpdateStatus[keyof typeof OrderReviewAnomalyUpdateStatus];
+
+
+export const OrderReviewAnomalyUpdateStatus = {
+  open: 'open',
+  explained: 'explained',
+  superseded: 'superseded',
+} as const;
+
+export interface OrderReviewAnomalyUpdate {
+  status: OrderReviewAnomalyUpdateStatus;
+  /**
+     * @minLength 1
+     * @maxLength 2000
+     */
+  explanation: string;
+}
+
+/**
  * One (project, structure) order row joined to computed dispatch.
  */
 export interface OrderStatusRow {
@@ -2003,6 +2261,8 @@ export interface OrderStatusResponse {
   reconciliation: DispatchReconciliation;
   balanceReconciliation: BalanceReconciliation;
   imports: OrderReviewImport[];
+  /** Overrides accepted within the last seven days, shown to operators as a safety warning. */
+  recentCumulativeOverrides: OrderReviewImport[];
 }
 
 export interface ReviewRequest {
@@ -2364,6 +2624,8 @@ export interface UnknownProjectCauses {
 }
 
 export interface FabricationProjectCompletionResponse {
+  /** WIP import used to calculate this response, or null when no WIP import exists. */
+  importId: number | null;
   /** False when no WIP import exists, or when the import is gated (pre-dates Type/Status storage). */
   available: boolean;
   /** Human-readable explanation when available is false due to a type-data gate. */
@@ -2687,6 +2949,15 @@ export type GetReleaseBalanceParams = {
 /**
  * WIP import to scope the Release Balance figures to. When omitted, falls back to the most recently committed WIP import.
 
+ */
+importId?: number;
+};
+
+export type GetFabricationProjectCompletionTltParams = {
+/**
+ * WIP import to calculate. When omitted, uses the most recently committed WIP import for the standalone report pages.
+
+ * @minimum 1
  */
 importId?: number;
 };

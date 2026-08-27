@@ -1,0 +1,162 @@
+# Rebuild the pre-import staging checks on both upload cards
+
+The checks that run when a file is selected — before anything is imported — were written against
+the old Excel format and no longer match what the ERP sends. They need rebuilding.
+
+**The principle to build around:** an absolute check catches a *malformed* file. Only a delta
+check catches a *wrong* file. Every serious problem this month came from a file that was perfectly
+well-formed and simply wrong, and no absolute check would have caught any of them:
+
+| What happened | Would an absolute check catch it? |
+|---|---|
+| 19-Aug: NTLT vanished entirely — 331 marks, 7,296 MT | No. The file parsed cleanly. |
+| 19-Aug: finished goods doubled, 2,708 → 5,524 MT | No. Valid rows, valid weights. |
+| 19-Aug (.xlsx): 6,830 production dates in the future | No. Valid dates, just the wrong ones. |
+| 19-Aug: 24 extra completed projects appeared | No. |
+| 20-Aug: Order Review jumped 165 → 1,130 projects | No. |
+
+Every one shows as an obvious jump against the previous import. So the staging panel must compare
+against the current latest import of the same kind, not just validate the file in isolation.
+
+---
+
+## PART 1 — WIP staging checks
+
+### A. Blocking — refuse the import, no override
+
+**A1 · Critical columns present.** `Type`, `Job Card Status`, `Order Nature`, `Balance Wt.`,
+`Mark No.`, `Alias`, `Project Code`, `Activity`, `Contractor`, `Batch No.` Name every missing one.
+This is task #42 and it already exists — surface it on the staging card rather than only at
+import.
+
+**A2 · No future dates.** Parse all three date columns day-first. If any value falls after the
+selected report date, refuse and report the count per column. This is the single check that would
+have caught the corrupted `.xlsx` — it had 6,830 future production entries.
+
+**A3 · Not an Excel file when a CSV is expected.** The `.xlsx` version of this export is corrupted
+by Excel re-reading `dd/mm/yyyy` text as `mm/dd/yyyy`. If an Excel WIP file is uploaded, warn
+prominently that the CSV export is the supported format, and run A2 with particular care.
+
+### B. Warn loudly — show a delta, require acknowledgement
+
+Compare against the current latest WIP import. Flag anything outside these bands:
+
+```
+total rows            ±5%      (16-Aug 59,276 → 19-Aug 75,176 was +27%)
+total weight          ±5%
+any of the six buckets ±10%    (FG 2,708 → 5,524 MT was +104%)
+TLT project count     ±3 projects
+NTLT mark count       ±25%, and ALWAYS if it reaches zero
+```
+
+Show previous value, new value, and the change — not a pass/fail. The user is being asked "does
+this look like a normal day?", and they can only answer that if they can see both numbers.
+
+### C. Informational — show, never block
+
+**C1 · New activity codes.** Any activity not in `PROCESS_SEQUENCE` after aliasing. `P` appeared
+this way on 19-Aug and `S` will follow.
+
+**C2 · New Order Nature values.** Anything outside `KNOWN_ORDER_NATURES`. Four appeared on 20-Aug.
+
+**C3 · Column set change.** Recognised, appended-new, and missing-optional, listed by name. The
+column count has gone 24 → 26 → 28 → 36 in three weeks; report what changed, never assert a total.
+
+**C4 · Duplicate rows.** Identical rows are the `copies` mechanism and run at ~1.7% on every file.
+Show the percentage; flag only if it moves materially. **Do not present these as an error** — they
+are bill-of-material lines, and a plate used eight times in an assembly produces eight identical
+job-card rows.
+
+**C5 · Alias summary.** How many rows were canonicalised, and from what. On 21-Aug: 497 `P` → `RFI`.
+
+**C6 · Unclassified preview.** Marks that will fall into no bucket, with their activity values.
+Should be 0 on a clean file.
+
+---
+
+## PART 2 — Order Review staging checks
+
+### A. Blocking
+
+**A1 · Header layout intact.** `OrderReview` sheet, four-row preamble, two-tier header on rows 6
+and 7, 24 columns, data from row 8. This has been stable across every file; a change means the
+export has been rebuilt and should be looked at before import.
+
+**A2 · As-on date present** in row 3 and matching the selected report date.
+
+### B. Warn loudly — delta against the latest Order Review
+
+```
+project count         ±5 projects   (17-Aug 165 → 20-Aug 1,130 was a 7× jump)
+data rows             ±10%
+Progress Despatch     must never DECREASE — it is cumulative
+Progress Release      must never decrease
+```
+
+**The despatch test is the important one.** It is the check that proves a newer file is actually
+newer. Material cannot un-ship, so a fall in cumulative despatch means an older file is being
+loaded over a newer one — which silently rolls the order book backwards, because
+`order_review_rows` upserts one row per project and structure. That has already happened once.
+
+### C. Informational
+
+**C1 · Banner and structure counts.** Raw banners, distinct after normalisation, data rows,
+sub-total rows. On 21-Aug: **169 raw banners collapsing to 165** — `840`, `866`, `907` and `912`
+each appear twice.
+
+**C2 · Blank-Tower-Type rows.** Now retained rather than dropped — report count and weight. Long
+running at 4 rows / 63.882 MT.
+
+**C3 · Rows whose structure name is `SUB TOTAL`, `GRAND TOTAL` or `TOTAL`.** Must be 0. This is
+DC0 and it caught a real parser bug.
+
+---
+
+## PART 3 — how it should read
+
+The panel is being read by someone deciding whether to click Import. Write for that.
+
+- **Blocking items first**, in red, with the reason and the specific column or count.
+- **Deltas next**, as `previous → new (change)`. A number on its own cannot be judged.
+- **Informational last**, collapsed by default.
+- One-line verdict at the top: *"Looks like a normal day"*, or *"3 things to check"*, or
+  *"Cannot import — 2 critical columns missing"*.
+- Where nothing is comparable — the first import of a kind — say so rather than showing a delta
+  against zero.
+
+Do not use the word "error" for anything in section C. Duplicate rows and new columns are normal
+and will appear on most uploads; calling them errors teaches people to click past the panel, and
+then the blocking items get clicked past too.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change the bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, or anything on the Data Check tab.
+- Do NOT block on new columns, new activity codes, or new Order Nature values. The ERP is
+  actively changing and blocking on novelty would stop every upload.
+- Do NOT reject duplicate rows or attempt to de-duplicate them.
+- Do NOT change the import itself — this is the staging panel only.
+
+## ACCEPTANCE CHECK
+
+Stage the **21-Aug WIP CSV** without importing. The panel must show:
+
+```
+36 columns · all recognised
+0 blocking items
+dates: 73,891 + 59,061 + 52,823 parsed day-first, 0 in the future
+aliases: 497 P → RFI
+unclassified preview: 0
+duplicates: ~1.7% — normal
+deltas vs 16-Aug: rows +26.9%, weight flagged, FG +103%, NTLT −100% ← all should warn
+```
+
+That last line is the real test. Staging 21-Aug against a 16-Aug baseline **should** raise
+several loud warnings, because five days and a format change genuinely happened. If the panel
+shows nothing, the delta checks are not working.
+
+Then stage the **21-Aug Order Review**: 169 raw banners, 165 normalised, ~2,284 data rows, 4
+blank-Tower-Type rows at 63.882 MT, 0 total-rows, and despatch increasing against the previous
+import.

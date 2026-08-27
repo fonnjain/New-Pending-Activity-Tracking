@@ -1,0 +1,120 @@
+# Bucket E three-step cascade, then the outstanding verification
+
+Two parts. Part 1 is a build. Part 2 is read-only and has been outstanding for a while.
+
+---
+
+## PART 1 — Bucket E: bucket, then project, then batch
+
+The add form currently asks for project, then batch. It should ask for three things in sequence,
+each unlocking the next:
+
+```
+1. Bucket   ->  C or D
+2. Project  ->  only projects in the chosen bucket
+3. Batch    ->  only that project's batches in the chosen bucket
+4. Add      ->  enabled only when all three are set
+```
+
+Same cascade pattern as the MFC Batch Colour form, one step deeper.
+
+### How to build it
+
+Replace the single `eEligibleMfcBatches` map with **two** maps, built the same way but from one
+bucket each:
+
+```ts
+const cEligibleMfcBatches = useMemo(() => buildBatchMap(buckets.c), [buckets.c]);
+const dEligibleMfcBatches = useMemo(() => buildBatchMap(buckets.d), [buckets.d]);
+```
+
+where `buildBatchMap` is the helper you already wrote — project to sorted batch list, `"Z"` last.
+Return both from the hook.
+
+In `ManualAddForm`:
+
+- Add a bucket dropdown ahead of the project dropdown, labelled from `BUCKET_LABELS`:
+  `C — RM Complete – Material Under Production` and
+  `D — Dispatch Clearance Recd But Production Not Complete`.
+- Changing the bucket resets project and batch, exactly as changing the project already resets
+  batch.
+- Project dropdown draws from the chosen bucket's map keys, sorted.
+- Batch dropdown draws from that map for the chosen project.
+- Placeholders follow the cascade: `Select bucket...`, then `Select bucket first`, then
+  `Select project first`.
+
+### The C/D overlap — decided, build it this way
+
+C and D are not mutually exclusive: C is `fileBalReleaseMt <= 0`, D is `inspectionMt > 0`, tested
+independently, so the same project and batch can appear in both.
+
+**Keep the current suppression behaviour.** The E key stays `project + mfcBatch` and continues to
+suppress matching entries from **both** C and D. No `source_bucket` column, no change to
+`eExcludeKeys`. Material is either ready to dispatch or it is not — that is a property of the
+material, not of the bucket it was found in.
+
+Because that will otherwise surprise a user who deliberately chose C, **show it on the form
+before they confirm**: when the selected project and batch also appears in the other bucket,
+display a line such as `also present in D — will be removed from both`.
+
+### What not to change
+
+- Do NOT change `computeAutoBuckets`, the A/B/C/D rules, `hasWipMarks`, or `eExcludeKeys`.
+- Do NOT change `projectMfcBatches` or the MFC Batch Colour form that consumes it.
+- Do NOT change the `inventory_manual_e` schema, the upsert, or the delete path.
+- Do NOT remove the `canEdit` wrapper.
+- Do NOT touch anything outside the Inventory page.
+
+### Acceptance check
+
+1. With nothing selected, only the bucket dropdown is enabled.
+2. Choosing C lists only projects in Bucket C; choosing D lists only projects in D.
+3. Changing the bucket after choosing a project clears both project and batch.
+4. Add enables only when all three are set.
+5. After adding, the project and batch leaves C and D, appears in E, and
+   `eRemovedFromCCount` / `eRemovedFromDCount` move accordingly.
+6. Deleting the E entry returns it to whichever of C and D it qualifies for.
+7. The MFC Batch Colour form is unchanged.
+
+Paste the project list under bucket C and under bucket D, and name one project that appears in
+both.
+
+---
+
+## PART 2 — read-only verification, still outstanding
+
+The 11-Aug and 12-Aug files were parsed from disk in an earlier session but never ingested. If
+they are now in the database, answer from **the Data Check tab and the API — not from a disk
+parse**. If they are still not ingested, say so plainly and stop; do not substitute a disk
+reading.
+
+**a. DC6 and DC16 for the 11-Aug and 12-Aug imports.** These must match to 0.001 MT and exactly
+on mark counts:
+
+```
+11-Aug  Release 2,055.640 (10,203)   Awaiting   980.849 (4,889)   Cutting 1,194.766 (8,194)
+        QualityCheck 2,124.732 (16,183)   Galvanising 1,729.254 (10,353)   FG 2,529.153 (9,481)
+        TOTAL 10,614.395 MT / 59,303 marks       NTLT 6,469.336 MT / 322 marks
+
+12-Aug  Release 2,026.130 (10,644)   Awaiting   975.680 (4,789)   Cutting 1,277.065 (8,336)
+        QualityCheck 2,003.966 (15,671)   Galvanising 1,688.496 (10,747)   FG 2,618.153 (9,548)
+        TOTAL 10,589.490 MT / 59,735 marks       NTLT 6,323.436 MT / 318 marks
+```
+
+Zero unclassified on all four figures.
+
+**b. DC12 to DC14 for both pairs** — 10→11 and 11→12. Counts, weights, transition lists, and the
+two import ids and dates named in each case. State which mark-identity key was used.
+
+**c. DC17 on the 12-Aug import.** Expected roughly 487 structures flagged, +2,130.753 MT, with
+category B at 37 structures / +261.573 MT. My figures came from a parse of the source files, so
+small differences are expected — if the counts differ by more than a handful, list the flagged
+structures so I can diff them rather than attributing the gap to edge-case handling.
+
+**d. Which import `loadLatestWipImport()` and `loadLatestOrderReview()` now resolve to**, by id
+and date.
+
+**e. Project 913** should appear on the 12-Aug import with 498 marks and 70.174 MT, all in
+Release Balance, and should have no Order Review rows.
+
+Do not change any code in Part 2. Report only.

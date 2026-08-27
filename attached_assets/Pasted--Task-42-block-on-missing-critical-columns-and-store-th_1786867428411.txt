@@ -1,0 +1,141 @@
+# Task #42: block on missing critical columns, and store the two new WIP columns
+
+Two parts, both in the ingest path. Part 1 closes a real hole. Part 2 captures new source data
+that we do not yet have a use for.
+
+---
+
+## PART 1 — refuse an import that is missing a critical column
+
+Today the format check is descriptive only. A WIP file missing `Job Card Status` or `Batch No.`
+ingests successfully with those fields silently null. The only files that get refused are ones
+missing `Activity`, `Mark No.` or `Project Code` — and those are refused incidentally, because
+type detection stops recognising the file as a WIP file, not because anything guards them.
+
+**That is exactly how the 19 gated imports happened.** Files without `Type` and `Job Card Status`
+were accepted, the fields sat null, and the query layer filled the gap from `record_pool` at read
+time — producing historical snapshots that looked entirely reasonable and had never existed. The
+`hasTypeData` gate detects that after the fact. Blocking at ingest is the actual fix.
+
+`Batch No.` is now the sharpest case. If it went missing, every mark would fall to blank, the
+whole batch attribution would collapse into a single `Z` row, and the four Order Review columns
+would attribute wholesale to that row — with no error anywhere and figures that still look
+plausible.
+
+### The rule
+
+Define one critical-column list and refuse the import outright if any is absent from the header
+row:
+
+```
+Type            Job Card Status   Order Nature    Balance Wt.
+Mark No.        Alias             Project Code    Activity
+Contractor      Batch No.
+```
+
+On failure: reject the file, name every missing column in the error surfaced to the user, and
+write nothing — no partial import, no staging row that could later be committed. Do **not** offer
+an override or a "continue anyway" path. A partial import is worse than no import, because
+nothing downstream can distinguish it from a complete one.
+
+Extra columns stay harmless. The current behaviour of reporting `unexpectedFound` and proceeding
+is correct and must not change — the 16-Aug file added two columns and ingested cleanly, which is
+the behaviour we want.
+
+### Acceptance
+
+- A file missing `Batch No.` is refused, naming that column.
+- A file missing both `Type` and `Job Card Status` is refused, naming both.
+- The 16-Aug file (26 columns) still ingests and still reports `unexpectedFound` for the two new
+  ones.
+- No existing import is affected.
+
+---
+
+## PART 2 — store `BOM Status` and `Is Welded Structure`
+
+The 16-Aug WIP file appended two columns after `Batch No.` (col X):
+
+```
+Col Y   BOM Status             "Authorized" on all 59,276 rows
+Col Z   Is Welded Structure    "True" on 354 rows, "False" on 58,922
+```
+
+Capture both now so the history exists from the day the ERP started emitting them. **Do not build
+any logic on either yet** — `BOM Status` has a single value across every row and carries no
+information, and 354 welded marks out of 58,945 is too small a population to base a rule on.
+
+### Schema
+
+Add to `record_pool`, following the pattern of the existing additive fields:
+
+```ts
+// --- ERP additions, Aug-2026 (source cols Y + Z; additive, NOT part of the row hash). ---
+// BOM Status (col Y): "Authorized" on every row of the first file that carried it.
+// Stored for history; no logic depends on it. Null on rows imported before 16-Aug-2026.
+bomStatus: text("bom_status"),
+// Is Welded Structure (col Z): "True" / "False" as written by the ERP. 354 of 58,945
+// TLT marks were True on 16-Aug-2026; every NTLT row was False. Stored for history;
+// no logic depends on it. Null on rows imported before 16-Aug-2026.
+isWeldedStructure: text("is_welded_structure"),
+```
+
+Store the raw trimmed string rather than coercing to boolean. `Is Welded Structure` currently
+emits the words `True` and `False`; if the ERP later emits `Y`/`N`, `1`/`0` or a blank, a text
+column absorbs it and a boolean column throws. We can coerce later, once we know what the domain
+actually is.
+
+### Do NOT add them to the row hash
+
+This is the important constraint. `hashRow` currently covers 21 fields. Adding these two would
+change the hash of **every existing mark**, so the next import would append a new pool row for
+all 59,000 of them instead of matching — destroying mark identity, `diff.ts`, `contractorMovement`
+and every movement figure in one upload.
+
+They also should not be in the hash on their own merits: both are attributes of the structure
+rather than of the mark's state, and neither has been observed to change. Follow the pattern
+already used for `category`, `ntltSubtype`, `groupType` and `holeOperation` — additive, populated
+at parse time, explicitly outside the hash.
+
+### Parser
+
+Add to the `COL` map in `parse.ts` alongside `workOrderNo` and `batchNo`, resolved by header name
+as everything else is. Both are optional: files before 16-Aug do not have them and must continue
+to import with the fields null.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT add either new column to `hashRow`. See above — it would break mark identity globally.
+- Do NOT build any bucket, rule, filter, report or Data Check rule on either column yet.
+- Do NOT coerce `Is Welded Structure` to a boolean.
+- Do NOT change the bucket definitions, `hasTypeData`, the import selection helpers, the
+  predecessor queries, DC0–DC17, or the Bucket E cascade.
+- Do NOT backfill either column on existing imports. Null is the correct value for a file that
+  never carried the field.
+
+## ACCEPTANCE CHECK
+
+After the change, re-import the 16-Aug WIP file and confirm the six buckets are unchanged:
+
+```
+Release 1,886.620 (9,759)   Awaiting 924.667 (4,730)   Cutting 1,209.729 (8,587)
+Quality Check 1,875.200 (14,825)   Galvanising 1,804.723 (11,064)   FG 2,707.992 (9,980)
+TOTAL 10,408.931 MT / 58,945 marks · zero unclassified · 67 TLT projects
+NTLT 7,296.551 MT / 331 marks
+```
+
+Then paste:
+
+```sql
+SELECT bom_status, is_welded_structure, count(*)
+FROM record_pool
+GROUP BY 1, 2 ORDER BY 3 DESC;
+```
+
+Expected on the 16-Aug rows: `Authorized / False` ≈ 58,922 and `Authorized / True` = 354, with
+older rows showing null on both.
+
+And confirm the mark count of the 16-Aug import is unchanged from before the schema change —
+if it jumps, the hash was altered and the change must be reverted.

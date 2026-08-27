@@ -61,6 +61,7 @@ import type {
   FabricationPriority,
   FabricationPriorityInput,
   FabricationProjectCompletionResponse,
+  GetFabricationProjectCompletionTltParams,
   GetReleaseBalanceParams,
   HealthStatus,
   Import,
@@ -86,6 +87,8 @@ import type {
   ManualThicknessInput,
   MilestonesResponse,
   MovementResponse,
+  OrderReviewAnomaly,
+  OrderReviewAnomalyUpdate,
   OrderStatusResponse,
   ProductionMovementResponse,
   Record,
@@ -107,6 +110,7 @@ import type {
   UpdateUserRole200,
   UploadItemMasterBody,
   UploadResult,
+  UploadStageEvidence,
   UserActivityResponse,
   ValidateRequest,
   ValidationResult,
@@ -3121,6 +3125,9 @@ if(importUpload.label !== undefined) {
 if(importUpload.reportDate !== undefined) {
  formData.append(`reportDate`, importUpload.reportDate);
  }
+if(importUpload.expectedType !== undefined) {
+ formData.append(`expectedType`, importUpload.expectedType);
+ }
 
   return customFetch<UploadResult>(getUploadImportUrl(),
   {
@@ -3273,6 +3280,9 @@ if(importUpload.label !== undefined) {
  }
 if(importUpload.reportDate !== undefined) {
  formData.append(`reportDate`, importUpload.reportDate);
+ }
+if(importUpload.expectedType !== undefined) {
+ formData.append(`expectedType`, importUpload.expectedType);
  }
 
   return customFetch<StageResult>(getStageImportUrl(),
@@ -3546,6 +3556,85 @@ export function useListDeletionLog<TData = Awaited<ReturnType<typeof listDeletio
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListDeletionLogQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListUploadStageEvidenceUrl = () => {
+
+
+
+
+  return `/api/imports/stage-evidence`
+}
+
+/**
+ * Authenticated administrator-only audit history of WIP and Order Review staging panels. Evidence is retained independently of staged rows and imports, so deleting or re-importing a file cannot remove its findings.
+
+ * @summary List durable upload staging evidence
+ */
+export const listUploadStageEvidence = async ( options?: RequestInit): Promise<UploadStageEvidence[]> => {
+
+  return customFetch<UploadStageEvidence[]>(getListUploadStageEvidenceUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListUploadStageEvidenceQueryKey = () => {
+    return [
+    `/api/imports/stage-evidence`
+    ] as const;
+    }
+
+
+export const getListUploadStageEvidenceQueryOptions = <TData = Awaited<ReturnType<typeof listUploadStageEvidence>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listUploadStageEvidence>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListUploadStageEvidenceQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listUploadStageEvidence>>> = ({ signal }) => listUploadStageEvidence({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listUploadStageEvidence>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListUploadStageEvidenceQueryResult = NonNullable<Awaited<ReturnType<typeof listUploadStageEvidence>>>
+export type ListUploadStageEvidenceQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary List durable upload staging evidence
+ */
+
+export function useListUploadStageEvidence<TData = Awaited<ReturnType<typeof listUploadStageEvidence>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listUploadStageEvidence>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListUploadStageEvidenceQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -4577,12 +4666,19 @@ export function useGetReleaseBalance<TData = Awaited<ReturnType<typeof getReleas
 
 
 
-export const getGetFabricationProjectCompletionTltUrl = () => {
+export const getGetFabricationProjectCompletionTltUrl = (params?: GetFabricationProjectCompletionTltParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/reports/fabrication-project-completion-tlt`
+  return stringifiedParams.length > 0 ? `/api/reports/fabrication-project-completion-tlt?${stringifiedParams}` : `/api/reports/fabrication-project-completion-tlt`
 }
 
 /**
@@ -4590,9 +4686,9 @@ export const getGetFabricationProjectCompletionTltUrl = () => {
 
  * @summary Fabrication Report – Project Completion (TLT only)
  */
-export const getFabricationProjectCompletionTlt = async ( options?: RequestInit): Promise<FabricationProjectCompletionResponse> => {
+export const getFabricationProjectCompletionTlt = async (params?: GetFabricationProjectCompletionTltParams, options?: RequestInit): Promise<FabricationProjectCompletionResponse> => {
 
-  return customFetch<FabricationProjectCompletionResponse>(getGetFabricationProjectCompletionTltUrl(),
+  return customFetch<FabricationProjectCompletionResponse>(getGetFabricationProjectCompletionTltUrl(params),
   {
     ...options,
     method: 'GET'
@@ -4605,23 +4701,23 @@ export const getFabricationProjectCompletionTlt = async ( options?: RequestInit)
 
 
 
-export const getGetFabricationProjectCompletionTltQueryKey = () => {
+export const getGetFabricationProjectCompletionTltQueryKey = (params?: GetFabricationProjectCompletionTltParams,) => {
     return [
-    `/api/reports/fabrication-project-completion-tlt`
+    `/api/reports/fabrication-project-completion-tlt`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetFabricationProjectCompletionTltQueryOptions = <TData = Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetFabricationProjectCompletionTltQueryOptions = <TData = Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>, TError = ErrorType<unknown>>(params?: GetFabricationProjectCompletionTltParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetFabricationProjectCompletionTltQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetFabricationProjectCompletionTltQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>> = ({ signal }) => getFabricationProjectCompletionTlt({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>> = ({ signal }) => getFabricationProjectCompletionTlt(params, { signal, ...requestOptions });
 
 
 
@@ -4639,11 +4735,11 @@ export type GetFabricationProjectCompletionTltQueryError = ErrorType<unknown>
  */
 
 export function useGetFabricationProjectCompletionTlt<TData = Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: GetFabricationProjectCompletionTltParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFabricationProjectCompletionTlt>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetFabricationProjectCompletionTltQueryOptions(options)
+  const queryOptions = getGetFabricationProjectCompletionTltQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -4816,7 +4912,7 @@ export const getDeleteOrderImportUrl = (id: number,) => {
 }
 
 /**
- * Removes a single Order Review upload from the history log. The Order Review file is a daily snapshot merged (UPSERTed) into one current order book, so deleting a history entry does NOT roll back the current order-book values. Deleting the most recent upload re-points the current snapshot rows to the now-latest remaining upload. Deleting the last remaining upload clears the entire order book (rows + computed dispatch). Purely additive to WIP state — never touches WIP parsing, activity, dedup, ageing, warning, or milestone math.
+ * Removes a single Order Review upload from the history log. The Order Review file is a daily snapshot merged (UPSERTed) into one current order book, so deleting a history entry cannot reconstruct older row values. Rows last seen in the deleted import are removed rather than re-pointed to a surviving import; rows last seen in other uploads remain. Deleting the last remaining upload clears the entire order book (rows + computed dispatch). Purely additive to WIP state — never touches WIP parsing, activity, dedup, ageing, warning, or milestone math.
 
  * @summary Delete one Order Review file from the upload history
  */
@@ -4877,6 +4973,157 @@ export const useDeleteOrderImport = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getDeleteOrderImportMutationOptions(options));
+    }
+
+export const getListOrderReviewAnomaliesUrl = () => {
+
+
+
+
+  return `/api/order-review/anomalies`
+}
+
+/**
+ * Authenticated administrator-only register of projects awaiting explanation. This register is audit metadata only and never changes regression blockers or calculations.
+ * @summary List Order Review cumulative-regression anomalies
+ */
+export const listOrderReviewAnomalies = async ( options?: RequestInit): Promise<OrderReviewAnomaly[]> => {
+
+  return customFetch<OrderReviewAnomaly[]>(getListOrderReviewAnomaliesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOrderReviewAnomaliesQueryKey = () => {
+    return [
+    `/api/order-review/anomalies`
+    ] as const;
+    }
+
+
+export const getListOrderReviewAnomaliesQueryOptions = <TData = Awaited<ReturnType<typeof listOrderReviewAnomalies>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOrderReviewAnomalies>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOrderReviewAnomaliesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOrderReviewAnomalies>>> = ({ signal }) => listOrderReviewAnomalies({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOrderReviewAnomalies>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListOrderReviewAnomaliesQueryResult = NonNullable<Awaited<ReturnType<typeof listOrderReviewAnomalies>>>
+export type ListOrderReviewAnomaliesQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary List Order Review cumulative-regression anomalies
+ */
+
+export function useListOrderReviewAnomalies<TData = Awaited<ReturnType<typeof listOrderReviewAnomalies>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOrderReviewAnomalies>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListOrderReviewAnomaliesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateOrderReviewAnomalyUrl = (project: string,) => {
+
+
+
+
+  return `/api/order-review/anomalies/${project}`
+}
+
+/**
+ * Authenticated administrator-only audit metadata update. Does not alter blockers or calculations.
+ * @summary Update one Order Review anomaly's status and explanation
+ */
+export const updateOrderReviewAnomaly = async (project: string,
+    orderReviewAnomalyUpdate: OrderReviewAnomalyUpdate, options?: RequestInit): Promise<OrderReviewAnomaly> => {
+
+  return customFetch<OrderReviewAnomaly>(getUpdateOrderReviewAnomalyUrl(project),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      orderReviewAnomalyUpdate,)
+  }
+);}
+
+
+
+
+export const getUpdateOrderReviewAnomalyMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOrderReviewAnomaly>>, TError,{project: string;data: BodyType<OrderReviewAnomalyUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateOrderReviewAnomaly>>, TError,{project: string;data: BodyType<OrderReviewAnomalyUpdate>}, TContext> => {
+
+const mutationKey = ['updateOrderReviewAnomaly'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateOrderReviewAnomaly>>, {project: string;data: BodyType<OrderReviewAnomalyUpdate>}> = (props) => {
+          const {project,data} = props ?? {};
+
+          return  updateOrderReviewAnomaly(project,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateOrderReviewAnomalyMutationResult = NonNullable<Awaited<ReturnType<typeof updateOrderReviewAnomaly>>>
+    export type UpdateOrderReviewAnomalyMutationBody = BodyType<OrderReviewAnomalyUpdate>
+    export type UpdateOrderReviewAnomalyMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Update one Order Review anomaly's status and explanation
+ */
+export const useUpdateOrderReviewAnomaly = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOrderReviewAnomaly>>, TError,{project: string;data: BodyType<OrderReviewAnomalyUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateOrderReviewAnomaly>>,
+        TError,
+        {project: string;data: BodyType<OrderReviewAnomalyUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateOrderReviewAnomalyMutationOptions(options));
     }
 
 export const getGetInventoryBucketsUrl = () => {

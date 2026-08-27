@@ -17,6 +17,8 @@ export interface OrderReviewSummary {
   totalReleaseMt: number;
   totalFileDespatchMt: number;
   skippedTotals: number;
+  /** Banner rows intentionally skipped while parsing. */
+  skippedBanner?: number;
   missingStructure: number;
   /** Total Order Qty Weight (MT) of missingStructure rows. Optional — absent for Order Review files parsed before this field was added.
    */

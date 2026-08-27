@@ -22,4 +22,6 @@ export interface OrderStatusResponse {
   reconciliation: DispatchReconciliation;
   balanceReconciliation: BalanceReconciliation;
   imports: OrderReviewImport[];
+  /** Overrides accepted within the last seven days, shown to operators as a safety warning. */
+  recentCumulativeOverrides: OrderReviewImport[];
 }

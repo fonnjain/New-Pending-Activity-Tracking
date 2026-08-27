@@ -1,0 +1,183 @@
+# Publish to production, then make the guard usable day to day
+
+Two pieces of work, in this order. **Publish first** — the reason is in Part 1.
+
+Your normaliser answer is correct and I have no further questions on it. The sequence handles both
+`.0` and a bare trailing `.`, collapses whitespace without truncating it, and keeps
+`RAILWAY BATCH 10` and `RAILWAY BATCH 11` distinct. That is exactly right. Thank you also for
+correcting the table and column names in my queries rather than reporting them as failures.
+
+---
+
+## PART 1 — publish
+
+Your production check answered the question I have been asking for a fortnight, and the answer is
+partial:
+
+```
+production HAS      activity_raw · bom_status · is_last_activity · sales_order_status
+production MISSING  issue_lot_rate · lot_document_no
+```
+
+So the `P`/`S` alias and the four earlier column additions **are** live. The eight material and
+issue columns are **not**. That is the part with a clock on it — `Issue Lot Rate` is the first
+cost-per-tonne data VTPL has ever produced, currently ₹51.86 per kilogram across 9,377.921 MT, and
+production is discarding it on every import. Like `bom_status` before it, the value is snapshotted
+at parse time and the only recovery is re-importing source files while VTPL still hold them.
+
+Given your three answers — no manual migration, data preserved unless Overwrite is selected, and
+it can be done today — please publish, with these conditions:
+
+**Before approving the diff**, paste exactly what the Publish UI shows. Expect additive columns
+only. **If anything reports a rename, a drop, a type change or any destructive operation, stop and
+report rather than approving.** The eight material columns and the guard tables should be pure
+additions.
+
+**Leave "Overwrite data" off.** Production data is not to be replaced by development data.
+
+**After publishing, confirm against production:**
+
+```sql
+SELECT column_name FROM information_schema.columns
+ WHERE table_name = 'record_pool'
+   AND column_name IN ('activity_raw','sales_order_status','is_last_activity',
+                       'issue_lot_rate','lot_document_no','lot_source_form',
+                       'issue_document_no','sin_rate_for_issue_month',
+                       'nearest_sin_date_to_issue','bom_status','is_welded_structure');
+```
+
+All eleven should be present.
+
+### Then tell me what data production actually holds
+
+Your query returned import id 10 with a null report date, while development is at import 68. That
+does not tell me what production is showing to its users. Please report, from production:
+
+1. How many WIP imports and how many Order Review imports exist.
+2. The most recent import of each kind that has a non-null report date.
+3. What the six TLT buckets read on production's current latest import, with its date.
+
+Production users are looking at a number today. I want to know which day it belongs to before
+deciding whether to import the recent files there.
+
+**Do not import any files into production yet.** Publish the code and schema; report the data
+state; then we decide.
+
+---
+
+## PART 2 — make the guard usable day to day
+
+Only after Part 1 is reported. **Nothing about what blocks changes.**
+
+### Why
+
+I advised overriding the 22-August Order Review and wrote a confident reason calling it a
+source-data correction. **That was wrong.** VTPL later explained it: a packing list dated
+29-06-2026 was deleted and re-authorised by the Dispatch Department, and the export was taken
+mid-transaction. Had we overridden, production would hold 291.882 MT permanently with an audit
+note explaining an event that never happened.
+
+What saved us is that **cumulative files are self-healing**. Skipping 22-August cost nothing —
+23-August carried the corrected 326.511 MT. Overriding is irreversible in a way skipping is not.
+
+### 2.1 Recommend the reversible action
+
+Add a **recommended action** to the staging panel, chosen by the signature classifier:
+
+| Situation | Recommendation |
+|---|---|
+| Cause not known at upload time | **Skip this file.** Tomorrow's export supersedes it. |
+| Signature A — cancellation or transfer | Override **only if** the cancellation is confirmed. Otherwise skip. |
+| Signature B — restatement or correction | **Skip unless the cause is known.** Verify against tomorrow's file. |
+| Signature C — unrecognised, or many projects | **Do not import.** Wrong file, not an event. |
+
+Advice, not obstruction. The override path stays exactly as it is. Add one line wherever it is
+offered:
+
+> Skipping is reversible — the next day's file carries the corrected cumulative figures.
+> Overriding is not.
+
+### 2.2 A register of anomalies awaiting explanation
+
+The gap this week was timing: the guard fired on the 22nd, VTPL explained it on the 24th, and
+there was nowhere to hold the question.
+
+```
+id · seen_on · import_id (null if skipped) · project_code · columns_affected[]
+stored_value · incoming_value · signature (A|B|C) · action_taken (skipped|overridden)
+status (open|explained|superseded) · explanation · explained_on · explained_by
+```
+
+- Write an entry whenever a regression blocks, **whether skipped or overridden**.
+- Status starts `open`.
+- When a later import shows the figure recovered above the stored value, set `superseded`
+  automatically and record which import proved it.
+- `explained` is set by a person, with free text.
+
+Seed it with what is already known:
+
+```
+903      22-Aug  Despatch 325.411 -> 291.882   skipped        superseded
+   packing list 29-06-2026 deleted and re-authorised by Dispatch Dept (~34 MT);
+   export taken mid-transaction. True cumulative 326.511 MT, confirmed 24-Aug.
+
+775      24-Aug  all five columns + WO Order Qty -> 0   not imported   explained
+   order cancelled by client at final stage; finished material reallocated to other
+   projects and despatched. Project code reused for new scope (OC-1A, 1.423 MT).
+
+840      24-Aug  all five fall, WO unchanged            not imported   open
+896      24-Aug  four columns -> 0, WO unchanged        not imported   open
+VS-189   24-Aug  three columns -> 0, WO unchanged       not imported   open
+```
+
+Show `open` entries somewhere visible. That list is the agenda for the next conversation with
+VTPL — three of the five 24-August blocks still have no explanation and nothing is tracking them.
+
+### 2.3 Warn when overrides stop being exceptional
+
+Before granting an override, check the register. If one was granted within the last seven days,
+show it in the confirmation step:
+
+> An override was granted on {date} for project {code}. Two overrides in a week suggests the rule
+> needs examining rather than bypassing.
+
+Do not block on it. An override facility that becomes habit is worse than none, because it has the
+appearance of a control without the substance.
+
+---
+
+## WHAT MUST NOT CHANGE
+
+- Do NOT approve a publish diff containing any destructive operation. Stop and report.
+- Do NOT enable "Overwrite data".
+- Do NOT import any file into production until the data state is reported and agreed.
+- Do NOT import the 24-August files anywhere.
+- Do NOT change which regressions block, the block/warn split, the five-column rule, the
+  tolerance, or the signature classifier.
+- Do NOT auto-skip or auto-override. Both stay a person's decision.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the eight material columns, or the normaliser.
+
+---
+
+## ACCEPTANCE CHECK
+
+**After Part 1:** all eleven columns present in production; the publish diff pasted verbatim;
+production's import counts, latest dated import of each kind, and its six bucket figures reported.
+
+**After Part 2:** stage the 24-August pair against the committed 23-August baseline in
+development, without importing, and confirm:
+
+```
+775                  recommendation: override only if cancellation confirmed
+840 · 896 · VS-189   recommendation: skip, cause unknown
+register entries written for each, status open
+the reversibility line appears wherever the override is offered
+five seeded entries present, 903 superseded, 775 explained, three open
+the seven-day override warning stays hidden on an empty register
+```
+
+Development figures must be unchanged throughout: TLT **13,282.657 MT / 74,822 marks**,
+unclassified 0, 92 projects, NTLT **9,477.101 MT / 470 marks**.
+
+State which database every query ran against.

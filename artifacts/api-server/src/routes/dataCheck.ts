@@ -7,7 +7,7 @@ import {
   orderReviewRowsTable,
 } from "@workspace/db";
 import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
-import { PROCESS_SEQUENCE, QC_ACTIVITY_SET, GALV_ACTIVITY_SET, classifyNtltStage, classifyDc17 } from "@workspace/domain";
+import { PROCESS_SEQUENCE, QC_ACTIVITY_SET, GALV_ACTIVITY_SET, classifyNtltStage, classifyDc17, isIncompleteBlankActivityWip, isLiveWorkType } from "@workspace/domain";
 import { hasTypeData, loadLatestOrderReview, loadLatestWipImport } from "../lib/dispatch";
 import { type SourceColumnWatchColumn } from "../lib/parse";
 import { buildIdentityBridge, identityRawKey } from "../lib/identityBridge";
@@ -38,6 +38,8 @@ export interface DcWarning {
   id: string;
   label: string;
   structureCount: number;
+  /** Present for warnings that identify a concrete number of affected copies. */
+  markCount?: number;
   totalMt: number;
   worstProject: string;
   worstStructure: string;
@@ -127,6 +129,11 @@ export interface DataCheckResponse {
   available: boolean;
   orImportId: number | null;
   orAsOnDate: string | null;
+  orOverride: {
+    reason: string;
+    at: string;
+    by: string;
+  } | null;
   wipImportId: number | null;
   /** True when the WIP import has per-row job_card_type data in import_rows.
    * False for pre-type-column imports (ids 5–32): DC6 is not evaluated for
@@ -144,6 +151,7 @@ export interface DataCheckResponse {
   /** DC16 — NTLT five-stage partition buckets. */
   ntltBuckets: DcWipBucket[];
   ntltUnclassifiedMarks: number;
+  ntltUnclassifiedMt: number;
   ntltTotalMt: number;
   ntltTotalMarks: number;
   dc0StoredTotalRows: number;
@@ -259,6 +267,7 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     available: false,
     orImportId: null,
     orAsOnDate: null,
+    orOverride: null,
     wipImportId: latestWip?.id ?? null,
     wipHasTypeData: false,
     structuresEvaluated: 0,
@@ -271,6 +280,7 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     wipTotalMarks: 0,
     ntltBuckets: [],
     ntltUnclassifiedMarks: 0,
+    ntltUnclassifiedMt: 0,
     ntltTotalMt: 0,
     ntltTotalMarks: 0,
     dc0StoredTotalRows: 0,
@@ -402,6 +412,12 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     string,
     { project: string; structure: string; mt: number }
   >();
+  let blankJobCardWipMarks = 0;
+  let blankJobCardWipMt = 0;
+  const blankJobCardByStructure = new Map<
+    string,
+    { project: string; structure: string; mt: number }
+  >();
 
   // DC6 gate: delegate to the shared hasTypeData helper (one definition in dispatch.ts).
   const wipHasTypeData = latestWip ? await hasTypeData(latestWip.id) : false;
@@ -420,6 +436,9 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
   );
   let ntltTotalMt = 0;
   let ntltTotalMarks = 0;
+  let ntltUnclassifiedMarks = 0;
+  let ntltUnclassifiedMt = 0;
+  const ntltUnclassifiedViolations: DcViolation[] = [];
 
   // Predecessor import for DC12–DC14 (fetched in parallel below if applicable).
   let prevWip: { id: number; reportDate: string | null; createdAt: Date | string } | null = null;
@@ -432,6 +451,7 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
       db.select({
         job: recordPoolTable.job,
         structure: recordPoolTable.structure,
+        jobCardNo: recordPoolTable.jobCardNo,
         jobCardType: importRowsTable.jobCardType,
         jobCardStatus: importRowsTable.jobCardStatus,
         contractor: recordPoolTable.contractor,
@@ -445,6 +465,10 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
 
       // NTLT rows for the five-stage DC16 partition.
       db.select({
+        job: recordPoolTable.job,
+        structure: recordPoolTable.structure,
+        markId: recordPoolTable.markId,
+        jobCardNo: recordPoolTable.jobCardNo,
         jobCardType: importRowsTable.jobCardType,
         jobCardStatus: importRowsTable.jobCardStatus,
         activity: recordPoolTable.activity,
@@ -499,6 +523,20 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
         }
       }
 
+      if (isIncompleteBlankActivityWip(r)) {
+        blankJobCardWipMarks += copies;
+        blankJobCardWipMt += wMt;
+        const project = r.job || "(Unassigned)";
+        const structure = r.structure || "(blank)";
+        const key = `${project}\x01${structure}`;
+        const existing = blankJobCardByStructure.get(key);
+        if (existing) {
+          existing.mt += wMt;
+        } else {
+          blankJobCardByStructure.set(key, { project, structure, mt: wMt });
+        }
+      }
+
       if (tp === "job card not started" && st === "initial") {
         bucketCounts["Release"].mt += wMt;
         bucketCounts["Release"].marks += copies;
@@ -535,8 +573,26 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
       ntltTotalMt += wMt;
       ntltTotalMarks += copies;
       const stage = classifyNtltStage(r);
-      ntltBucketCounts[stage].mt += wMt;
-      ntltBucketCounts[stage].marks += copies;
+      if (stage === "unclassified") {
+        ntltUnclassifiedMarks += copies;
+        ntltUnclassifiedMt += wMt;
+        ntltUnclassifiedViolations.push({
+          project: r.job || "(Unassigned)",
+          structure: r.structure || "(blank)",
+          fields: {
+            "Mark": r.markId || "(blank)",
+            "Job Card": r.jobCardNo || "(blank)",
+            "Activity": r.activity || "(blank)",
+            "Type": r.jobCardType || "(blank)",
+            "Status": r.jobCardStatus || "(blank)",
+            "Copies": String(copies),
+            "Weight (MT)": wMt.toFixed(3),
+          },
+        });
+      } else {
+        ntltBucketCounts[stage].mt += wMt;
+        ntltBucketCounts[stage].marks += copies;
+      }
     }
   }
 
@@ -588,6 +644,27 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     worstStructure: blankActivityWorst.structure,
     worstMt: blankActivityWorst.mt,
   };
+  let blankJobCardWorst = {
+    project: "",
+    structure: "",
+    mt: 0,
+  };
+  for (const row of blankJobCardByStructure.values()) {
+    if (row.mt > blankJobCardWorst.mt) blankJobCardWorst = row;
+  }
+  const r_dc19: DcWarning = {
+    id: "DC19",
+    label:
+      `Job Card WIP rows with both blank Activity and Job Card No are incomplete source WIP, not Finished Goods. ` +
+      `Affected: ${blankJobCardWipMarks.toLocaleString("en-US")} mark${blankJobCardWipMarks === 1 ? "" : "s"}, ` +
+      `${blankJobCardWipMt.toFixed(3)} MT. Correct the missing Job Card No in the ERP source.`,
+    structureCount: blankJobCardByStructure.size,
+    markCount: blankJobCardWipMarks,
+    totalMt: blankJobCardWipMt,
+    worstProject: blankJobCardWorst.project,
+    worstStructure: blankJobCardWorst.structure,
+    worstMt: blankJobCardWorst.mt,
+  };
 
   // -------------------------------------------------------------------------
   // DC16 — NTLT five-stage partition assembly
@@ -597,21 +674,19 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     mt: ntltBucketCounts[key].mt,
     marks: ntltBucketCounts[key].marks,
   }));
-  // classifyNtltStage always returns a valid stage — unclassified is structurally zero.
-  const ntltUnclassifiedMarks = 0;
-
   const dc16: DcHardRule = wipHasTypeData
     ? {
         id: "DC16",
         label:
-          "WIP (NTLT only): the five stages (Not Started, TS, Galvanising, Y, Finished Goods) sum to " +
-          "the total NTLT balance with zero unclassified copies. NTLT rows carry blank project code and " +
-          "alias and cannot be joined to the Order Review — this is a WIP-only check.",
+          "WIP (NTLT only): the five approved stages (Not Started, TS, Galvanising, Y, Finished Goods) " +
+          "must cover the total NTLT balance with zero unclassified copies. BL, blank Activity, and other " +
+          "unknown Job Card WIP activities are source exceptions, not Not Started. NTLT rows carry blank " +
+          "project code and alias and cannot be joined to the Order Review — this is a WIP-only check.",
         toleranceMt: 0.001,
         structuresEvaluated: ntltTotalMarks,
         violationCount: ntltUnclassifiedMarks,
         pass: ntltUnclassifiedMarks === 0,
-        violations: [],
+        violations: ntltUnclassifiedViolations,
       }
     : {
         id: "DC16",
@@ -898,11 +973,14 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
   // -------------------------------------------------------------------------
   let dc17: Dc17Result | null = null;
   if (latestWip) {
-    // Aggregate TLT WIP balance by (job, structure)
+    // Aggregate only live TLT WIP by (job, structure). Group by the immutable
+    // per-import Type snapshot first, then use the shared Type predicate below:
+    // null legacy and unknown Type values stay included; only explicit FG drops.
     const wipByStruct = await db
       .select({
         job:       recordPoolTable.job,
         structure: recordPoolTable.structure,
+        jobCardType: importRowsTable.jobCardType,
         wipMt:     sql<number>`SUM(${recordPoolTable.balanceWt} * ${importRowsTable.copies}) / 1000.0`,
       })
       .from(importRowsTable)
@@ -913,13 +991,15 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
           eq(recordPoolTable.category, "TLT"),
         ),
       )
-      .groupBy(recordPoolTable.job, recordPoolTable.structure);
+      .groupBy(recordPoolTable.job, recordPoolTable.structure, importRowsTable.jobCardType);
 
     // WIP map: "\x01"-delimited key → MT  +  set of active TLT project codes
     const wipMap = new Map<string, number>();
     const wipProjectSet = new Set<string>();
     for (const r of wipByStruct) {
-      wipMap.set(`${r.job}\x01${r.structure}`, r.wipMt ?? 0);
+      if (!isLiveWorkType(r.jobCardType)) continue;
+      const key = `${r.job}\x01${r.structure}`;
+      wipMap.set(key, (wipMap.get(key) ?? 0) + (r.wipMt ?? 0));
       if (r.job) wipProjectSet.add(r.job);
     }
 
@@ -1030,18 +1110,27 @@ router.get("/reports/data-check", async (_req, res): Promise<void> => {
     available: true,
     orImportId: currentOrImportId,
     orAsOnDate: orData.import.asOnDate,
+    orOverride:
+      orData.import.overrideReason && orData.import.overrideAt && orData.import.overrideBy
+        ? {
+            reason: orData.import.overrideReason,
+            at: orData.import.overrideAt.toISOString(),
+            by: orData.import.overrideBy,
+          }
+        : null,
     wipImportId: latestWip?.id ?? null,
     wipHasTypeData,
     structuresEvaluated: currentOrRows.length,
     hardRuleFailures,
     hardRules: allHardRules,
-    warnings: [r_dc7, r_dc8, r_dc9, r_dc10, r_dc15, r_dc18],
+    warnings: [r_dc7, r_dc8, r_dc9, r_dc10, r_dc15, r_dc18, r_dc19],
     wipBuckets,
     wipUnclassifiedMarks,
     wipTotalMt,
     wipTotalMarks,
     ntltBuckets,
     ntltUnclassifiedMarks,
+    ntltUnclassifiedMt,
     ntltTotalMt,
     ntltTotalMarks,
     dc0StoredTotalRows: dc0Count,

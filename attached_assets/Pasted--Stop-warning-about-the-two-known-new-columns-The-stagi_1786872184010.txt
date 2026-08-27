@@ -1,0 +1,95 @@
+# Stop warning about the two known new columns
+
+The staging panel currently shows **"Column layout mismatch detected — Found 26 columns, expected
+24 · New / unexpected (2): BOM Status, Is Welded Structure"** with a *Proceed anyway* button, on
+every WIP upload.
+
+That was correct on 16-Aug when the columns were new. It is wrong now. Both columns are known,
+both are being stored, and this warning will fire on every upload from here on. A warning that
+appears every single day is a warning nobody reads — and the same panel is where a genuinely
+unexpected column, or a missing critical one, has to stand out.
+
+---
+
+## THE PROBLEM
+
+The format check compares the file's headers against a single flat list of 24 expected names.
+Anything outside that list is "unexpected". There is no way to express *"this column is known,
+and may or may not be present"* — which is exactly what the two new columns are: absent before
+16-Aug-2026, present from 16-Aug onward.
+
+## THE FIX — three tiers, not one list
+
+Replace the single expected list with three classifications:
+
+**1. Critical — required, missing means refuse**
+
+```
+Type          Job Card Status   Order Nature    Balance Wt.
+Mark No.      Alias             Project Code    Activity
+Contractor    Batch No.
+```
+
+This is task #42. Missing any of these blocks the import outright, naming every missing column,
+with no *Proceed anyway* path.
+
+**2. Known — expected, but presence is optional**
+
+The remaining 14 original columns, plus the two new ones:
+
+```
+Job Card No.   Job Card Date   Tower Type   Tower Sub Type   Section   Length
+Width          Wt/Pcs          Balance Qty. Assign Date      Operation
+Ref. Job Card No.   Last Production Entry Date   Work Order No.
+BOM Status          Is Welded Structure                        <- new, Aug-2026
+```
+
+A known column being present is normal. A known column being **absent** is also normal — a
+pre-16-Aug file has neither of the new two. **Neither case produces a warning.**
+
+**3. Unknown — not in either list**
+
+Only these produce the "unexpected column" warning. That is the case the panel exists for: the ERP
+adding something we have not seen, which is worth a human look.
+
+## WHAT THE PANEL SHOULD SAY
+
+| File | Panel |
+|---|---|
+| 26 columns, all known | `26 columns · all recognised` — no warning, no *Proceed anyway*, import proceeds normally |
+| 24 columns, pre-16-Aug file | `24 columns · all recognised · 2 optional columns not present (BOM Status, Is Welded Structure)` — informational, no warning |
+| 27 columns, one genuinely new | Amber warning naming only the unrecognised column. *Proceed anyway* is appropriate here |
+| Missing `Batch No.` | Refused. Names the missing column. No *Proceed anyway* |
+
+Drop the "expected 24" phrasing entirely — a fixed count is the wrong model for a source system
+that is actively changing. Report what was found and whether every column was recognised.
+
+## MAKE IT ONE LIST TO EDIT
+
+The three tiers should be three exported constants in one module, so the next ERP column is a
+one-line addition to the Known list — the same shape as the watched-columns list in the Source
+Column Watch panel. If those two lists can share a definition, share it: a column being watched
+implies it is known.
+
+## WHAT NOT TO CHANGE
+
+- Do NOT weaken the critical-column gate from task #42. Missing critical columns must still
+  refuse, and must still have no override.
+- Do NOT stop reporting genuinely unknown columns. That warning is the reason the panel exists.
+- Do NOT add either new column to `hashRow`.
+- Do NOT change the parser's header-name resolution, the bucket definitions, or anything on the
+  Data Check tab including the Source Column Watch panel.
+
+## ACCEPTANCE CHECK
+
+1. Upload the 16-Aug file (26 columns): staging shows all columns recognised, **no mismatch
+   warning**, no *Proceed anyway*, and the import proceeds. Six buckets must read
+   `1,886.620 / 924.667 / 1,209.729 / 1,875.200 / 1,804.723 / 2,707.992 = 10,408.931 MT`,
+   58,945 marks, zero unclassified.
+2. Upload a pre-16-Aug file such as 14-Aug (24 columns): recognised, no warning, with a note that
+   the two optional columns are absent. Buckets unchanged at
+   `10,483.514 MT / 59,028 marks`.
+3. A file with a fabricated extra column warns and names only that column.
+4. A file with `Batch No.` removed is refused.
+
+Paste the staging panel text for cases 1 and 2.

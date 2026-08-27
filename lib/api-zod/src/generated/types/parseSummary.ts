@@ -7,7 +7,9 @@
  */
 import type { ParseSummaryFgWipByJob } from './parseSummaryFgWipByJob';
 import type { ParseSummaryFgWipByStructure } from './parseSummaryFgWipByStructure';
+import type { ParseSummaryTypeCountsItem } from './parseSummaryTypeCountsItem';
 import type { ParseSummaryUnclassifiedSamplesItem } from './parseSummaryUnclassifiedSamplesItem';
+import type { ParseSummaryUnknownTypeValuesItem } from './parseSummaryUnknownTypeValuesItem';
 
 export interface ParseSummary {
   rowsRead: number;
@@ -38,6 +40,16 @@ export interface ParseSummary {
   /** Up to 5 distinct Type+Status combos from unclassified rows, for diagnosis. Absent when unclassifiedRowCount is absent or zero.
    */
   unclassifiedSamples?: ParseSummaryUnclassifiedSamplesItem[];
+  /** Every observed WIP Type value, with casing variants combined. Blank legacy Type values are represented as "(blank / legacy)".
+   */
+  typeCounts?: ParseSummaryTypeCountsItem[];
+  /** Explicit FG Pending For Dispatch rows. They remain available for FG reporting but are excluded from live-work calculations.
+   */
+  fgExcludedRowCount?: number;
+  /** Number of rows with an unknown nonblank WIP Type. */
+  unknownTypeRowCount?: number;
+  /** Up to five unknown WIP Type values, with row counts. */
+  unknownTypeValues?: ParseSummaryUnknownTypeValuesItem[];
   /** Finished Goods WIP per project: sum of Balance Wt. (Col Q) for rows where Type (Col A, new >=Jul-2026 WIP format) = "FG Pending For Dispatch". Same unit as balanceWt (kg raw). Absent when the file has no Type column (old format) or no FG rows.
    */
   fgWipByJob?: ParseSummaryFgWipByJob;

@@ -1,0 +1,175 @@
+# Verification of the 21-Aug CSV and Order Review imports
+
+The 21-Aug WIP CSV and Order Review have been uploaded. Below are the figures computed directly
+from those two files, before the app touched them. Please compare the app's output against every
+one and report each individually — not a summary.
+
+**State which database each query ran against.** Dev and production have diverged repeatedly in
+this project and it has caused wrong conclusions more than once.
+
+---
+
+## FIRST — the format changed again
+
+The 21-Aug CSV has **36 columns**. The 20-Aug CSV had 28, and the file before that had 26. Eight
+new columns appeared in a single day:
+
+```
+Lot Document No.        Lot Document Date       Lot Source Form         Issue Lot Rate
+Issue Document No.      Issue Document Date     SinRateForIssueMonth    NearestSinDateToIssue
+```
+
+The first 28 are unchanged in name and order. Everything new is appended.
+
+**Do not treat the column count as fixed.** The parser resolves by header name, which is why this
+keeps working — that behaviour must be preserved. But the "known columns" list needs these eight
+added, or the staging panel will warn on every upload from here and people will learn to click
+past it.
+
+**Do not build any logic on the new columns yet.** Store them, surface them in the Source Column
+Watch panel, and nothing else. See the closing note for why they matter later.
+
+---
+
+## 1. TLT six buckets — 21-Aug
+
+With `P` aliased to `RFI`:
+
+```
+Release        1,622.711 MT    9,593 marks
+Awaiting         887.087 MT    5,074 marks
+Cutting        1,226.579 MT    7,629 marks
+Quality Check  2,133.128 MT   17,993 marks
+Galvanising    1,920.442 MT   11,571 marks
+FG             5,509.449 MT   22,910 marks
+TOTAL         13,299.396 MT   74,770 marks
+TLT projects   92
+```
+
+**Unclassified must be exactly 23 marks / 6.915 MT** — the blank-activity rows covered by the
+catch-all.
+
+If it comes back as **520 marks**, the `P` alias did not fire: the file carries **497 rows with
+activity `P`** and 0 with `S`. That is the single check that distinguishes a working alias from a
+broken one, because 497 marks and roughly 125 MT is under 1% of the total and every other figure
+would still look plausible.
+
+## 2. NTLT — 21-Aug
+
+```
+Not Started    4,641.607 MT   135 marks
+TS                59.583 MT     7 marks
+Galvanising      521.449 MT    68 marks
+Yard             642.279 MT    49 marks
+FG             3,703.786 MT   200 marks
+TOTAL          9,569.104 MT   459 marks
+```
+
+Plus **2 unclassified marks / 5.392 MT** — one at activity `BL` (3.190 MT) and one with a blank
+activity (2.202 MT). `BL` is an NTLT-only code we have never resolved; leave it unclassified and
+report it rather than guessing a home for it.
+
+Order Nature values present, all NTLT:
+
+```
+RSJ POLE 333 · EARTHING 64 · Solar Structure 30 · GENERAL 13
+RAILWAY STRUCTURE 10 · RURAL ELECTRIFICATION 9 · JOB WORK 2
+```
+
+**`unknownOrderNatureCount` must be 0.** If it is 51, the four new natures were not added to
+`KNOWN_ORDER_NATURES`.
+
+## 3. Dates
+
+Every date in the CSV is text in `dd/mm/yyyy`. Parsed day-first, all three columns are clean:
+
+```
+Job Card Date               73,891 values — all valid, none in the future
+Assign Date                 59,061 values — all valid, none in the future
+Last Production Entry Date  52,823 values — all valid, none in the future
+```
+
+Confirm the app parses day-first and that **zero dates fall after the 21-Aug report date**. A
+future production entry is the signature of the file being read month-first — the `.xlsx` version
+of this same export had 6,830 of them.
+
+## 4. Order Review — 21-Aug
+
+```
+Sheet OrderReview · data rows 2,285 · projects 165
+```
+
+Note this is **back to normal scope**. The 20-Aug Order Review carried 1,130 projects and 20,539
+rows; 21-Aug is 165 and 2,285. The oversized file appears to have been a one-off, so no filter is
+needed and none should be added.
+
+## 5. Order-book reconciliation
+
+`WIP Total = WO Order Qty − Progress Despatch`, at project level:
+
+```
+92 projects · WIP 13,306.311 MT
+total gap  −441.393 MT  (3.32% of WIP)
+within ±0.5 MT   65 of 92
+within ±5 MT     80 of 92
+```
+
+The five worst are unchanged and expected: **900 −161.6 · 912 −138.0 · 907 −93.5 · 938 −72.8 ·
+VS-33 −68.1**. These are known business conditions — deleted job cards and cross-project planning
+— not defects.
+
+For context, the same measure on the old Excel format was −2,160 MT (20.8%).
+
+## 6. Data Check tab
+
+Report all of it: DC0–DC6, DC7–DC10, DC15, DC16, DC12–DC14, DC17, and the Source Column Watch
+panel. Two things to note specifically:
+
+- DC16 must now show the seven Order Nature values above, not three.
+- The Source Column Watch panel must list all four watched columns — `BOM Status`,
+  `Is Welded Structure`, `Sales Order Status`, `Is Last Activity` — and flag the eight new ones as
+  newly appeared.
+
+## 7. Which import the app resolves to
+
+`loadLatestWipImport()` and `loadLatestOrderReview()`, by id and as-on date. Both should be
+21-Aug.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `classifyDc17`,
+  `hashRow`, `hasTypeData`, the import selection helpers or the Bucket E cascade.
+- Do NOT add any of the eight new columns to `hashRow`.
+- Do NOT build a filter for the oversized 20-Aug Order Review. It has already resolved.
+- Do NOT guess a bucket for activity `BL`.
+
+---
+
+## CLOSING NOTE — what the eight new columns actually are
+
+Worth understanding before deciding what to do with them, because they are not routine.
+
+They are **material issue and cost data**, populated on 67.5% of rows — specifically on
+`Job Card WIP` (28,050 of 29,713) and `FG Pending` (22,729 of 23,110), and on **none** of the
+22,431 `Job Card Not Started` rows. That pattern is coherent: material is issued when work starts.
+
+```
+Lot Source Form   Material Return 22,735 · SIN Lot Entry 22,530 · SIN Entry 4,800
+                  RM Stock Transfer 664 · RawMaterial Stock Adjustment 40 · CBOM Rejection 10
+Issue Lot Rate    50,779 values · min 3.00 · max 88.00 · mean 50.74
+```
+
+`Issue Lot Rate` at a mean of 50.74 reads as rupees per kilogram of steel. If that is right, this
+is the first cost-per-tonne data the tracker has ever received, and it is exactly what the
+material-wastage and finance-cost workstreams were blocked on.
+
+**One data-quality caveat before anyone builds on it.** `SinRateForIssueMonth` looks unit-mixed:
+49,929 values fall below 100, but 339 rows carry 1,348 · 46,830 · 52,680 · 69,500 — and on 333
+rows that field is more than 100× the `Issue Lot Rate` on the same line. That looks like rupees
+per tonne in a few rows where the rest are per kilogram. Worth confirming with the ERP team before
+any calculation uses it.
+
+Store and watch for now. Do not compute anything from these columns until VTPL confirms the units
+and which of the two rate fields is authoritative.

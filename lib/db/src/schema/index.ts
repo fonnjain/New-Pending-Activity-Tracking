@@ -4,6 +4,7 @@ export * from "./imports";
 export * from "./recordPool";
 export * from "./importRows";
 export * from "./uploadStaging";
+export * from "./uploadStageEvidence";
 export * from "./settings";
 export * from "./projectMilestones";
 export * from "./rsjThickness";

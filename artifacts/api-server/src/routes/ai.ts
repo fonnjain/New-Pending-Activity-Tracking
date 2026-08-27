@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, lt, desc, sql, or, and } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import { requireAuth } from "./auth";
 import {
   db,
@@ -20,6 +20,7 @@ import {
   resolveAgeingDate,
 } from "../lib/parse";
 import { buildAnalyticsPack } from "../lib/report";
+import { previousImportCondition } from "../lib/previous-import-condition";
 import {
   AI_MODEL_STANDARD,
   AI_MODEL_DEEP,
@@ -435,10 +436,7 @@ router.post("/ai/review", requireAuth, async (req, res): Promise<void> => {
     const [prev] = await db
       .select()
       .from(importsTable)
-      .where(or(
-        lt(importsTable.reportDate, toImport.reportDate),
-        and(eq(importsTable.reportDate, toImport.reportDate), lt(importsTable.id, toImport.id)),
-      ))
+      .where(previousImportCondition(toImport.reportDate, toImport.id))
       .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
       .limit(1);
     fromImport = prev;
@@ -777,10 +775,7 @@ router.post("/ai/report", requireAuth, async (req, res): Promise<void> => {
     const [prev] = await db
       .select()
       .from(importsTable)
-      .where(or(
-        lt(importsTable.reportDate, toImport.reportDate),
-        and(eq(importsTable.reportDate, toImport.reportDate), lt(importsTable.id, toImport.id)),
-      ))
+      .where(previousImportCondition(toImport.reportDate, toImport.id))
       .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id))
       .limit(1);
     fromImport = prev;

@@ -1,0 +1,172 @@
+# Support the new CSV WIP format, and recognise four new Order Nature values
+
+The ERP change is complete and **this format continues from here**. VTPL will send **CSV**, not
+Excel — that is confirmed and it matters more than anything else in this prompt.
+
+Everything below was measured directly from `wip_20_08_2026_today.CSV` (75,733 rows) and the
+Order Review of 20 August 2026.
+
+---
+
+## PART 1 — accept the CSV, and never route it through Excel
+
+### Shape
+
+```
+File type      .CSV, comma-delimited, quoted fields, CRLF line endings
+Header         row 1 — no title/preamble rows above it
+Columns        28 (was 24)
+Sheet name     n/a
+```
+
+The first 24 columns are **unchanged in name and order**. Four are appended:
+
+| Col | Name | Values on 20-Aug |
+|---|---|---|
+| Y | `BOM Status` | `Authorized` on all 75,733 rows |
+| Z | `Is Welded Structure` | `False` 75,069 · `True` 664 |
+| AA | `Sales Order Status` | `Authorized` 68,519 · `In Progress` 4,083 · `Completed` 2,721 · blank 410 |
+| AB | `Is Last Activity` | `0` 46,703 · `1` 29,030 |
+
+`BOM Status` and `Is Welded Structure` already have columns on `record_pool`. Add two more,
+following the same additive pattern — populated, stored, **not used by any logic and not shown
+on any page**:
+
+```ts
+// ERP additions, Aug-2026 (source cols AA + AB; additive, NOT part of the row hash).
+// Sales Order Status: state of the parent sales order. Likely the correct scope
+// filter for excluding completed orders later, but nothing reads it yet.
+salesOrderStatus: text("sales_order_status"),
+// Is Last Activity: "1" when this activity is the FINAL step of the mark's own
+// route, "0" otherwise. It is a route property, not a current-state flag — it
+// sits on Y, GB and FG rows. Do not use it to filter for current state.
+isLastActivity: text("is_last_activity"),
+```
+
+Store both as text. **Neither goes in `hashRow`** — that would change the hash of every existing
+mark and append a fresh pool row for all ~59,000 on the next import.
+
+### Dates — the critical part
+
+Every date in the CSV is text in **`dd/mm/yyyy`** format. Parse it explicitly as day-first.
+
+**Do not** use a locale-dependent parser, a date-guessing library, or anything that opens the
+file through a spreadsheet engine. This is not a preference — the same data delivered as `.xlsx`
+is **corrupted**, because Excel re-reads the text as `mm/dd/yyyy` wherever both parts are 12 or
+under. In the 19-Aug Excel version, 6,830 Last Production dates (38%) fell in the future.
+
+Read directly from the CSV and the problem does not exist. Verified across all three date columns
+on 20-Aug:
+
+```
+Job Card Date               74,389 values — all valid dd/mm, none in the future
+Assign Date                 59,557 values — all valid dd/mm, none in the future
+Last Production Entry Date  53,302 values — all valid dd/mm, none in the future
+```
+
+Zero values anywhere parse as month-first. Add a guard: **if any parsed date falls after the
+import's report date, refuse the import and report the count.** A production entry in the future
+is impossible and is the signature of the format being mis-read.
+
+### Operation separator
+
+The route in `Operation` is now `;`-delimited (`C;P;S;RFI;Q;TS;G;GB;Y`) where the old Excel export
+used `,`. Accept either. The column is stored as text and nothing parses it today, so this only
+matters if that changes.
+
+---
+
+## PART 2 — recognise the four new Order Nature values
+
+`classifyMark` in `parse.ts` has a `KNOWN_ORDER_NATURES` set of five values. The 20-Aug file adds
+four more:
+
+| Order Nature | Rows |
+|---|---|
+| `Solar Structure` | 30 |
+| `RAILWAY STRUCTURE` | 10 |
+| `RURAL ELECTRIFICATION` | 9 |
+| `JOB WORK` | 2 |
+
+**All four are NTLT.** VTPL has confirmed this.
+
+The good news is the default already gets it right — anything that is not `STRUCTURE` falls to
+NTLT, so the weight is not being misclassified today. What is wrong is that all four land in
+`unknownOrderNatureCount`, which makes a real "we have never seen this" alarm fire on 51 rows of
+perfectly normal work. Once that count is permanently non-zero it stops meaning anything.
+
+Add all four to `KNOWN_ORDER_NATURES`, and give each an explicit branch in `classifyMark`
+following the `GENERAL` pattern — `category: "NTLT"`, `groupType: "section"`, `active: true`, and
+a `groupKey` of `normalizeSectionKey(input.section)` falling back to the nature name.
+
+For `ntltSubtype`, use `"GENERAL"` for all four rather than inventing new subtypes. `NtltSubtype`
+is a three-value union that drives `sequenceKeyFor`, and there is no evidence yet that any of the
+four follows a distinct route. Revisit only if their activity vocabulary turns out to differ.
+
+**Do not change** `NTLT_ACTIVITIES`, the NTLT five-stage model, or any `SEQUENCES.NTLT_*` entry.
+
+---
+
+## PART 3 — what must not change
+
+- Do NOT change the six TLT bucket definitions, the NTLT five-stage model, `PROCESS_SEQUENCE`,
+  `QC_ACTIVITY_SET`, `GALV_ACTIVITY_SET`, `classifyDc17`, `hasTypeData`, the import selection
+  helpers, the Bucket E cascade, or `hashRow`.
+- Do NOT change the `P`/`S` → `RFI` alias. It is already correct for this format — the 20-Aug
+  file carries 478 `P` marks and the alias handles them.
+- Do NOT add `Sales Order Status` or `Is Last Activity` to any page, filter, export or rule.
+- Do NOT use `Is Last Activity` to filter for current state. It marks the last step of a mark's
+  route, not where the mark is now.
+- Do NOT drop or de-duplicate rows. Identical rows are the existing `copies` mechanism — 1.7% of
+  rows on every file, and correctly collapsed on the row hash.
+
+---
+
+## ACCEPTANCE CHECK — the 20-Aug CSV
+
+Six TLT buckets, with `P` aliased to `RFI`:
+
+```
+Release      1,622.711 MT   9,593 marks
+Awaiting       887.087 MT   5,074
+Cutting      1,226.579 MT   7,629
+Quality Check 2,133.161 MT  17,994
+Galvanising  1,920.464 MT  11,572
+FG           5,531.176 MT  23,387
+TOTAL       13,321.178 MT  75,249 marks
+```
+
+Unclassified must be **23 marks / 6.915 MT** — the blank-activity rows already covered by the
+catch-all — and **not** 501 marks, which would mean the `P` alias did not fire.
+
+NTLT, 461 marks:
+
+```
+Not Started  4,641.607 MT  135      Galvanising    521.449 MT   68
+TS              59.583 MT    7      Yard           642.279 MT   49
+FG           3,728.166 MT  200      unclassified     5.392 MT    2
+```
+
+`unknownOrderNatureCount` must be **0** after Part 2.
+
+Order-book reconciliation, project level, `WIP Total = WO Order Qty − Progress Despatch`:
+
+```
+92 projects · WIP 13,328.093 MT · total gap −508.087 MT (3.81%)
+within ±0.5 MT: 58 of 92 · within ±5 MT: 76 of 92
+```
+
+For context, the old format's gap on 16-Aug was −2,160.0 MT (20.75%). The improvement is real and
+comes from the new export retaining finished goods until despatch.
+
+---
+
+## NOTE — the Order Review is temporarily much larger
+
+The 20-Aug Order Review covers **1,130 projects across 20,539 rows**, against 165 projects and
+~2,200 rows on 17-Aug. Its format is unchanged — same sheet, same header rows, same columns.
+
+VTPL has confirmed this is because completed projects have not yet been closed in the ERP, and
+they will be. **No code change is needed.** The app already scopes the order book to projects that
+have live WIP marks, so the extra rows are ignored. Do not add a filter for this — it will resolve
+at source.

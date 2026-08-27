@@ -1,22 +1,28 @@
 import React, { useMemo, useState, Fragment, useEffect } from "react";
-import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, useListInventoryMfcBatchColors, getListInventoryMfcBatchColorsQueryKey, useUpsertInventoryMfcBatchColor, useDeleteInventoryMfcBatchColor, useGetInventoryBuckets, getGetInventoryBucketsQueryKey, type InventoryMfcBatchColor, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow } from "@workspace/api-client-react";
+import { useListImports, useGetImportRecords, useDeleteImport, useDeleteAllImports, useDeleteOrderImport, getListImportsQueryKey, getGetImportRecordsQueryKey, useGetOrderStatus, getGetOrderStatusQueryKey, getGetMilestonesQueryKey, useAdminRecompute, useGetReleaseBalance, getGetReleaseBalanceQueryKey, useGetAuthStatus, useListUsers, useCreateUser, useResetUserPassword, useUpdateUserRole, useDeleteUser, useGetUserActivity, useListDeletionLog, getGetAuthStatusQueryKey, getListUsersQueryKey, getGetUserActivityQueryKey, useListInventoryMfcBatchColors, getListInventoryMfcBatchColorsQueryKey, useUpsertInventoryMfcBatchColor, useDeleteInventoryMfcBatchColor, useGetInventoryBuckets, getGetInventoryBucketsQueryKey, useGetImportProductionMovement, getGetImportProductionMovementQueryKey, useGetContractorMovement, useGetFabricationProjectCompletionTlt, getGetFabricationProjectCompletionTltQueryKey, useListOrderReviewAnomalies, getListOrderReviewAnomaliesQueryKey, useUpdateOrderReviewAnomaly, type InventoryMfcBatchColor, type CommitResult, type DispatchReconciliationRow, type BalanceReconciliationRow, type AppUser, type UserSessionEntry, type OrderStatusRow, type Record as WipRecord, type ReleaseBalanceResponse, type OrderReviewAnomaly, type FabricationProjectCompletionRow } from "@workspace/api-client-react";
 
 // ERP rules types are not part of the generated API contract (the endpoint is
 // not in the OpenAPI spec); define them locally to avoid import errors.
 type ErpRuleSampleRow = { project: string; structure: string; markNo: string; fields: Record<string, string | number | null> };
 type ErpRuleResult = { id: string; label: string; pass: boolean; scope: "UNIVERSAL" | "TLT"; violatingRowCount: number; violatingWeightMt: number; sampleRows: ErpRuleSampleRow[]; notApplicable?: boolean };
 type ErpRulesResponse = { rules: ErpRuleResult[]; asOnDate?: string | null; typeColumnMissing?: boolean };
-import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE } from "@/lib/store";
+import { useTracker, useFilteredRecords, useContractorCategoryMap, contractorCategoryFor, useActiveJobSet, isNamedJobSetFilter, MULTI_JOBS_FILTER_VALUE, dateRangeWindow, type Filters } from "@/lib/store";
+import { useProjectCompare } from "@/lib/projectSort";
+import { buildOrderStatusRows } from "@/lib/order-status-rows";
 import { useSettings } from "@/lib/settings";
 import { useFgRows, type FgComputedRow } from "@/lib/fg";
-import { contractorCategoryLabel, QC_ACTIVITY_SET, GALV_ACTIVITY_SET, PROCESS_SEQUENCE } from "@workspace/domain";
+import { activityDisplayKey, activityDisplayKeyForRecord, activityRank, bundleActivitySet, classifyWipCase, compareActivity, FAB_LOAD_SECTIONS, fabLoadColumnsForSection, lifecycleStatus, migrateTurnaroundSettings, normalizeActivity, routeIncludesOp, scopeFor, sequenceFor, contractorCategoryLabel, QC_ACTIVITY_SET, GALV_ACTIVITY_SET, PROCESS_SEQUENCE } from "@workspace/domain";
+import { isActiveCutting, isAwaitingAssignment, isCutting } from "@/lib/ageing";
+import { useVelocityInfo, velocityKey, VELOCITY_LABELS } from "@/lib/velocity";
+import { useStalledInfo } from "@/lib/movement";
+import { LIFECYCLE_LABELS } from "@/lib/turnaround";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, PlusCircle, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History, CircleCheck, CircleX, Info, Pencil } from "lucide-react";
+import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, PlusCircle, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History, CircleCheck, CircleX, Info, Pencil, Archive } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { exportToXlsx, exportToJson, exportGenOrXlsx, exportTimestamp, exportToXlsxSheets, type XlsxColumn, type XlsxSheet } from "@/lib/export";
+import { createXlsxBlockGridFile, createXlsxFile, createXlsxSheetsFile, downloadZip, exportToXlsx, exportToJson, exportGenOrXlsx, exportTimestamp, exportToXlsxSheets, type DownloadableFile, type XlsxColumn, type XlsxGridBlock, type XlsxGridSheet, type XlsxSheet } from "@/lib/export";
 import { formatDate } from "@/lib/utils";
 import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { AiReviewPanel } from "@/components/ai-review-panel";
@@ -28,6 +34,8 @@ import { Segmented } from "@/components/ui/segmented";
 import { ContractorSetupContent } from "@/pages/contractor-setup";
 import { WarningParametersContent } from "@/pages/warning-parameters";
 import { ThicknessContent } from "@/pages/thickness";
+import { OrderReviewAnomalyRegister } from "@/components/order-review-anomaly-register";
+import { StagingEvidenceRegister } from "@/components/staging-evidence-register";
 
 // Most tabs are admin-only. Job Templates is visible to all roles so normal
 // users can manage their own named job sets for the global filter.
@@ -137,10 +145,565 @@ export function BucketListDatesPage() {
   );
 }
 
+function filterReleaseBalanceRows(
+  data: ReleaseBalanceResponse | undefined,
+  filters: Filters,
+  namedJobSet: ReadonlySet<string>,
+) {
+  let activeJobSet: Set<string> | null = null;
+  if (isNamedJobSetFilter(filters.job)) {
+    activeJobSet = new Set([...namedJobSet].map((code) => code.includes(" - ") ? code.split(" - ")[0] : code));
+  } else if (filters.selectedJobs.length > 0) {
+    activeJobSet = new Set(filters.selectedJobs.map((code) => code.includes(" - ") ? code.split(" - ")[0] : code));
+  } else if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) {
+    activeJobSet = new Set([filters.job]);
+  }
+  const allRows = data?.rows ?? [];
+  return activeJobSet ? allRows.filter((row) => activeJobSet.has(row.project ?? "")) : allRows;
+}
+
+const ZIP_FAB_SET = bundleActivitySet("TLT_FABRICATION") ?? new Set<string>();
+const ZIP_YARD_SET = bundleActivitySet("YARD") ?? new Set<string>();
+const ZIP_GALV_SET = new Set(
+  [...(bundleActivitySet("GALVANIZING") ?? [])].filter((activity) => !ZIP_YARD_SET.has(activity)),
+);
+
+function buildActivityExportSheets(records: any[]): XlsxSheet[] {
+  const grouped = new Map<string, any[]>();
+  for (const record of records) {
+    if (isAwaitingAssignment(record)) continue;
+    if (isCutting(record.activity) && !isActiveCutting(record)) continue;
+    const activity = activityDisplayKeyForRecord(record);
+    const list = grouped.get(activity) ?? [];
+    list.push(record);
+    grouped.set(activity, list);
+  }
+  const averageAge = (rows: any[]) => {
+    const ageable = rows.filter((row) => row.ageingDays != null);
+    return ageable.length
+      ? Math.round(ageable.reduce((sum, row) => sum + row.ageingDays, 0) / ageable.length)
+      : null;
+  };
+  const activities = [...grouped.keys()].sort(compareActivity);
+  return [
+    {
+      name: "Activities",
+      columns: [
+        { label: "Activity", field: "activity" },
+        { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
+        { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
+        { label: "Balance Wt", field: "weight", numeric: true, decimals: 2, total: true },
+        { label: "Avg Ageing", field: "avgAge", numeric: true, decimals: 0 },
+      ],
+      rows: activities.map((activity) => {
+        const rows = grouped.get(activity) ?? [];
+        return {
+          activity,
+          marks: rows.length,
+          qty: rows.reduce((sum, row) => sum + (row.balanceQty ?? 0), 0),
+          weight: rows.reduce((sum, row) => sum + (row.balanceWt ?? 0), 0),
+          avgAge: averageAge(rows),
+        };
+      }),
+    },
+    {
+      name: "Marks",
+      columns: [
+        { label: "Activity", field: "activity" },
+        { label: "Project", field: "job" },
+        { label: "Structure", field: "structure" },
+        { label: "Mark", field: "markId" },
+        { label: "Section", field: "section" },
+        { label: "Contractor", field: "contractor" },
+        { label: "Balance Qty", field: "balanceQty", numeric: true, decimals: 0, total: true },
+        { label: "Balance Wt", field: "balanceWt", numeric: true, decimals: 2, total: true },
+        { label: "Assign Date", field: "assignDate" },
+        { label: "Last Production", field: "lastProductionDate" },
+        { label: "Ageing (days)", field: "ageingDays", numeric: true, decimals: 0 },
+      ],
+      rows: activities.flatMap((activity) =>
+        (grouped.get(activity) ?? []).map((record) => ({
+          activity,
+          job: record.job,
+          structure: record.structure,
+          markId: record.markId,
+          section: record.section,
+          contractor: record.contractor,
+          balanceQty: record.balanceQty,
+          balanceWt: record.balanceWt,
+          assignDate: record.assignDate ?? "",
+          lastProductionDate: record.lastProductionDate ?? "",
+          ageingDays: record.ageingDays,
+        })),
+      ),
+    },
+  ];
+}
+
+function buildContractorExportRows(records: any[], categoryMap: Parameters<typeof contractorCategoryFor>[1]) {
+  const grouped = new Map<string, any[]>();
+  for (const record of records) {
+    const rawName = record.contractor || "Unassigned";
+    const name = rawName === "Unassigned"
+      ? rawName
+      : contractorCategoryFor(rawName, categoryMap).displayName || rawName;
+    const list = grouped.get(name) ?? [];
+    list.push(record);
+    grouped.set(name, list);
+  }
+  return [...grouped.entries()].map(([name, rows]) => {
+    const ageable = rows.filter((row) => row.ageingDays != null);
+    return {
+      name,
+      marks: rows.length,
+      projects: new Set(rows.map((row) => row.job).filter((job) => job && job !== "(Unassigned)")).size,
+      qty: rows.reduce((sum, row) => sum + (row.balanceQty ?? 0), 0),
+      weight: rows.reduce((sum, row) => sum + (row.balanceWt ?? 0), 0),
+      fabLoad: rows.filter((row) => ZIP_FAB_SET.has((row.activity ?? "").toUpperCase()) &&
+        (!isCutting(row.activity) || isActiveCutting(row) || isAwaitingAssignment(row)))
+        .reduce((sum, row) => sum + (row.balanceWt ?? 0), 0),
+      galvaLoad: rows.filter((row) => ZIP_GALV_SET.has((row.activity ?? "").toUpperCase()))
+        .reduce((sum, row) => sum + (row.balanceWt ?? 0), 0),
+      yardLoad: rows.filter((row) => ZIP_YARD_SET.has((row.activity ?? "").toUpperCase()))
+        .reduce((sum, row) => sum + (row.balanceWt ?? 0), 0),
+      avgAge: ageable.length
+        ? Math.round(ageable.reduce((sum, row) => sum + row.ageingDays, 0) / ageable.length)
+        : null,
+    };
+  }).sort((a, b) => b.weight - a.weight);
+}
+
+const CONTRACTOR_WORKLOAD_COLUMNS: XlsxColumn[] = [
+  { label: "Contractor", field: "name" },
+  { label: "Total Wt", field: "weight", numeric: true, decimals: 2, total: true },
+  { label: "Projects", field: "projects", numeric: true, decimals: 0 },
+  { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
+  { label: "Fabrication Load", field: "fabLoad", numeric: true, decimals: 2, total: true },
+  { label: "Galvanizing Load", field: "galvaLoad", numeric: true, decimals: 2, total: true },
+  { label: "Yard Load", field: "yardLoad", numeric: true, decimals: 2, total: true },
+  { label: "Avg Ageing", field: "avgAge", numeric: true, decimals: 0 },
+];
+
+function buildPlantOperationSheets(records: any[]): XlsxSheet[] {
+  const fabricationRows = records
+    .filter((record) => ZIP_FAB_SET.has((record.activity ?? "").toUpperCase()))
+    .map((record) => ({
+      project: record.job || "(Unassigned)",
+      structure: record.structure || "",
+      markId: record.markId,
+      section: record.section || "",
+      activity: record.activity || "",
+      contractor: record.contractor || "Unassigned",
+      holeOp: record.holeOperation === "PUNCHING" ? "Punching" : record.holeOperation === "DRILLING" ? "Drilling" : "Not set",
+      thicknessMm: record.thicknessMm ?? null,
+      qty: record.balanceQty,
+      weight: record.balanceWt,
+      ageingDays: record.ageingDays ?? null,
+    }));
+  const galvanizingByProjectContractor = new Map<string, any[]>();
+  for (const record of records.filter((row) => (bundleActivitySet("GALVANIZING") ?? new Set()).has((row.activity ?? "").toUpperCase()))) {
+    const key = `${record.job || "(Unassigned)"}\u0001${record.contractor || "Unassigned"}`;
+    const list = galvanizingByProjectContractor.get(key) ?? [];
+    list.push(record);
+    galvanizingByProjectContractor.set(key, list);
+  }
+  const galvanizingRows = [...galvanizingByProjectContractor.entries()].flatMap(([key, rows]) => {
+    const [project, contractor] = key.split("\u0001");
+    const ageable = rows.filter((row) => row.ageingDays != null);
+    return [{
+      project,
+      contractor,
+      marks: rows.length,
+      qty: rows.reduce((sum, row) => sum + (row.balanceQty ?? 0), 0),
+      weight: rows.reduce((sum, row) => sum + (row.balanceWt ?? 0), 0),
+      avgAge: ageable.length ? Math.round(ageable.reduce((sum, row) => sum + row.ageingDays, 0) / ageable.length) : null,
+      totalThicknessMm: rows.reduce((sum, row) => sum + (row.thicknessMm ?? 0), 0),
+    }];
+  });
+  return [
+    {
+      name: "Fabrication",
+      columns: [
+        { label: "Project", field: "project" }, { label: "Structure", field: "structure" },
+        { label: "Mark ID", field: "markId" }, { label: "Section", field: "section" },
+        { label: "Activity", field: "activity" }, { label: "Contractor", field: "contractor" },
+        { label: "Hole Op.", field: "holeOp" }, { label: "Thickness (mm)", field: "thicknessMm", numeric: true, decimals: 1 },
+        { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
+        { label: "Balance Wt (kg)", field: "weight", numeric: true, decimals: 2, total: true },
+        { label: "Ageing (days)", field: "ageingDays", numeric: true, decimals: 0 },
+      ],
+      rows: fabricationRows,
+    },
+    {
+      name: "Galvanization",
+      columns: [
+        { label: "Project", field: "project" }, { label: "Contractor", field: "contractor" },
+        { label: "Marks", field: "marks", numeric: true, decimals: 0, total: true },
+        { label: "Balance Qty", field: "qty", numeric: true, decimals: 0, total: true },
+        { label: "Balance Wt (kg)", field: "weight", numeric: true, decimals: 2, total: true },
+        { label: "Avg Ageing (days)", field: "avgAge", numeric: true, decimals: 0 },
+        { label: "Total Thickness (mm)", field: "totalThicknessMm", numeric: true, decimals: 0, total: true },
+      ],
+      rows: galvanizingRows,
+    },
+  ];
+}
+
+function buildDailyProductionMovementSheets(records: any[], movement: any, dateRange: string | null): XlsxSheet[] {
+  const window = dateRange ? dateRangeWindow(dateRange) : null;
+  const start = window?.start.toISOString().slice(0, 10);
+  const end = window?.end.toISOString().slice(0, 10);
+  const cuttingByDay = new Map<string, number>();
+  for (const day of movement?.days ?? []) {
+    if (day.cuttingOutputMt > 0) cuttingByDay.set(day.dayKey, day.cuttingOutputMt * 1000);
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const dates = new Set<string>();
+  for (const record of records) {
+    const date = record.lastProductionDate as string | null;
+    if (!date) continue;
+    if (window ? date >= start! && date <= end! : date <= today) dates.add(date);
+  }
+  for (const date of cuttingByDay.keys()) {
+    if (window ? date >= start! && date <= end! : date <= today) dates.add(date);
+  }
+  const moveDates = [...dates].sort().slice(-7);
+  const grouped = new Map<string, any[]>();
+  for (const record of records) {
+    if (isCutting(record.activity) && !isActiveCutting(record) && !isAwaitingAssignment(record)) continue;
+    const activity = activityDisplayKeyForRecord(record);
+    const list = grouped.get(activity) ?? [];
+    list.push(record);
+    grouped.set(activity, list);
+  }
+  const activities = [...grouped.keys()].sort(compareActivity);
+  const dateColumns: XlsxColumn[] = moveDates.map((date, index) => ({
+    label: formatDate(date), field: `d${index}`, numeric: true, decimals: 3, total: true,
+  }));
+  const activityRows = activities.map((activity) => {
+    const rows = grouped.get(activity) ?? [];
+    const perDate = activity === "C"
+      ? moveDates.map((date) => cuttingByDay.get(date) ?? 0)
+      : moveDates.map((date) => rows.reduce((sum, row) =>
+        row.lastProductionDate === date ? sum + (row.balanceWt ?? 0) : sum, 0));
+    const row: Record<string, any> = { activity, total: perDate.reduce((sum, value) => sum + value, 0) };
+    perDate.forEach((value, index) => { row[`d${index}`] = value > 0 ? value : null; });
+    return row;
+  });
+  const activitySheets = activities.flatMap((activity) => {
+    const rows = grouped.get(activity) ?? [];
+    const byContractor = new Map<string, number[]>();
+    for (const row of rows) {
+      const index = moveDates.indexOf(row.lastProductionDate);
+      if (index < 0) continue;
+      const contractor = row.contractor || "(No Contractor)";
+      const values = byContractor.get(contractor) ?? moveDates.map(() => 0);
+      values[index] += row.balanceWt ?? 0;
+      byContractor.set(contractor, values);
+    }
+    if (!byContractor.size) return [];
+    return [{
+      name: activity,
+      columns: [
+        { label: "Contractor", field: "contractor" },
+        ...dateColumns,
+        { label: "Total (MT)", field: "total", numeric: true, decimals: 3, total: true },
+      ],
+      rows: [...byContractor.keys()]
+        .sort((left, right) => byContractor.get(right)!.reduce((sum, value) => sum + value, 0) -
+          byContractor.get(left)!.reduce((sum, value) => sum + value, 0))
+        .map((contractor) => {
+          const values = byContractor.get(contractor)!;
+          const row: Record<string, any> = { contractor, total: values.reduce((sum, value) => sum + value, 0) };
+          values.forEach((value, index) => { row[`d${index}`] = value > 0 ? value : null; });
+          return row;
+        }),
+    }];
+  });
+  return [{
+    name: "Summary",
+    columns: [
+      { label: "Activity", field: "activity" },
+      ...dateColumns,
+      { label: "Total (MT)", field: "total", numeric: true, decimals: 3, total: true },
+    ],
+    rows: activityRows,
+  }, ...activitySheets];
+}
+
+function buildSpeedOfExecutionSheets(records: any[], velocityItems: any[]): XlsxSheet[] {
+  const visible = new Set(records.map((row) => velocityKey(row.markId, row.jobCardNo)));
+  const items = velocityItems.filter((item) => visible.has(velocityKey(item.markId, item.jobCardNo)));
+  const makeRollup = (field: "job" | "contractor" | "activity", stage = false) => {
+    const grouped = new Map<string, { markCount: number; stalled: number; slow: number; gapSum: number; gapCount: number }>();
+    for (const item of items) {
+      const key = stage ? activityDisplayKey(item.activity) : (item[field] || (field === "contractor" ? "Unassigned" : "(Unassigned)"));
+      const bucket = grouped.get(key) ?? { markCount: 0, stalled: 0, slow: 0, gapSum: 0, gapCount: 0 };
+      bucket.markCount++;
+      if (item.status === "stalled") bucket.stalled++;
+      if (item.status === "slow") bucket.slow++;
+      if (item.etaGap != null) { bucket.gapSum += item.etaGap; bucket.gapCount++; }
+      grouped.set(key, bucket);
+    }
+    return [...grouped.entries()].map(([key, bucket]) => ({
+      [field === "job" ? "project" : field]: key,
+      markCount: bucket.markCount,
+      stalled: bucket.stalled,
+      slow: bucket.slow,
+      avgEtaGap: bucket.gapCount ? bucket.gapSum / bucket.gapCount : null,
+      stuckScore: bucket.markCount ? (bucket.stalled + 0.5 * bucket.slow) / bucket.markCount : 0,
+    }));
+  };
+  const projects = makeRollup("job").sort((a, b) => b.stuckScore - a.stuckScore || b.stalled - a.stalled);
+  const contractors = makeRollup("contractor").sort((a, b) => b.stuckScore - a.stuckScore || b.stalled - a.stalled);
+  const stageBuckets = new Map<string, { markCount: number; stalled: number; slow: number; paceSum: number; paceCount: number }>();
+  for (const item of items) {
+    const activity = activityDisplayKey(item.activity);
+    const bucket = stageBuckets.get(activity) ?? { markCount: 0, stalled: 0, slow: 0, paceSum: 0, paceCount: 0 };
+    bucket.markCount++;
+    if (item.status === "stalled") bucket.stalled++;
+    if (item.status === "slow") bucket.slow++;
+    if (item.daysPerStage != null) { bucket.paceSum += item.daysPerStage; bucket.paceCount++; }
+    stageBuckets.set(activity, bucket);
+  }
+  const stages = [...stageBuckets.entries()]
+    .map(([activity, bucket]) => ({
+      activity,
+      markCount: bucket.markCount,
+      stalled: bucket.stalled,
+      slow: bucket.slow,
+      avgDaysPerStage: bucket.paceCount ? bucket.paceSum / bucket.paceCount : null,
+    }))
+    .sort((a, b) => compareActivity(a.activity, b.activity));
+  return [
+    { name: "Projects", columns: [
+      { label: "Project", field: "project" }, { label: "Marks", field: "markCount", numeric: true, decimals: 0, total: true },
+      { label: "Stalled", field: "stalled", numeric: true, decimals: 0, total: true }, { label: "Slow", field: "slow", numeric: true, decimals: 0, total: true },
+      { label: "Avg ETA Gap", field: "avgEtaGap", numeric: true, decimals: 1 }, { label: "Stuck Score", field: "stuckScore", numeric: true, decimals: 2 },
+    ], rows: projects },
+    { name: "Contractors", columns: [
+      { label: "Contractor", field: "contractor" }, { label: "Marks", field: "markCount", numeric: true, decimals: 0, total: true },
+      { label: "Stalled", field: "stalled", numeric: true, decimals: 0, total: true }, { label: "Slow", field: "slow", numeric: true, decimals: 0, total: true },
+      { label: "Avg ETA Gap", field: "avgEtaGap", numeric: true, decimals: 1 }, { label: "Stuck Score", field: "stuckScore", numeric: true, decimals: 2 },
+    ], rows: contractors },
+    { name: "Stages", columns: [
+      { label: "Activity", field: "activity" }, { label: "Marks", field: "markCount", numeric: true, decimals: 0, total: true },
+      { label: "Stalled", field: "stalled", numeric: true, decimals: 0, total: true }, { label: "Slow", field: "slow", numeric: true, decimals: 0, total: true },
+      { label: "Avg Days/Stage", field: "avgDaysPerStage", numeric: true, decimals: 1 },
+    ], rows: stages },
+  ];
+}
+
+const ZIP_JOB_WISE_COLUMNS: XlsxColumn[] = [
+  { label: "Mark No.", field: "markId" },
+  { label: "Section", field: "section" },
+  { label: "Length", field: "length", numeric: true, decimals: 2 },
+  { label: "Width", field: "width", numeric: true, decimals: 2 },
+  { label: "Balance Qty", field: "balanceQty", numeric: true, decimals: 0, total: true },
+  { label: "Balance Wt (MT)", field: "balanceWtMt", numeric: true, decimals: 3, total: true },
+  { label: "Activity", field: "activity" },
+  { label: "Contractor", field: "contractor" },
+  { label: "Last Op Date", field: "lastProductionDate" },
+  { label: "Ageing (days)", field: "ageingDays", numeric: true, decimals: 0 },
+  { label: "Lifecycle Status", field: "lifecycleStatus" },
+  { label: "Stalled", field: "stalledLabel" },
+  { label: "Velocity Status", field: "velocityStatusLabel" },
+];
+
+function buildJobWiseReportSheets(
+  records: any[],
+  settings: Parameters<typeof lifecycleStatus>[1],
+  isStalled: (markId: string | null | undefined, jobCardNo: string | null | undefined) => boolean,
+  velocityFor: (markId: string | null | undefined, jobCardNo: string | null | undefined) => any,
+): XlsxSheet[] {
+  const enriched = [...records]
+    .sort((a, b) => compareActivity(a.activity, b.activity) || String(a.markId ?? "").localeCompare(String(b.markId ?? "")))
+    .map((record) => {
+      const status = lifecycleStatus(
+        { activity: record.activity, ageingDays: record.ageingDays, scope: scopeFor(record), sequence: sequenceFor(record) },
+        settings,
+      );
+      const velocity = velocityFor(record.markId, record.jobCardNo);
+      const stalled = isStalled(record.markId, record.jobCardNo);
+      return {
+        ...record,
+        balanceWtMt: record.balanceWt != null ? record.balanceWt / 1000 : null,
+        lifecycleStatus: LIFECYCLE_LABELS[status.status],
+        stalledLabel: stalled ? "Yes" : "",
+        velocityStatusLabel: velocity
+          ? VELOCITY_LABELS[velocity.status as keyof typeof VELOCITY_LABELS]
+          : "",
+      };
+    });
+  const byActivity = new Map<string, typeof enriched>();
+  for (const row of enriched) {
+    const activity = activityDisplayKeyForRecord(row);
+    const rows = byActivity.get(activity) ?? [];
+    rows.push(row);
+    byActivity.set(activity, rows);
+  }
+  return [
+    { name: "Summary", columns: ZIP_JOB_WISE_COLUMNS, rows: enriched },
+    ...[...byActivity.entries()]
+      .sort(([a], [b]) => compareActivity(a, b))
+      .map(([activity, rows]) => ({ name: activity, columns: ZIP_JOB_WISE_COLUMNS, rows })),
+  ];
+}
+
+const ZIP_FAB_LOAD_NOTE =
+  "Note: the six load columns are not mutually exclusive. A mark still to be punched, drilled and bent appears in every applicable column, so column totals must not be summed to reconcile to a balance figure.";
+
+function zipFabLoadMatch(section: string, column: string, record: any): boolean {
+  const notReleased = classifyWipCase(record) === "NOT_RELEASED";
+  if (section === "upcoming") {
+    if (!notReleased) return false;
+  } else {
+    if (notReleased) return false;
+    if (isCutting(record.activity) && !isActiveCutting(record) && !isAwaitingAssignment(record)) return false;
+  }
+  const activity = normalizeActivity(record.activity);
+  const rank = activityRank(record.activity);
+  const sectionType = record.sectionType;
+  const holeOperation = record.holeOperation;
+  if (section === "operational") {
+    if (column === "welded") return activity === "W";
+    if (column === "bending") return activity === "B";
+    if (column === "anglePunch") return sectionType === "ANGLE" && activity === "RFI" && holeOperation === "PUNCHING";
+    if (column === "drilling") return sectionType === "ANGLE" && activity === "RFI" && holeOperation === "DRILLING";
+    if (column === "platePunch") return sectionType === "PLATE" && activity === "RFI" && holeOperation === "PUNCHING";
+    return column === "plateDrill" && sectionType === "PLATE" && activity === "RFI" && holeOperation === "DRILLING";
+  }
+  if (column === "welded") return rank < activityRank("W") && routeIncludesOp(record.operation, "W");
+  if (column === "bending") return rank < activityRank("B") && routeIncludesOp(record.operation, "B");
+  if (column === "anglePunch") return sectionType === "ANGLE" && activity === "C" && holeOperation === "PUNCHING";
+  if (column === "drilling") return sectionType === "ANGLE" && activity === "C" && holeOperation === "DRILLING";
+  if (column === "platePunch") return sectionType === "PLATE" && activity === "C" && holeOperation === "PUNCHING";
+  return column === "plateDrill" && sectionType === "PLATE" && activity === "C" && holeOperation === "DRILLING";
+}
+
+function buildFabricationLoadGridSheets(records: any[]): XlsxGridSheet[] {
+  const grids = FAB_LOAD_SECTIONS.map((section) => {
+    const blocks = fabLoadColumnsForSection(section.value).map((column) => {
+      const totals = new Map<string, number>();
+      for (const record of records) {
+        if ((record.category || "TLT") !== "TLT" || !zipFabLoadMatch(section.value, column.value, record)) continue;
+        const project = (record.job || "").trim();
+        if (!project || project === "(Unassigned)") continue;
+        totals.set(project, (totals.get(project) ?? 0) + (record.balanceWt ?? 0));
+      }
+      const rows = [...totals.entries()]
+        .sort(([, left], [, right]) => right - left)
+        .map(([project, weightKg]) => [project, Math.round(weightKg) / 1000]);
+      return {
+        title: column.label,
+        headers: ["Project", "Wt (t)"],
+        numeric: [false, true],
+        decimals: 3,
+        rows,
+        totals: ["G. Total", rows.reduce((sum, row) => sum + Number(row[1]), 0)],
+      } satisfies XlsxGridBlock;
+    });
+    return { label: section.label, blocks };
+  });
+  return [
+    { name: "All", note: ZIP_FAB_LOAD_NOTE, sections: grids.map((grid) => ({ banner: grid.label.toUpperCase(), blocks: grid.blocks })) },
+    ...grids.map((grid) => ({ name: grid.label, blocks: grid.blocks })),
+  ];
+}
+
+const ZIP_FAB_COMPLETION_COLUMNS: XlsxColumn[] = [
+  { label: "BOM Label", field: "bomLabel" },
+  { label: "Sub-Type Group", field: "subTypeGroup" },
+  { label: "Project", field: "project" },
+  { label: "MFC Batch", field: "mfcBatch" },
+  { label: "Release Balance Calc (MT)", field: "releaseBalanceCalcMt", numeric: true, decimals: 3, total: true },
+  { label: "Awaiting Assignment Calc (MT)", field: "assignmentBalanceCalcMt", numeric: true, decimals: 3, total: true },
+  { label: "Cutting Balance — C (MT)", field: "cuttingBalanceMt", numeric: true, decimals: 3, total: true },
+  { label: "HG Balance (MT)", field: "hgBalanceMt", numeric: true, decimals: 3, total: true },
+  { label: "RFI Balance (MT)", field: "rfiBalanceMt", numeric: true, decimals: 3, total: true },
+  { label: "NH Balance (MT)", field: "nhBalanceMt", numeric: true, decimals: 3, total: true },
+  { label: "B Balance (MT)", field: "bBalanceMt", numeric: true, decimals: 3, total: true },
+  { label: "HAB Balance (MT)", field: "habBalanceMt", numeric: true, decimals: 3, total: true },
+  { label: "W Balance (MT)", field: "wBalanceMt", numeric: true, decimals: 3, total: true },
+  { label: "Quality Check — Q (MT)", field: "qBalanceMt", numeric: true, decimals: 3, total: true },
+  { label: "Test/Sign-off — TS (MT)", field: "tsBalanceMt", numeric: true, decimals: 3, total: true },
+  { label: "Total Fabrication Balance (MT)", field: "totalFabBalanceMt", numeric: true, decimals: 3, total: true },
+];
+
+function buildFabCompletionSheets(rows: FabricationProjectCompletionRow[]): XlsxSheet[] {
+  const withTotal = rows
+    .map((row) => ({
+      ...row,
+      mfcBatch: row.mfcBatch ?? "",
+      totalFabBalanceMt:
+        row.releaseBalanceCalcMt + row.assignmentBalanceCalcMt + row.cuttingBalanceMt + row.hgBalanceMt +
+        row.rfiBalanceMt + row.nhBalanceMt + row.bBalanceMt + row.habBalanceMt + row.wBalanceMt + row.qBalanceMt,
+    }))
+    .sort((a, b) => a.bomLabel.localeCompare(b.bomLabel) || a.subTypeGroup.localeCompare(b.subTypeGroup) || a.project.localeCompare(b.project));
+  const byBom = new Map<string, typeof withTotal>();
+  for (const row of withTotal) {
+    const group = byBom.get(row.bomLabel) ?? [];
+    group.push(row);
+    byBom.set(row.bomLabel, group);
+  }
+  return [
+    { name: "Summary", columns: ZIP_FAB_COMPLETION_COLUMNS, rows: withTotal },
+    ...[...byBom.entries()].map(([name, bomRows]) => ({ name, columns: ZIP_FAB_COMPLETION_COLUMNS, rows: bomRows })),
+  ];
+}
+
+function buildContractorPerformanceSheets(entries: any[]): XlsxSheet[] {
+  const dates = [...new Set(entries.map((entry) => entry.date).filter(Boolean))].sort();
+  const contractors = [...new Set(entries.map((entry) => entry.contractor?.trim() || "Unassigned"))]
+    .sort((a, b) => a.localeCompare(b));
+  const summaryRows = contractors.map((contractor) => {
+    const row: Record<string, string | number> = { contractor };
+    for (const date of dates) {
+      row[date] = entries
+        .filter((entry) => (entry.contractor?.trim() || "Unassigned") === contractor && entry.date === date)
+        .reduce((sum, entry) => sum + (entry.weightKg ?? 0) / 1000, 0);
+    }
+    row.total = dates.reduce((sum, date) => sum + Number(row[date] ?? 0), 0);
+    return row;
+  });
+  const summaryColumns: XlsxColumn[] = [
+    { label: "Contractor", field: "contractor" },
+    ...dates.map((date) => ({ label: formatDate(date), field: date, numeric: true, decimals: 2, total: true })),
+    { label: "Total (MT)", field: "total", numeric: true, decimals: 2, total: true },
+  ];
+  const detailColumns: XlsxColumn[] = [
+    { label: "Date", field: "date" },
+    { label: "Project", field: "project" },
+    { label: "From Activity", field: "fromActivity" },
+    { label: "To Activity", field: "toActivity" },
+    { label: "Mark Count", field: "markCount", numeric: true, decimals: 0, total: true },
+    { label: "Weight (MT)", field: "weightMt", numeric: true, decimals: 2, total: true },
+  ];
+  const detailRows = [...entries]
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.project).localeCompare(String(b.project)))
+    .map((entry) => ({ ...entry, date: formatDate(entry.date), weightMt: (entry.weightKg ?? 0) / 1000 }));
+  return [
+    { name: "Summary", columns: summaryColumns, rows: summaryRows },
+    { name: "Detail", columns: detailColumns, rows: detailRows },
+    ...contractors.map((contractor) => ({
+      name: contractor,
+      columns: detailColumns,
+      rows: detailRows.filter((entry) => (entry.contractor?.trim() || "Unassigned") === contractor),
+    })),
+  ];
+}
+
 function DataViewContent() {
-  const { data: imports = [], refetch } = useListImports();
-  const { data: orderStatus } = useGetOrderStatus({ query: { queryKey: getGetOrderStatusQueryKey() } });
+  const { data: imports = [], refetch, isLoading: importsLoading } = useListImports();
+  const { data: orderStatus, isLoading: orderStatusLoading } = useGetOrderStatus({
+    query: { queryKey: getGetOrderStatusQueryKey() },
+  });
+  const { data: releaseBalance } = useGetReleaseBalance(undefined, {
+    query: { queryKey: getGetReleaseBalanceQueryKey() },
+  });
+  const { available: fgAvailable, rows: fgRows } = useFgRows();
   const orderImports = orderStatus?.imports ?? [];
+  const recentCumulativeOverrides = orderStatus?.recentCumulativeOverrides ?? [];
   const { data: deletionLog = [] } = useListDeletionLog();
 
   // Strict per-date pairing: an Order Review can only be uploaded for a date that
@@ -163,7 +726,18 @@ function DataViewContent() {
   const takenOrDates = new Set(
     orderImports.map((o) => o.asOnDate).filter((d): d is string => !!d),
   );
-  const { selectedImportId, setSelectedImportId } = useTracker();
+  const { selectedImportId, setSelectedImportId, filters } = useTracker();
+  // The shared store normally advances to imports[0], but its state update is
+  // one render behind the list query. Use the newest loaded WIP immediately so
+  // the Data-page exports cannot be clicked into a false "select an import"
+  // state during that short handoff.
+  const selectedImportIsAvailable =
+    selectedImportId != null && imports.some((entry) => entry.id === selectedImportId);
+  const effectiveImportId = selectedImportIsAvailable
+    ? selectedImportId
+    : imports[0]?.id ?? null;
+  const activeJobSet = useActiveJobSet();
+  const compareProjects = useProjectCompare();
   const [, setLocation] = useLocation();
   const deleteImport = useDeleteImport();
   const deleteAll = useDeleteAllImports();
@@ -171,6 +745,7 @@ function DataViewContent() {
   const adminRecompute = useAdminRecompute();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [exportingAllExcel, setExportingAllExcel] = useState(false);
 
   const handleRecompute = () => {
     adminRecompute.mutate(undefined, {
@@ -189,13 +764,102 @@ function DataViewContent() {
     });
   };
 
-  const { data: allRecords } = useGetImportRecords(selectedImportId as number, {
-    query: { enabled: !!selectedImportId, queryKey: getGetImportRecordsQueryKey(selectedImportId as number) }
+  const { data: allRecords, isLoading: recordsLoading } = useGetImportRecords(effectiveImportId as number, {
+    query: { enabled: !!effectiveImportId, queryKey: getGetImportRecordsQueryKey(effectiveImportId as number) }
   });
   const filteredRecords = useFilteredRecords(allRecords);
+  const velocity = useVelocityInfo(effectiveImportId);
+  const stalled = useStalledInfo(effectiveImportId);
+  const { settings: rawTurnaroundSettings } = useSettings();
+  const turnaroundSettings = useMemo(
+    () => migrateTurnaroundSettings(rawTurnaroundSettings),
+    [rawTurnaroundSettings],
+  );
+  const { data: productionMovement } = useGetImportProductionMovement(effectiveImportId as number, {
+    query: {
+      enabled: !!effectiveImportId,
+      queryKey: getGetImportProductionMovementQueryKey(effectiveImportId as number),
+    },
+  });
+  const { data: contractorMovement } = useGetContractorMovement();
+  const { data: fabricationCompletion } = useGetFabricationProjectCompletionTlt(
+    effectiveImportId ? { importId: effectiveImportId } : undefined,
+    {
+      query: {
+        enabled: !!effectiveImportId,
+        queryKey: getGetFabricationProjectCompletionTltQueryKey(
+          effectiveImportId ? { importId: effectiveImportId } : undefined,
+        ),
+      },
+    },
+  );
+  const zipOrderStatusRows = useMemo(
+    () => buildOrderStatusRows({
+      records: (allRecords ?? []) as WipRecord[],
+      orderRows: orderStatus?.rows ?? [],
+      filters,
+      activeJobSet,
+      compareProjects,
+    }),
+    [allRecords, orderStatus?.rows, filters, activeJobSet, compareProjects],
+  );
+  const zipReleaseBalanceRows = useMemo(
+    () => filterReleaseBalanceRows(releaseBalance, filters, activeJobSet),
+    [releaseBalance, filters, activeJobSet],
+  );
   const contractorCategories = useContractorCategoryMap();
+  const zipContractorMovementEntries = useMemo(() => {
+    const bundle = filters.activity?.startsWith("bundle:")
+      ? bundleActivitySet(filters.activity.slice("bundle:".length))
+      : null;
+    const dateWindow = dateRangeWindow(filters.dateRange);
+    const start = dateWindow?.start.toISOString().slice(0, 10);
+    const end = dateWindow?.end.toISOString().slice(0, 10);
+    return (contractorMovement?.entries ?? [])
+      .map((entry) => {
+        const raw = entry.contractor?.trim();
+        const contractor = raw
+          ? contractorCategoryFor(raw, contractorCategories).displayName || raw
+          : "Unassigned";
+        return contractor === entry.contractor ? entry : { ...entry, contractor };
+      })
+      .filter((entry) => {
+        if (entry.project === "(Unassigned)") return false;
+        if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) {
+          const matchesNamed = isNamedJobSetFilter(filters.job)
+            ? activeJobSet.has(entry.project) || [...activeJobSet].some((key) => key.startsWith(`${entry.project} - `))
+            : entry.project === filters.job;
+          if (!matchesNamed) return false;
+        }
+        if (filters.selectedJobs.length && !filters.selectedJobs.some((key) => key === entry.project || key.startsWith(`${entry.project} - `))) return false;
+        if (filters.contractor && entry.contractor !== filters.contractor) return false;
+        if (filters.activity) {
+          const from = String(entry.fromActivity ?? "").toUpperCase();
+          const to = String(entry.toActivity ?? "").toUpperCase();
+          if (bundle ? !bundle.has(from) && !bundle.has(to) : from !== filters.activity && to !== filters.activity) return false;
+        }
+        if (start && end && (entry.date < start || entry.date >= end)) return false;
+        const search = filters.search.trim().toLowerCase();
+        return !search || entry.project.toLowerCase().includes(search) || String(entry.contractor).toLowerCase().includes(search);
+      });
+  }, [contractorMovement?.entries, filters, activeJobSet, contractorCategories]);
+  const zipFabCompletionRows = useMemo(() => {
+    const rows = fabricationCompletion?.available ? fabricationCompletion.rows : [];
+    if (isNamedJobSetFilter(filters.job)) {
+      return rows.filter((row) => activeJobSet.has(row.project) || [...activeJobSet].some((key) => key.startsWith(`${row.project} - `)));
+    }
+    if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) return rows.filter((row) => row.project === filters.job);
+    if (filters.selectedJobs.length) return rows.filter((row) => filters.selectedJobs.some((key) => key === row.project || key.startsWith(`${row.project} - `)));
+    return rows;
+  }, [fabricationCompletion, filters.job, filters.selectedJobs, activeJobSet]);
 
-  const selectedImport = imports.find(s => s.id === selectedImportId);
+  const selectedImport = imports.find(s => s.id === effectiveImportId);
+  const exportDataLoading =
+    importsLoading ||
+    orderStatusLoading ||
+    recordsLoading ||
+    !selectedImport ||
+    !filteredRecords;
 
   const handleCommitted = (res: CommitResult) => {
     if (res.kind === "order-review") {
@@ -240,7 +904,7 @@ function DataViewContent() {
   };
 
   const handleDeleteOrder = (id: number) => {
-    if (!confirm("Delete this Order Review file from the history? The current order book is a merge of all uploads, so deleting one history entry does not change the current numbers. Deleting the last remaining entry clears the order book entirely.")) return;
+    if (!confirm("Delete this Order Review file? Rows last seen in this file will be removed from the current order book; rows last seen in other files stay. Dispatch entries with no remaining Order Review row are also removed. Historical values cannot be reconstructed after deletion.")) return;
     deleteOrderImport.mutate({ id }, {
       onSuccess: () => {
         toast({ title: "Order Review file deleted" });
@@ -318,11 +982,334 @@ function DataViewContent() {
     exportToJson(`import_${selectedImportId}_${date}.json`, { import: selectedImport, records: allRecords });
   };
 
+  const handleExportAllExcel = async () => {
+    if (exportDataLoading) {
+      toast({
+        variant: "destructive",
+        title: "Loading latest data",
+        description: "The latest WIP and Order Review data is still loading. Try again in a moment.",
+      });
+      return;
+    }
+    if (!filteredRecords.length) {
+      toast({
+        variant: "destructive",
+        title: "No WIP records to export",
+        description: "The selected WIP import has no records matching the active filters.",
+      });
+      return;
+    }
+
+    setExportingAllExcel(true);
+    try {
+      const timestamp = exportTimestamp();
+      const files: DownloadableFile[] = [];
+      const included: string[] = [];
+      const unavailable: string[] = [];
+
+      const enrichedRecords = filteredRecords.map((r) => {
+        const info = contractorCategoryFor(r.contractor, contractorCategories);
+        return {
+          ...r,
+          contractor_category: contractorCategoryLabel(info.category),
+          out_vendor_type: info.outVendorType.join(";"),
+        };
+      });
+      files.push(await createXlsxFile(
+        `01_selected_wip_records_${timestamp}.xlsx`,
+        [
+          { label: "Project", field: "job" },
+          { label: "Structure", field: "structure" },
+          { label: "Mark", field: "markId" },
+          { label: "Section", field: "section" },
+          { label: "Activity", field: "activity" },
+          { label: "Contractor", field: "contractor" },
+          { label: "Contractor Type", field: "contractor_category" },
+          { label: "Out-vendor Type", field: "out_vendor_type" },
+          { label: "Balance Qty", field: "balanceQty", numeric: true, decimals: 0, total: true },
+          { label: "Balance Wt", field: "balanceWt", numeric: true, decimals: 2, total: true },
+          { label: "Assign Date", field: "assignDate" },
+          { label: "Last Production", field: "lastProductionDate" },
+          { label: "Ageing (days)", field: "ageingDays", numeric: true, decimals: 0 },
+        ] satisfies XlsxColumn[],
+        enrichedRecords,
+        { sheetName: "Records" },
+      ));
+      included.push("Selected WIP records");
+
+      const orderRows = zipOrderStatusRows;
+      if (orderStatus?.available && orderRows.length > 0) {
+        files.push(await createXlsxFile(
+          `02_order_status_${timestamp}.xlsx`,
+          [
+            { label: "Project Code", field: "project" },
+            { label: "Structure Type", field: "structure" },
+            { label: "Sub Type", field: "subType" },
+            { label: "Sets", field: "sets", numeric: true, decimals: 0 },
+            { label: "Weight (MT)", field: "weightMt", numeric: true, decimals: 3, total: true },
+            { label: "WO Order Qty (MT)", field: "woOrderQtyMt", numeric: true, decimals: 3, total: true },
+            { label: "BOM Type", field: "bomType" },
+            { label: "Release (MT)", field: "releaseMt", numeric: true, decimals: 3 },
+            { label: "Release Balance (MT)", field: "releaseBalanceMt", numeric: true, decimals: 3, total: true },
+            { label: "Scope", field: "scope" },
+            { label: "Fabrication (MT)", field: "fabMt", numeric: true, decimals: 3, total: true },
+            { label: "Galvanizing (MT)", field: "galvMt", numeric: true, decimals: 3, total: true },
+            { label: "Dispatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
+            { label: "Dispatch Balance (MT)", field: "dispatchBalanceMt", numeric: true, decimals: 3, total: true },
+          ] satisfies XlsxColumn[],
+          orderRows.map((row) => ({
+            ...row,
+            subType: row.subType ?? "",
+            sets: row.sets ?? "",
+            weightMt: row.weightMt ?? "",
+            woOrderQtyMt: row.woOrderQtyMt ?? "",
+            bomType: row.bomType ?? "",
+            releaseMt: row.releaseMt ?? "",
+            releaseBalanceMt: row.releaseBalanceMt ?? "",
+            scope: row.outOfScope ? "NTLT (out of scope)" : "TLT",
+            fabMt: row.fabMt ?? "",
+            galvMt: row.galvMt ?? "",
+            fileDespatchMt: row.fileDespatchMt ?? "",
+            dispatchBalanceMt: row.dispatchBalanceMt ?? "",
+          })),
+          { sheetName: "Order Status" },
+        ));
+        included.push("Order Status");
+      } else {
+        unavailable.push("Order Status (no committed Order Review data)");
+      }
+
+      const releaseRows = zipReleaseBalanceRows;
+      if (releaseBalance?.available && releaseRows.length > 0) {
+        files.push(await createXlsxFile(
+          `03_release_balance_${timestamp}.xlsx`,
+          [
+            { label: "Project", field: "project" },
+            { label: "Structure", field: "structure" },
+            { label: "Release Balance Order Review (MT)", field: "releaseBalanceOrderReviewMt", numeric: true, decimals: 3, total: true },
+            { label: "Release Balance Computed WIP (MT)", field: "releaseBalanceComputedMt", numeric: true, decimals: 3, total: true },
+            { label: "Diff (MT)", field: "diffMt", numeric: true, decimals: 3, total: true },
+          ] satisfies XlsxColumn[],
+          releaseRows,
+          { sheetName: "Release Balance" },
+        ));
+        included.push("Release Balance");
+      } else {
+        unavailable.push("Release Balance (not available for this WIP format)");
+      }
+
+      if (fgAvailable && fgRows.length > 0) {
+        files.push(await createXlsxFile(
+          `04_computed_fg_${timestamp}.xlsx`,
+          [
+            { label: "Project", field: "project" },
+            { label: "Structure", field: "structure" },
+            { label: "Release (MT)", field: "releaseMt", numeric: true, decimals: 3, total: true },
+            { label: "File Despatch (MT)", field: "fileDespatchMt", numeric: true, decimals: 3, total: true },
+            { label: "FG (Order Review) (MT)", field: "computedFgMt", numeric: true, decimals: 3, total: true },
+            { label: "FG (WIP file) (MT)", field: "fgWipMt", numeric: true, decimals: 3, total: true },
+          ] satisfies XlsxColumn[],
+          fgRows,
+          { sheetName: "Computed FG" },
+        ));
+        included.push("Computed FG");
+      } else {
+        unavailable.push("Computed FG (no matching WIP and Order Review data)");
+      }
+
+      const activitySheets = buildActivityExportSheets(filteredRecords);
+      if (activitySheets[0]?.rows?.length) {
+        files.push(await createXlsxSheetsFile(
+          `05_activity_wise_${timestamp}.xlsx`,
+          activitySheets,
+        ));
+        included.push("Activity Wise");
+      } else {
+        unavailable.push("Activity Wise (no qualifying activity records)");
+      }
+
+      const contractorRows = buildContractorExportRows(filteredRecords, contractorCategories);
+      if (contractorRows.length) {
+        files.push(await createXlsxFile(
+          `06_contractor_wise_${timestamp}.xlsx`,
+          CONTRACTOR_WORKLOAD_COLUMNS,
+          contractorRows,
+          { sheetName: "Workload" },
+        ));
+        included.push("Contractor Wise");
+      } else {
+        unavailable.push("Contractor Wise (no qualifying contractor records)");
+      }
+
+      const plantSheets = buildPlantOperationSheets(filteredRecords);
+      if (plantSheets[0]?.rows?.length) {
+        files.push(await createXlsxSheetsFile(
+          `07_plant_operation_fabrication_${timestamp}.xlsx`,
+          [plantSheets[0]],
+        ));
+        included.push("Plant Operation — Fabrication");
+      } else {
+        unavailable.push("Plant Operation — Fabrication (no TLT fabrication records)");
+      }
+      if (plantSheets[1]?.rows?.length) {
+        files.push(await createXlsxSheetsFile(
+          `08_plant_operation_galvanization_${timestamp}.xlsx`,
+          [plantSheets[1]],
+        ));
+        included.push("Plant Operation — Galvanization");
+      } else {
+        unavailable.push("Plant Operation — Galvanization (no galvanizing records)");
+      }
+
+      const dailyMovementSheets = buildDailyProductionMovementSheets(
+        filteredRecords,
+        productionMovement,
+        filters.dateRange,
+      );
+      if (dailyMovementSheets[0]?.rows?.length) {
+        files.push(await createXlsxSheetsFile(
+          `09_daily_production_movement_activity_wise_${timestamp}.xlsx`,
+          dailyMovementSheets,
+        ));
+        included.push("Daily Production Movement — Activity Wise");
+      } else {
+        unavailable.push("Daily Production Movement — Activity Wise (no production dates)");
+      }
+
+      const speedSheets = buildSpeedOfExecutionSheets(filteredRecords, velocity.items);
+      if (speedSheets[0]?.rows?.length) {
+        files.push(await createXlsxSheetsFile(
+          `10_speed_of_execution_${timestamp}.xlsx`,
+          speedSheets,
+        ));
+        included.push("Speed of Execution");
+      } else {
+        unavailable.push("Speed of Execution (no velocity history for this import)");
+      }
+
+      const jobWiseSheets = buildJobWiseReportSheets(
+        filteredRecords,
+        turnaroundSettings,
+        stalled.isStalled,
+        velocity.velocityFor,
+      );
+      if (jobWiseSheets[0]?.rows?.length) {
+        files.push(await createXlsxSheetsFile(
+          `11_job_wise_report_${timestamp}.xlsx`,
+          jobWiseSheets,
+        ));
+        included.push("Job Wise Report");
+      } else {
+        unavailable.push("Job Wise Report (no records match the active filters)");
+      }
+
+      const fabLoadSheets = buildFabricationLoadGridSheets(filteredRecords);
+      const fabLoadHasRows = fabLoadSheets.some((sheet) =>
+        sheet.sections?.some((section) => section.blocks.some((block) => block.rows.length > 0)),
+      );
+      if (fabLoadHasRows) {
+        files.push(await createXlsxBlockGridFile(
+          `12_fabrication_load_tlt_${timestamp}.xlsx`,
+          fabLoadSheets,
+        ));
+        included.push("Fabrication Load for TLT");
+      } else {
+        unavailable.push("Fabrication Load for TLT (no qualifying TLT fabrication records)");
+      }
+
+      const contractorPerformanceSheets = buildContractorPerformanceSheets(zipContractorMovementEntries);
+      if (zipContractorMovementEntries.length) {
+        files.push(await createXlsxSheetsFile(
+          `13_contractor_performance_${timestamp}.xlsx`,
+          contractorPerformanceSheets,
+        ));
+        included.push("Contractor Performance");
+      } else {
+        unavailable.push("Contractor Performance (no movement-ledger entries match the active filters)");
+      }
+
+      const fabCompletionSheets = buildFabCompletionSheets(zipFabCompletionRows);
+      if (fabCompletionSheets[0]?.rows?.length) {
+        files.push(await createXlsxSheetsFile(
+          `14_fabrication_completion_tlt_${timestamp}.xlsx`,
+          fabCompletionSheets,
+        ));
+        included.push("Fabrication Report – Project Completion - TLT");
+      } else {
+        unavailable.push("Fabrication Report – Project Completion - TLT (not available for this WIP format or job filter)");
+      }
+
+      files.push({
+        filename: "README.txt",
+        bytes: new TextEncoder().encode([
+          "Balance & Activity Tracker — Excel export bundle",
+          `Created: ${new Date().toLocaleString()}`,
+          `Selected WIP import: ${selectedImport.label || selectedImport.sourceFilename}`,
+          "",
+          "Included workbooks:",
+          ...included.map((name) => `- ${name}`),
+          "",
+          "Not available at export time:",
+          ...(unavailable.length ? unavailable.map((name) => `- ${name}`) : ["- None"]),
+          "",
+          "ZIP defaults:",
+          "- All WIP-based workbooks use the active global filters.",
+           "- Every workbook includes a TOTAL row: sum only the data rows or read the TOTAL cell, never both. A whole-column SUM (for example, SUM(F:F)) includes the TOTAL row and doubles the result.",
+           "- Activity Wise reports Balance Wt in kilograms, matching the raw WIP file; Project Wise uses metric tonnes (MT).",
+           "- Activity Wise includes process-stage records and Finished Goods (blank Activity), but intentionally excludes Release Balance and Awaiting Assignment; its C row is active Cutting only.",
+           "- Fabrication Load has six intentionally overlapping operation columns. A mark can appear in more than one column, so do not add the six column totals to reconcile against a WIP balance.",
+          "- Job Wise uses Activity sorting and includes its lifecycle, stalled, and velocity columns.",
+          "- Fabrication Load uses its default weight-descending order; saved priority order is not applied.",
+          "- Contractor Performance applies the global filters that a movement ledger can represent (job, contractor, activity, date, search).",
+          "- Fabrication Completion includes all projects in the active job scope and the standard expanded stage columns.",
+          "- Plant Operation uses the all-sections / all-operations defaults, within the active global filters.",
+          "",
+          "Not included because they do not provide an Excel workbook on the Reports page:",
+          "- Project Wise (Order Type and MFC display mode)",
+          "- Bucket List (MFC colour assignment and temporary hidden-project state)",
+          "- Activity Wise Net Balance Movement and Contractor Wise Net Balance Movement (history-window selection)",
+          "- Turnaround (warning-parameter settings)",
+          "",
+          "Their individual Excel downloads remain available on the corresponding report pages.",
+        ].join("\n")),
+      });
+
+      downloadZip(`tracker_excel_exports_${timestamp}.zip`, files);
+      toast({
+        title: "Excel ZIP downloaded",
+        description: `${included.length} workbook${included.length === 1 ? "" : "s"} included${unavailable.length ? `; ${unavailable.length} unavailable report${unavailable.length === 1 ? "" : "s"} listed in README` : ""}.`,
+      });
+    } catch (error) {
+      console.error("[Export] Excel ZIP failed", error);
+      toast({
+        variant: "destructive",
+        title: "Excel ZIP export failed",
+        description: error instanceof Error ? error.message : "The archive could not be created.",
+      });
+    } finally {
+      setExportingAllExcel(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">Data</h1>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleExportAllExcel()}
+            disabled={exportingAllExcel || exportDataLoading}
+            className="h-8 gap-2"
+          >
+            <Archive className={`w-4 h-4 ${exportingAllExcel ? "animate-pulse" : ""}`} />
+            {exportingAllExcel
+              ? "Building ZIP..."
+              : exportDataLoading
+                ? "Loading latest data..."
+                : "Export all Excel files"}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -471,7 +1458,47 @@ function DataViewContent() {
                   : <span className="block text-xs text-muted-foreground">Unknown Type or Job Card Status</span>
                 }
               </div>
+              <div>
+                <span className="block text-muted-foreground text-xs uppercase mb-1">FG Excluded from Live Work</span>
+                <span className="font-bold text-lg tabular-nums">{(selectedImport.summary.fgExcludedRowCount ?? 0).toLocaleString()}</span>
+                <span className="block text-xs text-muted-foreground">Still retained for FG reporting</span>
+              </div>
             </div>
+            {selectedImport.summary.typeCounts && selectedImport.summary.typeCounts.length > 0 && (
+              <div className="mt-4 rounded-md border bg-muted/20 p-3">
+                <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
+                  ERP Type breakdown
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+                  {selectedImport.summary.typeCounts.map(({ type, rows }) => (
+                    <div key={type} className="flex items-center justify-between gap-3 rounded border bg-background px-2.5 py-2">
+                      <span className="truncate" title={type}>{type}</span>
+                      <span className="font-bold tabular-nums">{rows.toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {(selectedImport.summary.unknownTypeRowCount ?? 0) > 0 && (
+              <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 flex gap-2 items-start">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <span className="font-semibold">
+                    {(selectedImport.summary.unknownTypeRowCount ?? 0).toLocaleString()} row{selectedImport.summary.unknownTypeRowCount === 1 ? "" : "s"} with unknown ERP Type values
+                  </span>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Unknown and legacy Type values remain in live-work figures so no work is silently hidden. Review the ERP source before relying on Type-specific buckets.
+                  </p>
+                  {selectedImport.summary.unknownTypeValues && (
+                    <div className="mt-2 font-mono text-xs text-muted-foreground space-y-0.5">
+                      {selectedImport.summary.unknownTypeValues.map(({ type, rows }) => (
+                        <div key={type}>&quot;{type}&quot; · {rows.toLocaleString()} row{rows === 1 ? "" : "s"}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             {(selectedImport.summary.unclassifiedRowCount ?? 0) > 0 && (
               <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 p-3 flex gap-2 items-start">
                 <AlertTriangle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
@@ -562,6 +1589,18 @@ function DataViewContent() {
 
         <div className="space-y-2">
           <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">Order Review Files</h4>
+          {recentCumulativeOverrides.length > 0 && (
+            <div className="rounded-md border border-amber-400 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-900 dark:text-amber-200">
+              <div className="flex items-start gap-2 font-medium">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  A cumulative-regression override was granted in the last seven days
+                  for {recentCumulativeOverrides.length === 1 ? " this file" : ` ${recentCumulativeOverrides.length} files`}.
+                  Review the recorded reason before relying on merged Order Review figures.
+                </span>
+              </div>
+            </div>
+          )}
           <div className="grid gap-3">
             {orderImports.map(o => (
               <Card key={o.id} className="transition-all hover:border-primary/50">
@@ -572,6 +1611,14 @@ function DataViewContent() {
                       <span>{formatDate(o.createdAt)}</span>
                       {o.asOnDate && <span>as on {formatDate(o.asOnDate)}</span>}
                       <span>{o.summary.rowsKept.toLocaleString()} rows</span>
+                      {o.overrideReason && (
+                        <span
+                          className="font-medium text-amber-700 dark:text-amber-300"
+                          title={`Cumulative regression override${o.overrideBy ? ` by ${o.overrideBy}` : ""}: ${o.overrideReason}`}
+                        >
+                          Cumulative override
+                        </span>
+                      )}
                       {o.changeLog && (
                         <>
                           <span className="text-emerald-600 dark:text-emerald-400">+{o.changeLog.inserted.length.toLocaleString()} added</span>
@@ -614,6 +1661,9 @@ function DataViewContent() {
         </h3>
         <OrderReviewConsistencyPanel />
       </div>
+
+      <OrderReviewAnomalyRegister />
+      <StagingEvidenceRegister />
 
       {/* Deletion audit log */}
       <div className="space-y-2">
@@ -882,31 +1932,22 @@ function ReleaseBalanceContent() {
   });
   const { filters } = useTracker();
   const namedJobSet = useActiveJobSet();
-  const activeJobSet = useMemo(() => {
-    if (isNamedJobSetFilter(filters.job)) {
-      // namedJobSet may contain combo keys ("821 - Z"); rows use plain project codes
-      return new Set([...namedJobSet].map(c => c.includes(' - ') ? c.split(' - ')[0] : c));
-    }
-    // Combo keys like "920 - C" — extract the plain job code for project-level rows
-    if (filters.selectedJobs.length > 0)
-      return new Set(filters.selectedJobs.map(c => c.includes(' - ') ? c.split(' - ')[0] : c));
-    if (filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE) return new Set([filters.job]);
-    return null;
-  }, [filters.job, filters.selectedJobs, namedJobSet]);
-  const allRows = useMemo(() => data?.rows ?? [], [data]);
   const rows = useMemo(
-    () => (activeJobSet ? allRows.filter((r) => activeJobSet.has(r.project ?? "")) : allRows),
-    [allRows, activeJobSet],
+    () => filterReleaseBalanceRows(data, filters, namedJobSet),
+    [data, filters, namedJobSet],
   );
+  const isJobFiltered = isNamedJobSetFilter(filters.job)
+    || filters.selectedJobs.length > 0
+    || !!(filters.job && filters.job !== MULTI_JOBS_FILTER_VALUE);
   const totals = useMemo(() => {
-    if (!activeJobSet) return data?.totals;
+    if (!isJobFiltered) return data?.totals;
     return {
       releaseBalanceComputedMt: rows.reduce((s, r) => s + (r.releaseBalanceComputedMt ?? 0), 0),
       releaseBalanceOrderReviewMt: rows.reduce((s, r) => s + (r.releaseBalanceOrderReviewMt ?? 0), 0),
       diffMt: rows.reduce((s, r) => s + (r.diffMt ?? 0), 0),
       rowCount: rows.length,
     };
-  }, [activeJobSet, data, rows]);
+  }, [data, isJobFiltered, rows]);
 
   const handleExport = () => {
     exportToXlsx(
@@ -2991,7 +4032,7 @@ function LoginActivitySection() {
 
 type DcViolation = { project: string; structure: string; fields: Record<string, string | null> };
 type DcHardRule  = { id: string; label: string; toleranceMt: number; structuresEvaluated: number; violationCount: number; pass: boolean; violations: DcViolation[] };
-type DcWarning   = { id: string; label: string; structureCount: number; totalMt: number; worstProject: string; worstStructure: string; worstMt: number };
+type DcWarning   = { id: string; label: string; structureCount: number; totalMt: number; worstProject: string; worstStructure: string; worstMt: number; markCount?: number };
 type DcWipBucket = { name: string; mt: number; marks: number };
 type DcTransition = { from: string; to: string; count: number; weightMt: number };
 
@@ -3028,6 +4069,7 @@ type DataCheckResponse = {
   available: boolean;
   orImportId: number | null;
   orAsOnDate: string | null;
+  orOverride: { reason: string; at: string; by: string } | null;
   wipImportId: number | null;
   /** False for pre-type-column imports; DC6 and DC16 are not evaluated for those. */
   wipHasTypeData: boolean;
@@ -3041,6 +4083,7 @@ type DataCheckResponse = {
   wipTotalMarks: number;
   ntltBuckets: DcWipBucket[];
   ntltUnclassifiedMarks: number;
+  ntltUnclassifiedMt: number;
   ntltTotalMt: number;
   ntltTotalMarks: number;
   dc0StoredTotalRows: number;
@@ -3056,6 +4099,9 @@ type SourceWatchColumn = {
   key: string;
   header: string;
   present: boolean;
+  mode?: "coverage" | "distribution" | "numeric";
+  populatedCount?: number;
+  numericSummary?: { min: number; max: number; mean: number } | null;
   values: SourceWatchValue[];
   crossTab: { orderNature: string; value: string | null; marks: number }[];
 };
@@ -3128,13 +4174,14 @@ function DataCheckContent() {
         { field: "id",       label: "Warning",      numeric: false },
         { field: "label",    label: "Description",  numeric: false },
         { field: "count",    label: "Structures",   numeric: true, decimals: 0 },
+        { field: "marks",    label: "Marks",        numeric: true, decimals: 0 },
         { field: "totalMt",  label: "Total MT (signed)", numeric: true, decimals: 3 },
         { field: "worstProj",label: "Worst Project",numeric: false },
         { field: "worstStr", label: "Worst Structure",numeric: false },
         { field: "worstMt",  label: "Worst MT",     numeric: true, decimals: 3 },
       ],
       rows: data.warnings.map((w) => ({
-        id: w.id, label: w.label, count: w.structureCount, totalMt: w.totalMt,
+        id: w.id, label: w.label, count: w.structureCount, marks: w.markCount ?? null, totalMt: w.totalMt,
         worstProj: w.worstProject, worstStr: w.worstStructure, worstMt: w.worstMt,
       })),
     };
@@ -3341,6 +4388,14 @@ function DataCheckContent() {
                 <span className="text-muted-foreground ml-1">({formatDate(data.orAsOnDate)})</span>
               )}
             </span>
+            {data.orOverride && (
+              <span
+                className="font-medium text-amber-700 dark:text-amber-300"
+                title={`Cumulative regression override by ${data.orOverride.by}: ${data.orOverride.reason}`}
+              >
+                Cumulative override · {formatDate(data.orOverride.at)}
+              </span>
+            )}
             <span>
               <span className="text-muted-foreground">WIP import: </span>
               <span className="font-mono font-medium">#{data.wipImportId ?? "—"}</span>
@@ -3441,6 +4496,7 @@ function DataCheckContent() {
                 rule={rule}
                 wipBuckets={rule.id === "DC6" ? data.wipBuckets : rule.id === "DC16" ? data.ntltBuckets : undefined}
                 wipUnclassifiedMarks={rule.id === "DC6" ? data.wipUnclassifiedMarks : rule.id === "DC16" ? data.ntltUnclassifiedMarks : undefined}
+                wipUnclassifiedMt={rule.id === "DC6" ? undefined : rule.id === "DC16" ? data.ntltUnclassifiedMt : undefined}
                 wipTotalMt={rule.id === "DC6" ? data.wipTotalMt : rule.id === "DC16" ? data.ntltTotalMt : undefined}
                 wipTotalMarks={rule.id === "DC6" ? data.wipTotalMarks : rule.id === "DC16" ? data.ntltTotalMarks : undefined}
                 wipHasTypeData={rule.id === "DC6" || rule.id === "DC16" ? data.wipHasTypeData : undefined}
@@ -3482,6 +4538,7 @@ function DcHardRuleRow({
   rule,
   wipBuckets,
   wipUnclassifiedMarks,
+  wipUnclassifiedMt,
   wipTotalMt,
   wipTotalMarks,
   wipHasTypeData,
@@ -3489,6 +4546,7 @@ function DcHardRuleRow({
   rule: DcHardRule;
   wipBuckets?: DcWipBucket[];
   wipUnclassifiedMarks?: number;
+  wipUnclassifiedMt?: number;
   wipTotalMt?: number;
   wipTotalMarks?: number;
   /** Undefined for non-DC6 rules. False = old-format import; DC6 was not evaluated. */
@@ -3579,7 +4637,9 @@ function DcHardRuleRow({
                 {(wipUnclassifiedMarks ?? 0) > 0 && (
                   <tr className="border-b border-destructive/30 bg-destructive/5">
                     <td className="px-2 py-1 text-destructive font-medium">Unclassified</td>
-                    <td className="px-2 py-1 text-right font-mono text-destructive">—</td>
+                    <td className="px-2 py-1 text-right font-mono text-destructive">
+                      {wipUnclassifiedMt == null ? "—" : wipUnclassifiedMt.toFixed(3)}
+                    </td>
                     <td className="px-2 py-1 text-right font-mono text-destructive">{wipUnclassifiedMarks?.toLocaleString()}</td>
                   </tr>
                 )}
@@ -3591,6 +4651,37 @@ function DcHardRuleRow({
               </tbody>
             </table>
           </div>
+          {rule.violations.length > 0 && (
+            <div className="mt-4">
+              <p className="text-xs font-medium text-destructive mb-2">
+                Affected source rows:
+              </p>
+              <div className="overflow-auto max-h-80">
+                <table className="w-full text-xs border-collapse">
+                  <thead className="sticky top-0 bg-background">
+                    <tr className="border-b border-border/40 bg-muted/40">
+                      <th className="text-left px-2 py-1 font-medium">Project</th>
+                      <th className="text-left px-2 py-1 font-medium">Structure</th>
+                      {fieldKeys.map((k) => (
+                        <th key={k} className="text-right px-2 py-1 font-medium whitespace-nowrap">{k}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rule.violations.map((v, i) => (
+                      <tr key={i} className="border-b border-destructive/20 bg-destructive/5">
+                        <td className="px-2 py-1">{v.project}</td>
+                        <td className="px-2 py-1">{v.structure}</td>
+                        {fieldKeys.map((k) => (
+                          <td key={k} className="px-2 py-1 text-right font-mono">{v.fields[k] ?? "blank"}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -3940,15 +5031,22 @@ function SourceColumnWatchCard({
 }) {
   const currPresent = curr?.present ?? false;
   const prevPresent = prev?.present ?? false;
+  // Older snapshots predate the explicit watch mode and were all
+  // distributions, so retain that rendering as their backwards-compatible
+  // default.
+  const mode = curr?.mode ?? prev?.mode ?? "distribution";
   const currValues = currPresent ? curr!.values : [];
   const prevValues = prevPresent ? prev!.values : [];
+  const currPopulatedCount =
+    curr?.populatedCount ??
+    currValues.filter((value) => value.value != null).reduce((sum, value) => sum + value.marks, 0);
   const totalMarks = currValues.reduce((s, v) => s + v.marks, 0);
   const prevTotalMarks = prevValues.reduce((s, v) => s + v.marks, 0);
   const prevByValue = new Map(prevValues.map((v) => [swBlankLabel(v.value), v]));
   const currLabels = new Set(currValues.map((v) => swBlankLabel(v.value)));
 
   // Comparison: only meaningful when BOTH imports carried the column.
-  const comparable = currPresent && prevPresent;
+  const comparable = mode === "distribution" && currPresent && prevPresent;
   const newValues = comparable
     ? currValues.filter((v) => !prevByValue.has(swBlankLabel(v.value)))
     : [];
@@ -3979,14 +5077,52 @@ function SourceColumnWatchCard({
           )}
         </div>
 
-        {currPresent && currValues.length === 1 && (
+        {currPresent && mode === "coverage" && (
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground tabular-nums">
+              {currPopulatedCount.toLocaleString()}
+            </span>
+            {" "}populated row{currPopulatedCount === 1 ? "" : "s"}.
+          </p>
+        )}
+
+        {currPresent && mode === "numeric" && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            <div className="rounded bg-muted/60 px-3 py-2">
+              <div className="text-muted-foreground">Populated</div>
+              <div className="font-semibold tabular-nums">{currPopulatedCount.toLocaleString()}</div>
+            </div>
+            {curr?.numericSummary ? (
+              <>
+                <div className="rounded bg-muted/60 px-3 py-2">
+                  <div className="text-muted-foreground">Min</div>
+                  <div className="font-semibold tabular-nums">{curr.numericSummary.min.toFixed(4)}</div>
+                </div>
+                <div className="rounded bg-muted/60 px-3 py-2">
+                  <div className="text-muted-foreground">Max</div>
+                  <div className="font-semibold tabular-nums">{curr.numericSummary.max.toFixed(4)}</div>
+                </div>
+                <div className="rounded bg-muted/60 px-3 py-2">
+                  <div className="text-muted-foreground">Mean</div>
+                  <div className="font-semibold tabular-nums">{curr.numericSummary.mean.toFixed(4)}</div>
+                </div>
+              </>
+            ) : (
+              <div className="col-span-3 rounded bg-muted/60 px-3 py-2 text-muted-foreground">
+                No numeric values in this file.
+              </div>
+            )}
+          </div>
+        )}
+
+        {currPresent && mode === "distribution" && currValues.length === 1 && (
           <p className="text-xs text-muted-foreground">
             <span className="font-medium text-foreground">{swBlankLabel(currValues[0].value)}</span>
             {" "}on all {currValues[0].marks.toLocaleString()} rows — no variation, carries no information yet.
           </p>
         )}
 
-        {currPresent && (
+        {currPresent && mode === "distribution" && (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -4034,7 +5170,7 @@ function SourceColumnWatchCard({
           </div>
         )}
 
-        {currPresent && curr!.crossTab.length > 0 && (
+        {currPresent && mode === "distribution" && curr!.crossTab.length > 0 && (
           <div>
             <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
               Cross-tab · Order Nature × {header}
@@ -4283,6 +5419,11 @@ function DcWarningRow({ warning }: { warning: DcWarning }) {
             <span className={`text-xs font-semibold ${isSignificant ? "text-amber-600 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>
               {warning.structureCount.toLocaleString()} structure{warning.structureCount !== 1 ? "s" : ""}
             </span>
+            {warning.markCount != null && (
+              <span className="text-xs text-muted-foreground">
+                · {warning.markCount.toLocaleString()} mark{warning.markCount !== 1 ? "s" : ""}
+              </span>
+            )}
             {isSignificant && (
               <>
                 <span className="text-xs text-muted-foreground">

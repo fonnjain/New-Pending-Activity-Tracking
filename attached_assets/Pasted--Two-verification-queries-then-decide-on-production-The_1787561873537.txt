@@ -1,0 +1,119 @@
+# Two verification queries, then decide on production
+
+The 23-August import is clean. Your figures match my own parse of the source to the kilogram —
+largest difference 0.004 MT on FG, which is float summation order — and every mark count is
+identical across all six buckets. The Order Review importing with zero blockers is exactly what
+903's recovery to 326.510 MT predicted.
+
+Two things to settle, both short.
+
+---
+
+## PART 1 — the normaliser description does not match the data
+
+You reported that the established handling is for a **trailing `.0`**. The files do not contain
+`.0`. They contain a **bare trailing dot**:
+
+```
+WIP 23-Aug        '907.' 507 rows · '912.' 3,693 · '908.' 1,535 · '910.' 1,513
+                  '956.' 1,309 · '945.' 975 · '824.' 757 · '932.' 681 · '913.' 498
+                  '906.' 297 · '884.' 186 · '866.' 176 · '640.' 13 · '952.' 62
+                  '840.' 2 · 'VR075.' 2 · '802.' 1          — 17 codes
+
+Order Review      '907.' '912.' '908.' '910.' '913.' '932.' '945.' '952.' '956.'
+                  '735.' '790.' '802.' '803.' '824.' '840.' '866.' '884.' '906.'
+                  'VR075.' 'VR082.' 'VR088.' 'VS-94.' 'VS-183.'   — 23 codes
+```
+
+Stripping `.0` leaves every one of them untouched. Only stripping a trailing `.` normalises them.
+
+**If the normaliser now strips `.0` and not `.`, then `907` and `907.` have become two separate
+projects**, and the same for 16 other codes. Nothing would fail — the reconciliation would simply
+compare `907` against nothing and `907.` against nothing, and the project count would drift from
+92 toward 109.
+
+Your import reported **92 projects**, which suggests the code is still correct and only the
+description was loose. Confirm it with one query:
+
+```sql
+SELECT DISTINCT project_code
+  FROM record_pool
+ WHERE import_id = 68
+   AND order_nature = 'Structure'
+   AND project_code LIKE '%.';
+```
+
+- **0 rows** — trailing dots are being stripped. Nothing to do; just correct the description so
+  the next person reading it is not misled.
+- **17 rows** — they survived normalisation. Fix the normaliser to strip a bare trailing `.` as
+  well as `.0`, then re-import 23-August and confirm the project count returns to 92.
+
+Whichever it is, paste the query result. And please paste the normaliser's exact transformation —
+the sequence of operations it applies — so it can be checked against the data rather than
+described.
+
+**Do not remove the RAILWAY fix.** Keeping `RAILWAY BATCH 10` and `RAILWAY BATCH 11` separate is
+correct and must stay.
+
+---
+
+## PART 2 — what is actually running in production
+
+A live deployment with a successful build does not tell us which code is in it. Two queries
+**against the production database** settle it:
+
+```sql
+SELECT column_name
+  FROM information_schema.columns
+ WHERE table_name = 'record_pool'
+   AND column_name IN ('activity_raw', 'sales_order_status',
+                       'is_last_activity', 'issue_lot_rate',
+                       'lot_document_no', 'bom_status');
+
+SELECT id, report_date
+  FROM wip_imports
+ ORDER BY report_date DESC
+ LIMIT 1;
+```
+
+Paste both results verbatim, and state plainly that they ran against production.
+
+**Reading the answer:**
+
+- **six columns and a recent report_date** — this month's work is live and there is nothing to do.
+- **`bom_status` only, or none, and a 16-August date** — five weeks of verified work exists in
+  development only: the `P`/`S` alias, CSV format support, the four `record_pool` column
+  additions, the eight material/issue columns, the cumulative-regression guard, the signature
+  classifier, and the normaliser fix.
+
+If it is the second, say so directly. Then tell me:
+
+1. What publishing requires — is the schema migration a separate step that must run first?
+2. Whether the production data would be replaced, or only the code deployed. The publish check
+   previously said development imports do not replace production data unless the overwrite option
+   is explicitly selected — confirm that still holds.
+3. Whether it can be done today.
+
+**Do not publish yet.** I want the answer to those three questions first.
+
+---
+
+## WHY THIS ONE MATTERS
+
+`bom_status` and `is_welded_structure` are snapshotted at parse time. Every production import since
+16 August has discarded those values, and the only recovery is re-importing the original files
+while VTPL still retain them.
+
+The same now applies to the eight material columns, including `Issue Lot Rate` — the first
+cost-per-tonne data the tracker has ever received, currently worth ₹48.64 crore of steel on the
+floor at ₹51.86 per kilogram. If production is not capturing it, that history is accruing nowhere.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT publish before answering the three questions in Part 2.
+- Do NOT remove or weaken the RAILWAY normaliser fix.
+- Do NOT import the 24-August files.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the guard, or the eight material columns.

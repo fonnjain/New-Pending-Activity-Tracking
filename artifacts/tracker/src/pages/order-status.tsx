@@ -1,16 +1,15 @@
 import { useMemo, useState } from "react";
 import { formatDate } from "@/lib/utils";
-import { useTracker, useActiveJobSet, isNamedJobSetFilter } from "@/lib/store";
+import { useTracker, useActiveJobSet } from "@/lib/store";
 import { useProjectCompare } from "@/lib/projectSort";
 import {
   useGetOrderStatus,
   getGetOrderStatusQueryKey,
   useGetImportRecords,
   getGetImportRecordsQueryKey,
-  type OrderStatusRow,
   type Record as WipRecord,
 } from "@workspace/api-client-react";
-import { bundleActivitySet } from "@workspace/domain";
+import { buildOrderStatusRows, type OrderStatusDisplayRow } from "@/lib/order-status-rows";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { exportToXlsx, exportTimestamp, type XlsxColumn } from "@/lib/export";
@@ -22,17 +21,6 @@ import {
   ChevronDown,
 } from "lucide-react";
 
-// Activity buckets used to roll WIP marks into Fabrication / Galvanizing.
-// Galvanizing spans the FULL GALVANIZING bundle (G,GB,Y) — Y (Yard/terminal) is
-// folded in here rather than kept in a separate column. Everything else still in
-// the route is Fabrication (this naturally captures the NTLT pre-galv fab codes).
-const GALV_SET = bundleActivitySet("GALVANIZING") ?? new Set<string>();
-
-const KEY_SEP = "\u0001";
-function keyOf(project: string, structure: string): string {
-  return `${project}${KEY_SEP}${structure}`;
-}
-
 function mt(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "-";
   return n.toFixed(3);
@@ -43,46 +31,10 @@ function dispMt(n: number | null | undefined): string {
   return n.toFixed(3);
 }
 
-interface ComputedBuckets {
-  fabMt: number;
-  galvMt: number;
-}
-
-interface DisplayRow {
-  project: string;
-  structure: string;
-  subType: string | null;
-  bomType: string | null;
-  sets: number | null;
-  weightMt: number | null;
-  woOrderQtyMt: number | null;
-  releaseMt: number | null;
-  fileDespatchMt: number | null;
-  // Balances from WO Order Qty (col J): J - Release (L) and J - File Despatch (Q).
-  // Null when WO Order Qty is blank (no ordered base to net against).
-  releaseBalanceMt: number | null;
-  dispatchBalanceMt: number | null;
-  // Bundle tonnage is TLT-only. For an out-of-scope (NTLT) structure these are
-  // null and rendered "n/a" — NTLT marks never contribute Fab/Galv math.
-  fabMt: number | null;
-  galvMt: number | null;
-  inFile: boolean;
-  inWip: boolean;
-  // The structure has NTLT marks whose bundle math is intentionally suppressed.
-  outOfScope: boolean;
-  // Structure has no marks in WIP at all, so Fabrication/Galvanizing cannot be
-  // computed live and show as "n/a" (no fallback to the Order Review file's
-  // Progress block — those figures are cumulative-done, not current-at-stage,
-  // and would misrepresent a live WIP snapshot).
-  noWipData: boolean;
-  // The order row exists in the order book but was absent from the latest Order
-  // Review upload (kept, never deleted — flagged for review).
-  notInLatest: boolean;
-}
-
 export default function OrderStatusView() {
   const { filters, selectedImportId } = useTracker();
   const compareProjects = useProjectCompare();
+  const isNtlt = filters.category === "NTLT";
 
   const { data: order, isLoading: orderLoading } = useGetOrderStatus({
     query: { queryKey: getGetOrderStatusQueryKey() },
@@ -98,171 +50,21 @@ export default function OrderStatusView() {
     },
   );
 
-  const isNtlt = filters.category === "NTLT";
-  const isAll = filters.category === "ALL";
-
-  // WIP records narrowed to the active dimension selections (project / structure
-  // / order-type mode). Activity and contractor filters are intentionally NOT
-  // applied here — the Fabrication / Galvanizing columns ARE activity
-  // partitions, so filtering by a single activity would make them meaningless.
   const activeJobSet = useActiveJobSet();
-  const scopedRecords = useMemo(() => {
-    return records.filter((r: WipRecord) => {
-      if (r.active === false) return false;
-      if (!isAll && (r.category || "TLT") !== filters.category) return false;
-      // Jobs filter: named sets (templates) hold combo keys ("821 - Z") or
-      // plain codes; a plain code filter matches the job directly.
-      if (isNamedJobSetFilter(filters.job)) {
-        const comboKey = r.mfcBatch ? `${r.job} - ${r.mfcBatch}` : null;
-        if (!activeJobSet.has(r.job ?? "") && !(comboKey && activeJobSet.has(comboKey))) return false;
-      } else if (filters.job && r.job !== filters.job) {
-        return false;
-      }
-      // Combo picker (Job/Batch) — independent of the plain Jobs filter.
-      if (filters.selectedJobs.length > 0) {
-        const comboKey = r.mfcBatch ? `${r.job} - ${r.mfcBatch}` : null;
-        if (!filters.selectedJobs.includes(r.job ?? "") && !(comboKey && filters.selectedJobs.includes(comboKey))) return false;
-      }
-      if (filters.structure && r.structure !== filters.structure) return false;
-      return true;
-    });
-  }, [records, isAll, filters.category, filters.job, filters.selectedJobs, filters.structure, activeJobSet]);
-
-  // Roll WIP marks into per (project, structure) Fab / Galv tonnages (balanceWt
-  // is kilograms; /1000 -> metric tonnes). Galvanizing spans G,GB,Y. Bundle math
-  // is TLT-only: NTLT marks are OUT OF SCOPE for Order Status — they never
-  // contribute to the Fab/Galv buckets. We still record their key so the
-  // structure can be flagged "out of scope" in the table.
-  const { computedByKey, ntltKeys } = useMemo(() => {
-    const m = new Map<string, ComputedBuckets>();
-    const ntlt = new Set<string>();
-    for (const r of scopedRecords) {
-      const k = keyOf(r.job, r.structure);
-      const cat = (r.category || "TLT").toUpperCase();
-      if (cat === "NTLT") {
-        // Out of scope: suppress all bundle tonnage for NTLT marks.
-        ntlt.add(k);
-        continue;
-      }
-      let agg = m.get(k);
-      if (!agg) {
-        agg = { fabMt: 0, galvMt: 0 };
-        m.set(k, agg);
-      }
-      const tonnes = (r.balanceWt || 0) / 1000;
-      const act = (r.activity || "").toUpperCase();
-      if (GALV_SET.has(act)) agg.galvMt += tonnes;
-      else agg.fabMt += tonnes;
-    }
-    return { computedByKey: m, ntltKeys: ntlt };
-  }, [scopedRecords]);
-
-  // Category-INDEPENDENT WIP presence: a structure counts as "in the WIP report"
-  // if it has ANY active WIP mark (any order-type), respecting only the job /
-  // structure display filters. computedByKey is order-type-mode scoped, so it
-  // cannot decide true WIP absence (a present structure hidden by the current
-  // mode would look absent). The file Fab/Galv fallback is gated on THIS set so
-  // toggling the order-type mode never mistakes a present structure for absent.
-  const wipKeys = useMemo(() => {
-    const s = new Set<string>();
-    for (const r of records as WipRecord[]) {
-      if (r.active === false) continue;
-      if (filters.job && r.job !== filters.job) continue;
-      if (filters.structure && r.structure !== filters.structure) continue;
-      s.add(keyOf(r.job, r.structure));
-    }
-    return s;
-  }, [records, filters.job, filters.structure]);
-
-  const dispatchByKey = useMemo(() => {
-    const m = new Map<string, OrderStatusRow>();
-    for (const r of order?.rows ?? []) m.set(keyOf(r.project, r.structure), r);
-    return m;
-  }, [order]);
-
-
-  // Union of file rows and WIP-derived keys, filtered by the active project /
-  // structure selections so the table tracks the global filter bar.
-  const rows = useMemo<DisplayRow[]>(() => {
-    const keys = new Set<string>([
-      ...dispatchByKey.keys(),
-      ...computedByKey.keys(),
-      ...ntltKeys,
-    ]);
-    const out: DisplayRow[] = [];
-    for (const k of keys) {
-      const file = dispatchByKey.get(k);
-      const comp = computedByKey.get(k);
-      const [project, structure] = k.split(KEY_SEP);
-      if (filters.job && project !== filters.job) continue;
-      if (filters.structure && structure !== filters.structure) continue;
-      // A structure is out of scope when it has NTLT marks but no TLT bundle
-      // tonnage (NTLT-only). Its Fab/Galv are not computed -> null (n/a).
-      const outOfScope = ntltKeys.has(k) && !comp;
-      // TRUE WIP absence (any order-type), not just "absent from the current
-      // mode's computed buckets". A structure present in WIP must never use the
-      // file fallback even when the active mode hides its marks.
-      const inWipReport = wipKeys.has(k);
-      // Structure genuinely absent from WIP -> Fab/Galv cannot be computed live.
-      // No fallback to the order file's Progress Fabrication / Galvanising: those
-      // figures are cumulative-done, not current-at-stage, and would misrepresent
-      // a live WIP snapshot.
-      const noWipData = !outOfScope && !inWipReport;
-      const galvMt = outOfScope
-        ? null
-        : comp
-          ? comp.galvMt
-          : inWipReport
-            ? 0
-            : null;
-      out.push({
-        project,
-        structure,
-        subType: file?.subType ?? null,
-        bomType: file?.bomType ?? null,
-        sets: file?.sets ?? null,
-        weightMt: file?.weightMt ?? null,
-        woOrderQtyMt: file?.woOrderQtyMt ?? null,
-        releaseMt: file?.releaseMt ?? null,
-        fileDespatchMt: file?.fileDespatchMt ?? null,
-        releaseBalanceMt: file?.releaseBalanceMt ?? null,
-        dispatchBalanceMt: file?.dispatchBalanceMt ?? null,
-        // comp -> live WIP buckets; else in-WIP-but-mode-hidden -> 0; else truly
-        // absent from WIP -> null (n/a), never the file's Progress figures.
-        fabMt: outOfScope
-          ? null
-          : comp
-            ? comp.fabMt
-            : inWipReport
-              ? 0
-              : null,
-        galvMt,
-        inFile: !!file,
-        inWip: !!comp,
-        outOfScope,
-        noWipData,
-        notInLatest: file?.notInLatest ?? false,
-      });
-    }
-    out.sort(
-      (a, b) =>
-        compareProjects(a.project, b.project) ||
-        a.structure.localeCompare(b.structure),
-    );
-    return out;
-  }, [
-    dispatchByKey,
-    computedByKey,
-    ntltKeys,
-    wipKeys,
-    filters.job,
-    filters.structure,
-    compareProjects,
-  ]);
+  const rows = useMemo(
+    () => buildOrderStatusRows({
+      records: records as WipRecord[],
+      orderRows: order?.rows ?? [],
+      filters,
+      activeJobSet,
+      compareProjects,
+    }),
+    [records, order?.rows, filters, activeJobSet, compareProjects],
+  );
 
   // Per-project subtotals for the grouped table.
   const groups = useMemo(() => {
-    const byProject = new Map<string, DisplayRow[]>();
+    const byProject = new Map<string, OrderStatusDisplayRow[]>();
     for (const r of rows) {
       const list = byProject.get(r.project) ?? [];
       list.push(r);
@@ -510,7 +312,7 @@ function ProjectGroup({
 }: {
   group: {
     project: string;
-    list: DisplayRow[];
+    list: OrderStatusDisplayRow[];
     subtotal: {
       sets: number;
       weightMt: number;

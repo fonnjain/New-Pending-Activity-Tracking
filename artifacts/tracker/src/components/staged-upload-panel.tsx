@@ -13,6 +13,7 @@ import {
   type OrderReviewStageInfo,
   type OrSanityResult,
   type OrDataFlag,
+  type StagingAssessment,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -92,6 +93,11 @@ export function StagedUploadPanel({
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [accepted, setAccepted] = useState<Set<number>>(new Set());
   const [formatAcknowledged, setFormatAcknowledged] = useState(false);
+  const [assessmentAcknowledged, setAssessmentAcknowledged] = useState(false);
+  const [showCumulativeOverride, setShowCumulativeOverride] = useState(false);
+  const [cumulativeOverrideAcknowledged, setCumulativeOverrideAcknowledged] = useState(false);
+  const [cumulativeOverrideReason, setCumulativeOverrideReason] = useState("");
+  const [cumulativeOverrideArmed, setCumulativeOverrideArmed] = useState(false);
   // User-selected date for this upload (YYYY-MM-DD). Defaults to today.
   const [selectedDate, setSelectedDate] = useState<string>(todayYmd);
   // Set when the server refuses because the file's date is older than the
@@ -113,6 +119,11 @@ export function StagedUploadPanel({
     setValidation(null);
     setAccepted(new Set());
     setFormatAcknowledged(false);
+    setAssessmentAcknowledged(false);
+    setShowCumulativeOverride(false);
+    setCumulativeOverrideAcknowledged(false);
+    setCumulativeOverrideReason("");
+    setCumulativeOverrideArmed(false);
     setStaleDateConflict(null);
     // Keep selectedDate — user likely wants to re-upload for the same date.
   };
@@ -120,6 +131,15 @@ export function StagedUploadPanel({
   // Format check gate: null wipFormatCheck (non-WIP or unreadable) = pass through.
   const wipCheck = staged?.structural?.wipFormatCheck ?? null;
   const formatOk = wipCheck === null || wipCheck.ok;
+  const assessment = staged?.assessment;
+  const stageBlocked = assessment?.verdict === "blocked";
+  const stageNeedsAcknowledgement =
+    assessment?.verdict === "review" &&
+    (assessment.warnings.length > 0 || assessment.deltas.some((delta) => delta.requiresAcknowledgement));
+  const mayContinue =
+    !stageBlocked &&
+    (!stageNeedsAcknowledgement || assessmentAcknowledged) &&
+    (formatOk || formatAcknowledged);
 
   const isOrderReview = expectedType === "order-review";
   // Slot gate: the file the user picked must match THIS slot's expected type.
@@ -147,13 +167,18 @@ export function StagedUploadPanel({
     const file = e.target.files?.[0];
     if (!file) return;
     stage.mutate(
-      { data: { file, reportDate: selectedDate || undefined } },
+      { data: { file, reportDate: selectedDate || undefined, expectedType } },
       {
         onSuccess: (res) => {
           setStaged(res);
           setValidation(null);
           setAccepted(new Set());
           setFormatAcknowledged(false);
+          setAssessmentAcknowledged(false);
+          setShowCumulativeOverride(false);
+          setCumulativeOverrideAcknowledged(false);
+          setCumulativeOverrideReason("");
+          setCumulativeOverrideArmed(false);
           setPhase("staged");
         },
         onError: (err) => {
@@ -194,9 +219,10 @@ export function StagedUploadPanel({
     );
   };
 
-  const doCommit = (forceStaleDate = false) => {
+  const doCommit = (forceStaleDate = false, forceCumulativeRegressionOverride = false) => {
     if (!staged) return;
     setStaleDateConflict(null);
+    if (forceCumulativeRegressionOverride) setCumulativeOverrideArmed(true);
     const acceptedSuggestions =
       validation?.sanitize
         .filter((_, i) => accepted.has(i))
@@ -209,6 +235,12 @@ export function StagedUploadPanel({
           expectedType,
           acceptedSuggestions,
           ...(forceStaleDate ? { forceStaleDate: true } : {}),
+          ...(forceCumulativeRegressionOverride
+            ? {
+                forceCumulativeRegressionOverride: true,
+                cumulativeOverrideReason: cumulativeOverrideReason.trim(),
+              }
+            : {}),
         },
       },
       {
@@ -411,6 +443,14 @@ export function StagedUploadPanel({
                   <OrderReviewSummary info={staged.orderReview} />
                 )}
 
+                {assessment && (
+                  <StagingAssessmentView
+                    assessment={assessment}
+                    acknowledged={assessmentAcknowledged}
+                    onAcknowledge={() => setAssessmentAcknowledged(true)}
+                  />
+                )}
+
                 {phase === "staged" && !formatOk && !formatAcknowledged && (
                   <WipFormatWarning
                     check={wipCheck!}
@@ -430,12 +470,15 @@ export function StagedUploadPanel({
                         This file is dated <strong>{formatDate(staleDateConflict.fileAsOnDate)}</strong>, which is older than the current Order Review (<strong>{formatDate(staleDateConflict.existingAsOnDate)}</strong>). Uploading will revert the order book to the earlier snapshot and may make cross-file figures wrong.
                       </span>
                     </div>
+                    <p className="text-xs text-amber-800 dark:text-amber-300">
+                      Skipping is reversible. Overriding is not.
+                    </p>
                     <div className="flex gap-2">
                       <Button
                         size="sm"
                         variant="outline"
                         className="border-amber-500 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40"
-                        onClick={() => doCommit(true)}
+                        onClick={() => doCommit(true, cumulativeOverrideArmed)}
                         disabled={busy}
                       >
                         Upload anyway
@@ -452,7 +495,94 @@ export function StagedUploadPanel({
                   </div>
                 )}
 
-                {phase === "staged" && (formatOk || formatAcknowledged) && isOrderReview && (
+                {assessment?.cumulativeOverrideRequired && (
+                  <div className="rounded-md border border-amber-400 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-3 text-sm">
+                    {!showCumulativeOverride ? (
+                      <>
+                        <div className="flex items-start gap-2 text-amber-900 dark:text-amber-200">
+                          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                          <p>
+                            Normal import is refused because these cumulative totals went backward.
+                            An override would mix incoming rows with current rows from earlier snapshots,
+                            which can make the order book inconsistent.
+                            {" "}Skipping is reversible. Overriding is not.
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-amber-500 text-amber-900 dark:text-amber-200"
+                          onClick={() => setShowCumulativeOverride(true)}
+                          disabled={busy}
+                        >
+                          Review override consequences
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="font-semibold text-amber-900 dark:text-amber-200">
+                          Confirm cumulative-regression override
+                        </div>
+                        <p className="text-xs text-amber-800 dark:text-amber-300">
+                          Skipping is reversible. Overriding is not.
+                        </p>
+                        <label className="flex items-start gap-2 text-xs text-foreground">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5"
+                            checked={cumulativeOverrideAcknowledged}
+                            onChange={(event) => setCumulativeOverrideAcknowledged(event.target.checked)}
+                            disabled={busy}
+                          />
+                          <span>
+                            I understand this imports a mixed-date order book and should only be used
+                            after verifying the source report.
+                          </span>
+                        </label>
+                        <div className="space-y-1">
+                          <Label htmlFor="cumulative-override-reason">Reason for override</Label>
+                          <textarea
+                            id="cumulative-override-reason"
+                            className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={cumulativeOverrideReason}
+                            onChange={(event) => setCumulativeOverrideReason(event.target.value)}
+                            maxLength={1000}
+                            placeholder="Why is this cumulative decrease valid?"
+                            disabled={busy}
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={
+                              busy ||
+                              !cumulativeOverrideAcknowledged ||
+                              cumulativeOverrideReason.trim().length === 0
+                            }
+                            onClick={() => doCommit(false, true)}
+                          >
+                            Confirm override and import
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setShowCumulativeOverride(false);
+                              setCumulativeOverrideAcknowledged(false);
+                              setCumulativeOverrideReason("");
+                            }}
+                            disabled={busy}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {phase === "staged" && mayContinue && isOrderReview && (
                   <div className="flex flex-col sm:flex-row gap-2">
                     <Button
                       onClick={runValidate}
@@ -481,7 +611,7 @@ export function StagedUploadPanel({
                   </div>
                 )}
 
-                {phase === "staged" && (formatOk || formatAcknowledged) && !isOrderReview && (
+                {phase === "staged" && mayContinue && !isOrderReview && (
                   <div className="flex flex-col sm:flex-row gap-2">
                     <Button
                       onClick={runValidate}
@@ -493,7 +623,7 @@ export function StagedUploadPanel({
                     </Button>
                     <Button
                       variant="outline"
-                      onClick={doCommit}
+                      onClick={() => doCommit()}
                       disabled={busy}
                       className="gap-2"
                     >
@@ -561,6 +691,69 @@ function TypeMismatchView({
       <Button variant="outline" onClick={onDiscard} disabled={busy}>
         Reset
       </Button>
+    </div>
+  );
+}
+
+function StagingAssessmentView({
+  assessment,
+  acknowledged,
+  onAcknowledge,
+}: {
+  assessment: StagingAssessment;
+  acknowledged: boolean;
+  onAcknowledge: () => void;
+}) {
+  const hasReview = assessment.warnings.length > 0 || assessment.deltas.some((d) => d.requiresAcknowledgement);
+  const status =
+    assessment.verdict === "blocked"
+      ? { label: "IMPORT BLOCKED", className: "border-destructive bg-destructive/10 text-destructive" }
+      : assessment.verdict === "review"
+        ? { label: "REVIEW REQUIRED", className: "border-amber-500 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200" }
+        : { label: "READY TO IMPORT", className: "border-emerald-500 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200" };
+  return (
+    <section className={`rounded-md border p-3 space-y-3 ${status.className}`}>
+      <div className="flex items-center gap-2 text-sm font-bold">
+        {assessment.verdict === "blocked" ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+        {status.label}
+      </div>
+      {assessment.blocking.map((finding) => (
+        <Finding key={`${finding.title}-${finding.detail}`} finding={finding} />
+      ))}
+      {assessment.deltas.length > 0 && (
+        <div className="space-y-1 text-xs">
+          <div className="font-semibold">Compared with the latest committed import</div>
+          {assessment.deltas.map((delta) => (
+            <div key={delta.key} className={delta.requiresAcknowledgement ? "font-semibold" : ""}>
+              {delta.label}: {delta.previous.toLocaleString(undefined, { maximumFractionDigits: 3 })} → {delta.current.toLocaleString(undefined, { maximumFractionDigits: 3 })}
+              {delta.changePercent == null
+                ? ` (change ${delta.current - delta.previous >= 0 ? "+" : ""}${(delta.current - delta.previous).toLocaleString(undefined, { maximumFractionDigits: 3 })})`
+                : ` (change ${delta.current - delta.previous >= 0 ? "+" : ""}${(delta.current - delta.previous).toLocaleString(undefined, { maximumFractionDigits: 3 })}; ${delta.changePercent >= 0 ? "+" : ""}${delta.changePercent.toFixed(1)}%)`}
+              {delta.requiresAcknowledgement ? " — check" : ""}
+            </div>
+          ))}
+        </div>
+      )}
+      {assessment.warnings.map((finding) => <Finding key={`${finding.title}-${finding.detail}`} finding={finding} />)}
+      <details className="text-xs">
+        <summary className="cursor-pointer font-semibold">Informational findings ({assessment.information.length})</summary>
+        <div className="mt-2 space-y-1">
+          {assessment.information.map((finding) => <Finding key={`${finding.title}-${finding.detail}`} finding={finding} />)}
+        </div>
+      </details>
+      {hasReview && !acknowledged && assessment.verdict !== "blocked" && (
+        <Button size="sm" variant="outline" onClick={onAcknowledge}>
+          I reviewed the changes — continue
+        </Button>
+      )}
+    </section>
+  );
+}
+
+function Finding({ finding }: { finding: { title: string; detail: string } }) {
+  return (
+    <div className="text-xs whitespace-pre-wrap">
+      <strong>{finding.title}:</strong> {finding.detail}
     </div>
   );
 }

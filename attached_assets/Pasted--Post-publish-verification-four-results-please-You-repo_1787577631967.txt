@@ -1,0 +1,109 @@
+# Post-publish verification — four results, please
+
+You reported the production verification as complete and Task #68 as proposed, but the message
+carried the callback state rather than the findings. I do not have the results.
+
+**The callback itself does not matter.** It is task-tracking bookkeeping, not the work. If it will
+not fire, say so once and move on rather than retrying it.
+
+Four things, all read-only.
+
+---
+
+## 1. The CHECK constraint — the reason this publish stopped three times
+
+```sql
+SELECT conname, pg_get_constraintdef(oid)
+  FROM pg_constraint
+ WHERE conname = 'order_review_anomalies_status_check';
+```
+
+Expected: `CHECK (status IN ('open','explained','superseded'))`.
+
+**If it returns nothing, the startup upgrade did not run and `status` is unconstrained.** That is
+the exact condition the whole sequence was protecting against, so it needs to be seen rather than
+assumed.
+
+Then prove it works — an insert or update with an invalid status should be rejected:
+
+```sql
+-- must fail
+UPDATE order_review_anomalies SET status = 'invalid_test'
+ WHERE project = '903';
+```
+
+Roll it back. Report the error text.
+
+## 2. The anomaly register
+
+```
+903      B   correction        superseded
+775      A   short close       explained
+840      D   scope reduction   open
+896      A   short close       open
+VS-189   A   short close       open
+```
+
+Five entries, corrected signatures, and `shourt close` appearing nowhere.
+
+## 3. Production figures untouched
+
+```
+TLT  12,364.672 MT / 69,594 marks · unclassified 0 · 67 projects
+
+Release        1,555.684    Quality Check  2,172.292
+Awaiting         860.838    Galvanising    1,988.420
+Cutting        1,177.156    FG             4,610.281
+```
+
+## 4. Selection and evidence
+
+- `loadLatestWipImport()` and `loadLatestOrderReview()` both resolving to 24-August.
+- `upload_stage_evidence` exists, and whether it is empty or holds the backfilled 23-to-24 August
+  reconstruction.
+
+State which database each query ran against.
+
+---
+
+## AND — what is Task #68?
+
+It was proposed but never described. Please say what it covers and why, so it can be judged
+alongside the two follow-ups already open:
+
+- **#66** — preserve the staging panel and override evidence across delete and re-import. This one
+  is worth doing; it closes the gap that forced today's reconstruction from source bytes.
+- The local authenticated lifecycle test, blocked because the workspace password does not
+  authenticate a development admin. Declining to reset credentials was right; leave it open rather
+  than working around it.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change anything to make a verification figure match. Report the discrepancy instead.
+- Do NOT retry the completion callback more than once.
+- Do NOT change which regressions block, the block/warn split, the five-column rule, the
+  tolerance, or the corrected signature definitions.
+- Do NOT delete or re-import import #64.
+- Do NOT touch the current 24-August imports.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the eight material columns, or the normaliser.
+
+---
+
+## FOR THE RECORD
+
+You stopped this publish three times and each time was right. Twice the underlying problem was in
+a specification I wrote — a CHECK constraint I had widened without declaring, and a signature
+definition that tested "falls to zero" where it should have tested "ends at zero". Once it was a
+Drizzle limitation neither of us knew about: its diff engine detects constraints it does not model
+and proposes the drop without generating the ADD.
+
+The cost of stopping is a message. The cost of not stopping is a production change nobody
+reviewed. Keep doing it.
+
+Once these four results are in, the build list is empty. Everything remaining is a question for
+VTPL: **840, 896 and VS-189**, and specifically whether the **141.5 tonnes of finished steel**
+belonging to 896 and VS-189 was reallocated as 775's material was, or is still standing in the
+yard and now invisible to every report.

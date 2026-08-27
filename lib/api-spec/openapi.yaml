@@ -1224,6 +1224,38 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ImportDeletionLogEntry"
+  /imports/stage-evidence:
+    get:
+      operationId: listUploadStageEvidence
+      tags: [imports]
+      summary: List durable upload staging evidence
+      description: >
+        Authenticated administrator-only audit history of WIP and Order Review
+        staging panels. Evidence is retained independently of staged rows and
+        imports, so deleting or re-importing a file cannot remove its findings.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Staging evidence, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UploadStageEvidence"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /imports/stage/{id}:
     delete:
       operationId: discardStagedImport
@@ -1615,6 +1647,17 @@ paths:
         multiple BOM labels → "Mixed"; no match → "Unknown". Grand totals
         included. Purely additive read — never changes parsing, hashing, dedup,
         ageing, activity, qty, or any other state.
+      parameters:
+        - in: query
+          name: importId
+          schema:
+            type: integer
+            minimum: 1
+            multipleOf: 1
+          required: false
+          description: >
+            WIP import to calculate. When omitted, uses the most recently
+            committed WIP import for the standalone report pages.
       responses:
         "200":
           description: Fabrication project completion rows and totals
@@ -1681,10 +1724,10 @@ paths:
       description: >
         Removes a single Order Review upload from the history log. The Order Review
         file is a daily snapshot merged (UPSERTed) into one current order book, so
-        deleting a history entry does NOT roll back the current order-book values.
-        Deleting the most recent upload re-points the current snapshot rows to the
-        now-latest remaining upload. Deleting the last remaining upload clears the
-        entire order book (rows + computed dispatch). Purely additive to WIP state —
+        deleting a history entry cannot reconstruct older row values. Rows last seen
+        in the deleted import are removed rather than re-pointed to a surviving
+        import; rows last seen in other uploads remain. Deleting the last remaining
+        upload clears the entire order book (rows + computed dispatch). Purely additive to WIP state —
         never touches WIP parsing, activity, dedup, ageing, warning, or milestone math.
       parameters:
         - name: id
@@ -1697,6 +1740,72 @@ paths:
           description: Deleted
         "404":
           description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /order-review/anomalies:
+    get:
+      operationId: listOrderReviewAnomalies
+      tags: [orderStatus]
+      summary: List Order Review cumulative-regression anomalies
+      description: Authenticated administrator-only register of projects awaiting explanation. This register is audit metadata only and never changes regression blockers or calculations.
+      responses:
+        "200":
+          description: Anomaly register, newest updates first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrderReviewAnomaly"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /order-review/anomalies/{project}:
+    patch:
+      operationId: updateOrderReviewAnomaly
+      tags: [orderStatus]
+      summary: Update one Order Review anomaly's status and explanation
+      description: Authenticated administrator-only audit metadata update. Does not alter blockers or calculations.
+      parameters:
+        - name: project
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderReviewAnomalyUpdate"
+      responses:
+        "200":
+          description: Updated anomaly
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderReviewAnomaly"
+        "400":
+          description: Invalid update
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Anomaly not found
           content:
             application/json:
               schema:
@@ -2354,6 +2463,13 @@ components:
           type: string
         reportDate:
           type: string
+        expectedType:
+          type: string
+          enum: [wip, order-review]
+          description: >
+            The upload slot chosen by the user. Retained only with temporary
+            staging bytes so a WIP reset cannot discard a staged Order Review
+            that a malformed workbook prevents auto-detecting.
       required:
         - file
     ParseSummary:
@@ -2419,6 +2535,38 @@ components:
             required:
               - type
               - status
+        typeCounts:
+          type: array
+          description: >
+            Every observed WIP Type value, with casing variants combined. Blank
+            legacy Type values are represented as "(blank / legacy)".
+          items:
+            type: object
+            required: [type, rows]
+            properties:
+              type:
+                type: string
+              rows:
+                type: integer
+        fgExcludedRowCount:
+          type: integer
+          description: >
+            Explicit FG Pending For Dispatch rows. They remain available for
+            FG reporting but are excluded from live-work calculations.
+        unknownTypeRowCount:
+          type: integer
+          description: Number of rows with an unknown nonblank WIP Type.
+        unknownTypeValues:
+          type: array
+          description: Up to five unknown WIP Type values, with row counts.
+          items:
+            type: object
+            required: [type, rows]
+            properties:
+              type:
+                type: string
+              rows:
+                type: integer
         fgWipByJob:
           type: object
           description: >
@@ -2703,6 +2851,9 @@ components:
       properties:
         stagingId:
           type: string
+        evidenceId:
+          type: ["integer", "null"]
+          description: Durable audit record created for a recognised WIP or Order Review file.
         sourceFilename:
           type: string
         fileType:
@@ -2719,11 +2870,137 @@ components:
             - $ref: "#/components/schemas/OrderReviewStageInfo"
             - type: "null"
           description: Deterministic read for Order Review files; null for WIP files.
+        assessment:
+          $ref: "#/components/schemas/StagingAssessment"
       required:
         - stagingId
+        - evidenceId
         - sourceFilename
         - fileType
         - structural
+        - assessment
+    StageFinding:
+      type: object
+      properties:
+        title: { type: string }
+        detail: { type: string }
+        classification:
+          type: string
+          enum: [cancellation-transfer, correction, scope-reduction, unclassified]
+          description: Optional read-only classification for a blocking cumulative Order Review regression.
+      required: [title, detail]
+    StageDelta:
+      type: object
+      properties:
+        key: { type: string }
+        label: { type: string }
+        previous: { type: number }
+        current: { type: number }
+        changePercent:
+          oneOf:
+            - type: number
+            - type: "null"
+        requiresAcknowledgement: { type: boolean }
+      required: [key, label, previous, current, changePercent, requiresAcknowledgement]
+    StagingAssessment:
+      type: object
+      properties:
+        verdict:
+          type: string
+          enum: [blocked, review, ready]
+        blocking:
+          type: array
+          items: { $ref: "#/components/schemas/StageFinding" }
+        warnings:
+          type: array
+          items: { $ref: "#/components/schemas/StageFinding" }
+        deltas:
+          type: array
+          items: { $ref: "#/components/schemas/StageDelta" }
+        information:
+          type: array
+          items: { $ref: "#/components/schemas/StageFinding" }
+        cumulativeOverrideRequired:
+          type: boolean
+          description: >
+            True only when the current blocking findings are cumulative Order
+            Review regressions that may be deliberately overridden for this
+            one import after acknowledgement and a recorded reason.
+      required: [verdict, blocking, warnings, deltas, information, cumulativeOverrideRequired]
+    UploadStageEvidence:
+      type: object
+      description: >
+        Immutable evidence of the exact staging-panel findings for one source
+        file. It is independent of the disposable staging row and mutable import
+        history, and never changes import guards or report calculations.
+      properties:
+        id: { type: integer }
+        stagingId: { type: string }
+        stagedAt: { type: string }
+        sourceFilename: { type: string }
+        sourceHash:
+          type: string
+          description: SHA-256 of the exact uploaded source bytes.
+        kind:
+          type: string
+          enum: [wip, order-review, unknown]
+        reportDate:
+          type: ["string", "null"]
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+        comparedAgainstImportId:
+          type: ["integer", "null"]
+        blockers:
+          type: array
+          items: {}
+        warnings:
+          type: array
+          items: {}
+        assessment:
+          $ref: "#/components/schemas/StagingAssessment"
+        details:
+          type: object
+          additionalProperties: true
+        projectCodes:
+          type: array
+          items: { type: string }
+        outcome:
+          type: ["string", "null"]
+          enum: [imported, skipped, expired, refused, null]
+        outcomeAt:
+          type: ["string", "null"]
+        outcomeReason:
+          type: ["string", "null"]
+        importId:
+          type: ["integer", "null"]
+        importDeletedAt:
+          type: ["string", "null"]
+        importDeletionScope:
+          type: ["string", "null"]
+        isReconstruction: { type: boolean }
+        reconstructionNote:
+          type: ["string", "null"]
+      required:
+        - id
+        - stagingId
+        - stagedAt
+        - sourceFilename
+        - sourceHash
+        - kind
+        - reportDate
+        - comparedAgainstImportId
+        - blockers
+        - warnings
+        - assessment
+        - details
+        - projectCodes
+        - outcome
+        - outcomeAt
+        - outcomeReason
+        - importId
+        - importDeletedAt
+        - importDeletionScope
+        - isReconstruction
+        - reconstructionNote
     OrDataFlag:
       type: object
       description: A single deterministic data quality finding for an Order Review file.
@@ -2934,6 +3211,17 @@ components:
           items:
             $ref: "#/components/schemas/AcceptedSuggestion"
           description: Descriptive cleanups the user accepted; applied before parse+merge.
+        forceCumulativeRegressionOverride:
+          type: boolean
+          description: >
+            One-use Order Review override for an otherwise-blocking cumulative
+            progress regression. Requires cumulativeOverrideReason; never
+            persists in staging or applies to a later import.
+        cumulativeOverrideReason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Required operator explanation when forcing a cumulative regression.
       required:
         - stagingId
     WipCommitResult:
@@ -4546,6 +4834,19 @@ components:
           oneOf:
             - $ref: "#/components/schemas/OrderReviewChangeLog"
             - type: "null"
+        overrideReason:
+          type: ["string", "null"]
+          description: Reason recorded for a deliberate cumulative-regression override.
+        overrideAt:
+          type: ["string", "null"]
+          description: Timestamp at which a cumulative-regression override was accepted.
+        overrideBy:
+          type: ["string", "null"]
+          description: Authenticated operator who accepted the cumulative-regression override.
+        overrideDetails:
+          oneOf:
+            - $ref: "#/components/schemas/OrderReviewCumulativeOverrideDetails"
+            - type: "null"
         createdAt:
           type: string
       required:
@@ -4555,7 +4856,68 @@ components:
         - asOnDate
         - summary
         - changeLog
+        - overrideReason
+        - overrideAt
+        - overrideBy
+        - overrideDetails
         - createdAt
+    OrderReviewCumulativeOverrideDetails:
+      type: object
+      description: Exact project and cumulative-column regressions accepted for one Order Review import.
+      properties:
+        baselineImportId:
+          type: ["integer", "null"]
+        regressions:
+          type: array
+          items:
+            type: object
+            properties:
+              project: { type: string }
+              column: { type: string }
+              label: { type: string }
+              previousMt: { type: number }
+              currentMt: { type: number }
+              differenceMt: { type: number }
+            required: [project, column, label, previousMt, currentMt, differenceMt]
+      required: [baselineImportId, regressions]
+    OrderReviewAnomaly:
+      type: object
+      description: Persistent investigation record for a project-level cumulative-regression anomaly.
+      properties:
+        id:
+          type: integer
+        project:
+          type: string
+        signature:
+          type: string
+          enum: [A, B, C, D]
+          description: Read-only signature classification for the anomaly.
+        reason:
+          type: string
+          description: Normalized investigation reason for the signature.
+        status:
+          type: string
+          enum: [open, explained, superseded]
+        explanation:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        updatedBy:
+          type: ["string", "null"]
+      required: [id, project, signature, reason, status, explanation, createdAt, updatedAt, updatedBy]
+    OrderReviewAnomalyUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [open, explained, superseded]
+        explanation:
+          type: string
+          minLength: 1
+          maxLength: 2000
+      required: [status, explanation]
     OrderReviewSummary:
       type: object
       description: Parse summary for an Order Review ingest.
@@ -4574,6 +4936,9 @@ components:
           type: number
         skippedTotals:
           type: integer
+        skippedBanner:
+          type: integer
+          description: Banner rows intentionally skipped while parsing.
         missingStructure:
           type: integer
         missingStructureWtMt:
@@ -4830,6 +5195,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/OrderReviewImport"
+        recentCumulativeOverrides:
+          type: array
+          description: Overrides accepted within the last seven days, shown to operators as a safety warning.
+          items:
+            $ref: "#/components/schemas/OrderReviewImport"
       required:
         - available
         - asOnDate
@@ -4838,6 +5208,7 @@ components:
         - reconciliation
         - balanceReconciliation
         - imports
+        - recentCumulativeOverrides
     ReviewRequest:
       type: object
       properties:
@@ -5315,6 +5686,10 @@ components:
     FabricationProjectCompletionResponse:
       type: object
       properties:
+        importId:
+          type: integer
+          nullable: true
+          description: WIP import used to calculate this response, or null when no WIP import exists.
         available:
           type: boolean
           description: False when no WIP import exists, or when the import is gated (pre-dates Type/Status storage).
@@ -5336,6 +5711,7 @@ components:
             Cause classification for each project that has Unknown structures,
             including those that may be suppressed by the < 1 MT threshold.
       required:
+        - importId
         - available
         - rows
         - totals

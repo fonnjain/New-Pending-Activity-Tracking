@@ -38,3 +38,6 @@ channel = "stable-25_05"
 
 [userenv.shared]
 AUTH_EMAIL = "nishantj@vijaytransmission.com"
+
+[userenv.development]
+DEV_STAGING_FIXTURE_ENABLED = "true"

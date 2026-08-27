@@ -35,6 +35,27 @@ export const ACTIVITY_ALIASES: Readonly<Record<string, string>> = {
   S: "RFI",
 };
 
+// ---------------------------------------------------------------------------
+// Order Review cumulative progress safeguards
+// ---------------------------------------------------------------------------
+// These source fields are cumulative ERP totals. Their definitions live here so
+// staging, commit-time validation, audit details, and tests cannot silently
+// diverge on which progress columns are protected.
+export const ORDER_REVIEW_CUMULATIVE_COLUMNS = [
+  { key: "releaseMt", label: "Progress Release" },
+  { key: "fabMt", label: "Progress Fabrication" },
+  { key: "galvMt", label: "Progress Galvanising" },
+  { key: "inspectionMt", label: "Progress Inspection" },
+  { key: "fileDespatchMt", label: "Progress Despatch" },
+] as const;
+
+export type OrderReviewCumulativeColumnKey =
+  (typeof ORDER_REVIEW_CUMULATIVE_COLUMNS)[number]["key"];
+
+// One kilogram. Source exports report MT to three decimal places, so smaller
+// differences are rounding noise rather than a meaningful cumulative rollback.
+export const ORDER_REVIEW_CUMULATIVE_TOLERANCE_MT = 0.001;
+
 export function canonicalActivity(
   activity: string | null | undefined,
 ): string | null {
@@ -99,6 +120,40 @@ export function activityDisplayKey(
     : category != null  ? _TLT_ACTIVITY_SET   // explicit TLT or other named category
     :                     _ALL_ACTIVITY_SET;  // nature unknown: accept either set
   return set.has(activity) ? activity : `⚠ ${activity}`;
+}
+
+/**
+ * Display-only label for incomplete source WIP rows. These records deliberately
+ * retain their normal process/bucket classification; only activity-wise views
+ * split them from genuine blank-activity Finished Goods rows.
+ */
+export const INCOMPLETE_WIP_ACTIVITY_LABEL = "Blank activity (no job card)";
+
+export interface ActivityDisplayRecord {
+  activity?: string | null;
+  category?: string | null;
+  jobCardType?: string | null;
+  jobCardNo?: string | null;
+}
+
+/**
+ * True only for the known incomplete WIP shape: Job Card WIP with both Activity
+ * and Job Card No blank. It is intentionally narrower than "blank activity" so
+ * genuine Finished Goods remain grouped as Finished Goods (FG).
+ */
+export function isIncompleteBlankActivityWip(record: ActivityDisplayRecord): boolean {
+  return (
+    (record.jobCardType ?? "").trim().toLowerCase() === "job card wip" &&
+    (record.activity ?? "").trim() === "" &&
+    (record.jobCardNo ?? "").trim() === ""
+  );
+}
+
+/** Activity grouping for record-aware reports that need to surface source gaps. */
+export function activityDisplayKeyForRecord(record: ActivityDisplayRecord): string {
+  return isIncompleteBlankActivityWip(record)
+    ? INCOMPLETE_WIP_ACTIVITY_LABEL
+    : activityDisplayKey(record.activity, record.category);
 }
 
 export type SequenceKey = keyof typeof SEQUENCES;
@@ -2309,6 +2364,31 @@ export type WipCase =
   | "FINISHED_GOODS"
   | "UNCLASSIFIED";
 
+/** The ERP Type value that denotes finished goods awaiting despatch. */
+export const FINISHED_GOODS_WIP_TYPE = "FG PENDING FOR DISPATCH";
+
+/** Normalize an ERP WIP Type value without treating blank legacy data as a value. */
+export function normalizeWipType(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toUpperCase() ?? "";
+  return normalized || null;
+}
+
+/** True only for rows explicitly labelled as finished goods in the ERP Type column. */
+export function isFinishedGoodsType(value: string | null | undefined): boolean {
+  return normalizeWipType(value) === FINISHED_GOODS_WIP_TYPE;
+}
+
+/**
+ * Whether a row belongs in live-work calculations.
+ *
+ * Legacy rows with no Type and rows carrying a new, unknown Type deliberately
+ * remain included: excluding them would silently hide work. Only the explicit
+ * finished-goods ERP Type is excluded.
+ */
+export function isLiveWorkType(value: string | null | undefined): boolean {
+  return !isFinishedGoodsType(value);
+}
+
 // Activity codes that represent "Job Card Not Started" work, used in the legacy
 // and transitional fallback paths of classifyWipCase (when jobCardType is absent).
 // C = TLT; NTF/NTFSW/NTFW = NTLT not-started codes (computed from SEQUENCES so
@@ -2360,9 +2440,9 @@ export function classifyWipCase(r: {
   if (r.jobCardType != null) {
     // Col A (Type) stored — authoritative discriminator.
     // For "Job Card Not Started": use Col G when present, else isInitialCutting proxy.
-    const tp = r.jobCardType.trim().toUpperCase();
+    const tp = normalizeWipType(r.jobCardType);
     if (tp === "JOB CARD WIP")           return "IN_PRODUCTION";
-    if (tp === "FG PENDING FOR DISPATCH") return "FINISHED_GOODS";
+    if (isFinishedGoodsType(tp)) return "FINISHED_GOODS";
     if (tp === "JOB CARD NOT STARTED") {
       const isInitial = r.jobCardStatus != null
         ? r.jobCardStatus.trim().toUpperCase() === "INITIAL"
@@ -2410,7 +2490,15 @@ export function classifyWipCase(r: {
 // classifyNtltStage is built on classifyWipCase so the guard is always applied.
 // ---------------------------------------------------------------------------
 
+/** One of the five approved NTLT production stages. */
 export type NtltStage = "notStarted" | "ts" | "galvanising" | "y" | "fg";
+
+/**
+ * Result of classifying an NTLT row. "unclassified" is deliberately outside
+ * the stage chain: it means the source row needs a business decision rather
+ * than being silently attributed to Not Started.
+ */
+export type NtltStageClassification = NtltStage | "unclassified";
 
 export interface NtltStageInfo {
   key: NtltStage;
@@ -2443,7 +2531,7 @@ export const NTLT_STAGES: readonly NtltStageInfo[] = [
 ];
 
 /**
- * Classify an NTLT mark into one of the five NTLT stages.
+ * Classify an NTLT mark into an approved NTLT stage, or an explicit exception.
  *
  * Built on classifyWipCase so the Type guard (Col A) is always applied.
  *
@@ -2452,8 +2540,11 @@ export const NTLT_STAGES: readonly NtltStageInfo[] = [
  *   "Job Card WIP" + activity ∈ {G, GB}       → galvanising
  *   "Job Card WIP" + activity = Y             → y
  *   "FG Pending For Dispatch"                  → fg
- *   Any unexpected IN_PRODUCTION activity      → notStarted (safe fallback,
- *                                                never drops a mark)
+ *   Any unexpected IN_PRODUCTION activity      → unclassified
+ *
+ * In particular, BL and blank Activity on a Job Card WIP row are source-data
+ * exceptions, not Not Started work. Keeping the exception explicit makes
+ * DC16 fail and prevents a false production-stage total.
  */
 export function classifyNtltStage(r: {
   activity?: string | null;
@@ -2461,18 +2552,23 @@ export function classifyNtltStage(r: {
   jobCardType?: string | null;
   jobCardStatus?: string | null;
   contractor?: string | null;
-}): NtltStage {
+}): NtltStageClassification {
   const wipCase = classifyWipCase(r);
   if (wipCase === "FINISHED_GOODS") return "fg";
-  if (wipCase !== "IN_PRODUCTION")  return "notStarted";
+  if (
+    wipCase === "NOT_RELEASED" ||
+    wipCase === "AWAITING_ASSIGNMENT" ||
+    wipCase === "CUTTING"
+  ) {
+    return "notStarted";
+  }
+  if (wipCase !== "IN_PRODUCTION") return "unclassified";
   // IN_PRODUCTION: discriminate by activity (Type guard already passed above).
   const act = (r.activity ?? "").trim().toUpperCase();
   if (act === "TS")                return "ts";
   if (act === "G" || act === "GB") return "galvanising";
   if (act === "Y")                 return "y";
-  // Unexpected IN_PRODUCTION activity (e.g. NTF/NTFSW under WIP type) —
-  // collapse to notStarted rather than silently dropping the mark.
-  return "notStarted";
+  return "unclassified";
 }
 
 export * from "./aggregate";

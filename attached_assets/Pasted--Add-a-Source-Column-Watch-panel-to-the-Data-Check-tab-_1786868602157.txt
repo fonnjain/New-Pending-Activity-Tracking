@@ -1,0 +1,98 @@
+# Add a "Source Column Watch" panel to the Data Check tab
+
+Companion to task #42. Once `bom_status` and `is_welded_structure` are being stored, we need to
+be told what is in them on every import — without anyone having to remember to look.
+
+Neither column carries usable information today. `BOM Status` is `Authorized` on all 59,276 rows
+of the 16-Aug file, and `Is Welded Structure` is `True` on only 354 of 58,945 TLT marks. **The
+point of this panel is not to report a number — it is to notice the day that changes.** An ERP
+mid-change will start populating these properly at some point, and the first sign will be a new
+distinct value or a shifted split. That is when they become worth building on.
+
+---
+
+## WHERE IT GOES
+
+A new section on the Data Check tab, below the movement checks, headed **SOURCE COLUMN WATCH**.
+It is **not** a DC-numbered rule. It has no pass or fail state and must never turn the top banner
+red or amber — it is descriptive only.
+
+Do not create a DC18. The DC series is for rules with a correct answer; this has none.
+
+## WHAT IT SHOWS
+
+For each of the two columns, for the currently selected import:
+
+1. **Present or absent** in the source file. Imports before 16-Aug-2026 do not have these columns
+   and must render as "not present in this file", not as a null or a zero.
+2. **Value distribution** — every distinct value with its mark count and weight in MT, including
+   blanks as an explicit `(blank)` row.
+3. **Comparison with the previous import** — new values appearing, values disappearing, and the
+   percentage split moving. Flag a **new distinct value** prominently in amber; that is the single
+   most informative event this panel can surface.
+4. **Cross-tab against Order Nature**, since that is where the current signal sits.
+
+Where a column has exactly one distinct value across every row, say so plainly — something like
+`Authorized on all 59,276 rows — no variation, carries no information yet`. That phrasing matters:
+it stops anyone building a filter on a constant.
+
+## BASELINE — 16-Aug-2026
+
+Use these to confirm the panel is reading correctly:
+
+```
+BOM Status
+  Authorized              59,276 rows   (100%)   — single value, no variation
+
+Is Welded Structure
+  False                   58,922 rows   17,643.130 MT
+  True                       354 rows        62.352 MT
+
+Cross-tab, Order Nature × Is Welded Structure
+  STRUCTURE  / False      58,591        STRUCTURE / True   354
+  RSJ POLE   / False         271        EARTHING  / False   50
+  GENERAL    / False          10        — every NTLT row is False
+```
+
+The 354 welded marks, for reference:
+
+```
+by activity   Y 150 (21.980 MT) · FG 124 (30.247) · G 44 (5.885) · GB 24 (1.662) · TS 10 (2.483) · Q 2 (0.096)
+by project    920: 203 · 824: 78 · 908: 32 · 906: 23 · 893: 5 · 909: 4 · 870: 3 · 890: 3 · 945: 2 · 848: 1
+```
+
+Note the shape: welded marks are concentrated in the back half of the process — 274 of 354 are at
+Y, FG or in the galvanising bath. That is worth watching too, but do not build a rule on it.
+
+## MAKE IT EXTENSIBLE
+
+Write this so a third column can be added by appending to a list, not by copying a block. The ERP
+is mid-change and more columns are likely. The panel should take a list of watched column names
+and render the same treatment for each.
+
+Also surface it in the Excel export as one sheet named `Source Column Watch`, with one block per
+watched column.
+
+## WHAT NOT TO CHANGE
+
+- Do NOT add either column to `hashRow`. It would change the hash of every existing mark.
+- Do NOT create a DC-numbered rule, and do NOT let this panel affect the top banner or any
+  pass/fail count.
+- Do NOT build any bucket, filter, report or classification on either column.
+- Do NOT coerce `Is Welded Structure` to a boolean — the ERP writes the words `True` and `False`
+  today and may write something else later.
+- Do NOT backfill. Imports before 16-Aug legitimately have no value.
+- Do NOT change DC0–DC17, the bucket definitions, `hasTypeData`, the import selection helpers or
+  the Bucket E cascade.
+
+## ACCEPTANCE CHECK
+
+On the 16-Aug import the panel must show the baseline above exactly — 59,276 rows all
+`Authorized`, and 354 / 58,922 on the welded split with 62.352 MT and 17,643.130 MT.
+
+On the 14-Aug import both columns must read "not present in this file".
+
+Confirm the top banner is unchanged by this panel — with DC3 still the only hard-rule failure, it
+must still read one structure affected and stay amber.
+
+Paste the panel output for 16-Aug and for 14-Aug.

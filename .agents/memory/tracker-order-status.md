@@ -88,6 +88,17 @@ whole order-review commit under the shared dispatch advisory lock `pg_advisory_x
 `committed_order_review_import_id` UNDER the lock** so a duplicate commit replays the winner without
 ever ingesting. Any future shared-state UPSERT under a retry-guard must recheck the guard inside the lock.
 
+**Cumulative-progress guard:** Order Review Progress Despatch is cumulative by project, not by
+project+structure. Before ingesting, compare each incoming project total with the latest committed
+snapshot: a lower total or a project missing after it had dispatched is a hard refusal; a lower
+Progress Release is warning-only. Perform that comparison again after the advisory lock is held,
+otherwise a queued request can pass against an old snapshot and regress the later one. Treat only
+sub-nanotonne floating-point residue as equal when summing structure rows.
+**Why:** source exports can be scoped or truncated, and JavaScript decimal sums can differ by tiny
+representation noise even when the displayed MT values are identical.
+**How to apply:** retain detailed per-project stored/incoming/difference findings in both staging and
+the commit rejection. Never allow a UI acknowledgement to override a Despatch regression.
+
 **How to apply:** any new file type added to the staging flow must extend `detectFileType`, the
 `StageResult.fileType` enum, and the `CommitResult` union — do not assume a single file shape.
 Direct `POST /imports` stays WIP-only (`UploadResult`); the dual-file logic lives in the staged path.

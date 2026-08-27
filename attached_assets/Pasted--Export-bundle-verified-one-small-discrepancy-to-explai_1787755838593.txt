@@ -1,0 +1,99 @@
+# Export bundle verified — one small discrepancy to explain
+
+I checked the ten-workbook bundle dated 26-Aug 20:14 against the source file. **It is sound.**
+
+The README is genuinely well done — it names the source import, lists what is included, and states
+plainly which reports were excluded and why. That is the right way to ship a bundle, and the
+exclusion list is more useful than silently omitting them.
+
+## What verified
+
+Activity Wise reconciles exactly against `WIP_26_08_2026.CSV`:
+
+```
+C 23,370 · RFI 11,987 · G 4,749 · Y 4,304 · GB 2,890 · Q 1,940
+TS 1,655 · NH 1,144 · B 451 · W 416 · HAB 22
+```
+
+Every count matches the source. At project-and-structure level, 778 of 838 comparable keys match
+at ratio 1.000.
+
+**One correction to something I said earlier today:** I initially read the records export as
+doubled. That was my error — the export's `Mark` column uses a `project \ structure \ number`
+display format rather than the raw mark, so my comparison keys were mismatched and produced a
+false ratio. Nothing is doubled. Disregard that.
+
+---
+
+## The one thing to explain
+
+**Activity Wise shows FG as 17,714 marks / 4,707.752 MT.** The source file's TLT FG is **17,692
+marks / 4,701.623 MT** — a difference of **+22 marks / +6.129 MT**.
+
+It is not a straight TLT/NTLT mix: NTLT FG is 165 marks / 4,146.774 MT, so it is neither included
+whole nor excluded whole.
+
+```sql
+-- what are the 22?
+SELECT rp.job, rp.order_nature, rp.type, rp.activity,
+       count(*) AS marks, sum(rp.balance_wt)/1000 AS mt
+  FROM record_pool rp
+  JOIN import_rows ir ON ...
+ WHERE ir.import_id = <the 26-Aug WIP import>
+   AND <whatever predicate the Activity Wise FG row uses>
+ GROUP BY 1,2,3,4;
+```
+
+Please report what the Activity Wise FG row actually selects on, and which 22 marks it picks up
+that a plain `Order Nature = Structure AND Type = FG Pending For Dispatch` filter does not.
+
+Most likely candidates: NTLT FG rows leaking in on a partial predicate, or marks with a blank
+Type being swept into FG. Either is small, but a report whose FG differs from the WIP file's FG by
+an unexplained amount will be queried by someone eventually.
+
+---
+
+## Two conventions worth documenting rather than changing
+
+Both are correct. Both would confuse a reader comparing bundles.
+
+**Weights are in kilograms in this bundle, MT in the Project Wise export.** Activity Wise shows
+RFI as 1,426,262.983 — that is 1,426.263 MT and matches source exactly. Consistent with the raw
+file, inconsistent with the other export. Worth a line in the README stating the unit, rather than
+changing either.
+
+**Activity Wise covers 55,680 marks, not 70,642.** The difference is exactly 14,962 — Release
+Balance 10,733 plus Awaiting Assignment 4,229. It shows only marks that have reached an activity,
+and its `C` row is the Cutting bucket alone at 1,267.635 MT. Correct, but someone will reconcile
+it against the six-bucket total and find a 14,962-mark gap. One line in the README would prevent
+that.
+
+---
+
+## WHAT NOT TO CHANGE
+
+- Do NOT change the kg/MT conventions in either export. Document them.
+- Do NOT change what Activity Wise scopes to. Document it.
+- Do NOT change bucket definitions, `PROCESS_SEQUENCE`, the `P`/`S` alias, `hashRow`,
+  `classifyDc17`, the NTLT model, the eight material columns, the normaliser, or the regression
+  guard.
+- Do NOT alter the FG predicate before reporting what it currently selects.
+
+---
+
+## STILL OPEN
+
+Two follow-ups from earlier, neither urgent:
+
+**#66 — preserve the staging panel and override evidence across delete and re-import.** Worth
+doing. It closes the gap that forced today's reconstruction from retained source bytes.
+
+**The authenticated lifecycle test** (formerly #68, since cancelled). I would reinstate it once a
+working development admin login exists. The staging path is the only part of the guard never
+exercised end to end — `upload_stage_evidence` currently holds exactly one row, and that row is a
+reconstruction rather than a live capture. Until a real stage-time capture is seen, the mechanism
+is unproven.
+
+Everything else is with VTPL: **840, 896 and VS-189**, and specifically whether the **141.5 tonnes**
+of finished steel from 896 and VS-189 was reallocated as 775's was, or is still standing in the
+yard.

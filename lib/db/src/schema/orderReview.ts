@@ -8,8 +8,10 @@ import {
   timestamp,
   jsonb,
   primaryKey,
+  check,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -61,6 +63,20 @@ export interface OrderReviewChangeLog {
   flagged: { project: string; structure: string }[];
 }
 
+export interface OrderReviewCumulativeOverrideDetails {
+  baselineImportId: number | null;
+  regressions: Array<{
+    project: string;
+    column: string;
+    label: string;
+    previousMt: number;
+    currentMt: number;
+    differenceMt: number;
+  }>;
+}
+
+export type OrderReviewAnomalySignature = "A" | "B" | "C" | "D";
+
 // One ingest of an "Order Review" export (the second input file, a per-structure
 // order/dispatch summary). Each upload is logged here with its change log, but the
 // order rows themselves are UPSERTED (one current row per project+structure), not
@@ -76,6 +92,13 @@ export const orderReviewImportsTable = pgTable("order_review_imports", {
   // flagged). Null for the very first ingest before any prior rows existed is
   // still populated (all inserted); nullable only for forward-compat.
   changeLog: jsonb("change_log").$type<OrderReviewChangeLog>(),
+  // Present only when an operator deliberately accepted a cumulative-progress
+  // rollback for this one import. Kept on the immutable upload record, never in
+  // staging, so an override cannot leak into a later upload.
+  overrideReason: text("override_reason"),
+  overrideAt: timestamp("override_at", { withTimezone: true }),
+  overrideBy: text("override_by"),
+  overrideDetails: jsonb("override_details").$type<OrderReviewCumulativeOverrideDetails>(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -88,6 +111,46 @@ export type InsertOrderReviewImport = z.infer<
   typeof insertOrderReviewImportSchema
 >;
 export type OrderReviewImportRow = typeof orderReviewImportsTable.$inferSelect;
+
+// A small, operator-maintained register for projects whose Order Review
+// cumulative regressions need an explicit explanation. It records investigation
+// state only — it never changes the import guard or any calculated report.
+export const orderReviewAnomaliesTable = pgTable(
+  "order_review_anomalies",
+  {
+    id: serial("id").primaryKey(),
+    project: text("project").notNull(),
+    signature: text("signature")
+      .$type<OrderReviewAnomalySignature>()
+      .notNull()
+      .default("C"),
+    reason: text("reason").notNull().default(""),
+    status: text("status").notNull().default("open"),
+    explanation: text("explanation").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => [
+    uniqueIndex("order_review_anomalies_project_uq").on(t.project),
+    check(
+      "order_review_anomalies_status_check",
+      sql`${t.status} IN ('open', 'explained', 'superseded')`,
+    ),
+  ],
+);
+
+export const insertOrderReviewAnomalySchema = createInsertSchema(
+  orderReviewAnomaliesTable,
+).omit({ id: true, createdAt: true, updatedAt: true, updatedBy: true });
+export type InsertOrderReviewAnomaly = z.infer<
+  typeof insertOrderReviewAnomalySchema
+>;
+export type OrderReviewAnomalyRow = typeof orderReviewAnomaliesTable.$inferSelect;
 
 // ONE CURRENT row per (project, structure) — the live order-book snapshot. The
 // Order Review file is a daily snapshot, so each upload UPSERTS this row in place
