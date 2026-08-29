@@ -19,6 +19,9 @@ import {
   rsjThicknessTable,
   manualThicknessTable,
   inventoryMfcBatchColorTable,
+  contractorMovementTable,
+  contractorMovementStateTable,
+  CONTRACTOR_MOVEMENT_STATE_ID,
   itemMasterTable,
   SETTINGS_SINGLETON_ID,
   type InsertRecordPool,
@@ -60,14 +63,14 @@ import {
   type ActivitySequence,
   type ThicknessLookups,
 } from "@workspace/domain";
-import { recomputeMilestones } from "../lib/milestones";
+import { loadMilestones, recomputeMilestones } from "../lib/milestones";
 import {
   recomputeDispatch,
   ingestOrderReview,
   computeWipCoverage,
   loadLatestOrderReview,
 } from "../lib/dispatch";
-import { recomputeContractorMovement } from "../lib/contractorMovement";
+import { loadContractorMovement, recomputeContractorMovement } from "../lib/contractorMovement";
 import { recomputeReleaseBalance, recomputeAssignmentBalance } from "../lib/parseWipReleaseBalance";
 import { cutoffSql, loadValidFrom, importDayKey } from "../lib/cutoff";
 import { expandCopies } from "../lib/copies";
@@ -416,10 +419,15 @@ const membershipCache = new Map<
   number,
   { pool: RecordPoolRow; copies: number; irJobCardStatus: string | null; irJobCardType: string | null }[]
 >();
+const membershipInFlight = new Map<number, Promise<
+  { pool: RecordPoolRow; copies: number; irJobCardStatus: string | null; irJobCardType: string | null }[]
+>>();
 // Same immutability guarantee: velocity states and identity signatures for a
 // given import never change once the import is committed, so caching is safe.
 const velocityStateCache = new Map<number, Map<string, VelocityState>>();
 const identityStateCache = new Map<number, Map<string, IdentityState>>();
+const velocityStateInFlight = new Map<number, Promise<Map<string, VelocityState>>>();
+const identityStateInFlight = new Map<number, Promise<Map<string, IdentityState>>>();
 
 // Caches the fully-serialized WipRecord[] per importId so neither /records nor
 // /summary has to re-run the O(57k) serializeRecord + sort loop on every request.
@@ -427,32 +435,75 @@ const identityStateCache = new Map<number, Map<string, IdentityState>>();
 // Thickness lookups and MFC project dates change rarely; the evict-on-delete
 // contract is the primary safety gate.
 const serializedRecordsCache = new Map<number, ReturnType<typeof serializeRecord>[]>();
+const serializedRecordsInFlight = new Map<
+  number,
+  Promise<ReturnType<typeof serializeRecord>[]>
+>();
 
 // Caches the full /movement response per importId. Movement for import N depends
 // only on identity states of all imports ≤ N, which are immutable once committed.
 // Cleared on ANY import deletion because removing a prior import changes the chain
 // for every later import's movement calculation.
-const movementResponseCache = new Map<number, {
+interface MovementResponse {
   importId: number;
   hasHistory: boolean;
   items: { markId: string; jobCardNo: string | null; daysSinceLastMovement: number | null }[];
-}>();
+}
+const movementResponseCache = new Map<number, MovementResponse>();
+const movementResponseInFlight = new Map<number, Promise<MovementResponse>>();
+
+function loadCachedSingleFlight<T>(
+  cache: Map<number, T>,
+  inFlight: Map<number, Promise<T>>,
+  importId: number,
+  load: () => Promise<T>,
+): Promise<T> {
+  const cached = cache.get(importId);
+  if (cached) return Promise.resolve(cached);
+  const existing = inFlight.get(importId);
+  if (existing) return existing;
+
+  let flight!: Promise<T>;
+  flight = (async () => {
+    try {
+      const value = await load();
+      // An invalidation may have occurred while this query was running. Do not
+      // repopulate a cache that was explicitly cleared in the meantime.
+      if (inFlight.get(importId) === flight) cache.set(importId, value);
+      return value;
+    } finally {
+      if (inFlight.get(importId) === flight) inFlight.delete(importId);
+    }
+  })();
+  inFlight.set(importId, flight);
+  return flight;
+}
 
 function evictMembershipCache(importId?: number) {
   if (importId === undefined) {
     membershipCache.clear();
+    membershipInFlight.clear();
     velocityStateCache.clear();
+    velocityStateInFlight.clear();
     identityStateCache.clear();
+    identityStateInFlight.clear();
     serializedRecordsCache.clear();
+    serializedRecordsInFlight.clear();
     movementResponseCache.clear();
+    movementResponseInFlight.clear();
   } else {
     membershipCache.delete(importId);
+    membershipInFlight.delete(importId);
     velocityStateCache.delete(importId);
+    velocityStateInFlight.delete(importId);
     identityStateCache.delete(importId);
+    identityStateInFlight.delete(importId);
     serializedRecordsCache.delete(importId);
+    serializedRecordsInFlight.delete(importId);
     // Removing any import from the history chain invalidates movement for all
     // later imports, so clear the whole response cache (it rebuilds quickly).
     movementResponseCache.clear();
+    movementResponseInFlight.clear();
   }
 }
 
@@ -487,11 +538,7 @@ async function loadMembership(
 ): Promise<{ pool: RecordPoolRow; copies: number; irJobCardStatus: string | null; irJobCardType: string | null }[]> {
   // Only cache top-level db calls, not mid-transaction reads.
   const useCache = executor === db;
-  if (useCache) {
-    const cached = membershipCache.get(importId);
-    if (cached) return cached;
-  }
-  const rows = await executor
+  const load = () => executor
     .select({
       pool: recordPoolTable,
       copies: importRowsTable.copies,
@@ -502,8 +549,11 @@ async function loadMembership(
     .from(importRowsTable)
     .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
     .where(eq(importRowsTable.importId, importId));
-  if (useCache) membershipCache.set(importId, rows);
-  return rows;
+  // Transaction callers always bypass both value and in-flight caches because
+  // their data has not committed yet.
+  return useCache
+    ? loadCachedSingleFlight(membershipCache, membershipInFlight, importId, load)
+    : load();
 }
 
 function toMembershipRows(
@@ -537,9 +587,7 @@ interface IdentityState {
 async function loadIdentityStates(
   importId: number,
 ): Promise<Map<string, IdentityState>> {
-  const cached = identityStateCache.get(importId);
-  if (cached) return cached;
-
+  return loadCachedSingleFlight(identityStateCache, identityStateInFlight, importId, async () => {
   const rows = await db
     .select({
       markId: recordPoolTable.markId,
@@ -571,14 +619,60 @@ async function loadIdentityStates(
     const l = Array.from(lpds.get(key)!).sort().join(",");
     out.set(key, { markId: m.markId, jobCardNo: m.jobCardNo, sig: `${a}\u0002${l}` });
   }
-  identityStateCache.set(importId, out);
   return out;
+  });
 }
 
 // Whole days between an import's createdAt and now (>= 0).
 function daysSince(createdAt: Date | string): number {
   const t = createdAt instanceof Date ? createdAt.getTime() : new Date(createdAt).getTime();
   return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+
+async function buildMovementResponse(
+  target: typeof importsTable.$inferSelect,
+): Promise<MovementResponse> {
+  const current = await loadIdentityStates(target.id);
+
+  // Bound the history walk to the global WIP cutoff so movement ignores
+  // pre-cutoff imports as if never uploaded. cutoffSql(null) is a no-op.
+  const movementCutoff = await loadValidFrom();
+  const priorImports = await db
+    .select({ id: importsTable.id, createdAt: importsTable.createdAt })
+    .from(importsTable)
+    .where(and(
+      previousImportCondition(target.reportDate, target.id),
+      cutoffSql(movementCutoff),
+    ))
+    .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id));
+
+  const days = new Map<string, number | null>();
+  for (const key of current.keys()) days.set(key, null);
+
+  const stillMatching = new Set(current.keys());
+  for (const imp of priorImports) {
+    if (stillMatching.size === 0) break;
+    const priorSigs = await loadIdentityStates(imp.id);
+    const age = daysSince(imp.createdAt);
+    for (const key of Array.from(stillMatching)) {
+      const prior = priorSigs.get(key);
+      if (prior && prior.sig === current.get(key)!.sig) {
+        days.set(key, age);
+      } else {
+        stillMatching.delete(key);
+      }
+    }
+  }
+
+  return {
+    importId: target.id,
+    hasHistory: priorImports.length > 0,
+    items: Array.from(current.entries()).map(([key, st]) => ({
+      markId: st.markId,
+      jobCardNo: st.jobCardNo,
+      daysSinceLastMovement: days.get(key) ?? null,
+    })),
+  };
 }
 
 // Rebuild a ChangeSet-shaped object from an import's stored changeSummary. Used
@@ -717,6 +811,39 @@ async function loadProjectDates(): Promise<Map<string, string>> {
   return map;
 }
 
+async function loadSerializedRecords(
+  importId: number,
+): Promise<ReturnType<typeof serializeRecord>[]> {
+  return loadCachedSingleFlight(
+    serializedRecordsCache,
+    serializedRecordsInFlight,
+    importId,
+    async () => {
+      // These independent reads remain parallel; single-flight only prevents
+      // concurrent cold requests from repeating this full expansion.
+      const [rows, thicknessLookups, projectDates] = await Promise.all([
+        loadMembership(db, importId),
+        loadThicknessLookups(),
+        loadProjectDates(),
+      ]);
+      rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
+      let nextId = 1;
+      return expandCopies(rows, ({ pool, irJobCardStatus, irJobCardType }) => {
+        const clientMfcDate = projectDates.get(`${pool.job}|${pool.mfcBatch ?? "Z"}`) ?? null;
+        return serializeRecord(
+          pool,
+          importId,
+          nextId++,
+          thicknessLookups,
+          clientMfcDate,
+          irJobCardStatus,
+          irJobCardType,
+        );
+      });
+    },
+  );
+}
+
 // Load the two thickness config maps (RSJ lookup by group key + manual pins by
 // mark_id) so records can be resolved live, exactly like ageing. Read-only.
 // In-process cache for thickness lookups. RSJ/manual thickness tables change
@@ -735,8 +862,10 @@ export function clearThicknessCache(): void {
 export function evictSerializedRecordsCache(importId?: number): void {
   if (importId === undefined) {
     serializedRecordsCache.clear();
+    serializedRecordsInFlight.clear();
   } else {
     serializedRecordsCache.delete(importId);
+    serializedRecordsInFlight.delete(importId);
   }
 }
 
@@ -2753,6 +2882,23 @@ router.delete("/imports", requireAuth, async (req, res): Promise<void> => {
         );
       await tx.delete(uploadStagingTable).where(inArray(uploadStagingTable.id, stagingIds));
     }
+    await tx.delete(contractorMovementTable);
+    await tx
+      .insert(contractorMovementStateTable)
+      .values({
+        id: CONTRACTOR_MOVEMENT_STATE_ID,
+        importCount: 0,
+        sourceMaxImportId: null,
+        completedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: contractorMovementStateTable.id,
+        set: {
+          importCount: 0,
+          sourceMaxImportId: null,
+          completedAt: new Date(),
+        },
+      });
     const deletedPool = await tx.delete(recordPoolTable).returning({ id: recordPoolTable.id });
     return {
       importsDeleted: deletedImports.length,
@@ -2864,29 +3010,7 @@ router.get("/imports/:id/records", async (req, res): Promise<void> => {
     return;
   }
 
-  // Serve from cache if available — avoids the O(57k) serialize+sort on hot paths.
-  const cachedRecords = serializedRecordsCache.get(params.data.id);
-  if (cachedRecords) {
-    res.json(cachedRecords);
-    return;
-  }
-
-  // Fire all three reads in parallel — independent data sources.
-  const [rows, thicknessLookups, projectDates] = await Promise.all([
-    loadMembership(db, params.data.id),
-    loadThicknessLookups(),
-    loadProjectDates(),
-  ]);
-  rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
-
-  let nextId = 1;
-  const out = expandCopies(rows, ({ pool, irJobCardStatus, irJobCardType }) => {
-    const clientMfcDate = projectDates.get(`${pool.job}|${pool.mfcBatch ?? "Z"}`) ?? null;
-    return serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate, irJobCardStatus, irJobCardType);
-  });
-  serializedRecordsCache.set(params.data.id, out);
-
-  res.json(out);
+  res.json(await loadSerializedRecords(params.data.id));
 });
 
 // Server-side Overview summary. Computes every headline metric the Overview page
@@ -2919,24 +3043,7 @@ router.post("/imports/:id/summary", async (req, res): Promise<void> => {
   // Reuse the serialized records array from cache (populated by /records) to
   // avoid a redundant O(57 k) serialize+sort when the Overview dashboard loads
   // summary and records in parallel on the same import.
-  let serialized = serializedRecordsCache.get(params.data.id);
-  if (!serialized) {
-    // Serialize the full record set EXACTLY as /records does, then apply the same
-    // shared filter + aggregators the client uses (byte-identical by construction).
-    // Fire all three reads in parallel — independent data sources.
-    const [rows, thicknessLookups, projectDatesForSummary] = await Promise.all([
-      loadMembership(db, params.data.id),
-      loadThicknessLookups(),
-      loadProjectDates(),
-    ]);
-    rows.sort((a, b) => a.pool.markId.localeCompare(b.pool.markId));
-    let nextId = 1;
-    serialized = expandCopies(rows, ({ pool, irJobCardStatus, irJobCardType }) => {
-      const clientMfcDate = projectDatesForSummary.get(`${pool.job}|${pool.mfcBatch ?? "Z"}`) ?? null;
-      return serializeRecord(pool, params.data.id, nextId++, thicknessLookups, clientMfcDate, irJobCardStatus, irJobCardType);
-    });
-    serializedRecordsCache.set(params.data.id, serialized);
-  }
+  const serialized = await loadSerializedRecords(params.data.id);
 
   // Contractor sub-category overlay (normalized name -> category + tags), matching
   // the client's useContractorCategoryMap. Only consulted when those filters are
@@ -3094,50 +3201,12 @@ router.get("/imports/:id/movement", async (req, res): Promise<void> => {
     return;
   }
 
-  const current = await loadIdentityStates(target.id);
-
-  // Bound the history walk to the global WIP cutoff so movement ignores
-  // pre-cutoff imports as if never uploaded. cutoffSql(null) is a no-op.
-  const movementCutoff = await loadValidFrom();
-  const priorImports = await db
-    .select({ id: importsTable.id, createdAt: importsTable.createdAt })
-    .from(importsTable)
-    .where(and(
-      previousImportCondition(target.reportDate, target.id),
-      cutoffSql(movementCutoff),
-    ))
-    .orderBy(sql`${importsTable.reportDate} DESC NULLS LAST`, desc(importsTable.id));
-
-  const days = new Map<string, number | null>();
-  for (const key of current.keys()) days.set(key, null);
-
-  const stillMatching = new Set(current.keys());
-  for (const imp of priorImports) {
-    if (stillMatching.size === 0) break;
-    const priorSigs = await loadIdentityStates(imp.id);
-    const age = daysSince(imp.createdAt);
-    for (const key of Array.from(stillMatching)) {
-      const prior = priorSigs.get(key);
-      if (prior && prior.sig === current.get(key)!.sig) {
-        days.set(key, age);
-      } else {
-        stillMatching.delete(key);
-      }
-    }
-  }
-
-  const items = Array.from(current.entries()).map(([key, st]) => ({
-    markId: st.markId,
-    jobCardNo: st.jobCardNo,
-    daysSinceLastMovement: days.get(key) ?? null,
-  }));
-
-  const movementResponse = {
-    importId: target.id,
-    hasHistory: priorImports.length > 0,
-    items,
-  };
-  movementResponseCache.set(target.id, movementResponse);
+  const movementResponse = await loadCachedSingleFlight(
+    movementResponseCache,
+    movementResponseInFlight,
+    target.id,
+    () => buildMovementResponse(target),
+  );
   res.json(movementResponse);
 });
 
@@ -3163,9 +3232,7 @@ interface VelocityState {
 async function loadVelocityStates(
   importId: number,
 ): Promise<Map<string, VelocityState>> {
-  const cached = velocityStateCache.get(importId);
-  if (cached) return cached;
-
+  return loadCachedSingleFlight(velocityStateCache, velocityStateInFlight, importId, async () => {
   const rows = await db
     .select({
       markId: recordPoolTable.markId,
@@ -3215,8 +3282,8 @@ async function loadVelocityStates(
       sequence,
     });
   }
-  velocityStateCache.set(importId, out);
   return out;
+  });
 }
 
 // Today's date as a YYYY-MM-DD string (UTC). Used as the Order Review pairing
@@ -3483,20 +3550,20 @@ router.get("/imports/:id/velocity", async (req, res): Promise<void> => {
 });
 
 // Permanent per-project turnaround milestones (Ready for Dispatch / Dispatched).
-// Recomputed deterministically from the full import history on each read (and on
-// each upload); captured dates are preserved (capture-once) and persisted so
-// they survive after a project leaves the report. Purely additive.
+// Upload/delete/settings/admin paths keep the persisted capture-once ledger
+// current. Normal reads avoid replaying the full import history; an active WIP
+// cutoff remains a bounded, non-persisted recomputation inside loadMilestones().
 router.get("/milestones", async (_req, res): Promise<void> => {
-  const items = await recomputeMilestones();
+  const items = await loadMilestones();
   res.json({ items, generatedAt: new Date().toISOString() });
 });
 
 // Contractor Performance report: a daily log of how much work (marks +
 // weight) moved from one activity to the next, credited to the contractor of
-// the FROM activity. Recomputed deterministically from the full import
-// history on each read (and on each upload/delete/settings change).
+// the FROM activity. Upload/delete/settings/admin paths keep the persisted
+// ledger current, so report reads do not replay the full history.
 router.get("/contractor-movement", async (_req, res): Promise<void> => {
-  const entries = await recomputeContractorMovement();
+  const entries = await loadContractorMovement();
   res.json({ entries, generatedAt: new Date().toISOString() });
 });
 

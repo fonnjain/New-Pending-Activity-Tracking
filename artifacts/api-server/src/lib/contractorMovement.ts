@@ -5,6 +5,8 @@ import {
   importRowsTable,
   recordPoolTable,
   contractorMovementTable,
+  contractorMovementStateTable,
+  CONTRACTOR_MOVEMENT_STATE_ID,
 } from "@workspace/db";
 import { buildIdentityBridge, identityRawKey, type IdentityRow } from "./identityBridge";
 
@@ -68,6 +70,28 @@ function groupKey(entryDate: string, project: string, contractor: string | null,
 // entire import history and persist it. Idempotent; returns the flat list of
 // entries (already the report's natural "detail" grain) for direct API use.
 export async function recomputeContractorMovement(): Promise<ContractorMovementEntry[]> {
+  if (contractorMovementRecomputeInFlight) return contractorMovementRecomputeInFlight;
+
+  let flight!: Promise<ContractorMovementEntry[]>;
+  flight = (async () => {
+    try {
+      return await recomputeContractorMovementOnce();
+    } finally {
+      if (contractorMovementRecomputeInFlight === flight) {
+        contractorMovementRecomputeInFlight = null;
+      }
+    }
+  })();
+  contractorMovementRecomputeInFlight = flight;
+  return flight;
+}
+
+// A full rebuild truncates and replays the ledger, so concurrent callers must
+// share one run. The promise is deliberately not retained after completion:
+// each later request still performs its normal deterministic replay.
+let contractorMovementRecomputeInFlight: Promise<ContractorMovementEntry[]> | null = null;
+
+async function recomputeContractorMovementOnce(): Promise<ContractorMovementEntry[]> {
   const imports = await db
     .select({
       id: importsTable.id,
@@ -196,6 +220,22 @@ export async function recomputeContractorMovement(): Promise<ContractorMovementE
         })),
       );
     }
+    await tx
+      .insert(contractorMovementStateTable)
+      .values({
+        id: CONTRACTOR_MOVEMENT_STATE_ID,
+        importCount: imports.length,
+        sourceMaxImportId: imports.at(-1)?.id ?? null,
+        completedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: contractorMovementStateTable.id,
+        set: {
+          importCount: imports.length,
+          sourceMaxImportId: imports.at(-1)?.id ?? null,
+          completedAt: new Date(),
+        },
+      });
   });
 
   return entries
@@ -214,6 +254,31 @@ export async function recomputeContractorMovement(): Promise<ContractorMovementE
 // Read the persisted ledger without recomputing (cheap read used where a
 // recompute has already run elsewhere in the request).
 export async function loadContractorMovement(): Promise<ContractorMovementEntry[]> {
+  const [state] = await db
+    .select({
+      id: contractorMovementStateTable.id,
+      importCount: contractorMovementStateTable.importCount,
+      sourceMaxImportId: contractorMovementStateTable.sourceMaxImportId,
+    })
+    .from(contractorMovementStateTable)
+    .where(eq(contractorMovementStateTable.id, CONTRACTOR_MOVEMENT_STATE_ID))
+    .limit(1);
+  const importIds = await db
+    .select({ id: importsTable.id })
+    .from(importsTable)
+    .orderBy(asc(importsTable.id));
+  const currentMaxImportId = importIds.at(-1)?.id ?? null;
+
+  if (
+    !state ||
+    (
+      state.importCount !== importIds.length ||
+      state.sourceMaxImportId !== currentMaxImportId
+    )
+  ) {
+    return recomputeContractorMovement();
+  }
+
   const rows = await db.select().from(contractorMovementTable);
   return rows
     .map((r) => ({

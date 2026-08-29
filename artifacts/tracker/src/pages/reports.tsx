@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { Fragment, useMemo, useState, useEffect } from "react";
 import { NetBalanceMovementPanel } from "@/components/NetBalanceMovementPanel";
 import { ContractorNetMovementPanel } from "@/components/ContractorNetMovementPanel";
 import {
@@ -620,16 +620,6 @@ function ReportBuilder() {
     ]).catch((err) => console.error("[Export] report failed", err));
   };
 
-  if (selectedImportId == null) {
-    return (
-      <Card className="border-border">
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Upload or select an import on the Data page to build a report.
-        </CardContent>
-      </Card>
-    );
-  }
-
   // otherEnriched grouped by activity key (process-ordered), respecting TABLE_CAP.
   const otherByActivity = useMemo(() => {
     const visible = otherEnriched.slice(0, TABLE_CAP);
@@ -641,6 +631,16 @@ function ReportBuilder() {
     }
     return [...groups.entries()].sort(([a], [b]) => compareActivity(a, b));
   }, [otherEnriched, enrichedRows]);
+
+  if (selectedImportId == null) {
+    return (
+      <Card className="border-border">
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Upload or select an import on the Data page to build a report.
+        </CardContent>
+      </Card>
+    );
+  }
 
   // Shared row renderer for itemwise sections (Release Bal, Assignment Bal, main).
   // Column order: Mark No. | Section | Length | Width | Bal Qty | Bal Wt (MT) | Activity | Contractor | Last Op Date | Ageing
@@ -882,9 +882,11 @@ function ReportBuilder() {
                   {itemwiseColumnHeaders}
                   {renderActivityGroup("Release Bal.", relBalEnriched, "rb")}
                   {renderActivityGroup("Awaiting Assignment", assignBalEnriched, "ab")}
-                  {otherByActivity.map(([act, actRows]) =>
-                    renderActivityGroup(act, actRows, `act-${act}`)
-                  )}
+                  {otherByActivity.map(([act, actRows]) => (
+                    <Fragment key={act}>
+                      {renderActivityGroup(act, actRows, `act-${act}`)}
+                    </Fragment>
+                  ))}
                 </>
               )}
               {rows.length === 0 && (
@@ -928,7 +930,7 @@ const B_RANK = activityRank("B");
 // Section routing is PER-MARK:
 //   NOT_RELEASED (Type "Job Card Not Started" + Status "Initial") → UPCOMING
 //   everything else → Operational / In Hand as before.
-// Upcoming applies the same per-operation rules as In Hand (positional + Col Q
+// Upcoming applies the same per-operation rules as In Hand (positional + Operation
 // route guard for W/B; sectionType + holeOperation for the hole columns).
 function fabLoadMatch(
   section: FabLoadSection,
@@ -973,11 +975,11 @@ function fabLoadMatch(
   switch (column) {
     case "welded":
       // before W (C,HG,RFI,NH,B,HAB); unknown ranks excluded. AND the mark must
-      // actually weld: W must be in its Col Q route, else it is upcoming-load for
+      // actually weld: W must be in its Operation route, else it is upcoming-load for
       // an operation it never performs. Blank route keeps prior behaviour.
       return rank < W_RANK && routeIncludesOp(r.operation, "W");
     case "bending":
-      // before B (C,HG,RFI,NH) AND B must be in the mark's Col Q route.
+      // before B (C,HG,RFI,NH) AND B must be in the mark's Operation route.
       return rank < B_RANK && routeIncludesOp(r.operation, "B");
     case "anglePunch":
       return sec === "ANGLE" && act === "C" && op === "PUNCHING";

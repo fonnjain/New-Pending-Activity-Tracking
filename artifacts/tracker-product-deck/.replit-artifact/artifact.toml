@@ -1,0 +1,28 @@
+kind = "slides"
+previewPath = "/tracker-product-deck/"
+title = "Balance & Activity Tracker — Product Deck"
+description = "An 18-slide product overview deck for the Balance & Activity Tracker, showing how steel-fabrication teams turn spreadsheet snapshots into auditable operational control."
+version = "1.0.0"
+id = "artifacts/tracker-product-deck"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/tracker-product-deck/" ]
+localPort = 21924
+
+[services.development]
+run = "pnpm --filter @workspace/tracker-product-deck run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/tracker-product-deck", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/tracker-product-deck/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21924"
+BASE_PATH = "/tracker-product-deck/"

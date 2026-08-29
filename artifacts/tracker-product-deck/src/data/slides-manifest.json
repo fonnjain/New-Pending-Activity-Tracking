@@ -1,0 +1,146 @@
+[
+  {
+    "id": "tracker-deck-01",
+    "position": 1,
+    "filepath": "src/pages/slides/Slide1.tsx",
+    "title": "Balance & Activity Tracker",
+    "description": "A control center for steel-fabrication WIP, production movement, orders, and operational decisions.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-02",
+    "position": 2,
+    "filepath": "src/pages/slides/Slide2.tsx",
+    "title": "The operating challenge",
+    "description": "How spreadsheet snapshots, operational reality, and decision pressure meet.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-03",
+    "position": 3,
+    "filepath": "src/pages/slides/Slide3.tsx",
+    "title": "One system for the full WIP lifecycle",
+    "description": "From source files to history, control, and action.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-04",
+    "position": 4,
+    "filepath": "src/pages/slides/Slide4.tsx",
+    "title": "Start with the files teams already use",
+    "description": "A governed intake path for WIP and Order Review workbooks.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-05",
+    "position": 5,
+    "filepath": "src/pages/slides/Slide5.tsx",
+    "title": "Reliable data, not spreadsheet guesswork",
+    "description": "Integrity rules that make findings visible before they become decisions.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-06",
+    "position": 6,
+    "filepath": "src/pages/slides/Slide6.tsx",
+    "title": "See what is in hand right now",
+    "description": "A live operational lens across WIP, finished goods, and dispatch.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-07",
+    "position": 7,
+    "filepath": "src/pages/slides/Slide7.tsx",
+    "title": "Ageing that follows the work",
+    "description": "Activity-aware ageing for attention where work is waiting.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-08",
+    "position": 8,
+    "filepath": "src/pages/slides/Slide8.tsx",
+    "title": "Fabrication and galvanizing movement",
+    "description": "Route-aware movement and stage completion across contractors.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-09",
+    "position": 9,
+    "filepath": "src/pages/slides/Slide9.tsx",
+    "title": "Order status with history",
+    "description": "Dated Order Review snapshots with traceable change.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-10",
+    "position": 10,
+    "filepath": "src/pages/slides/Slide10.tsx",
+    "title": "Inventory organized for action",
+    "description": "MFC-aware responsibility and ownership views.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-11",
+    "position": 11,
+    "filepath": "src/pages/slides/Slide11.tsx",
+    "title": "Reports for every operating conversation",
+    "description": "Decision views that answer the question behind every total.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-12",
+    "position": 12,
+    "filepath": "src/pages/slides/Slide12.tsx",
+    "title": "Exports that preserve the analysis",
+    "description": "Filtered, formatted handoffs that keep the analysis intact.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-13",
+    "position": 13,
+    "filepath": "src/pages/slides/Slide13.tsx",
+    "title": "Data checks built into the workflow",
+    "description": "Evidence-led review instead of silent correction.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-14",
+    "position": 14,
+    "filepath": "src/pages/slides/Slide14.tsx",
+    "title": "A transparent admin layer",
+    "description": "Controlled administration with evidence and boundaries.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-15",
+    "position": 15,
+    "filepath": "src/pages/slides/Slide15.tsx",
+    "title": "Usage Audit: understand adoption",
+    "description": "Admin-only visibility into activity, pages, reports, and timelines.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-16",
+    "position": 16,
+    "filepath": "src/pages/slides/Slide16.tsx",
+    "title": "Designed for trustworthy decisions",
+    "description": "Validated metadata, bounded intervals, and authenticated access.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-17",
+    "position": 17,
+    "filepath": "src/pages/slides/Slide17.tsx",
+    "title": "The daily operating loop",
+    "description": "A repeatable rhythm from latest source files to accountable action.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "tracker-deck-18",
+    "position": 18,
+    "filepath": "src/pages/slides/Slide18.tsx",
+    "title": "From spreadsheet snapshots to operational control",
+    "description": "One workspace connects source data, production reality, order commitments, and accountable action.",
+    "speakerNotes": ""
+  }
+]

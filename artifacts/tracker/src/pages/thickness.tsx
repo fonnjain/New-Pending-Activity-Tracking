@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { trackReportGenerated } from "@/lib/usage-tracking";
 import { Layers, Trash2, Check, ChevronDown, ChevronRight, BookOpen, Download, Wand2, Upload } from "lucide-react";
 // Note: Trash2 and Check are still used in UnsetWorklistCard; useMemo used in ManualRow.
 
@@ -146,6 +147,7 @@ function exportItemMasterCsv(groups: ItemMasterThicknessGroup[]) {
   a.download = `item_master_thickness_${ts}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+  trackReportGenerated(a.download, "csv");
 }
 
 function ItemMasterThicknessCard({ groups }: { groups: ItemMasterThicknessGroup[] }) {

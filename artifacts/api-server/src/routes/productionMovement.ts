@@ -11,6 +11,7 @@ import { GetImportMovementParams } from "@workspace/api-zod";
 import { previousImportCondition } from "../lib/previous-import-condition";
 
 const router = Router();
+const contractorMovementCache = new Map<string, { days: unknown[] }>();
 
 // Normalise a raw Excel field for mark-key comparison:
 // trim whitespace, strip trailing dots, strip leading dashes, lowercase.
@@ -88,6 +89,12 @@ router.get("/imports/:id/contractor-movement", async (req, res): Promise<void> =
   }
 
   const allIds = allImports.map((i) => i.id);
+  const cacheKey = allIds.join(",");
+  const cached = contractorMovementCache.get(cacheKey);
+  if (cached) {
+    res.json(cached);
+    return;
+  }
 
   type ConMarkRow = {
     importId: number;
@@ -113,15 +120,19 @@ router.get("/imports/:id/contractor-movement", async (req, res): Promise<void> =
     })
     .from(importRowsTable)
     .innerJoin(recordPoolTable, eq(importRowsTable.poolId, recordPoolTable.id))
-    .where(inArray(importRowsTable.importId, allIds));
+    .where(
+      and(
+        inArray(importRowsTable.importId, allIds),
+        eq(recordPoolTable.orderNature, "Structure"),
+      ),
+    );
 
-  // Group by importId, keeping only TLT rows (orderNature = "Structure").
+  // Group by importId. The SQL query already excludes non-TLT rows.
   // Per mark-key (job|alias|markNo), aggregate balanceWt (sum copies) and pick contractor.
   type ConMarkState = { contractor: string; balanceWt: number };
 
   const byImportCon = new Map<number, Map<string, ConMarkState>>();
   for (const r of rawRows) {
-    if (r.orderNature !== "Structure") continue;
     const markKey = `${r.job}\x00${r.alias ?? ""}\x00${r.markNo}`;
     const con = r.contractor?.trim() || "(Unassigned)";
     if (!byImportCon.has(r.importId)) byImportCon.set(r.importId, new Map());
@@ -229,7 +240,13 @@ router.get("/imports/:id/contractor-movement", async (req, res): Promise<void> =
   }
 
   days.reverse(); // chronological: oldest first
-  res.json({ days });
+  const response = { days };
+  contractorMovementCache.set(cacheKey, response);
+  if (contractorMovementCache.size > 20) {
+    const oldest = contractorMovementCache.keys().next().value;
+    if (oldest !== undefined) contractorMovementCache.delete(oldest);
+  }
+  res.json(response);
 });
 
 // GET /imports/:id/production-movement

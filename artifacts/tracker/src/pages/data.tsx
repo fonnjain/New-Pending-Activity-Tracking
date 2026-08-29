@@ -23,7 +23,7 @@ import { Label } from "@/components/ui/label";
 import { FileDown, CheckCircle2, Trash2, FileSpreadsheet, AlertTriangle, RefreshCw, PlusCircle, ChevronDown, ChevronRight, UserPlus, RotateCcw, ShieldCheck, Shield, History, CircleCheck, CircleX, Info, Pencil, Archive } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { createXlsxBlockGridFile, createXlsxFile, createXlsxSheetsFile, downloadZip, exportToXlsx, exportToJson, exportGenOrXlsx, exportTimestamp, exportToXlsxSheets, type DownloadableFile, type XlsxColumn, type XlsxGridBlock, type XlsxGridSheet, type XlsxSheet } from "@/lib/export";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatDateTime } from "@/lib/utils";
 import { AiSanitizePanel } from "@/components/ai-sanitize-panel";
 import { AiReviewPanel } from "@/components/ai-review-panel";
 import { StagedUploadPanel } from "@/components/staged-upload-panel";
@@ -83,13 +83,13 @@ export default function DataView() {
 function TabbedPage({ isAdmin }: { isAdmin: boolean }) {
   const [location, setLocation] = useLocation();
   const visibleTabs = ALL_TABS.filter((t) => isAdmin || !t.adminOnly);
-  const active = visibleTabs.find((t) => t.path === location)?.path ?? visibleTabs[0]?.path ?? "/job-templates";
+  const active = visibleTabs.find((t) => t.path === location)?.path;
 
   return (
     <div className="space-y-4">
       <div className="overflow-x-auto -mx-1 px-1 pb-1">
         <Segmented
-          value={active}
+          value={active ?? ""}
           onChange={(v) => v && setLocation(v)}
           options={visibleTabs.map((t) => ({ value: t.path, label: t.label, disabled: t.disabled }))}
         />
@@ -120,9 +120,9 @@ function TabbedPage({ isAdmin }: { isAdmin: boolean }) {
         <BucketListDatesContent />
       ) : active === "/users" ? (
         <UsersContent />
-      ) : (
+      ) : active === "/data" ? (
         <DataViewContent />
-      )}
+      ) : null}
     </div>
   );
 }
@@ -3596,6 +3596,8 @@ function RoleBadge({ role }: { role: string }) {
 function AddUserForm({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [role, setRole] = useState<"user" | "admin">("user");
   const createUser = useCreateUser();
   const queryClient = useQueryClient();
@@ -3603,12 +3605,38 @@ function AddUserForm({ onClose }: { onClose: () => void }) {
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (password.length < 6) {
+      toast({
+        title: "Password is too short",
+        description: "The initial password must be at least 6 characters.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (password !== confirmPassword) {
+      toast({
+        title: "Passwords do not match",
+        description: "Enter the same initial password in both fields.",
+        variant: "destructive",
+      });
+      return;
+    }
     createUser.mutate(
-      { data: { email: email.trim().toLowerCase(), displayName: displayName.trim() || undefined, role } },
+      {
+        data: {
+          email: email.trim().toLowerCase(),
+          displayName: displayName.trim() || undefined,
+          password,
+          role,
+        },
+      },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
-          toast({ title: "User created", description: `${email} added with default password.` });
+          toast({
+            title: "User created",
+            description: `${email} was added with the initial password you provided.`,
+          });
           onClose();
         },
         onError: (err) => {
@@ -3652,6 +3680,34 @@ function AddUserForm({ onClose }: { onClose: () => void }) {
               />
             </div>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="new-password">Initial password</Label>
+              <Input
+                id="new-password"
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+                placeholder="At least 6 characters"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="new-password-confirm">Confirm initial password</Label>
+              <Input
+                id="new-password-confirm"
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                minLength={6}
+                placeholder="Re-enter password"
+              />
+            </div>
+          </div>
           <div className="space-y-1.5">
             <Label>Role</Label>
             <div className="flex gap-4">
@@ -3666,7 +3722,7 @@ function AddUserForm({ onClose }: { onClose: () => void }) {
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            The user will be created with the default password and must set a new one on first login.
+            The user will sign in with this initial password and must set a new one on first login.
           </p>
           <div className="flex gap-2">
             <Button type="submit" disabled={createUser.isPending} size="sm">
@@ -3861,12 +3917,12 @@ function UsersContent() {
         </CardContent>
       </Card>
 
-      <LoginActivitySection />
+      <LoginActivitySection users={users} />
     </div>
   );
 }
 
-// ── Login Activity ────────────────────────────────────────────────────────────
+// ── Usage Activity ────────────────────────────────────────────────────────────
 
 const SESSION_IDLE_MS = 5 * 60 * 1000; // must match server constant
 
@@ -3886,56 +3942,124 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 }
 
-/** Derive the effective "end time" and duration for a session row. */
 function sessionStatus(s: UserSessionEntry, now: number): {
   statusLabel: string;
   statusClass: string;
-  endTime: string | null;
-  durationSeconds: number | null;
 } {
   if (s.logoutAt) {
-    // Closed session
     return {
-      statusLabel: formatTime(s.logoutAt),
-      statusClass: "",
-      endTime: s.logoutAt,
-      durationSeconds: s.durationSeconds ?? null,
+      statusLabel: "Ended",
+      statusClass: "text-muted-foreground",
     };
   }
-
-  // Open session — determine if still active or idle-ended
-  const anchor = s.lastActivityAt ?? s.loginAt;
+  if (!s.lastHeartbeatAt) {
+    return s.busySeconds !== null
+      ? { statusLabel: "Recorded", statusClass: "text-muted-foreground" }
+      : { statusLabel: "Legacy session", statusClass: "text-muted-foreground" };
+  }
+  const anchor = s.lastHeartbeatAt;
   const idleMs = now - new Date(anchor).getTime();
-  const durationSeconds = Math.max(0, Math.round(
-    (new Date(anchor).getTime() - new Date(s.loginAt).getTime()) / 1000,
-  ));
-
   if (idleMs < SESSION_IDLE_MS) {
-    // Heartbeat received recently → genuinely active
     return {
-      statusLabel: "Active",
-      statusClass: "text-green-600 font-medium",
-      endTime: null,
-      durationSeconds,
+      statusLabel: s.lastClientState === "busy" ? "Busy" : "Idle",
+      statusClass: s.lastClientState === "busy"
+        ? "text-green-600 font-medium"
+        : "text-amber-700 dark:text-amber-400 font-medium",
     };
   }
-
-  // No heartbeat for >= 5 min → session effectively ended at last activity
   const idleMinutes = Math.floor(idleMs / 60_000);
   return {
     statusLabel: `Idle (${idleMinutes}m ago)`,
     statusClass: "text-muted-foreground",
-    endTime: anchor,
-    durationSeconds,
   };
+}
+
+function TimelineEntry({ entry }: { entry: UserSessionEntry["timeline"][number] }) {
+  const description = entry.kind === "session_start"
+    ? "Session started"
+    : entry.kind === "session_end"
+      ? "Session ended"
+      : entry.kind === "page_visit"
+        ? `Visited ${entry.pageLabel || entry.pagePath || "a page"}`
+        : entry.kind === "report_generated"
+          ? `Generated ${entry.reportName || "a report"}${entry.fileType ? ` (${entry.fileType.toUpperCase()})` : ""}`
+          : `${entry.pageLabel === "hidden" ? "App hidden" : "App visible"}${entry.pagePath ? ` — ${entry.pagePath}` : ""}`;
+  return (
+    <li className="flex gap-3 text-xs">
+      <span className="tabular-nums text-muted-foreground shrink-0">{formatDateTime(entry.at)}</span>
+      <span>{description}</span>
+    </li>
+  );
+}
+
+function SessionUsageRow({ session, now }: { session: UserSessionEntry; now: number }) {
+  const [open, setOpen] = useState(false);
+  const status = sessionStatus(session, now);
+  const lastSeen = session.lastHeartbeatAt ?? session.lastActivityAt ?? session.logoutAt;
+  return (
+    <Fragment>
+      <tr className="border-b border-border hover:bg-muted/20 transition-colors">
+        <td className="py-2 px-3">
+          <div className="font-medium text-sm">{session.displayName || <span className="italic text-muted-foreground">—</span>}</div>
+          <div className="text-xs text-muted-foreground">{session.email}</div>
+        </td>
+        <td className="py-2 px-3 text-xs tabular-nums whitespace-nowrap">{formatTime(session.loginAt)}</td>
+        <td className={`py-2 px-3 text-xs tabular-nums whitespace-nowrap ${status.statusClass}`}>
+          {status.statusLabel}
+          {lastSeen && <div className="text-[10px] font-normal text-muted-foreground">last seen {formatTime(lastSeen)}</div>}
+        </td>
+        <td className="py-2 px-3 text-xs tabular-nums whitespace-nowrap">{formatDuration(session.busySeconds ?? null)}</td>
+        <td className="py-2 px-3 text-xs tabular-nums whitespace-nowrap">{formatDuration(session.idleSeconds ?? null)}</td>
+        <td className="py-2 px-3 text-xs tabular-nums text-center">{session.pageVisitCount}</td>
+        <td className="py-2 px-3 text-xs tabular-nums text-center">{session.reportCount}</td>
+        <td className="py-2 px-3 text-xs max-w-[180px] truncate">{session.lastPagePath || "—"}</td>
+        <td className="py-2 px-3 text-xs">
+          <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setOpen((value) => !value)}>
+            {open ? "Hide" : "Timeline"}
+          </Button>
+        </td>
+      </tr>
+      {open && (
+        <tr className="border-b border-border bg-muted/10">
+          <td colSpan={9} className="px-5 py-3">
+            {session.timeline.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No detailed events were captured for this legacy session.</p>
+            ) : (
+              <ol className="space-y-1.5">
+                {session.timeline.map((entry, index) => (
+                  <TimelineEntry key={`${entry.kind}-${entry.at}-${index}`} entry={entry} />
+                ))}
+              </ol>
+            )}
+          </td>
+        </tr>
+      )}
+    </Fragment>
+  );
 }
 
 function DayBlock({ date, sessions, now }: { date: string; sessions: UserSessionEntry[]; now: number }) {
   const [open, setOpen] = useState(true);
-
   const displayDate = formatDate(date);
-
   const uniqueUsers = new Set(sessions.map((s) => s.userId)).size;
+  const users = Array.from(new Map(sessions.map((session) => [session.userId, session])).values()).map((user) => {
+    const ownSessions = sessions.filter((session) => session.userId === user.userId);
+    const knownBusy = ownSessions.filter((session) => session.busySeconds != null);
+    const knownIdle = ownSessions.filter((session) => session.idleSeconds != null);
+    return {
+      id: user.userId,
+      name: user.displayName || user.email,
+      sessions: ownSessions.length,
+      busySeconds: knownBusy.length
+        ? knownBusy.reduce((sum, session) => sum + (session.busySeconds ?? 0), 0)
+        : null,
+      idleSeconds: knownIdle.length
+        ? knownIdle.reduce((sum, session) => sum + (session.idleSeconds ?? 0), 0)
+        : null,
+      pages: ownSessions.reduce((sum, session) => sum + session.pageVisitCount, 0),
+      reports: ownSessions.reduce((sum, session) => sum + session.reportCount, 0),
+    };
+  });
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -3952,43 +4076,77 @@ function DayBlock({ date, sessions, now }: { date: string; sessions: UserSession
         </div>
       </button>
       {open && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/20">
-                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">User</th>
-                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Session Start</th>
-                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Session End</th>
-                <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Active Duration</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map((s) => {
-                const status = sessionStatus(s, now);
-                return (
-                  <tr key={s.id} className="border-b border-border last:border-0 hover:bg-muted/20 transition-colors">
-                    <td className="py-2 px-3">
-                      <div className="font-medium text-sm">{s.displayName || <span className="italic text-muted-foreground">—</span>}</div>
-                      <div className="text-xs text-muted-foreground">{s.email}</div>
-                    </td>
-                    <td className="py-2 px-3 text-xs tabular-nums">{formatTime(s.loginAt)}</td>
-                    <td className={`py-2 px-3 text-xs tabular-nums ${status.statusClass}`}>
-                      {status.statusLabel}
-                    </td>
-                    <td className="py-2 px-3 text-xs tabular-nums">{formatDuration(status.durationSeconds)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="space-y-3 p-3">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {users.map((user) => (
+              <div key={user.id} className="rounded-md border border-border bg-background px-3 py-2">
+                <div className="font-medium text-sm truncate">{user.name}</div>
+                <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>Busy <strong className="text-foreground tabular-nums">{formatDuration(user.busySeconds)}</strong></span>
+                  <span>Idle <strong className="text-foreground tabular-nums">{formatDuration(user.idleSeconds)}</strong></span>
+                  <span>{user.pages} page visit{user.pages !== 1 ? "s" : ""}</span>
+                  <span>{user.reports} report{user.reports !== 1 ? "s" : ""}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/20">
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">User</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Started</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Status / Last Seen</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Busy</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Idle</th>
+                  <th className="text-center py-2 px-3 text-xs font-semibold text-muted-foreground">Pages</th>
+                  <th className="text-center py-2 px-3 text-xs font-semibold text-muted-foreground">Reports</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Last Page</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.map((session) => <SessionUsageRow key={session.id} session={session} now={now} />)}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function LoginActivitySection() {
-  const { data, isLoading } = useGetUserActivity({ query: { queryKey: getGetUserActivityQueryKey() } });
+function dateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function LoginActivitySection({ users }: { users: AppUser[] }) {
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [startDate, setStartDate] = useState(() =>
+    dateInputValue(new Date(Date.now() - 89 * 24 * 60 * 60 * 1000)),
+  );
+  const [endDate, setEndDate] = useState(() => dateInputValue(new Date()));
+  const [appliedFilters, setAppliedFilters] = useState(() => ({
+    userId: "",
+    startDate: dateInputValue(new Date(Date.now() - 89 * 24 * 60 * 60 * 1000)),
+    endDate: dateInputValue(new Date()),
+  }));
+  const validDateRange = Boolean(startDate && endDate && startDate <= endDate);
+  const activityParams = useMemo(() => ({
+    ...(appliedFilters.userId ? { userId: appliedFilters.userId } : {}),
+    startDate: appliedFilters.startDate,
+    endDate: appliedFilters.endDate,
+  }), [appliedFilters]);
+  const { data, isLoading } = useGetUserActivity(activityParams, {
+    query: {
+      enabled: validDateRange,
+      queryKey: getGetUserActivityQueryKey(activityParams),
+      refetchInterval: 60_000,
+    },
+  });
   const days = data?.days ?? [];
   const totalSessions = data?.totalSessions ?? 0;
   const now = Date.now();
@@ -4001,13 +4159,100 @@ function LoginActivitySection() {
           <p className="text-xs text-muted-foreground mt-0.5">
             {isLoading
               ? "Loading..."
-              : `${totalSessions} session${totalSessions !== 1 ? "s" : ""} total — sessions split automatically after 5 min of inactivity`}
+              : `${totalSessions} session${totalSessions !== 1 ? "s" : ""} in this filtered range — busy/idle time is measured from browser activity, not login duration`}
           </p>
         </div>
       </div>
 
+      <Card className="border-border">
+        <CardContent className="p-3">
+          <div className="grid gap-3 md:grid-cols-[minmax(220px,1fr)_repeat(2,minmax(150px,180px))_auto] md:items-end">
+            <div className="space-y-1.5">
+              <Label htmlFor="usage-user-filter" className="text-xs font-semibold">User</Label>
+              <select
+                id="usage-user-filter"
+                value={selectedUserId}
+                onChange={(event) => {
+                  const userId = event.target.value;
+                  setSelectedUserId(userId);
+                  setAppliedFilters((previous) => ({ ...previous, userId }));
+                }}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option value="">All users</option>
+                {users
+                  .slice()
+                  .sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email))
+                  .map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.displayName || user.email}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="usage-start-date" className="text-xs font-semibold">From</Label>
+              <Input
+                id="usage-start-date"
+                type="date"
+                value={startDate}
+                onChange={(event) => {
+                  const nextStartDate = event.target.value;
+                  setStartDate(nextStartDate);
+                  if (nextStartDate && endDate && nextStartDate <= endDate) {
+                    setAppliedFilters((previous) => ({ ...previous, startDate: nextStartDate }));
+                  }
+                }}
+                aria-label="Usage activity start date"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="usage-end-date" className="text-xs font-semibold">To</Label>
+              <Input
+                id="usage-end-date"
+                type="date"
+                value={endDate}
+                onChange={(event) => {
+                  const nextEndDate = event.target.value;
+                  setEndDate(nextEndDate);
+                  if (startDate && nextEndDate && startDate <= nextEndDate) {
+                    setAppliedFilters((previous) => ({ ...previous, endDate: nextEndDate }));
+                  }
+                }}
+                aria-label="Usage activity end date"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setSelectedUserId("");
+                const resetStartDate = dateInputValue(new Date(Date.now() - 89 * 24 * 60 * 60 * 1000));
+                const resetEndDate = dateInputValue(new Date());
+                setStartDate(resetStartDate);
+                setEndDate(resetEndDate);
+                setAppliedFilters({ userId: "", startDate: resetStartDate, endDate: resetEndDate });
+              }}
+            >
+              Reset
+            </Button>
+          </div>
+          {!validDateRange && (
+            <p className="mt-2 text-xs text-destructive">Choose a valid date span where From is on or before To.</p>
+          )}
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Showing {startDate && endDate ? `${formatDate(startDate)} to ${formatDate(endDate)}` : "a custom date span"}.
+            Events are counted on the day they occurred.
+          </p>
+        </CardContent>
+      </Card>
 
-      {isLoading ? (
+
+      {!validDateRange ? (
+        <Card className="border-border">
+          <CardContent className="p-6 text-center text-muted-foreground text-sm">Activity is waiting for a valid date range.</CardContent>
+        </Card>
+      ) : isLoading ? (
         <Card className="border-border">
           <CardContent className="p-6 text-center text-muted-foreground text-sm">Loading activity...</CardContent>
         </Card>

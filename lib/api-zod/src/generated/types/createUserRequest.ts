@@ -10,5 +10,10 @@ import type { CreateUserRequestRole } from './createUserRequestRole';
 export interface CreateUserRequest {
   email: string;
   displayName?: string;
+  /**
+     * Initial password. The user must change it on first login.
+     * @minLength 6
+     */
+  password: string;
   role?: CreateUserRequestRole;
 }

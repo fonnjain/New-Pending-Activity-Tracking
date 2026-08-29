@@ -55,6 +55,19 @@ export const contractorMovementTable = pgTable("contractor_movement", {
   index("contractor_movement_import_id_idx").on(t.importId),
 ]);
 
+// Singleton completion marker for the persisted ledger. The ledger can
+// legitimately contain zero rows, so row-count alone cannot distinguish a
+// successful zero-movement rebuild from an uninitialized/failed backfill.
+export const CONTRACTOR_MOVEMENT_STATE_ID = "default";
+export const contractorMovementStateTable = pgTable("contractor_movement_state", {
+  id: text("id").primaryKey(),
+  importCount: integer("import_count").notNull().default(0),
+  sourceMaxImportId: integer("source_max_import_id"),
+  completedAt: timestamp("completed_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const insertContractorMovementSchema = createInsertSchema(
   contractorMovementTable,
 ).omit({ id: true, createdAt: true });

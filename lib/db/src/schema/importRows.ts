@@ -34,6 +34,8 @@ export const importRowsTable = pgTable(
     // Standalone index on import_id so Postgres can range-scan efficiently for
     // "WHERE import_id = ?" without a full sequential scan of 1M+ rows.
     index("import_rows_import_id_idx").on(t.importId),
+    // Supports pool-centric joins and lookups without scanning every import.
+    index("import_rows_pool_id_idx").on(t.poolId),
   ],
 );
 

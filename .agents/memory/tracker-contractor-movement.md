@@ -9,25 +9,17 @@ Tracks, per day, how many marks (and how much weight) moved from one activity
 to the next, crediting the contractor of the FROM (source) activity — the one
 who completed and released that stage, not the one who received it.
 
-**Engine shape:** mirrors `tracker-accumulated-wip.md`'s full id-ASC replay
-pattern, not the milestone capture-once pattern — a per-identity `prev` map
-walks every import in order, and any activity change between consecutive
-imports for the same identity emits a ledger entry (date/project/contractor/
-from/to/markCount/weightKg). TRUNCATE + reinsert on every recompute, wired
-into the same 4 best-effort call sites as Accumulated WIP and Order Status
-(upload, staged commit, delete, settings PUT).
+The report is derived from the full chronological history, not capture-once
+milestones. Regressing and later crossing the same activity transition again
+is intentionally counted again.
 
 **No TLT-only restriction.** Unlike Accumulated WIP (TLT-only) or Fab Load,
 this report intentionally includes every category/project — it's a general
 contractor-performance view, not a TLT planning tool.
 
-**Frontend scope:** sourced from a dedicated `GET /contractor-movement`
-endpoint (full history, independent of the currently selected import), so it
-honours only the global Job filter — there's no single activity/contractor
-per entry to filter by since every row IS a from/to pair. Excel export has one
-sheet per contractor (Detail) plus Summary + Stage Summary sheets, all via the
-shared `exportToXlsxSheets`/`XlsxColumn` helpers (sheet name dedup/sanitize is
-already built into that helper — never re-derive it).
+**Frontend scope:** full history, independent of the currently selected import,
+so it honours only filters represented by each movement entry. Excel export
+includes contractor detail, overall summary, and stage summary views.
 
 **Fabrication/Galvanizing bifurcation is a pure display-layer classification,
 not a stored field.** `stageFor(fromActivity)`: leaving `TS` → "Fabrication",
@@ -39,3 +31,18 @@ can be reused verbatim on the Reports page AND the Contractor Wise page,
 with local `contractorFilter`/`stageFilter` state driving click-to-filter on
 every table inside the component (summary row, stage-totals cell, detail
 rows all share the same two filters).
+
+## Persisted-read reliability rule
+
+Expensive derived reports may serve persisted results only when a durable
+completion marker proves they match the current source snapshot. Missing or
+mismatched proof must trigger repair; the presence or absence of result rows is
+not proof of freshness.
+
+**Why:** Best-effort rebuilding can fail after a source change has committed.
+Trusting old rows (or treating a valid empty result as uninitialized) either
+serves stale business figures indefinitely or restores the original page delay.
+
+**How to apply:** Source changes must either certify a completed rebuild or
+leave freshness proof invalid so the next read repairs it. Caches over immutable
+snapshot windows must be source-versioned and bounded.

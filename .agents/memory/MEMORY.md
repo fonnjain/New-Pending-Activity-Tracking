@@ -61,3 +61,5 @@
 - [Canonical WIP activity aliases](tracker-activity-aliases.md) — P/S fold to RFI before hashing; activity_raw is audit-only and first alias wins on shared-pool conflict.
 - [Order Review regression signatures](tracker-order-review-signatures.md) — labels never alter blockers: cancellation is end-at-zero, scope reduction is a non-zero WO decrease, correction needs unchanged WO.
 - [Anomaly constraint publish](tracker-anomaly-constraint-publish.md) — Drizzle may show a bare legacy CHECK drop; startup restores the exact three-value constraint and production must be verified after publish.
+- [Operation-route separators](tracker-operation-route-separators.md) — current WIP routes use semicolons; route-based reports must tokenize semicolons as well as legacy commas.
+- [Usage-audit privacy and daily attribution](tracker-usage-audit.md) — telemetry is allowlisted metadata only; split event/segment totals by occurrence day, never session-start day.

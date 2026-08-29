@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useMemo, ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useListImports, useListContractorCategories, useListContractorAliases, useGetCurrentJobs, useGetInventoryBuckets, getGetInventoryBucketsQueryKey, useListInventoryManualE, useListInventoryMfcBatchColors, type Record } from "@workspace/api-client-react";
+import { useListImports, useListContractorCategories, useListContractorAliases, useGetCurrentJobs, useGetInventoryBuckets, getGetInventoryBucketsQueryKey, useListInventoryManualE, getListInventoryManualEQueryKey, useListInventoryMfcBatchColors, getListInventoryMfcBatchColorsQueryKey, type Record } from "@workspace/api-client-react";
 import { computeAutoBuckets } from "@/lib/inventory";
 import { getActivityBundle, normalizeContractorName, resolveContractorKey, filterRecords, parseAssignDateMs, dateToDayKey, type RecordFilters } from "@workspace/domain";
 
@@ -146,6 +146,7 @@ const defaultFilters: Filters = {
 };
 
 const TrackerContext = createContext<TrackerContextType | undefined>(undefined);
+const EMPTY_JOB_SET: ReadonlySet<string> = new Set<string>();
 
 export function TrackerProvider({ children }: { children: ReactNode }) {
   const [selectedImportId, setSelectedImportIdState] = useState<number | null>(null);
@@ -158,11 +159,19 @@ export function TrackerProvider({ children }: { children: ReactNode }) {
   // Fetched once at the provider level so every page reads from the same
   // cache rather than each triggering its own useMemo computation.
   const jobTemplates = useJobTemplates();
+  // Bucket and MFC-date ranks are only read by their corresponding sort modes.
+  // Keep these relatively expensive inventory queries dormant for the default
+  // project/template, ageing, and assign-date sorts (and every unrelated view).
+  const needsInventoryRanks = projectSort === "bucket" || projectSort === "mfcDate";
   const { data: bucketsData } = useGetInventoryBuckets({
-    query: { queryKey: getGetInventoryBucketsQueryKey() },
+    query: { enabled: needsInventoryRanks, queryKey: getGetInventoryBucketsQueryKey() },
   });
-  const { data: manualE = [] } = useListInventoryManualE();
-  const { data: mfcBatchColors = [] } = useListInventoryMfcBatchColors();
+  const { data: manualE = [] } = useListInventoryManualE({
+    query: { enabled: needsInventoryRanks, queryKey: getListInventoryManualEQueryKey() },
+  });
+  const { data: mfcBatchColors = [] } = useListInventoryMfcBatchColors({
+    query: { enabled: needsInventoryRanks, queryKey: getListInventoryMfcBatchColorsQueryKey() },
+  });
 
   const sortRanks = useMemo((): ProjectSortRanks => {
     // Job Templates List rank.
@@ -586,7 +595,7 @@ export function useActiveJobSet(): ReadonlySet<string> {
       }
       return union;
     }
-    return new Set<string>();
+    return EMPTY_JOB_SET;
   }, [filters.job, filters.selectedTemplateIds, currentJobsSet, templates]);
 }
 
@@ -647,21 +656,46 @@ export function useFilteredRecords(records: Record[] | undefined) {
   const categoryMap = useContractorCategoryMap();
   const aliasMap = useContractorAliasMap();
   const activeJobSet = useActiveJobSet();
+  const plantLocationSet = useMemo(
+    () => new Set(filters.plantLocations),
+    [filters.plantLocations],
+  );
+  const resolved = useMemo(
+    () => resolveActiveFilters(filters, activeJobSet),
+    [
+      filters.category,
+      filters.ntltSubtype,
+      filters.job,
+      filters.section,
+      filters.mfcBatch,
+      filters.structure,
+      filters.mark,
+      filters.contractor,
+      filters.contractorCategory,
+      filters.outVendorType,
+      filters.activity,
+      filters.holeOperation,
+      filters.dateRange,
+      filters.search,
+      filters.selectedJobs,
+      filters.selectedJobCodes,
+      activeJobSet,
+    ],
+  );
 
   return useMemo(() => {
     if (!records) return [];
-    const { filters: rf, dateWindow } = resolveActiveFilters(filters, activeJobSet);
+    const { filters: rf, dateWindow } = resolved;
     let result = filterRecords(records, rf, { dateWindow, categoryMap, aliasMap });
     // Plant location post-filter: restrict to contractors whose plantLocation is
     // in the selected set. An unclassified/unmapped contractor (plantLocation null)
     // is excluded when any location is selected.
-    if (filters.plantLocations.length > 0) {
-      const plantSet = new Set(filters.plantLocations);
+    if (plantLocationSet.size > 0) {
       result = result.filter((r) => {
         const info = contractorCategoryFor(r.contractor, categoryMap);
-        return info.plantLocation != null && plantSet.has(info.plantLocation);
+        return info.plantLocation != null && plantLocationSet.has(info.plantLocation);
       });
     }
     return result;
-  }, [records, filters, categoryMap, aliasMap, activeJobSet]);
+  }, [records, resolved, categoryMap, aliasMap, plantLocationSet]);
 }

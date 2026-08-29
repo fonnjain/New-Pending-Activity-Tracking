@@ -723,6 +723,12 @@ paths:
         server closes it (logoutAt = lastActivityAt, durationSeconds computed)
         and immediately opens a fresh one. Call every ~60 s while the user is
         active. Fire-and-forget — clients may ignore the response.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UsageHeartbeatInput"
       responses:
         "200":
           description: Heartbeat recorded
@@ -735,6 +741,41 @@ paths:
                     type: boolean
                 required:
                   - ok
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/usage-event:
+    post:
+      operationId: recordUsageEvent
+      tags: [auth]
+      summary: Record a page visit or generated report
+      description: >
+        Records minimal product-usage metadata for the authenticated user's
+        current session. Page labels and report details are derived from
+        server-controlled allowlists; it never accepts typed content or report
+        data. Fire-and-forget — clients may ignore a failed acknowledgement.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UsageEventInput"
+      responses:
+        "200":
+          description: Usage event acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageEventAcknowledgement"
+        "400":
+          description: Invalid usage event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Not authenticated
           content:
@@ -827,8 +868,8 @@ paths:
     post:
       operationId: createUser
       tags: [users]
-      summary: Create a user
-      description: Admin only. Creates a new user with the default password.
+      summary: Create a user with an initial password
+      description: Admin only. Creates a new user with the supplied initial password and requires a password change on first login.
       requestBody:
         required: true
         content:
@@ -848,7 +889,7 @@ paths:
                 required:
                   - user
         "400":
-          description: Missing email
+          description: Missing email or invalid initial password
           content:
             application/json:
               schema:
@@ -963,7 +1004,36 @@ paths:
       operationId: getUserActivity
       tags: [users]
       summary: Get login activity for all users
-      description: Admin only. Returns per-user login sessions grouped by day.
+      description: Admin only. Returns per-user usage sessions grouped by day.
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Limit results to one user.
+        - name: startDate
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+          description: Inclusive start date in YYYY-MM-DD format.
+        - name: endDate
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+          description: Inclusive end date in YYYY-MM-DD format.
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+          description: Number of recent days to include (default 90).
       responses:
         "200":
           description: User activity data
@@ -2310,11 +2380,16 @@ components:
           type: string
         displayName:
           type: string
+        password:
+          type: string
+          minLength: 6
+          description: Initial password. The user must change it on first login.
         role:
           type: string
           enum: [admin, user]
       required:
         - email
+        - password
     UserSessionEntry:
       type: object
       properties:
@@ -2331,15 +2406,92 @@ components:
         lastActivityAt:
           type: ["string", "null"]
           description: ISO-8601. Last heartbeat received; null for legacy rows. Used to determine idle vs active.
+        lastHeartbeatAt:
+          type: ["string", "null"]
+          description: ISO-8601. Most recent browser activity signal; null for legacy rows.
+        lastClientState:
+          type: ["string", "null"]
+          enum: [busy, idle, null]
+          description: Most recent browser state; null for legacy rows.
+        lastPagePath:
+          type: ["string", "null"]
+          description: Current or last visited application page path.
         logoutAt:
           type: ["string", "null"]
         durationSeconds:
           type: ["integer", "null"]
+        busySeconds:
+          type: ["integer", "null"]
+          description: Measured busy time only. Null when a legacy session has no activity signals.
+        idleSeconds:
+          type: ["integer", "null"]
+          description: Measured idle time only. Null when a legacy session has no activity signals.
+        pageVisitCount:
+          type: integer
+        reportCount:
+          type: integer
+        timeline:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserUsageTimelineEntry"
       required:
         - id
         - userId
         - email
         - loginAt
+        - pageVisitCount
+        - reportCount
+        - timeline
+    UserUsageTimelineEntry:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [session_start, session_end, page_visit, report_generated, visibility]
+        at:
+          type: string
+        pagePath:
+          type: ["string", "null"]
+        pageLabel:
+          type: ["string", "null"]
+        reportName:
+          type: ["string", "null"]
+        fileType:
+          type: ["string", "null"]
+      required:
+        - kind
+        - at
+    UsageHeartbeatInput:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [busy, idle]
+        pagePath:
+          type: string
+      required:
+        - state
+    UsageEventInput:
+      type: object
+      properties:
+        eventType:
+          type: string
+          enum: [page_visit, report_generated, visibility]
+        pagePath:
+          type: string
+        pageLabel:
+          type: string
+        reportKey:
+          type: string
+      required:
+        - eventType
+    UsageEventAcknowledgement:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required:
+        - ok
     UserActivityDay:
       type: object
       properties:

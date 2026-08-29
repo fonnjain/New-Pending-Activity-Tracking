@@ -53,7 +53,48 @@ export const CreateUserRequestRole = {
 export interface CreateUserRequest {
   email: string;
   displayName?: string;
+  /**
+     * Initial password. The user must change it on first login.
+     * @minLength 6
+     */
+  password: string;
   role?: CreateUserRequestRole;
+}
+
+/**
+ * Most recent browser state; null for legacy rows.
+ * @nullable
+ */
+export type UserSessionEntryLastClientState = typeof UserSessionEntryLastClientState[keyof typeof UserSessionEntryLastClientState] | null;
+
+
+export const UserSessionEntryLastClientState = {
+  busy: 'busy',
+  idle: 'idle',
+} as const;
+
+export type UserUsageTimelineEntryKind = typeof UserUsageTimelineEntryKind[keyof typeof UserUsageTimelineEntryKind];
+
+
+export const UserUsageTimelineEntryKind = {
+  session_start: 'session_start',
+  session_end: 'session_end',
+  page_visit: 'page_visit',
+  report_generated: 'report_generated',
+  visibility: 'visibility',
+} as const;
+
+export interface UserUsageTimelineEntry {
+  kind: UserUsageTimelineEntryKind;
+  at: string;
+  /** @nullable */
+  pagePath?: string | null;
+  /** @nullable */
+  pageLabel?: string | null;
+  /** @nullable */
+  reportName?: string | null;
+  /** @nullable */
+  fileType?: string | null;
 }
 
 export interface UserSessionEntry {
@@ -68,10 +109,71 @@ export interface UserSessionEntry {
      * @nullable
      */
   lastActivityAt?: string | null;
+  /**
+     * ISO-8601. Most recent browser activity signal; null for legacy rows.
+     * @nullable
+     */
+  lastHeartbeatAt?: string | null;
+  /**
+     * Most recent browser state; null for legacy rows.
+     * @nullable
+     */
+  lastClientState?: UserSessionEntryLastClientState;
+  /**
+     * Current or last visited application page path.
+     * @nullable
+     */
+  lastPagePath?: string | null;
   /** @nullable */
   logoutAt?: string | null;
   /** @nullable */
   durationSeconds?: number | null;
+  /**
+     * Measured busy time only. Null when a legacy session has no activity signals.
+     * @nullable
+     */
+  busySeconds?: number | null;
+  /**
+     * Measured idle time only. Null when a legacy session has no activity signals.
+     * @nullable
+     */
+  idleSeconds?: number | null;
+  pageVisitCount: number;
+  reportCount: number;
+  timeline: UserUsageTimelineEntry[];
+}
+
+export type UsageHeartbeatInputState = typeof UsageHeartbeatInputState[keyof typeof UsageHeartbeatInputState];
+
+
+export const UsageHeartbeatInputState = {
+  busy: 'busy',
+  idle: 'idle',
+} as const;
+
+export interface UsageHeartbeatInput {
+  state: UsageHeartbeatInputState;
+  pagePath?: string;
+}
+
+export type UsageEventInputEventType = typeof UsageEventInputEventType[keyof typeof UsageEventInputEventType];
+
+
+export const UsageEventInputEventType = {
+  page_visit: 'page_visit',
+  report_generated: 'report_generated',
+  visibility: 'visibility',
+} as const;
+
+export interface UsageEventInput {
+  eventType: UsageEventInputEventType;
+  pagePath?: string;
+  pageLabel?: string;
+  reportKey?: string;
+}
+
+export interface UsageEventAcknowledgement {
+  ok: boolean;
 }
 
 export interface UserActivityDay {
@@ -2926,6 +3028,29 @@ export type ResetUserPassword200 = {
 
 export type UpdateUserRole200 = {
   success: boolean;
+};
+
+export type GetUserActivityParams = {
+/**
+ * Limit results to one user.
+ */
+userId?: string;
+/**
+ * Inclusive start date in YYYY-MM-DD format.
+ * @pattern ^\d{4}-\d{2}-\d{2}$
+ */
+startDate?: string;
+/**
+ * Inclusive end date in YYYY-MM-DD format.
+ * @pattern ^\d{4}-\d{2}-\d{2}$
+ */
+endDate?: string;
+/**
+ * Number of recent days to include (default 90).
+ * @minimum 1
+ * @maximum 365
+ */
+days?: number;
 };
 
 export type DeleteUser200 = {

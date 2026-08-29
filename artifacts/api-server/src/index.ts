@@ -10,6 +10,7 @@ import { seedRsjThickness } from "./lib/seedRsjThickness";
 import { seedUsersIfEmpty } from "./lib/seedUsers";
 import { seedDevelopmentStagingAdmin } from "./lib/dev-staging-fixture";
 import { warmMembershipCaches } from "./routes/imports";
+import { ensureUserUsageTables } from "./lib/ensureUserUsageTables";
 
 const rawPort = process.env["PORT"];
 
@@ -32,6 +33,7 @@ if (Number.isNaN(port) || port <= 0) {
 async function startServer(): Promise<void> {
   await ensureContractorDedupTables();
   await ensureOrderReviewColumns();
+  await ensureUserUsageTables();
   await backfillAugustOrderReviewEvidence();
   // A reserved browser-test administrator is created only by the local
   // development workflow. It uses conflict-safe insertion and never changes

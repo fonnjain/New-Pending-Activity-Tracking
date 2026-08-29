@@ -99,3 +99,10 @@ uri = "file://vtpl-tracker.zip"
 type = "unspecified"
 title = "VTPL Tracker — Full Source Code"
 description = "Complete monorepo source (node_modules, dist, and .git excluded). Extract and run `pnpm install` then start the workflows as usual."
+
+[[outputs]]
+id = "o1nwS-NxxKx9Psl4iwLOl"
+uri = "file://.local/outputs/Balance---Activity-Tracker---Product-Deck.pptx"
+type = "slides"
+title = "Balance & Activity Tracker — Product Deck (PPTX)"
+description = "An 18-slide PowerPoint product overview of the steel-fabrication Balance & Activity Tracker."

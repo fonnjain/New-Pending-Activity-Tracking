@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import { BarChart3, Briefcase, Activity, Users, Database, FileText, Filter, X, Timer, Gauge, Factory, PackageCheck, CalendarIcon, Boxes, ChevronsUpDown } from "lucide-react";
 import { useTracker, dateRangeWindow, useActiveJobSet, useJobTemplates, useContractorAliasMap, MULTI_JOBS_FILTER_VALUE, MULTI_TEMPLATES_FILTER_VALUE, isTemplateFilter, extractTemplateId, templateFilterValue, isNamedJobSetFilter, type JobTemplate, type MfcViewMode, type ProjectSortKey } from "@/lib/store";
@@ -15,6 +15,7 @@ import { Segmented } from "@/components/ui/segmented";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { formatDate } from "@/lib/utils";
+import { useUsageTracking } from "@/lib/usage-tracking";
 import { sortActivities, ACTIVITY_BUNDLES, OUT_VENDOR_TYPES, resolveContractorKey, normalizeContractorName } from "@workspace/domain";
 import {
   buildContractorGroups,
@@ -518,6 +519,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const mustChangePassword = isAuthenticated && authStatus?.mustChangePassword === true;
   const isAdmin = authStatus?.role === "admin";
   const displayLabel = authStatus?.displayName || authStatus?.email || "";
+  useUsageTracking(isAuthenticated && !mustChangePassword, location);
 
   const showFilters =
     location !== "/data" &&
@@ -799,6 +801,14 @@ function FilterBar() {
   // before matchesJobFilter which references activeJobSet.
   const activeJobSet = useActiveJobSet();
   const templates = useJobTemplates();
+  const selectedJobCodeSet = useMemo(
+    () => new Set(filters.selectedJobCodes),
+    [filters.selectedJobCodes],
+  );
+  const selectedComboSet = useMemo(
+    () => new Set(filters.selectedJobs),
+    [filters.selectedJobs],
+  );
 
   // Helper: does a record match all active job-related filters?
   // Four independent filters ANDed together:
@@ -806,10 +816,10 @@ function FilterBar() {
   //   filters.job              — named set sentinel (templates)
   //   filters.mfcBatch         — MFC batch letter (single select)
   //   filters.selectedJobs     — "job - batch" combo multi-select
-  const matchesJobFilter = (rJob: string | null | undefined, rMfcBatch?: string | null | undefined) => {
+  const matchesJobFilter = useCallback((rJob: string | null | undefined, rMfcBatch?: string | null | undefined) => {
     // 1. Multi-select job codes (new primary job filter).
-    if (filters.selectedJobCodes.length > 0) {
-      if (!rJob || !filters.selectedJobCodes.includes(rJob)) return false;
+    if (selectedJobCodeSet.size > 0) {
+      if (!rJob || !selectedJobCodeSet.has(rJob)) return false;
     }
     // 2. Named set / template filter (uses activeJobSet).
     // activeJobSet may contain combo keys ("821 - Z") or plain codes; check both.
@@ -824,12 +834,12 @@ function FilterBar() {
     // 3. MFC batch filter (single select).
     if (filters.mfcBatch && (rMfcBatch || "Z") !== filters.mfcBatch) return false;
     // 4. Job/Batch combo multi-select.
-    if (filters.selectedJobs.length > 0) {
+    if (selectedComboSet.size > 0) {
       const comboKey = rMfcBatch ? `${rJob} - ${rMfcBatch}` : null;
-      if (!filters.selectedJobs.includes(rJob ?? "") && !(comboKey && filters.selectedJobs.includes(comboKey))) return false;
+      if (!selectedComboSet.has(rJob ?? "") && !(comboKey && selectedComboSet.has(comboKey))) return false;
     }
     return true;
-  };
+  }, [filters.job, filters.mfcBatch, activeJobSet, selectedJobCodeSet, selectedComboSet]);
 
   // Rows narrowed by the active PRIMARY-dimension selection(s), so the
   // secondary option lists (Contractor / Activity / Mark) only offer values
@@ -840,7 +850,7 @@ function FilterBar() {
         (!filters.section || r.groupKey === filters.section)
       : matchesJobFilter(r.job, r.mfcBatch) &&
         (!filters.structure || r.structure === filters.structure)),
-    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.job, filters.selectedJobCodes, filters.selectedJobs, filters.structure, activeJobSet]
+    [modeRecords, isNtlt, filters.ntltSubtype, filters.section, filters.structure, matchesJobFilter]
   );
   // NTLT primary dimension = Section (the cleaned group_key), narrowed to the
   // active sub-category so only relevant sections are offered.
@@ -857,7 +867,7 @@ function FilterBar() {
       .map(r => r.structure)
       .filter(Boolean)
     )).sort(),
-    [modeRecords, filters.job, filters.selectedJobCodes, filters.selectedJobs, activeJobSet]
+    [modeRecords, matchesJobFilter]
   );
 
   const marks = useMemo(

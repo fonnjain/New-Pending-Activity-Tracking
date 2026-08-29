@@ -4,6 +4,7 @@
 // when the chunk hash changed between builds and the old deployment still served
 // the old hash.
 import ExcelJS from "exceljs";
+import { trackReportGenerated } from "@/lib/usage-tracking";
 
 // Returns a compact timestamp string safe for use in filenames: YYYYMMDD_HHmmss
 // e.g. "20260810_143022". Use this for all export filenames so downloads are
@@ -73,6 +74,7 @@ export async function exportCleanedXlsx(
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
   XLSX.writeFile(wb, filename);
+  trackReportGenerated(filename, "xlsx");
 }
 
 // Column spec for the styled .xlsx export. `numeric` right-aligns the column and
@@ -587,6 +589,7 @@ async function downloadWorkbook(wb: ExcelJS.Workbook, filename: string) {
   downloadBlob(new Blob([ownedArrayBuffer(bytes)], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   }), filename);
+  trackReportGenerated(filename, "xlsx");
 }
 
 /**
@@ -725,6 +728,7 @@ export function createZipFile(filename: string, files: DownloadableFile[]): Down
 export function downloadZip(filename: string, files: DownloadableFile[]) {
   const file = createZipFile(filename, files);
   downloadBlob(new Blob([ownedArrayBuffer(file.bytes)], { type: "application/zip" }), file.filename);
+  trackReportGenerated(file.filename, "zip");
 }
 
 // Export rows to a clean, professionally formatted single-sheet .xlsx: bold
@@ -740,6 +744,7 @@ export async function exportToXlsx(
   downloadBlob(new Blob([ownedArrayBuffer(file.bytes)], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   }), file.filename);
+  trackReportGenerated(file.filename, "xlsx");
 }
 
 // Export a workbook with one styled worksheet per supplied sheet definition
@@ -758,6 +763,7 @@ export async function exportToXlsxSheets(
   downloadBlob(new Blob([ownedArrayBuffer(file.bytes)], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   }), file.filename);
+  trackReportGenerated(file.filename, "xlsx");
 }
 
 // A block of side-by-side columns sharing one merged title (e.g. one load
@@ -993,6 +999,7 @@ export async function exportToXlsxBlockGrid(
   downloadBlob(new Blob([ownedArrayBuffer(file.bytes)], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   }), file.filename);
+  trackReportGenerated(file.filename, "xlsx");
 }
 
 // Render the AI report result into a downloadable PDF. Plain text layout with
@@ -1083,6 +1090,7 @@ export async function exportAiReportPdf(filename: string, result: any) {
   }
 
   doc.save(filename);
+  trackReportGenerated(filename, "pdf");
 }
 
 // ─── Generated Order Review xlsx ──────────────────────────────────────────────
@@ -1320,4 +1328,6 @@ export function exportToJson(filename: string, data: any) {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  trackReportGenerated(filename, "json");
 }

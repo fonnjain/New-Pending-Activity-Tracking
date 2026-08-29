@@ -63,6 +63,7 @@ import type {
   FabricationProjectCompletionResponse,
   GetFabricationProjectCompletionTltParams,
   GetReleaseBalanceParams,
+  GetUserActivityParams,
   HealthStatus,
   Import,
   ImportDeletionLogEntry,
@@ -111,6 +112,9 @@ import type {
   UploadItemMasterBody,
   UploadResult,
   UploadStageEvidence,
+  UsageEventAcknowledgement,
+  UsageEventInput,
+  UsageHeartbeatInput,
   UserActivityResponse,
   ValidateRequest,
   ValidationResult,
@@ -2371,14 +2375,15 @@ export const getAuthHeartbeatUrl = () => {
 
  * @summary Record user activity heartbeat
  */
-export const authHeartbeat = async ( options?: RequestInit): Promise<AuthHeartbeat200> => {
+export const authHeartbeat = async (usageHeartbeatInput?: UsageHeartbeatInput, options?: RequestInit): Promise<AuthHeartbeat200> => {
 
   return customFetch<AuthHeartbeat200>(getAuthHeartbeatUrl(),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      usageHeartbeatInput,)
   }
 );}
 
@@ -2386,8 +2391,8 @@ export const authHeartbeat = async ( options?: RequestInit): Promise<AuthHeartbe
 
 
 export const getAuthHeartbeatMutationOptions = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authHeartbeat>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof authHeartbeat>>, TError,void, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authHeartbeat>>, TError,{data?: BodyType<UsageHeartbeatInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof authHeartbeat>>, TError,{data?: BodyType<UsageHeartbeatInput>}, TContext> => {
 
 const mutationKey = ['authHeartbeat'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -2399,10 +2404,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof authHeartbeat>>, void> = () => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof authHeartbeat>>, {data?: BodyType<UsageHeartbeatInput>}> = (props) => {
+          const {data} = props ?? {};
 
-
-          return  authHeartbeat(requestOptions)
+          return  authHeartbeat(data,requestOptions)
         }
 
 
@@ -2413,21 +2418,94 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type AuthHeartbeatMutationResult = NonNullable<Awaited<ReturnType<typeof authHeartbeat>>>
-
+    export type AuthHeartbeatMutationBody = BodyType<UsageHeartbeatInput> | undefined
     export type AuthHeartbeatMutationError = ErrorType<ErrorResponse>
 
     /**
  * @summary Record user activity heartbeat
  */
 export const useAuthHeartbeat = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authHeartbeat>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authHeartbeat>>, TError,{data?: BodyType<UsageHeartbeatInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof authHeartbeat>>,
         TError,
-        void,
+        {data?: BodyType<UsageHeartbeatInput>},
         TContext
       > => {
       return useMutation(getAuthHeartbeatMutationOptions(options));
+    }
+
+export const getRecordUsageEventUrl = () => {
+
+
+
+
+  return `/api/auth/usage-event`
+}
+
+/**
+ * Records minimal product-usage metadata for the authenticated user's current session. Page labels and report details are derived from server-controlled allowlists; it never accepts typed content or report data. Fire-and-forget — clients may ignore a failed acknowledgement.
+
+ * @summary Record a page visit or generated report
+ */
+export const recordUsageEvent = async (usageEventInput: UsageEventInput, options?: RequestInit): Promise<UsageEventAcknowledgement> => {
+
+  return customFetch<UsageEventAcknowledgement>(getRecordUsageEventUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      usageEventInput,)
+  }
+);}
+
+
+
+
+export const getRecordUsageEventMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordUsageEvent>>, TError,{data: BodyType<UsageEventInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordUsageEvent>>, TError,{data: BodyType<UsageEventInput>}, TContext> => {
+
+const mutationKey = ['recordUsageEvent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordUsageEvent>>, {data: BodyType<UsageEventInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordUsageEvent(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordUsageEventMutationResult = NonNullable<Awaited<ReturnType<typeof recordUsageEvent>>>
+    export type RecordUsageEventMutationBody = BodyType<UsageEventInput>
+    export type RecordUsageEventMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Record a page visit or generated report
+ */
+export const useRecordUsageEvent = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordUsageEvent>>, TError,{data: BodyType<UsageEventInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof recordUsageEvent>>,
+        TError,
+        {data: BodyType<UsageEventInput>},
+        TContext
+      > => {
+      return useMutation(getRecordUsageEventMutationOptions(options));
     }
 
 export const getLogoutUrl = () => {
@@ -2661,8 +2739,8 @@ export const getCreateUserUrl = () => {
 }
 
 /**
- * Admin only. Creates a new user with the default password.
- * @summary Create a user
+ * Admin only. Creates a new user with the supplied initial password and requires a password change on first login.
+ * @summary Create a user with an initial password
  */
 export const createUser = async (createUserRequest: CreateUserRequest, options?: RequestInit): Promise<CreateUser201> => {
 
@@ -2711,7 +2789,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateUserMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Create a user
+ * @summary Create a user with an initial password
  */
 export const useCreateUser = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUser>>, TError,{data: BodyType<CreateUserRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -2868,21 +2946,28 @@ export const useUpdateUserRole = <TError = ErrorType<ErrorResponse>,
       return useMutation(getUpdateUserRoleMutationOptions(options));
     }
 
-export const getGetUserActivityUrl = () => {
+export const getGetUserActivityUrl = (params?: GetUserActivityParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/users/activity`
+  return stringifiedParams.length > 0 ? `/api/users/activity?${stringifiedParams}` : `/api/users/activity`
 }
 
 /**
- * Admin only. Returns per-user login sessions grouped by day.
+ * Admin only. Returns per-user usage sessions grouped by day.
  * @summary Get login activity for all users
  */
-export const getUserActivity = async ( options?: RequestInit): Promise<UserActivityResponse> => {
+export const getUserActivity = async (params?: GetUserActivityParams, options?: RequestInit): Promise<UserActivityResponse> => {
 
-  return customFetch<UserActivityResponse>(getGetUserActivityUrl(),
+  return customFetch<UserActivityResponse>(getGetUserActivityUrl(params),
   {
     ...options,
     method: 'GET'
@@ -2895,23 +2980,23 @@ export const getUserActivity = async ( options?: RequestInit): Promise<UserActiv
 
 
 
-export const getGetUserActivityQueryKey = () => {
+export const getGetUserActivityQueryKey = (params?: GetUserActivityParams,) => {
     return [
-    `/api/users/activity`
+    `/api/users/activity`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetUserActivityQueryOptions = <TData = Awaited<ReturnType<typeof getUserActivity>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getUserActivity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetUserActivityQueryOptions = <TData = Awaited<ReturnType<typeof getUserActivity>>, TError = ErrorType<ErrorResponse>>(params?: GetUserActivityParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getUserActivity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetUserActivityQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetUserActivityQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getUserActivity>>> = ({ signal }) => getUserActivity({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getUserActivity>>> = ({ signal }) => getUserActivity(params, { signal, ...requestOptions });
 
 
 
@@ -2929,11 +3014,11 @@ export type GetUserActivityQueryError = ErrorType<ErrorResponse>
  */
 
 export function useGetUserActivity<TData = Awaited<ReturnType<typeof getUserActivity>>, TError = ErrorType<ErrorResponse>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getUserActivity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: GetUserActivityParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getUserActivity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetUserActivityQueryOptions(options)
+  const queryOptions = getGetUserActivityQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

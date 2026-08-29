@@ -7,8 +7,6 @@ import { TrackerProvider } from "@/lib/store";
 import { SettingsProvider } from "@/lib/settings";
 import { Layout } from "@/components/layout";
 import NotFound from "@/pages/not-found";
-import { useGetAuthStatus, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
-import { useActivityHeartbeat } from "@/lib/useActivityHeartbeat";
 
 // Route-level code splitting — each page is a separate JS chunk loaded on demand.
 // First visit fetches the chunk; subsequent visits are instant (browser cache).
@@ -136,24 +134,12 @@ function Router() {
   );
 }
 
-function HeartbeatInner() {
-  useActivityHeartbeat();
-  return null;
-}
-
-function HeartbeatMount() {
-  const { data: auth } = useGetAuthStatus({ query: { queryKey: getGetAuthStatusQueryKey() } });
-  const isAuth = (auth as { authenticated?: boolean } | undefined)?.authenticated === true;
-  return isAuth ? <HeartbeatInner /> : null;
-}
-
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <TrackerProvider>
           <SettingsProvider>
-            <HeartbeatMount />
             <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
               <Suspense fallback={null}>
                 <Router />

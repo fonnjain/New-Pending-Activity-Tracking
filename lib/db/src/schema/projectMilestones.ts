@@ -44,6 +44,20 @@ export const projectMilestonesTable = pgTable("project_milestones", {
     .defaultNow(),
 });
 
+// Singleton source fingerprint for the persisted full-history milestone view.
+// The milestone table may legitimately be empty and post-mutation rebuilds are
+// best-effort, so only this marker certifies that a rebuild completed.
+export const PROJECT_MILESTONE_STATE_ID = "default";
+export const projectMilestoneStateTable = pgTable("project_milestone_state", {
+  id: text("id").primaryKey(),
+  importCount: integer("import_count").notNull().default(0),
+  sourceMaxImportId: integer("source_max_import_id"),
+  settingsUpdatedAt: timestamp("settings_updated_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const insertProjectMilestoneSchema = createInsertSchema(
   projectMilestonesTable,
 );

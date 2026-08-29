@@ -1044,7 +1044,29 @@ export const LoginResponse = zod.object({
 
  * @summary Record user activity heartbeat
  */
+export const AuthHeartbeatBody = zod.object({
+  "state": zod.enum(['busy', 'idle']),
+  "pagePath": zod.string().optional()
+})
+
 export const AuthHeartbeatResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * Records minimal product-usage metadata for the authenticated user's current session. Page labels and report details are derived from server-controlled allowlists; it never accepts typed content or report data. Fire-and-forget — clients may ignore a failed acknowledgement.
+
+ * @summary Record a page visit or generated report
+ */
+export const RecordUsageEventBody = zod.object({
+  "eventType": zod.enum(['page_visit', 'report_generated', 'visibility']),
+  "pagePath": zod.string().optional(),
+  "pageLabel": zod.string().optional(),
+  "reportKey": zod.string().optional()
+})
+
+export const RecordUsageEventResponse = zod.object({
   "ok": zod.boolean()
 })
 
@@ -1094,12 +1116,17 @@ export const ListUsersResponse = zod.object({
 
 
 /**
- * Admin only. Creates a new user with the default password.
- * @summary Create a user
+ * Admin only. Creates a new user with the supplied initial password and requires a password change on first login.
+ * @summary Create a user with an initial password
  */
+export const createUserBodyPasswordMin = 6;
+
+
+
 export const CreateUserBody = zod.object({
   "email": zod.string(),
   "displayName": zod.string().optional(),
+  "password": zod.string().min(createUserBodyPasswordMin).describe('Initial password. The user must change it on first login.'),
   "role": zod.enum(['admin', 'user']).optional()
 })
 
@@ -1136,9 +1163,22 @@ export const UpdateUserRoleResponse = zod.object({
 
 
 /**
- * Admin only. Returns per-user login sessions grouped by day.
+ * Admin only. Returns per-user usage sessions grouped by day.
  * @summary Get login activity for all users
  */
+export const getUserActivityQueryStartDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const getUserActivityQueryEndDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const getUserActivityQueryDaysMax = 365;
+
+
+
+export const GetUserActivityQueryParams = zod.object({
+  "userId": zod.coerce.string().optional().describe('Limit results to one user.'),
+  "startDate": zod.coerce.string().regex(getUserActivityQueryStartDateRegExp).optional().describe('Inclusive start date in YYYY-MM-DD format.'),
+  "endDate": zod.coerce.string().regex(getUserActivityQueryEndDateRegExp).optional().describe('Inclusive end date in YYYY-MM-DD format.'),
+  "days": zod.coerce.number().min(1).max(getUserActivityQueryDaysMax).optional().describe('Number of recent days to include (default 90).')
+})
+
 export const GetUserActivityResponse = zod.object({
   "days": zod.array(zod.object({
   "date": zod.string().describe('YYYY-MM-DD'),
@@ -1149,8 +1189,23 @@ export const GetUserActivityResponse = zod.object({
   "displayName": zod.string().nullish(),
   "loginAt": zod.string(),
   "lastActivityAt": zod.string().nullish().describe('ISO-8601. Last heartbeat received; null for legacy rows. Used to determine idle vs active.'),
+  "lastHeartbeatAt": zod.string().nullish().describe('ISO-8601. Most recent browser activity signal; null for legacy rows.'),
+  "lastClientState": zod.union([zod.literal('busy'),zod.literal('idle'),zod.literal(null)]).nullish().describe('Most recent browser state; null for legacy rows.'),
+  "lastPagePath": zod.string().nullish().describe('Current or last visited application page path.'),
   "logoutAt": zod.string().nullish(),
-  "durationSeconds": zod.number().nullish()
+  "durationSeconds": zod.number().nullish(),
+  "busySeconds": zod.number().nullish().describe('Measured busy time only. Null when a legacy session has no activity signals.'),
+  "idleSeconds": zod.number().nullish().describe('Measured idle time only. Null when a legacy session has no activity signals.'),
+  "pageVisitCount": zod.number(),
+  "reportCount": zod.number(),
+  "timeline": zod.array(zod.object({
+  "kind": zod.enum(['session_start', 'session_end', 'page_visit', 'report_generated', 'visibility']),
+  "at": zod.string(),
+  "pagePath": zod.string().nullish(),
+  "pageLabel": zod.string().nullish(),
+  "reportName": zod.string().nullish(),
+  "fileType": zod.string().nullish()
+}))
 }))
 })),
   "totalSessions": zod.number()

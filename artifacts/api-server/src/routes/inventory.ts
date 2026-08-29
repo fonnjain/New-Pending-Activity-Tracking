@@ -14,6 +14,7 @@ import {
   inventoryProjectDatesTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin } from "./auth";
+import { evictSerializedRecordsCache } from "./imports";
 import {
   UpsertInventoryManualEBody,
   UpsertInventorySideOverrideBody,
@@ -331,6 +332,7 @@ router.put(
         },
       })
       .returning();
+    evictSerializedRecordsCache();
     res.json(row);
   },
 );
@@ -353,6 +355,7 @@ router.delete(
           eq(inventoryMfcBatchColorTable.mfcBatch, mfcBatch),
         ),
       );
+    evictSerializedRecordsCache();
     res.status(204).end();
   },
 );

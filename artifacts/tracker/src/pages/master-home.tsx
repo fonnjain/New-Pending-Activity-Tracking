@@ -1,153 +1,69 @@
 import { Link } from "wouter";
-import {
-  Factory,
-  ShieldCheck,
-  DraftingCompass,
-  CalendarRange,
-  Wallet,
-  ArrowRight,
-} from "lucide-react";
-
-type Tile = {
-  key: string;
-  label: string;
-  description: string;
-  icon: typeof Factory;
-  href?: string;
-  status: "live" | "soon";
-};
-
-const tiles: Tile[] = [
-  {
-    key: "production",
-    label: "Production",
-    description: "Balance & activity tracking, ageing, turnaround and velocity across the fabrication floor.",
-    icon: Factory,
-    href: "/production",
-    status: "live",
-  },
-  {
-    key: "quality",
-    label: "Quality",
-    description: "Inspection, NCRs and quality clearance tracking.",
-    icon: ShieldCheck,
-    status: "soon",
-  },
-  {
-    key: "engineering",
-    label: "Engineering",
-    description: "Drawings, revisions and design release tracking.",
-    icon: DraftingCompass,
-    status: "soon",
-  },
-  {
-    key: "planning",
-    label: "Planning",
-    description: "Schedules, load planning and milestone forecasting.",
-    icon: CalendarRange,
-    status: "soon",
-  },
-  {
-    key: "finance",
-    label: "Finance",
-    description: "Costing, billing and financial reconciliation.",
-    icon: Wallet,
-    status: "soon",
-  },
-];
+import { Activity, ArrowRight, Boxes, Factory, PackageCheck } from "lucide-react";
 
 export default function MasterHome() {
   return (
     <div className="min-h-[100dvh] bg-background text-foreground">
       <header className="border-b border-border bg-sidebar">
-        <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8">
-          <div className="text-xs md:text-sm font-medium tracking-[0.2em] text-primary uppercase">
+        <div className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-12">
+          <div className="text-xs font-medium uppercase tracking-[0.24em] text-primary md:text-sm">
             Vijay Transmission
           </div>
-          <h1 className="mt-1 text-2xl md:text-4xl font-bold tracking-tight">
-            Master Tracker
+          <h1 className="mt-3 text-3xl font-bold tracking-tight md:text-5xl">
+            Production Control Center
           </h1>
-          <p className="mt-2 text-sm md:text-base text-muted-foreground max-w-2xl">
-            Operational control across every department. Select a workspace to continue.
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground md:text-base">
+            One workspace for live WIP balances, production movement, ageing,
+            inventory, orders, and dispatch across the fabrication floor.
           </p>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-10">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
-          {tiles.map((tile) => {
-            const Icon = tile.icon;
-            const isLive = tile.status === "live";
-
-            const inner = (
-              <div
-                className={`group relative h-full rounded-xl border p-5 md:p-6 transition-all ${
-                  isLive
-                    ? "border-primary/30 bg-card hover:border-primary hover:shadow-lg cursor-pointer"
-                    : "border-border bg-card/60 cursor-not-allowed"
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div
-                    className={`flex h-11 w-11 md:h-12 md:w-12 items-center justify-center rounded-lg ${
-                      isLive
-                        ? "bg-primary/10 text-primary"
-                        : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    <Icon className="h-6 w-6" strokeWidth={2} />
+      <main className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-12">
+        <Link href="/production" className="group block">
+          <section className="relative overflow-hidden rounded-2xl border border-primary/40 bg-card p-6 shadow-sm transition-colors hover:border-primary md:p-10">
+            <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full border border-primary/15" />
+            <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full border border-primary/20" />
+            <div className="relative flex flex-col justify-between gap-10 md:flex-row md:items-end">
+              <div className="max-w-2xl">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Factory className="h-6 w-6" strokeWidth={2} />
                   </div>
-                  {isLive ? (
-                    <span className="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
-                      Live
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      Coming soon
-                    </span>
-                  )}
+                  <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-primary">
+                    Live workspace
+                  </span>
                 </div>
-
-                <h2
-                  className={`mt-4 text-lg md:text-xl font-semibold ${
-                    isLive ? "text-foreground" : "text-muted-foreground"
-                  }`}
-                >
-                  {tile.label}
+                <h2 className="mt-7 text-3xl font-bold tracking-tight md:text-4xl">
+                  Production
                 </h2>
-                <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed">
-                  {tile.description}
+                <p className="mt-3 max-w-xl text-base leading-7 text-muted-foreground md:text-lg">
+                  Balance and activity tracking for the complete steel-fabrication
+                  workflow, from source files to actionable production decisions.
                 </p>
-
-                {isLive && (
-                  <div className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary">
-                    Open workspace
-                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-                  </div>
-                )}
+                <div className="mt-7 inline-flex items-center gap-2 text-sm font-semibold text-primary">
+                  Open Production Tracker
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                </div>
               </div>
-            );
 
-            if (isLive && tile.href) {
-              return (
-                <Link key={tile.key} href={tile.href} className="block h-full">
-                  {inner}
-                </Link>
-              );
-            }
-
-            return (
-              <div
-                key={tile.key}
-                aria-disabled="true"
-                title={`${tile.label} (coming soon)`}
-                className="h-full select-none"
-              >
-                {inner}
+              <div className="grid w-full max-w-md grid-cols-3 gap-3 md:w-[28rem]">
+                <div className="rounded-xl border border-border bg-background/60 p-4">
+                  <Activity className="h-5 w-5 text-primary" />
+                  <div className="mt-8 text-sm font-semibold">WIP & ageing</div>
+                </div>
+                <div className="rounded-xl border border-border bg-background/60 p-4">
+                  <Boxes className="h-5 w-5 text-primary" />
+                  <div className="mt-8 text-sm font-semibold">Inventory</div>
+                </div>
+                <div className="rounded-xl border border-border bg-background/60 p-4">
+                  <PackageCheck className="h-5 w-5 text-primary" />
+                  <div className="mt-8 text-sm font-semibold">Orders & dispatch</div>
+                </div>
               </div>
-            );
-          })}
-        </div>
+            </div>
+          </section>
+        </Link>
       </main>
     </div>
   );

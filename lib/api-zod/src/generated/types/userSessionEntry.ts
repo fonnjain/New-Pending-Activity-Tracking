@@ -5,6 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { UserSessionEntryLastClientState } from './userSessionEntryLastClientState';
+import type { UserUsageTimelineEntry } from './userUsageTimelineEntry';
 
 export interface UserSessionEntry {
   id: string;
@@ -18,8 +20,36 @@ export interface UserSessionEntry {
      * @nullable
      */
   lastActivityAt?: string | null;
+  /**
+     * ISO-8601. Most recent browser activity signal; null for legacy rows.
+     * @nullable
+     */
+  lastHeartbeatAt?: string | null;
+  /**
+     * Most recent browser state; null for legacy rows.
+     * @nullable
+     */
+  lastClientState?: UserSessionEntryLastClientState;
+  /**
+     * Current or last visited application page path.
+     * @nullable
+     */
+  lastPagePath?: string | null;
   /** @nullable */
   logoutAt?: string | null;
   /** @nullable */
   durationSeconds?: number | null;
+  /**
+     * Measured busy time only. Null when a legacy session has no activity signals.
+     * @nullable
+     */
+  busySeconds?: number | null;
+  /**
+     * Measured idle time only. Null when a legacy session has no activity signals.
+     * @nullable
+     */
+  idleSeconds?: number | null;
+  pageVisitCount: number;
+  reportCount: number;
+  timeline: UserUsageTimelineEntry[];
 }

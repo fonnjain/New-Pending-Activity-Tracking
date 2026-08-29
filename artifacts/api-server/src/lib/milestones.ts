@@ -5,6 +5,8 @@ import {
   importRowsTable,
   recordPoolTable,
   projectMilestonesTable,
+  projectMilestoneStateTable,
+  PROJECT_MILESTONE_STATE_ID,
   settingsTable,
   SETTINGS_SINGLETON_ID,
 } from "@workspace/db";
@@ -50,6 +52,76 @@ export interface ProjectMilestone {
   varianceReadyDays: number | null;
   limitedHistory: boolean;
   reopened: boolean;
+}
+
+function milestoneRowToResult(
+  row: typeof projectMilestonesTable.$inferSelect,
+): ProjectMilestone {
+  return {
+    project: row.project,
+    projectStart: row.projectStart,
+    readyDate: row.readyDate,
+    readyTurnaroundDays: row.readyTurnaroundDays,
+    dispatchedDate: row.dispatchedDate,
+    dispatchedTurnaroundDays: row.dispatchedTurnaroundDays,
+    dispatchLagDays: row.dispatchLagDays,
+    marksTotal: row.marksTotal,
+    plannedReadyDays: row.plannedReadyDays,
+    varianceReadyDays: row.varianceReadyDays,
+    limitedHistory: row.limitedHistory,
+    reopened: row.reopened,
+  };
+}
+
+// Normal page reads use the persisted capture-once ledger. Upload, deletion,
+// settings updates, and the explicit admin repair action already recompute it.
+// An active cutoff is the exception: its bounded view is intentionally not
+// persisted, so it must still be derived from the in-window import history.
+export async function loadMilestones(): Promise<ProjectMilestone[]> {
+  const [settingsRow] = await db
+    .select({
+      validFromDate: settingsTable.validFromDate,
+      updatedAt: settingsTable.updatedAt,
+    })
+    .from(settingsTable)
+    .where(eq(settingsTable.id, SETTINGS_SINGLETON_ID))
+    .limit(1);
+
+  if (settingsRow?.validFromDate) {
+    return recomputeMilestones(settingsRow.validFromDate);
+  }
+
+  const [state, importIds] = await Promise.all([
+    db
+      .select({
+        importCount: projectMilestoneStateTable.importCount,
+        sourceMaxImportId: projectMilestoneStateTable.sourceMaxImportId,
+        settingsUpdatedAt: projectMilestoneStateTable.settingsUpdatedAt,
+      })
+      .from(projectMilestoneStateTable)
+      .where(eq(projectMilestoneStateTable.id, PROJECT_MILESTONE_STATE_ID))
+      .limit(1)
+      .then((rows) => rows[0]),
+    db
+      .select({ id: importsTable.id })
+      .from(importsTable)
+      .orderBy(asc(importsTable.id)),
+  ]);
+  const sourceMaxImportId = importIds.at(-1)?.id ?? null;
+  const settingsUpdatedAt = settingsRow?.updatedAt ?? null;
+  if (
+    !state ||
+    state.importCount !== importIds.length ||
+    state.sourceMaxImportId !== sourceMaxImportId ||
+    state.settingsUpdatedAt?.getTime() !== settingsUpdatedAt?.getTime()
+  ) {
+    return recomputeMilestones(null);
+  }
+
+  const rows = await db.select().from(projectMilestonesTable);
+  return rows
+    .map(milestoneRowToResult)
+    .sort((a, b) => a.project.localeCompare(b.project));
 }
 
 // Mark identity for "ever seen" sets — matches the change-log / movement engines.
@@ -447,33 +519,53 @@ export async function recomputeMilestones(
   // the cutoff could not restore the true earliest dates. On a full run this is
   // the normal capture-once persistence.
   if (cutoff === null) {
-    const chunk = 200;
-    for (let i = 0; i < upserts.length; i += chunk) {
-      await db
-        .insert(projectMilestonesTable)
-        .values(upserts.slice(i, i + chunk))
+    await db.transaction(async (tx) => {
+      const chunk = 200;
+      for (let i = 0; i < upserts.length; i += chunk) {
+        await tx
+          .insert(projectMilestonesTable)
+          .values(upserts.slice(i, i + chunk))
+          .onConflictDoUpdate({
+            target: projectMilestonesTable.project,
+            set: {
+              projectStart: sql`excluded.project_start`,
+              readyDate: sql`excluded.ready_date`,
+              readyImportId: sql`excluded.ready_import_id`,
+              readyTurnaroundDays: sql`excluded.ready_turnaround_days`,
+              dispatchedDate: sql`excluded.dispatched_date`,
+              dispatchedImportId: sql`excluded.dispatched_import_id`,
+              dispatchedTurnaroundDays: sql`excluded.dispatched_turnaround_days`,
+              dispatchLagDays: sql`excluded.dispatch_lag_days`,
+              marksTotal: sql`excluded.marks_total`,
+              plannedReadyDays: sql`excluded.planned_ready_days`,
+              varianceReadyDays: sql`excluded.variance_ready_days`,
+              limitedHistory: sql`excluded.limited_history`,
+              reopened: sql`excluded.reopened`,
+              lastSeenImportId: sql`excluded.last_seen_import_id`,
+              lastSeenDate: sql`excluded.last_seen_date`,
+              updatedAt: sql`excluded.updated_at`,
+            },
+          });
+      }
+      await tx
+        .insert(projectMilestoneStateTable)
+        .values({
+          id: PROJECT_MILESTONE_STATE_ID,
+          importCount: imports.length,
+          sourceMaxImportId: imports.at(-1)?.id ?? null,
+          settingsUpdatedAt: settingsRow?.updatedAt ?? null,
+          completedAt: new Date(),
+        })
         .onConflictDoUpdate({
-          target: projectMilestonesTable.project,
+          target: projectMilestoneStateTable.id,
           set: {
-            projectStart: sql`excluded.project_start`,
-            readyDate: sql`excluded.ready_date`,
-            readyImportId: sql`excluded.ready_import_id`,
-            readyTurnaroundDays: sql`excluded.ready_turnaround_days`,
-            dispatchedDate: sql`excluded.dispatched_date`,
-            dispatchedImportId: sql`excluded.dispatched_import_id`,
-            dispatchedTurnaroundDays: sql`excluded.dispatched_turnaround_days`,
-            dispatchLagDays: sql`excluded.dispatch_lag_days`,
-            marksTotal: sql`excluded.marks_total`,
-            plannedReadyDays: sql`excluded.planned_ready_days`,
-            varianceReadyDays: sql`excluded.variance_ready_days`,
-            limitedHistory: sql`excluded.limited_history`,
-            reopened: sql`excluded.reopened`,
-            lastSeenImportId: sql`excluded.last_seen_import_id`,
-            lastSeenDate: sql`excluded.last_seen_date`,
-            updatedAt: sql`excluded.updated_at`,
+            importCount: imports.length,
+            sourceMaxImportId: imports.at(-1)?.id ?? null,
+            settingsUpdatedAt: settingsRow?.updatedAt ?? null,
+            completedAt: new Date(),
           },
         });
-    }
+    });
   }
 
   items.sort((a, b) => a.project.localeCompare(b.project));

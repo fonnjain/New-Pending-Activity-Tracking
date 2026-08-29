@@ -7,10 +7,19 @@ import {
   parseWorkbook,
   readStructural,
 } from "./parse";
-import { isLiveWorkType } from "@workspace/domain";
+import {
+  activityRank,
+  classifyWipCase,
+  isLiveWorkType,
+  routeIncludesOp,
+  routeOps,
+} from "@workspace/domain";
 
 const fixturePath = fileURLToPath(
   new URL("./__fixtures__/wip-20-aug-2026.csv", import.meta.url),
+);
+const august27FixturePath = fileURLToPath(
+  new URL("../../../../attached_assets/WIP_27.08.2026_1787833211257.CSV", import.meta.url),
 );
 
 async function fixtureBuffer(): Promise<Buffer> {
@@ -18,6 +27,42 @@ async function fixtureBuffer(): Promise<Buffer> {
   // test always exercises the same record boundaries on every platform.
   const fixture = await readFile(fixturePath, "utf8");
   return Buffer.from(fixture.replace(/\r?\n/g, "\r\n"), "utf8");
+}
+
+function fabLoadSpecialTotals(
+  rows: ReturnType<typeof parseWorkbook>["rows"],
+  section: "inhand" | "upcoming",
+): { welded: number; bending: number } {
+  const totals = { welded: 0, bending: 0 };
+  for (const row of rows) {
+    if ((row.category || "TLT") !== "TLT") continue;
+    if (!(row.job || "").trim() || row.job === "(Unassigned)" || (row.balanceWt ?? 0) <= 0) continue;
+
+    const wipCase = classifyWipCase(row);
+    if (section === "upcoming") {
+      if (wipCase !== "NOT_RELEASED") continue;
+    } else if (
+      wipCase === "NOT_RELEASED" ||
+      ((row.activity ?? "").trim().toUpperCase() === "C" &&
+        wipCase !== "CUTTING" &&
+        wipCase !== "AWAITING_ASSIGNMENT")
+    ) {
+      continue;
+    }
+
+    const weightKg = row.balanceWt ?? 0;
+    if (activityRank(row.activity) < activityRank("W") && routeIncludesOp(row.operation, "W")) {
+      totals.welded += weightKg;
+    }
+    if (activityRank(row.activity) < activityRank("B") && routeIncludesOp(row.operation, "B")) {
+      totals.bending += weightKg;
+    }
+  }
+
+  return {
+    welded: Math.round(totals.welded * 1_000) / 1_000,
+    bending: Math.round(totals.bending * 1_000) / 1_000,
+  };
 }
 
 test("parses the compact 20-Aug WIP CSV with quoted CRLF fields and stable summary", async () => {
@@ -77,6 +122,28 @@ test("parses the compact 20-Aug WIP CSV with quoted CRLF fields and stable summa
   // Job Card WIP case and assigns it to Quality Check at read time.
   assert.equal(jobWork?.jobCardType, "Job Card WIP");
   assert.equal(jobWork?.activity, null);
+});
+
+test("recognizes comma- and semicolon-routed WIP operations", () => {
+  const expected = ["C", "RFI", "W", "B"];
+  for (const operation of ["C,P,S,RFI,W,B", "C;P;S;RFI;W;B"]) {
+    assert.deepEqual([...routeOps(operation)], expected);
+    assert.equal(routeIncludesOp(operation, "W"), true);
+    assert.equal(routeIncludesOp(operation, "B"), true);
+  }
+});
+
+test("restores 27-Aug TLT Welded and Bending In Hand and Upcoming totals", async () => {
+  const parsed = parseWorkbook(await readFile(august27FixturePath));
+
+  assert.deepEqual(fabLoadSpecialTotals(parsed.rows, "inhand"), {
+    welded: 475_548.82,
+    bending: 621_200.17,
+  });
+  assert.deepEqual(fabLoadSpecialTotals(parsed.rows, "upcoming"), {
+    welded: 108_618.104,
+    bending: 322_826.948,
+  });
 });
 
 test("accepts appended CSV columns while flagging them for review", async () => {

@@ -5,6 +5,7 @@ import {
   date,
   timestamp,
   jsonb,
+  index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -118,7 +119,10 @@ export const importsTable = pgTable("imports", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // Covers report-date history scans and deterministic id tie-breaking.
+  index("imports_report_date_id_idx").on(t.reportDate, t.id),
+]);
 
 export const insertImportSchema = createInsertSchema(importsTable).omit({
   id: true,
